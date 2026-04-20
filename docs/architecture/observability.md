@@ -21,6 +21,7 @@ The observability stack must answer:
 - structured logs
 - audit events
 - route evaluation records
+- route receipts
 - synthetic probe results
 
 ### 17.3 Trace Model
@@ -46,11 +47,15 @@ Each request should include:
 - provider error rate
 - retry rate
 - route fallback rate
+- admission-control rejection rate
+- quota reservation rejection rate
 - token volume
 - estimated cost
 - gross margin
 - auth failure count
 - policy denial count
+- trust-class traffic mix
+- redaction coverage rate
 
 ### 17.5 Log Requirements
 
@@ -64,9 +69,13 @@ Logs should be structured JSON and include:
 - protocol family
 - requested model alias
 - resolved provider target
+- target provenance class
 - error code
 - retry attempt
 - route policy ID
+- config snapshot ID
+- quota reservation ID or outcome
+- redaction tier
 
 Sensitive payload logging must be disabled by default and opt-in with redaction controls.
 
@@ -114,11 +123,40 @@ Every request should be able to emit a compact diagnostic event timeline contain
 - auth result
 - policy result
 - selected route candidate set
+- excluded candidates and exclusion reasons
 - chosen provider target
+- quota and budget admission outcome
 - retry and fallback transitions
 - final normalization and usage extraction result
 
 These events should be structured enough for support tooling and post-incident analysis, not just for log search.
+
+### 17.9 Redaction-First Observability
+
+Most gateway observability failures are data-governance failures masquerading as debugging features.
+
+The platform should therefore implement:
+
+- raw prompt and tool payload capture disabled by default
+- redacted structured summaries for support and analytics views
+- separate retention tiers for metadata, usage, and sealed payloads
+- explicit access controls and audit trails for any sealed payload retrieval
+- payload fingerprinting or hashing for correlation without content retention where possible
+
+### 17.10 Replay and Support Capsules
+
+Support and incident tooling should be able to reconstruct failures without requiring unbounded log retention.
+
+The system should produce a replay capsule or support bundle containing:
+
+- route receipt
+- config snapshot IDs
+- normalized request metadata
+- redacted policy decisions
+- upstream error classification
+- metering and ledger correlation IDs
+
+This capsule should be sufficient to explain most customer-visible failures without exposing full prompt content.
 
 
 ---

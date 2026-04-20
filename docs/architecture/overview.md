@@ -103,6 +103,56 @@ The platform should borrow proven patterns from leading open source systems wher
 
 These references inform our architecture, but do not define our product boundary.
 
+### 3.9 Provenance Over Cheapest-Path Shortcuts
+
+The platform must model where upstream capacity actually comes from.
+
+Every provider resource should carry an explicit provenance classification such as:
+
+- official provider API
+- official provider gateway or cloud marketplace integration
+- customer-supplied BYO credentials
+- partner-managed dedicated account pool
+- brokered shared account pool
+- reverse-engineered or unofficial client channel
+
+The architecture should default to denying unsafe provenance classes in production. A route that is cheaper but depends on hidden prompt injection, reverse-engineered client traffic, or non-transparent brokered capacity is not a trustworthy route.
+
+### 3.10 Budgets and Rate Limits Are Admission Control
+
+Cost and quota controls must be enforced before traffic is admitted upstream, not merely reported after the fact.
+
+This requires:
+
+- pre-admission quota and budget checks
+- provider-specific rate-window modeling, including sub-minute windows where required
+- pre-authorization or reserve accounting for expensive or long-lived sessions
+- deterministic failure behavior when a request would exceed budget, quota, or concurrency safety limits
+
+### 3.11 Explainability Beats Black-Box Routing
+
+Operators and customers must be able to answer "why did this request take that path?" without reconstructing state from scattered logs.
+
+Every routed request should produce a route decision record that captures:
+
+- candidate set
+- filters and exclusions
+- score breakdown
+- selected target
+- applicable policy and config snapshot IDs
+- retry and fallback transitions
+
+### 3.12 Redaction-First Diagnostics
+
+The product should assume that prompt and tool payloads may contain secrets, source code, customer data, or regulated content.
+
+Observability and supportability features must therefore default to:
+
+- no raw prompt retention
+- structured diagnostics without full payload persistence
+- opt-in sealed payload capture with explicit retention and access policy
+- redaction and tokenization before any support-facing surface
+
 
 ---
 

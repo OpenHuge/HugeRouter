@@ -22,6 +22,10 @@ The routing engine should consider:
 - region restrictions
 - compliance restrictions
 - rate limit state
+- provider-native quota window headroom
+- pre-admission budget headroom
+- target provenance class
+- ingress or regional failure-domain health
 - session affinity constraints
 - provider account health
 
@@ -42,13 +46,19 @@ The routing engine should consider:
 5. **Scoring**  
    Score remaining candidates based on weighted criteria.
 
-6. **Selection**  
+6. **Admission Control**  
+   Confirm budget, quota, concurrency, and trust-class eligibility before committing to a target.
+
+7. **Selection**  
    Choose a target according to route strategy.
 
-7. **Execution and Retry**  
+8. **Execution and Retry**  
    Retry according to route policy, avoiding duplicate unsafe requests.
 
-8. **Feedback Loop**  
+9. **Route Receipt**  
+   Persist a structured route decision record for diagnostics, support, billing explanation, and simulation parity.
+
+10. **Feedback Loop**  
    Persist outcome signals for future scoring.
 
 ### 11.3 Route Strategies
@@ -64,6 +74,8 @@ Supported strategies should include:
 - region-preferred fallback region
 - canary percentage routing
 - shadow traffic for evaluation
+- intent- or class-aware routing with confidence thresholds and deterministic fallback behavior
+- budget-aware quality floor selection, where the cheapest target must still satisfy tenant-defined quality or capability minima
 
 ### 11.4 Route Policies
 
@@ -77,10 +89,15 @@ A route policy should define:
 - retry count
 - retry backoff
 - timeout budget
+- max estimated marginal cost
 - fallback model aliases
 - session stickiness behavior (e.g., tying a client-side WebRTC session to a specific upstream node)
 - idempotency behavior
 - shadow sampling
+- allowed provenance classes
+- quota reserve strategy
+- time-to-first-token budget
+- route explanation sampling or retention tier
 
 ### 11.5 Health and Quarantine
 
@@ -93,6 +110,56 @@ Targets must transition through states such as:
 - disabled
 
 A target should be quarantined automatically when error thresholds, abuse thresholds, or policy thresholds are exceeded.
+
+Health must be tracked across separate failure domains rather than one flattened score. At minimum:
+
+- provider API health
+- credential or account-pool health
+- regional ingress health
+- protocol-path health (e.g. batch HTTP vs streaming vs realtime)
+- gateway deployment health
+
+### 11.6 Admission Control and Rate-Window Modeling
+
+Routing must treat rate limits, quotas, and budgets as first-class admission control inputs.
+
+The system should support:
+
+- provider-native RPM and TPM windows, including sub-minute windows where upstreams enforce them
+- hierarchical limits across platform, tenant, project, credential, and provider resource
+- concurrency caps for long-lived streaming or realtime sessions
+- pre-admission reserve accounting for estimated request cost
+- hard-stop and soft-throttle modes with explicit policy control
+
+When a request is rejected before execution, the rejection should still emit a route decision record and policy reason so that customers can distinguish "policy denied" from "provider failed".
+
+### 11.7 Route Receipt and Explainability
+
+Every routed request should emit a compact route receipt containing:
+
+- request classification inputs used by the routing engine
+- candidate list with exclusion reasons
+- score contributions by dimension such as latency, cost, health, trust, and residency
+- selected target and policy version
+- quota or budget reservation outcome
+- fallback chain traversal, if any
+
+This receipt is the canonical artifact for support tooling, customer spend explanations, route simulation parity, and incident review.
+
+### 11.8 Provenance and Trust-Class Filtering
+
+The router should refuse to treat all upstream capacity as interchangeable.
+
+Route candidates should carry provenance metadata such as:
+
+- official API
+- official managed gateway
+- BYO customer credential
+- dedicated managed account
+- shared brokered account pool
+- unofficial or reverse-engineered client channel
+
+Policy should be able to ban or degrade unsafe trust classes by environment, tenant tier, or compliance mode. Reverse-engineered or opaque brokered channels should be disabled by default for enterprise operation.
 
 
 ---

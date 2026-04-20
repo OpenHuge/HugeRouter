@@ -24,6 +24,8 @@ Configuration should resolve in the following order where relevant:
 4. tenant setting
 5. platform default
 
+The resolved configuration should be frozen into a request-scoped snapshot ID so that diagnostics, billing, and support can explain behavior against the exact policy state that was active at execution time.
+
 
 ---
 
@@ -51,5 +53,19 @@ Some configuration classes should support dynamic reload:
 - policy bundles
 
 Highly sensitive or structural config may still require restart or rollout.
+
+### 28.4 Staged Rollout and Safe Mutation
+
+Runtime configuration changes should not behave like invisible global toggles.
+
+The control plane should support:
+
+- schema validation before persistence
+- route simulation against pending changes
+- staged rollout by tenant, region, or percentage
+- fast rollback to a prior config snapshot
+- emergency kill switches for tenants, credentials, or provider resources
+
+This is especially important for routing, pricing, provenance policy, and redaction settings, where a bad mutation can create immediate spend, availability, or compliance incidents.
 
 ---

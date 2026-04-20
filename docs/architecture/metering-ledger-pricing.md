@@ -25,13 +25,16 @@ The system must support multiple usage dimensions, including:
 ### 14.3 Usage Event Flow
 
 1. request starts
-2. route selected
-3. upstream emits partial or final response (or continuous frames in a `ws` stream)
-4. adapter extracts usage fields
-5. **Progressive Metering:** For long-lived WebSocket/Realtime sessions, adapters emit partial normalized usage events periodically (e.g., every minute or per tool-call) rather than waiting for connection termination. This is critical for interrupting runaway agent loops before they cause a "Denial of Wallet".
-6. normalized usage event emitted to message bus
-7. ledger worker persists immutable usage event
-8. projection tables update balances, cost summaries, and analytics, triggering circuit breakers if quotas are exceeded.
+2. estimated usage and cost envelope calculated for admission control
+3. reserve or pre-authorization recorded when policy requires it
+4. route selected
+5. upstream emits partial or final response (or continuous frames in a `ws` stream)
+6. adapter extracts usage fields
+7. **Progressive Metering:** For long-lived WebSocket/Realtime sessions, adapters emit partial normalized usage events periodically (e.g., every minute or per tool-call) rather than waiting for connection termination. This is critical for interrupting runaway agent loops before they cause a "Denial of Wallet".
+8. normalized usage event emitted to message bus
+9. ledger worker persists immutable usage event
+10. reserve is reconciled into final debit or release entries
+11. projection tables update balances, cost summaries, and analytics, triggering circuit breakers if quotas are exceeded.
 
 ### 14.4 Ledger Entry Types
 
@@ -58,6 +61,18 @@ Derived projections include:
 ### 14.6 Idempotency
 
 Ledger ingestion must be idempotent. Duplicate usage events must not double-charge.
+
+### 14.7 Budget and Quota Guardrail Semantics
+
+The platform should support both soft and hard economic guardrails:
+
+- soft warning thresholds that annotate diagnostics and customer dashboards
+- hard stop thresholds that reject or terminate traffic before additional spend accrues
+- tenant or project budgets with explicit reset windows
+- provider-resource ceilings used to protect shared upstream capacity
+- session kill-switches for runaway long-lived streams or tool loops
+
+These semantics should be consistent across billing, routing, and support surfaces so customers do not see one system reporting "within budget" while another is already rejecting traffic.
 
 
 ---

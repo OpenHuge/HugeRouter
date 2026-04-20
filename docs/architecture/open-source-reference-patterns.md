@@ -26,6 +26,21 @@ The current reference set is:
 - OpenTelemetry
 - LiteLLM
 
+## 1.1 Community Pressure Signals
+
+In addition to named open source references, the architecture is intentionally shaped by repeated operator pain signals visible across public issue trackers and builder communities.
+
+The recurring pressures are:
+
+- routing decisions that are difficult to explain after incidents
+- rate-limit handling that fails under provider-specific or sub-minute enforcement windows
+- budgets that are reported after the fact instead of enforced before spend occurs
+- hidden or low-trust upstream brokerage that creates legal and operational risk
+- observability designs that over-collect prompt content and create new privacy problems
+- multi-tenant products that lack configuration snapshotting, staged rollout, and fast rollback
+
+These are not implementation details. They are the real-world constraints that separate a demo gateway from a production-grade AI traffic platform.
+
 ## 2. Backstage: Package-Level Plugin Boundaries
 
 Backstage is useful as a reference for frontend and monorepo composition, not because our product is a developer portal, but because it proves that large internal products stay healthier when extensions are packaged as isolated units with explicit app-level assembly.

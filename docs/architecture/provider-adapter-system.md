@@ -66,6 +66,7 @@ Each adapter manifest should declare at least:
 - capability profile
 - region or residency constraints
 - auth modes
+- upstream provenance or trust class support
 - retry and timeout characteristics
 - observability tags
 - stability level such as `stable`, `beta`, or `experimental`

@@ -17,6 +17,18 @@ The system should expose at least:
 - admin session secrets must be centrally managed
 - secret rotation must be automatable
 
+### 19.2.1 Upstream Credential Provenance
+
+Not all upstream credentials are equivalent from a legal, operational, or trust perspective.
+
+Every provider resource should record:
+
+- credential owner model such as platform-managed, partner-managed, or BYO customer key
+- provenance class such as official API, official gateway, brokered pool, or unofficial client channel
+- contractual or policy eligibility for each deployment tier
+
+Reverse-engineered or otherwise unofficial client channels should be treated as high-risk and disabled by default in production configurations.
+
 ### 19.3 Data Protection
 
 - TLS in transit
@@ -33,6 +45,7 @@ The gateway acts as the primary defense layer against modern AI vulnerabilities:
 - **Denial of Wallet & Runaway Loops (LLM10):** Real-time progressive metering and hierarchical quota enforcement to terminate unbounded consumption from broken agent loops.
 - **Sensitive Information Disclosure (LLM02):** Real-time PII redaction rules applied before traffic hits external upstream providers.
 - **Agentic Supply Chain (ASI04):** Signature or registry validation for third-party MCP servers and tools.
+- **Opaque Upstream Brokerage:** Requests must not be silently routed through unofficial resale paths or hidden client-channel emulation without explicit policy allowance and operator visibility.
 
 ### 19.5 Security Events
 
@@ -70,6 +83,8 @@ The platform should be designed to support future compliance requirements even i
 - configurable log redaction
 - exportable access history
 - deletion workflows
+- provider resource provenance attestations
+- payload-retention tier policy and access review
 
 ### 20.2 Data Residency
 
