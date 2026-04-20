@@ -1,0 +1,1135 @@
+tasks:
+- id: FND-001
+  title: Initialize Rust workspace and service skeletons
+  stream: Foundation and Monorepo
+  phase: PI-0
+  deps: []
+  owners:
+  - backend-platform
+  size: L
+  paths:
+  - Cargo.toml
+  - crates/*
+  - services/*
+  - justfile
+  outputs:
+  - Rust workspace root
+  - service crate templates
+  - shared lint/test commands
+  accepts:
+  - '`cargo check --workspace` passes'
+  - all services compile as placeholder binaries
+  - workspace dependency policy is documented
+- id: FND-002
+  title: Initialize pnpm + Turbo workspace and TanStack Start application shell
+  stream: Foundation and Monorepo
+  phase: PI-0
+  deps: []
+  owners:
+  - frontend-platform
+  size: M
+  paths:
+  - package.json
+  - pnpm-workspace.yaml
+  - turbo.json
+  - apps/console-web
+  - apps/storybook
+  - packages/ui-kit
+  - packages/design-tokens
+  - packages/typescript-config
+  - apps/console-web/src/start.ts
+  - apps/*/turbo.json
+  - packages/*/turbo.json
+  outputs:
+  - pnpm workspace root
+  - Turbo pipeline baseline
+  - TanStack Start app shell
+  - Mantine provider and theme bootstrap
+  - TanStack Start global middleware bootstrap
+  - typed route skeleton
+  - shared TS config
+  - initial workspace tags and boundary-ready package configurations
+  accepts:
+  - '`pnpm install`, `pnpm turbo run dev --filter=console-web`, and `pnpm turbo run typecheck --filter=console-web` work'
+  - React 19.2+ and Mantine 9 baseline are pinned and compatible
+  - TanStack Start RC version is pinned exactly
+  - root layout, auth placeholder, Mantine theme provider, TanStack Start global middleware, and basic navigation render
+  - core JavaScript workspaces declare package tags or equivalent ownership metadata
+  - shared UI primitives can render in Storybook or equivalent isolated component sandbox
+  - build passes in CI
+- id: FND-003
+  title: Provision local development stack and containerized runtime
+  stream: Foundation and Monorepo
+  phase: PI-0
+  deps: []
+  owners:
+  - platform
+  size: M
+  paths:
+  - infra/docker
+  - infra/scripts
+  - .env.example
+  outputs:
+  - Docker Compose stack
+  - local Postgres/Redis/NATS/OTel collectors
+  - bootstrap scripts
+  accepts:
+  - one command starts local dependencies
+  - health checks expose readiness
+  - local stack is documented in runbook
+- id: FND-004
+  title: Establish shared configuration, secrets, and environment loading
+  stream: Foundation and Monorepo
+  phase: PI-0
+  deps:
+  - FND-001
+  owners:
+  - backend-platform
+  - security
+  size: M
+  paths:
+  - crates/config
+  - crates/sdk-server
+  - docs/runbooks
+  outputs:
+  - typed config crate
+  - env validation
+  - secret provider interface
+  accepts:
+  - all services load validated config
+  - missing required variables fail fast
+  - secret-backed values are separated from non-secret config
+- id: FND-005
+  title: Set up CI pipelines, quality gates, and caching strategy
+  stream: Foundation and Monorepo
+  phase: PI-0
+  deps:
+  - FND-001
+  - FND-002
+  owners:
+  - platform
+  size: M
+  paths:
+  - .github/workflows
+  - turbo.json
+  - package.json
+  - justfile
+  outputs:
+  - CI workflows
+  - Turbo task graph
+  - selective change detection
+  - artifact caching
+  - remote caching rollout plan
+  - repository boundary validation rollout
+  accepts:
+  - pull requests run Rust and TS checks
+  - jobs are split by workspace scope and use Turbo filters where appropriate
+  - cacheable Turbo tasks declare `outputs`
+  - advisory repository boundary checks run in CI for tagged workspaces
+  - cache hit rate is measurable
+- id: FND-006
+  title: Create schema pipeline for OpenAPI, JSON Schema, and generated TS client
+  stream: Foundation and Monorepo
+  phase: PI-0
+  deps:
+  - FND-002
+  owners:
+  - platform
+  - frontend-platform
+  size: M
+  paths:
+  - schemas/openapi
+  - schemas/jsonschema
+  - packages/ts-api-client
+  - packages/ts-shared-schema
+  outputs:
+  - schema source-of-truth workflow
+  - TS client generation
+  - schema linting
+  accepts:
+  - OpenAPI documents validate
+  - TS client can be regenerated from CI
+  - console consumes generated types
+- id: GWT-001
+  title: Implement gateway HTTP server skeleton and middleware chain
+  stream: Gateway and Protocol Ingress
+  phase: PI-1
+  deps:
+  - FND-001
+  - FND-003
+  - FND-004
+  owners:
+  - gateway
+  size: M
+  paths:
+  - services/gateway-api
+  - crates/sdk-server
+  - crates/telemetry
+  outputs:
+  - HTTP server bootstrap
+  - middleware pipeline
+  - health/readiness endpoints
+  accepts:
+  - service starts with trace and metrics middleware
+  - health endpoints are covered by tests
+  - configuration is hot-reload safe or explicitly immutable
+- id: GWT-002
+  title: Implement API key authentication and tenant/project resolution
+  stream: Gateway and Protocol Ingress
+  phase: PI-1
+  deps:
+  - CTL-001
+  - SEC-001
+  owners:
+  - gateway
+  - security
+  size: M
+  paths:
+  - services/gateway-api
+  - crates/authn-authz
+  - crates/storage
+  outputs:
+  - API key auth middleware
+  - tenant/project context injection
+  - error model
+  accepts:
+  - valid keys resolve tenant and project scopes
+  - invalid/disabled keys fail with normalized errors
+  - auth path emits audit and trace metadata
+- id: GWT-003
+  title: Define protocol IR v1 with request, response, and capability models
+  stream: Gateway and Protocol Ingress
+  phase: PI-1
+  deps:
+  - FND-001
+  owners:
+  - gateway-architecture
+  size: L
+  paths:
+  - crates/protocol-ir
+  - crates/core-domain
+  - docs/architecture/protocol-ir-and-protocols.md
+  outputs:
+  - IR data structures
+  - semantic validation
+  - provider extension fields
+  - extension envelope rules
+  accepts:
+  - IR covers text generation MVP
+  - unknown provider-specific metadata can be preserved
+  - extension fields are namespaced and versionable
+  - IR versioning strategy is documented
+- id: GWT-004
+  title: Ship OpenAI-compatible northbound chat/completions ingress
+  stream: Gateway and Protocol Ingress
+  phase: PI-1
+  deps:
+  - GWT-001
+  - GWT-003
+  - PAD-001
+  - PAD-002
+  - RTE-002
+  - MET-001
+  owners:
+  - gateway
+  size: L
+  paths:
+  - services/gateway-api
+  - crates/protocol-openai
+  - schemas/examples
+  outputs:
+  - OpenAI-compatible endpoint
+  - request parsing to IR
+  - response mapping from IR/provider result
+  accepts:
+  - non-streaming chat requests work end-to-end
+  - OpenAI-compatible errors are returned
+  - golden fixture tests pass
+- id: GWT-005
+  title: Implement SSE streaming relay and backpressure-safe response path
+  stream: Gateway and Protocol Ingress
+  phase: PI-1
+  deps:
+  - GWT-004
+  owners:
+  - gateway
+  size: M
+  paths:
+  - services/gateway-api
+  - crates/sdk-server
+  - crates/protocol-openai
+  outputs:
+  - stream relay
+  - disconnect handling
+  - partial usage capture hooks
+  accepts:
+  - streaming responses are flushed incrementally
+  - client disconnects cancel upstream requests
+  - stream tests cover partial and terminal events
+- id: GWT-006
+  title: Add Anthropic-native northbound protocol support
+  stream: Gateway and Protocol Ingress
+  phase: PI-2
+  deps:
+  - GWT-003
+  - PAD-003
+  - RTE-002
+  owners:
+  - gateway
+  size: M
+  paths:
+  - crates/protocol-anthropic
+  - services/gateway-api
+  outputs:
+  - Anthropic request/response mapping
+  - protocol-specific validation
+  accepts:
+  - Anthropic-native message requests reach supported upstreams
+  - provider-specific fields are preserved when possible
+  - contract tests pass
+- id: GWT-007
+  title: Add Gemini-native northbound protocol support
+  stream: Gateway and Protocol Ingress
+  phase: PI-2
+  deps:
+  - GWT-003
+  - PAD-004
+  - RTE-002
+  owners:
+  - gateway
+  size: M
+  paths:
+  - crates/protocol-gemini
+  - services/gateway-api
+  outputs:
+  - Gemini request/response mapping
+  - tool/function compatibility notes
+  accepts:
+  - Gemini text generation works end-to-end
+  - unsupported constructs fail with explicit compatibility errors
+  - fixtures cover mapping edge cases
+- id: GWT-008
+  title: Build realtime session gateway skeleton
+  stream: Gateway and Protocol Ingress
+  phase: PI-4
+  deps:
+  - FND-001
+  - OBS-001
+  - RTE-004
+  owners:
+  - realtime
+  size: L
+  paths:
+  - services/realtime-gateway
+  - crates/protocol-realtime
+  - crates/authn-authz
+  outputs:
+  - WebSocket service skeleton
+  - session auth
+  - realtime connection model
+  accepts:
+  - service can accept authenticated sessions
+  - session lifecycle is traced
+  - no billing is coupled to the connection handshake
+- id: CTL-001
+  title: Create control plane API service skeleton with typed CRUD conventions
+  stream: Control Plane and Console
+  phase: PI-0
+  deps:
+  - FND-001
+  - FND-004
+  owners:
+  - control-plane
+  size: M
+  paths:
+  - services/control-plane-api
+  - crates/sdk-server
+  - schemas/openapi
+  outputs:
+  - service bootstrap
+  - error envelope
+  - pagination/filtering conventions
+  accepts:
+  - service exposes versioned base path
+  - OpenAPI spec is generated from implementation
+  - integration test can start service against local stack
+- id: CTL-002
+  title: Implement tenant, project, environment, and API key CRUD
+  stream: Control Plane and Console
+  phase: PI-1
+  deps:
+  - CTL-001
+  - DB-001
+  - SEC-001
+  owners:
+  - control-plane
+  size: L
+  paths:
+  - services/control-plane-api
+  - crates/storage
+  - crates/core-domain
+  outputs:
+  - resource CRUD endpoints
+  - API key issuance/rotation
+  - resource validation
+  accepts:
+  - CRUD endpoints are idempotent where expected
+  - API key rotation invalidates old secrets
+  - OpenAPI and TS client are updated
+- id: CTL-003
+  title: Implement provider, credential, route policy, and route set management APIs
+  stream: Control Plane and Console
+  phase: PI-1
+  deps:
+  - CTL-001
+  - PAD-001
+  - RTE-001
+  - SEC-003
+  owners:
+  - control-plane
+  size: L
+  paths:
+  - services/control-plane-api
+  - crates/storage
+  - crates/provider-traits
+  - crates/routing-engine
+  outputs:
+  - provider CRUD
+  - credential binding
+  - route policy CRUD
+  accepts:
+  - route policies can be created and validated from API
+  - secret references are stored without plaintext leakage
+  - policy schema validation errors are actionable
+- id: CTL-004
+  title: Build TanStack Start + Mantine application shell and authenticated app layout
+  stream: Control Plane and Console
+  phase: PI-0
+  deps:
+  - FND-002
+  - FND-006
+  owners:
+  - frontend-console
+  size: M
+  paths:
+  - apps/console-web
+  - packages/ui-kit
+  - packages/design-tokens
+  outputs:
+  - route tree
+  - shell layout
+  - Mantine-backed theme and navigation system
+  - shared provider stack and shell primitives
+  accepts:
+  - authenticated and unauthenticated layouts render
+  - Mantine AppShell or equivalent shell wrapper is in place
+  - route-level data loaders compile
+  - component story coverage exists for shell primitives
+- id: CTL-005
+  title: Implement tenant/project management UI flows
+  stream: Control Plane and Console
+  phase: PI-1
+  deps:
+  - CTL-002
+  - CTL-004
+  owners:
+  - frontend-console
+  size: M
+  paths:
+  - apps/console-web/src/routes
+  - packages/ts-api-client
+  outputs:
+  - list/detail/create flows
+  - API key issuance views
+  - error/loading states
+  accepts:
+  - CRUD flows are fully typed from generated client
+  - forms validate client-side and server-side
+  - role-based page guards work
+- id: CTL-006
+  title: Implement provider and route management UI with diagnostics surfaces
+  stream: Control Plane and Console
+  phase: PI-2
+  deps:
+  - CTL-003
+  - CTL-004
+  - RTE-005
+  owners:
+  - frontend-console
+  size: L
+  paths:
+  - apps/console-web/src/routes/providers
+  - apps/console-web/src/routes/routes
+  outputs:
+  - provider detail pages
+  - route editors
+  - route diagnostics panels
+  accepts:
+  - operators can inspect route health and policy resolution
+  - form edits are optimistic only where safe
+  - dangerous operations require confirmation
+- id: CTL-007
+  title: Build usage, budget, and billing dashboards
+  stream: Control Plane and Console
+  phase: PI-3
+  deps:
+  - MET-004
+  - MET-005
+  - CTL-004
+  owners:
+  - frontend-console
+  size: L
+  paths:
+  - apps/console-web/src/routes/usage
+  - apps/console-web/src/routes/billing
+  outputs:
+  - usage charts
+  - budget threshold views
+  - balance and invoice projections
+  accepts:
+  - dashboards match projection APIs
+  - time-range filters and tenant scopes work
+  - large tables are paginated and exportable
+- id: DB-001
+  title: Design relational schema, migrations, and repository primitives
+  stream: Data Storage and Events
+  phase: PI-0
+  deps:
+  - FND-001
+  - FND-003
+  owners:
+  - data-platform
+  size: L
+  paths:
+  - crates/storage
+  - infra/docker
+  - docs/architecture/data-storage-and-events.md
+  outputs:
+  - migration framework
+  - core tables
+  - repository abstractions
+  accepts:
+  - fresh database bootstraps successfully
+  - rollback policy is documented
+  - repositories are integration-tested
+- id: DB-002
+  title: Implement event bus abstractions and NATS-backed publishers/consumers
+  stream: Data Storage and Events
+  phase: PI-0
+  deps:
+  - FND-001
+  - FND-003
+  owners:
+  - data-platform
+  size: M
+  paths:
+  - crates/queue
+  - services/*
+  - crates/sdk-server
+  outputs:
+  - event publishing API
+  - consumer worker harness
+  - subject naming conventions
+  accepts:
+  - workers can consume and ack events
+  - message schemas are versioned
+  - dead-letter strategy is defined
+- id: PAD-001
+  title: Define provider adapter trait model and adapter conformance test kit
+  stream: Provider Adapters
+  phase: PI-1
+  deps:
+  - GWT-003
+  - FND-001
+  owners:
+  - gateway-architecture
+  size: M
+  paths:
+  - crates/provider-traits
+  - crates/testing-kit
+  - docs/architecture/provider-adapter-system.md
+  outputs:
+  - adapter trait set
+  - adapter manifest and registry model
+  - error normalization model
+  - conformance fixtures
+  accepts:
+  - all adapters implement shared trait surfaces
+  - registry can resolve adapters by provider kind and capability profile
+  - adapter tests can run against mocks
+  - error categories map to routing decisions
+- id: PAD-002
+  title: Implement OpenAI upstream adapter
+  stream: Provider Adapters
+  phase: PI-1
+  deps:
+  - PAD-001
+  - GWT-003
+  owners:
+  - provider-openai
+  size: M
+  paths:
+  - crates/provider-openai
+  outputs:
+  - OpenAI provider client
+  - streaming and non-streaming calls
+  - usage extraction hooks
+  accepts:
+  - adapter passes conformance fixtures
+  - timeouts and retries are configurable
+  - provider errors map to normalized categories
+- id: PAD-003
+  title: Implement Anthropic upstream adapter
+  stream: Provider Adapters
+  phase: PI-2
+  deps:
+  - PAD-001
+  - GWT-003
+  owners:
+  - provider-anthropic
+  size: M
+  paths:
+  - crates/provider-anthropic
+  outputs:
+  - Anthropic provider client
+  - message API integration
+  - usage extraction hooks
+  accepts:
+  - adapter passes conformance fixtures
+  - unsupported native features are surfaced clearly
+  - timeout and region configs are supported
+- id: PAD-004
+  title: Implement Gemini upstream adapter
+  stream: Provider Adapters
+  phase: PI-2
+  deps:
+  - PAD-001
+  - GWT-003
+  owners:
+  - provider-gemini
+  size: M
+  paths:
+  - crates/provider-gemini
+  outputs:
+  - Gemini provider client
+  - compatibility layer
+  - usage extraction hooks
+  accepts:
+  - adapter passes conformance fixtures
+  - model capability metadata is discoverable
+  - error normalization is documented
+- id: PAD-005
+  title: Implement gateway-of-gateways adapter for upstream transit systems
+  stream: Provider Adapters
+  phase: PI-4
+  deps:
+  - PAD-001
+  - RTE-004
+  owners:
+  - provider-gateway
+  size: M
+  paths:
+  - crates/provider-gateway
+  outputs:
+  - adapter for upstream gateway providers
+  - health and capability metadata model
+  accepts:
+  - adapter can call an upstream OpenAI-compatible gateway
+  - upstream gateway errors preserve diagnostic detail
+  - routing engine can score it alongside native providers
+- id: RTE-001
+  title: Implement route, provider target, and policy domain models
+  stream: Routing and Reliability
+  phase: PI-1
+  deps:
+  - GWT-003
+  - DB-001
+  owners:
+  - routing
+  size: M
+  paths:
+  - crates/routing-engine
+  - crates/core-domain
+  - services/control-plane-api
+  outputs:
+  - route entities
+  - policy model
+  - score input structures
+  accepts:
+  - route entities support weighted and ordered strategies
+  - validation prevents impossible configurations
+  - models are reusable by API and workers
+- id: RTE-002
+  title: Implement routing engine MVP for static selection and fallback
+  stream: Routing and Reliability
+  phase: PI-1
+  deps:
+  - RTE-001
+  - PAD-001
+  owners:
+  - routing
+  size: L
+  paths:
+  - crates/routing-engine
+  - services/gateway-api
+  outputs:
+  - route evaluator
+  - fallback chain execution
+  - selection reasoning output
+  accepts:
+  - engine selects eligible route deterministically
+  - fallback occurs on retryable error classes
+  - selection reason is emitted in traces
+- id: RTE-003
+  title: Implement active health probes and passive health aggregation
+  stream: Routing and Reliability
+  phase: PI-2
+  deps:
+  - RTE-001
+  - DB-002
+  - OBS-001
+  owners:
+  - routing
+  - sre
+  size: M
+  paths:
+  - services/edge-probe
+  - services/routing-worker
+  - crates/routing-engine
+  outputs:
+  - probe scheduler
+  - health score aggregation
+  - route health persistence
+  accepts:
+  - probe results update route health state
+  - cheap and billable probe modes are separated
+  - quarantine thresholds are configurable
+- id: RTE-004
+  title: Implement retry budgets, circuit breaking, and quarantine logic
+  stream: Routing and Reliability
+  phase: PI-2
+  deps:
+  - RTE-002
+  - RTE-003
+  - OBS-001
+  owners:
+  - routing
+  - sre
+  size: L
+  paths:
+  - crates/routing-engine
+  - services/gateway-api
+  - services/routing-worker
+  outputs:
+  - retry budget policy
+  - circuit breaker state
+  - quarantine transitions
+  accepts:
+  - retry loops are bounded and observable
+  - bad routes can be quarantined automatically
+  - manual override APIs exist
+- id: RTE-005
+  title: Expose route diagnostics APIs and explanation model
+  stream: Routing and Reliability
+  phase: PI-2
+  deps:
+  - RTE-002
+  - RTE-003
+  - CTL-001
+  owners:
+  - routing
+  - control-plane
+  size: M
+  paths:
+  - services/control-plane-api
+  - crates/routing-engine
+  - schemas/openapi
+  outputs:
+  - diagnostics endpoints
+  - route explanation model
+  - recent failure summaries
+  accepts:
+  - operators can query why a route was or was not selected
+  - health and score inputs are visible with redaction
+  - OpenAPI docs include example responses
+- id: MET-001
+  title: Define usage event schema and hot-path usage extraction hooks
+  stream: Metering, Ledger, and Billing
+  phase: PI-1
+  deps:
+  - GWT-003
+  - DB-002
+  owners:
+  - billing-platform
+  size: M
+  paths:
+  - crates/metering
+  - crates/ledger-models
+  - services/gateway-api
+  outputs:
+  - usage event schema
+  - gateway emission hooks
+  - idempotency key format
+  accepts:
+  - usage events can be emitted for success and failure paths
+  - schema version is explicit
+  - events include tenant/project/route correlation IDs
+- id: MET-002
+  title: Build ledger worker for immutable event ingestion and deduplication
+  stream: Metering, Ledger, and Billing
+  phase: PI-2
+  deps:
+  - MET-001
+  - DB-001
+  - DB-002
+  owners:
+  - billing-platform
+  size: L
+  paths:
+  - services/ledger-worker
+  - crates/ledger-models
+  - crates/storage
+  outputs:
+  - immutable ledger persistence
+  - deduplication logic
+  - repair/replay hooks
+  accepts:
+  - duplicate usage events are ignored safely
+  - ledger writes are append-only
+  - replay against a snapshot produces deterministic results
+- id: MET-003
+  title: Implement pricing engine with token, cached-token, and multimodal units
+  stream: Metering, Ledger, and Billing
+  phase: PI-3
+  deps:
+  - MET-002
+  - CTL-003
+  owners:
+  - billing-platform
+  size: L
+  paths:
+  - crates/metering
+  - crates/ledger-models
+  - services/control-plane-api
+  outputs:
+  - pricing rules engine
+  - price table model
+  - cost calculation library
+  accepts:
+  - pricing can model input/output/cache/image/audio units
+  - pricing rules are versioned and auditable
+  - simulation endpoint exists for test scenarios
+- id: MET-004
+  title: Build balance, budget, and projection read models
+  stream: Metering, Ledger, and Billing
+  phase: PI-3
+  deps:
+  - MET-002
+  - MET-003
+  owners:
+  - billing-platform
+  size: M
+  paths:
+  - services/ledger-worker
+  - crates/storage
+  - services/control-plane-api
+  outputs:
+  - projection jobs
+  - budget threshold evaluation
+  - usage summary APIs
+  accepts:
+  - projection lag is measurable
+  - budget threshold events are emitted once per threshold crossing
+  - read models can be repaired without ledger mutation
+- id: MET-005
+  title: Implement billing and usage analytics endpoints
+  stream: Metering, Ledger, and Billing
+  phase: PI-3
+  deps:
+  - MET-004
+  - CTL-001
+  owners:
+  - billing-platform
+  - control-plane
+  size: M
+  paths:
+  - services/control-plane-api
+  - schemas/openapi
+  outputs:
+  - aggregated usage endpoints
+  - balance endpoints
+  - billing export endpoints
+  accepts:
+  - APIs support tenant/project/time filtering
+  - responses are paginated for large datasets
+  - exports are asynchronous where needed
+- id: SEC-001
+  title: Define RBAC model, scopes, and authorization middleware
+  stream: Security, Identity, and Compliance
+  phase: PI-0
+  deps:
+  - FND-001
+  - CTL-001
+  owners:
+  - security
+  size: M
+  paths:
+  - crates/authn-authz
+  - services/control-plane-api
+  - services/gateway-api
+  outputs:
+  - role model
+  - scope evaluation
+  - authorization middleware
+  accepts:
+  - tenant and platform scopes are distinct
+  - forbidden responses are normalized
+  - authorization decisions are traceable
+- id: SEC-002
+  title: Implement OIDC/SSO login flow for console users
+  stream: Security, Identity, and Compliance
+  phase: PI-3
+  deps:
+  - CTL-004
+  - SEC-001
+  owners:
+  - security
+  - frontend-console
+  size: M
+  paths:
+  - apps/console-web
+  - services/control-plane-api
+  - crates/authn-authz
+  outputs:
+  - OIDC login flow
+  - session handling
+  - group-to-role mapping
+  accepts:
+  - interactive login works against a reference IdP
+  - logout and session expiry are handled cleanly
+  - role mapping is configurable
+- id: SEC-003
+  title: Implement secret reference model and provider credential storage boundary
+  stream: Security, Identity, and Compliance
+  phase: PI-1
+  deps:
+  - FND-004
+  - DB-001
+  owners:
+  - security
+  - control-plane
+  size: M
+  paths:
+  - crates/storage
+  - services/control-plane-api
+  - crates/config
+  outputs:
+  - secret reference abstraction
+  - credential vault boundary
+  - rotation hooks
+  accepts:
+  - plaintext provider secrets are never returned by API
+  - secret references can be resolved by authorized services only
+  - rotation is auditable
+- id: SEC-004
+  title: Build audit event pipeline and retention controls
+  stream: Security, Identity, and Compliance
+  phase: PI-2
+  deps:
+  - DB-002
+  - SEC-001
+  - OBS-001
+  owners:
+  - security
+  - data-platform
+  size: M
+  paths:
+  - services/audit-worker
+  - crates/queue
+  - crates/storage
+  outputs:
+  - audit event model
+  - durable audit worker
+  - retention/archive rules
+  accepts:
+  - security-sensitive actions emit audit events
+  - audit queries are filterable by actor and resource
+  - retention policies are testable
+- id: OBS-001
+  title: Implement telemetry crate and platform-wide OpenTelemetry conventions
+  stream: Observability, SRE, and Runtime
+  phase: PI-0
+  deps:
+  - FND-001
+  - FND-003
+  owners:
+  - sre
+  size: M
+  paths:
+  - crates/telemetry
+  - infra/monitoring
+  - services/*
+  outputs:
+  - trace helpers
+  - metrics registry
+  - structured log conventions
+  accepts:
+  - all services emit traces, metrics, and logs with shared resource tags
+  - trace IDs propagate across HTTP and events
+  - collector config is documented
+- id: OBS-002
+  title: Build service-level dashboards and SLO definitions
+  stream: Observability, SRE, and Runtime
+  phase: PI-1
+  deps:
+  - OBS-001
+  - GWT-001
+  - CTL-001
+  owners:
+  - sre
+  size: M
+  paths:
+  - infra/monitoring
+  - docs/runbooks
+  outputs:
+  - Grafana dashboards
+  - latency/error/availability SLOs
+  - runbooks
+  accepts:
+  - dashboards exist for gateway, control plane, and workers
+  - SLO calculations are reproducible
+  - runbooks link alerts to operational actions
+- id: OBS-003
+  title: Implement alert routing and incident notification pipeline
+  stream: Observability, SRE, and Runtime
+  phase: PI-2
+  deps:
+  - OBS-002
+  - SEC-004
+  owners:
+  - sre
+  size: S
+  paths:
+  - infra/monitoring
+  - services/notification-worker
+  outputs:
+  - alert rules
+  - notification fan-out
+  - severity taxonomy
+  accepts:
+  - high-severity incidents trigger notifications
+  - alert noise is rate-limited
+  - test alerts can be fired safely
+- id: OBS-004
+  title: Create load, soak, and failure-injection test suite
+  stream: Observability, SRE, and Runtime
+  phase: PI-3
+  deps:
+  - GWT-005
+  - RTE-004
+  - MET-002
+  owners:
+  - sre
+  - qa
+  size: L
+  paths:
+  - crates/testing-kit
+  - infra/scripts
+  - docs/runbooks
+  outputs:
+  - performance test scenarios
+  - failure injection harness
+  - capacity baseline report
+  accepts:
+  - test suite covers concurrency, retry storms, and degraded dependencies
+  - results are versioned and comparable
+  - capacity thresholds are documented
+- id: QAR-001
+  title: Build protocol contract tests and golden fixtures
+  stream: QA, Release, and Documentation
+  phase: PI-1
+  deps:
+  - GWT-004
+  - PAD-002
+  - FND-006
+  owners:
+  - qa
+  - gateway
+  size: M
+  paths:
+  - crates/testing-kit
+  - schemas/examples
+  - crates/protocol-openai
+  outputs:
+  - golden fixtures
+  - contract runner
+  - fixture update workflow
+  accepts:
+  - protocol contract tests run in CI
+  - fixtures cover success and failure cases
+  - breaking fixture deltas require review
+- id: QAR-002
+  title: Create end-to-end integration environment and seeded demo tenant
+  stream: QA, Release, and Documentation
+  phase: PI-2
+  deps:
+  - CTL-005
+  - GWT-005
+  - MET-002
+  owners:
+  - qa
+  - platform
+  size: M
+  paths:
+  - infra/docker
+  - infra/scripts
+  - apps/console-web
+  outputs:
+  - seed scripts
+  - e2e test environment
+  - reference demo scenario
+  accepts:
+  - fresh environment can be seeded repeatably
+  - smoke tests cover UI + API + gateway flow
+  - demo tenant credentials are generated securely
+- id: QAR-003
+  title: Implement release automation, versioning policy, and changelog generation
+  stream: QA, Release, and Documentation
+  phase: PI-2
+  deps:
+  - FND-005
+  owners:
+  - platform
+  size: M
+  paths:
+  - .github/workflows
+  - docs/runbooks
+  - Cargo.toml
+  - package.json
+  outputs:
+  - release pipeline
+  - versioning policy
+  - generated changelogs
+  accepts:
+  - tagging a release produces versioned artifacts
+  - workspace versions are consistent
+  - release notes are derived from merged changes
+- id: QAR-004
+  title: Create agent-facing implementation guides and definition-of-done checklists
+  stream: QA, Release, and Documentation
+  phase: PI-0
+  deps: []
+  owners:
+  - technical-writing
+  size: S
+  paths:
+  - docs/execution
+  - README.md
+  outputs:
+  - execution docs
+  - task templates
+  - checklists
+  accepts:
+  - agents can discover work without reading the whole spec
+  - task handoff template exists
+  - checklists align with CI and review requirements

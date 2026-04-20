@@ -1,0 +1,151 @@
+# 17. Observability
+
+[Back to Docs Index](../README.md)
+
+### 17.1 Requirements
+
+The observability stack must answer:
+
+- which route was chosen and why
+- what upstream was actually called
+- where did latency accumulate
+- why did a retry occur
+- how much usage was billed
+- did a policy alter the request or response
+- did a cache or circuit breaker trigger
+
+### 17.2 Telemetry Types
+
+- traces
+- metrics
+- structured logs
+- audit events
+- route evaluation records
+- synthetic probe results
+
+### 17.3 Trace Model
+
+Each request should include:
+
+- gateway request span
+- auth span
+- policy evaluation span
+- route scoring span
+- adapter execution span
+- stream relay span
+- metering span
+- ledger emit span
+
+### 17.4 Key Metrics
+
+- request count
+- success rate
+- latency percentiles
+- stream duration
+- first-token latency
+- provider error rate
+- retry rate
+- route fallback rate
+- token volume
+- estimated cost
+- gross margin
+- auth failure count
+- policy denial count
+
+### 17.5 Log Requirements
+
+Logs should be structured JSON and include:
+
+- trace ID
+- request ID
+- tenant ID
+- project ID
+- credential prefix
+- protocol family
+- requested model alias
+- resolved provider target
+- error code
+- retry attempt
+- route policy ID
+
+Sensitive payload logging must be disabled by default and opt-in with redaction controls.
+
+### 17.6 Semantic Convention Registry
+
+Observability fields should not be invented ad hoc by each crate or service.
+
+The platform should maintain a shared telemetry semantic registry covering:
+
+- span names
+- metric names and units
+- event names
+- resource attributes
+- stable attribute keys
+- incubating or experimental attribute keys
+
+Recommended governance model:
+
+- `crates/telemetry` exports typed constants and helpers
+- stable fields are documented and versioned
+- incubating fields use a clearly marked namespace until proven
+- feature teams add new fields through review instead of silently emitting one-off dimensions
+
+### 17.7 AI-Gateway-Specific Semantic Fields
+
+In addition to baseline HTTP and service telemetry, the platform should standardize fields for:
+
+- protocol family
+- northbound endpoint family
+- requested model alias
+- resolved provider target
+- route policy ID
+- fallback count
+- retry classification
+- cache decision
+- usage unit family
+- estimated and final billable cost
+
+This follows the OpenTelemetry discipline of semantic conventions while allowing product-specific extensions where the standard has no native concept.
+
+### 17.8 Diagnostics Event Model
+
+Every request should be able to emit a compact diagnostic event timeline containing:
+
+- auth result
+- policy result
+- selected route candidate set
+- chosen provider target
+- retry and fallback transitions
+- final normalization and usage extraction result
+
+These events should be structured enough for support tooling and post-incident analysis, not just for log search.
+
+
+---
+
+
+## 38. Diagnostics and Supportability
+
+### 38.1 Request Diagnostics Page
+
+The console should expose a request diagnostics view with:
+
+- request metadata
+- selected route
+- upstream response status
+- retry timeline
+- usage summary
+- policy decisions
+- trace link
+
+### 38.2 Support Tools
+
+Support operators should be able to:
+
+- revoke keys
+- quarantine a provider resource
+- pause a route target
+- issue billing credits/debits with audit trail
+- inspect recent failures by tenant/provider/model alias
+
+---
