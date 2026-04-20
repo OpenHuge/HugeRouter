@@ -3,6 +3,9 @@
 ## Architecture
 
 - [Overview](architecture/overview.md)
+- [Implementation Contracts](architecture/implementation-contracts.md)
+- [Event and Message Contracts](architecture/event-and-message-contracts.md)
+- [Persistence Guidance](architecture/persistence-guidance.md)
 - [Monorepo and Tech Stack](architecture/monorepo-and-tech-stack.md)
 - [Domain Model](architecture/domain-model.md)
 - [Protocol IR and Protocol Support](architecture/protocol-ir-and-protocols.md)

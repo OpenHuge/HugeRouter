@@ -2,6 +2,12 @@
 
 [Back to Docs Index](../README.md)
 
+For coding-facing persistence and messaging constraints, read [Persistence Guidance](persistence-guidance.md) and [Event and Message Contracts](event-and-message-contracts.md) alongside this document.
+
+Preferred rule:
+
+- treat this document as the logical storage and eventing shape, not as a requirement to create every store, topic, or pipeline on day one
+
 ### 24.1 PostgreSQL
 
 Primary use cases:
@@ -63,6 +69,10 @@ Use a durable event bus for asynchronous pipelines such as:
 - route score recalculation
 - synthetic health result ingestion
 - billing export generation
+
+Guardrail:
+
+- event delivery should support retry and fan-out, but should not become the only authoritative home of routing, admission, or billing decisions
 
 ### 25.2 Core Event Types
 

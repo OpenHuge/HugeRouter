@@ -2,6 +2,14 @@
 
 [Back to Docs Index](../README.md)
 
+This document describes preferred responsibility boundaries, not a requirement to create every listed service or crate in the first implementation.
+
+Preferred rule:
+
+- start with fewer deployables and fewer crates when ownership is still clear
+- split a service or crate only when lifecycle, scaling, isolation, or review boundaries become materially different
+- avoid empty plugin, registry, or runtime-composition layers unless a second concrete caller already forces the abstraction
+
 ### 33.1 `services/gateway-api`
 
 **Purpose:** Main northbound ingress for synchronous HTTP request traffic.

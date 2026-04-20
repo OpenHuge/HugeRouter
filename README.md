@@ -6,6 +6,9 @@ Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway
 
 - [Docs Index](docs/README.md)
 - [Architecture Overview](docs/architecture/overview.md)
+- [Implementation Contracts](docs/architecture/implementation-contracts.md)
+- [Event and Message Contracts](docs/architecture/event-and-message-contracts.md)
+- [Persistence Guidance](docs/architecture/persistence-guidance.md)
 - [Monorepo and Tech Stack](docs/architecture/monorepo-and-tech-stack.md)
 - [Domain Model](docs/architecture/domain-model.md)
 - [Protocol IR and Protocol Support (Updated for MCP & WebRTC)](docs/architecture/protocol-ir-and-protocols.md)
@@ -87,6 +90,9 @@ The repository includes a compose-based devcontainer in [`.devcontainer/devconta
 
 Recommended entry documents before starting implementation:
 
+- [Implementation Contracts](docs/architecture/implementation-contracts.md)
+- [Event and Message Contracts](docs/architecture/event-and-message-contracts.md)
+- [Persistence Guidance](docs/architecture/persistence-guidance.md)
 - [Monorepo and Tech Stack](docs/architecture/monorepo-and-tech-stack.md)
 - [Frontend Console](docs/architecture/frontend-console.md)
 - [Development, CI/CD, and Testing](docs/runbooks/development-cicd-testing.md)
