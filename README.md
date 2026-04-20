@@ -78,10 +78,11 @@ Convenience commands:
 
 The repository includes a compose-based devcontainer in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json).
 
-- The workspace container installs Node `24.15.0`, `pnpm 10.33.0`, Rust `1.95.0`, and Codex CLI.
-- `onCreate` installs `@openai/codex`.
+- The workspace container installs Node `24.15.0`, `pnpm 10.33.0`, Rust `1.95.0`, and uses the official `ghcr.io/devcontainers/features/github-cli:1` feature so `gh` is available the same way it is in GitHub Codespaces.
+- `onCreate` installs `@openai/codex` into a user-owned npm global prefix.
 - `updateContent` installs workspace dependencies.
-- `postCreate` and `postStart` wire a persisted Codex config from `.devcontainer/local/codex/config.toml` into `~/.codex/config.toml`.
+- `postCreate` and `postStart` persist Codex config in `.devcontainer/local/codex/config.toml` and GitHub CLI config in `.devcontainer/local/gh`.
+- In GitHub Codespaces, `gh` can use the built-in `GITHUB_TOKEN`; an optional recommended `GH_TOKEN` secret is declared for contributors who need fine-grained access to additional repositories. Locally, run `gh auth login` once and the stored auth will persist across rebuilds.
 - The devcontainer composes with the local infra stack for PostgreSQL, Redis, NATS, OpenTelemetry Collector, Prometheus, and Grafana.
 
 Recommended entry documents before starting implementation:

@@ -9,6 +9,15 @@
   "remoteUser": "vscode",
   "overrideCommand": false,
   "shutdownAction": "stopCompose",
+  "secrets": {
+    "GH_TOKEN": {
+      "description": "Optional fine-grained token for GitHub CLI access to repositories beyond the current codespace repository.",
+      "documentationUrl": "https://docs.github.com/en/codespaces/troubleshooting/troubleshooting-authentication-to-a-repository"
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
   "runServices": [
     "workspace",
     "postgres",
@@ -73,6 +82,7 @@
   "containerEnv": {
     "CARGO_TERM_COLOR": "always",
     "CODEX_HOME": "/home/vscode/.codex",
+    "NPM_CONFIG_PREFIX": "/home/vscode/.npm-global",
     "PNPM_HOME": "/home/vscode/.local/share/pnpm"
   },
   "customizations": {

@@ -34,4 +34,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
 RUN su "${USERNAME}" -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION}" \
     && su "${USERNAME}" -c "/home/${USERNAME}/.cargo/bin/rustup component add clippy rustfmt"
 
-ENV PATH="/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/.local/share/pnpm:${PATH}"
+RUN mkdir -p "/home/${USERNAME}/.npm-global" \
+    && chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/.npm-global"
+
+ENV PATH="/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/.local/share/pnpm:/home/${USERNAME}/.npm-global/bin:${PATH}"

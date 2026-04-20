@@ -1,4 +1,9 @@
-set shell := ["powershell.exe", "-NoLogo", "-Command"]
+set shell := ["bash", "-euo", "pipefail", "-c"]
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+stack_up_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-up.ps1" } else { "./infra/scripts/stack-up.sh" }
+stack_down_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-down.ps1" } else { "./infra/scripts/stack-down.sh" }
+stack_logs_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-logs.ps1" } else { "./infra/scripts/stack-logs.sh" }
 
 bootstrap:
   corepack enable
@@ -34,10 +39,10 @@ generate:
   pnpm turbo run generate
 
 stack-up:
-  ./infra/scripts/stack-up.ps1
+  {{stack_up_command}}
 
 stack-down:
-  ./infra/scripts/stack-down.ps1
+  {{stack_down_command}}
 
 stack-logs:
-  ./infra/scripts/stack-logs.ps1
+  {{stack_logs_command}}
