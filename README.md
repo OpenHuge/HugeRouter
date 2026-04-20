@@ -1,6 +1,6 @@
-# AI Traffic OS
+# HugeRouter
 
-Rust backend + TanStack Start frontend monorepo specification for a future-facing, protocol-native AI gateway platform. The implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `Mantine` as the frontend component foundation for the console.
+Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `Mantine` as the frontend component foundation for the console.
 
 ## Document Structure
 
@@ -48,13 +48,41 @@ This split specification preserves the original engineering intent:
 
 ## Development Baseline
 
-The repository is now documented around the following starting point for implementation:
+The repository now includes a working bootstrap baseline:
 
 - `Cargo` workspace for backend crates and services
 - `pnpm` workspaces orchestrated by `Turbo` for frontend apps and shared packages
 - `TanStack Start` for `apps/console-web`
 - `Mantine` for theme, layout, form, feedback, and reusable console components
 - `just` as the human-friendly entry point that wraps Rust, `pnpm`, and `turbo` tasks
+
+## Quick Start
+
+Local development:
+
+- `pnpm install`
+- `pnpm build`
+- `pnpm test`
+- `pnpm typecheck`
+- `cargo check --workspace`
+
+Convenience commands:
+
+- `just bootstrap`
+- `just dev-frontend`
+- `just dev-ui`
+- `just stack-up`
+- `just stack-down`
+
+## Dev Container
+
+The repository includes a compose-based devcontainer in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json).
+
+- The workspace container installs Node `24.15.0`, `pnpm 10.33.0`, Rust `1.95.0`, and Codex CLI.
+- `onCreate` installs `@openai/codex`.
+- `updateContent` installs workspace dependencies.
+- `postCreate` and `postStart` wire a persisted Codex config from `.devcontainer/local/codex/config.toml` into `~/.codex/config.toml`.
+- The devcontainer composes with the local infra stack for PostgreSQL, Redis, NATS, OpenTelemetry Collector, Prometheus, and Grafana.
 
 Recommended entry documents before starting implementation:
 

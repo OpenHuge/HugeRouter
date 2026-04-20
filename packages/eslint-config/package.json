@@ -1,0 +1,10 @@
+{
+  "name": "@huge-router/eslint-config",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./base.mjs"
+  }
+}
+

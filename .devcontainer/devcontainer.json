@@ -1,0 +1,98 @@
+{
+  "name": "HugeRouter",
+  "dockerComposeFile": [
+    "../infra/docker/compose.yaml",
+    "docker-compose.yml"
+  ],
+  "service": "workspace",
+  "workspaceFolder": "/workspaces/HugeRouter",
+  "remoteUser": "vscode",
+  "overrideCommand": false,
+  "shutdownAction": "stopCompose",
+  "runServices": [
+    "workspace",
+    "postgres",
+    "redis",
+    "nats",
+    "otel-collector",
+    "prometheus",
+    "grafana"
+  ],
+  "onCreateCommand": "bash .devcontainer/on-create.sh",
+  "updateContentCommand": "bash .devcontainer/update-content.sh",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+  "forwardPorts": [
+    3000,
+    4173,
+    5432,
+    6379,
+    4222,
+    8222,
+    4317,
+    4318,
+    6006,
+    9090,
+    3001
+  ],
+  "portsAttributes": {
+    "3000": {
+      "label": "console-web"
+    },
+    "3001": {
+      "label": "grafana"
+    },
+    "4173": {
+      "label": "vite-preview"
+    },
+    "4222": {
+      "label": "nats"
+    },
+    "4317": {
+      "label": "otel-grpc"
+    },
+    "4318": {
+      "label": "otel-http"
+    },
+    "5432": {
+      "label": "postgres"
+    },
+    "6006": {
+      "label": "storybook"
+    },
+    "6379": {
+      "label": "redis"
+    },
+    "8222": {
+      "label": "nats-monitor"
+    },
+    "9090": {
+      "label": "prometheus"
+    }
+  },
+  "containerEnv": {
+    "CARGO_TERM_COLOR": "always",
+    "CODEX_HOME": "/home/vscode/.codex",
+    "PNPM_HOME": "/home/vscode/.local/share/pnpm"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker",
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vitest.explorer",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "eslint.packageManager": "pnpm",
+        "files.eol": "\n",
+        "rust-analyzer.check.command": "clippy",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

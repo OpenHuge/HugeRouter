@@ -1,0 +1,24 @@
+{
+  "name": "@huge-router/ts-shared-schema",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "lint": "eslint . --config ../../eslint.config.mjs",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "node -e \"console.log('No tests for ts-shared-schema yet')\"",
+    "generate": "node -e \"console.log('Schema generation is reserved for FND-006')\""
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "typescript": "6.0.3"
+  }
+}
+
