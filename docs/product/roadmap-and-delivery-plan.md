@@ -26,8 +26,8 @@ Deliver:
 
 Deliver:
 - Anthropic and Gemini northbound support
-- richer IR with MCP (Model Context Protocol)
-- Semantic caching layer for repeated agent prompts
+- richer IR with MCP (Model Context Protocol) via Streamable HTTP
+- Semantic caching layer with pgvector for repeated agent prompts
 - multiple upstream adapters
 - retry/fallback logic
 - route diagnostics UI
@@ -40,18 +40,22 @@ Deliver:
 - balance projections
 - billing dashboard
 - audit improvements
+- replay capsule and supportability maturity
 
 ### 32.5 Phase 4: Enterprise, Realtime, and Ecosystem
 
 Deliver:
-- Realtime WebRTC proxy with Ephemeral Key generation
-- MCP server orchestration
-- A2A (Agent-to-Agent) traffic management
-- SSO and advanced RBAC
+- Realtime WebRTC proxy targeting OpenAI Realtime API GA
+- MCP server orchestration with stateless Streamable HTTP transport
+- A2A (Agent-to-Agent) protocol support with Agent Card discovery and task lifecycle management
+- A2A Hub-and-Spoke gateway governance model
+- Non-Human Identity (NHI) management for agent credentials
+- SSO and advanced RBAC including agent roles
 - data residency policies
 - plugin/adapters expansion
 - gateway-of-gateways support
-- advanced observability and analytics
+- advanced observability and analytics with agentic session tracing
+- optional orchestration-aware integrations with external agent runtimes and memory systems where product demand justifies them
 
 
 ---
@@ -136,6 +140,20 @@ Mitigation:
 - mandatory audit trails
 - least privilege defaults
 
+### 40.6 Risk: A2A Infinite Loops
+
+Mitigation:
+- A2A request hop limits
+- agent identity validation
+- circuit breaking on token bursts
+
+### 40.7 Risk: Semantic Cache Invalidation
+
+Mitigation:
+- TTL-based invalidation
+- content-hash keys
+- developer-controlled purge API
+
 
 ---
 
@@ -148,6 +166,10 @@ Mitigation:
 4. Should the first production deployment target Kubernetes only, or also support a simpler Docker Compose self-hosted mode as a first-class deliverable?
 5. Should the plugin/adapters roadmap be public and stable early, or remain internal until the core abstractions settle?
 6. How deeply should the AI Gateway introspect MCP (Model Context Protocol) tool calls versus passing them transparently?
+7. Should A2A Agent Card discovery and validation be implemented as a gateway-native feature or delegated to an external service registry?
+8. Should semantic caching use pgvector within PostgreSQL or a dedicated vector store from the start?
+9. How should the gateway handle A2A delegation chain depth limits to prevent cascading agent loops while still supporting legitimate multi-agent workflows?
+10. Which memory-bearing operations, if any, should be classified specially in policy and diagnostics before the platform ever owns a memory subsystem?
 
 ## 41.1 Recommended Answers For Development Kickoff
 
@@ -159,6 +181,10 @@ To avoid blocking implementation, use these defaults unless a later ADR changes 
 - make Docker Compose the first self-hosted and developer baseline
 - keep plugin contracts stable early, but defer third-party dynamic plugin loading
 - treat MCP as a first-class protocol family and inspect it enough for auth, policy, routing, and observability boundaries
+- treat A2A as a production-ready protocol and implement Agent Card discovery and task lifecycle from the first A2A milestone
+- start semantic caching with pgvector and defer dedicated vector store until scale requires it
+- implement NHI management as an extension of the existing credential model rather than a separate subsystem
+- treat external orchestration and memory systems as governed integrations first, not as runtime responsibilities the gateway must absorb immediately
 
 
 ---

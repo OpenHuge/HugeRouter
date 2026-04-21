@@ -12,6 +12,17 @@ Preferred rule:
 - leave secondary analytics or ergonomics fields nullable, derived, or deferred when they are not yet on the critical path
 - do not create a new entity just because a noun appears in the docs; a concept should become its own persisted model only when it has a distinct lifecycle, state owner, or audit requirement
 
+### 8.0 Lifecycle Boundary Rule
+
+The architecture should preserve four different lifecycle scopes even when the first implementation stores some of them together:
+
+- `request`: one admitted ingress operation with one route decision
+- `session`: a longer-lived conversational, realtime, or MCP interaction context that may span multiple requests or events
+- `task`: a delegated or durable unit of work, typically relevant to A2A or agent orchestration
+- `operation`: an individual side-effecting or governance-relevant step such as a tool call, browser action, memory write, or delegation transition
+
+These scopes must not be silently conflated in identifiers or diagnostics. A request may create or attach to a session. A session may contain many operations. A task may outlive the request that submitted it.
+
 ### 8.1 Tenant
 
 A top-level organizational boundary.
@@ -43,6 +54,18 @@ Attributes:
 
 A user, service account, API key subject, or machine identity.
 
+Recommended attributes:
+- `principal_id`
+- `identity_type` such as `human`, `service`, `agent`
+- `tenant_id`
+- `project_id` nullable
+- `display_name`
+- `status`
+- `delegation_depth_limit` nullable
+- `default_budget_scope_id` nullable
+- `created_at`
+- `updated_at`
+
 ### 8.4 API Credential
 
 Represents a northbound access credential.
@@ -53,6 +76,21 @@ Types:
 - ephemeral session token
 - JWT-based machine token
 - mTLS client identity
+- agent identity credential (non-human identity for autonomous agents)
+
+Recommended attributes:
+- `credential_id`
+- `tenant_id`
+- `project_id` nullable
+- `subject_principal_id`
+- `issuer_type`
+- `identity_type`
+- `binding_mode` such as `direct`, `delegated`, `ephemeral`
+- `scopes`
+- `status`
+- `expires_at` nullable
+- `created_at`
+- `updated_at`
 
 ### 8.5 Provider
 
@@ -119,6 +157,9 @@ Recommended attributes:
 - `quota_reserve_strategy`
 - `shadow_mode`
 - `retention_tier`
+- `protocol_bridge_policy`
+- `operation_risk_policy`
+- `approval_policy_id` nullable
 - `version`
 - `created_at`
 - `updated_at`
@@ -258,9 +299,130 @@ To reduce naming drift during implementation, the first version should standardi
 - `provider_resource.status`: `active | disabled | draining | quarantined | deleted`
 - `provider_resource.provenance_class`: `official_api | official_gateway | byo_customer_credential | dedicated_managed_account | shared_brokered_pool | unofficial_client_channel`
 - `provider_resource.credential_owner_type`: `platform | tenant | project | partner`
+- `route_policy.protocol_bridge_policy`: `disallow | allow_listed | require_approval`
 - `route_receipt.admission_result`: `admitted | rejected_budget | rejected_rate_limit | rejected_concurrency | rejected_policy | rejected_no_candidate`
 - `usage_event.usage_phase`: `reserve | partial | final | release`
 - `budget_policy.action_on_hard_limit`: `reject_new | terminate_inflight | require_override`
 - `budget_policy.action_on_soft_limit`: `log_only | notify | degrade_route | require_override`
+- `a2a_task.status`: `submitted | working | completed | failed | cancelled`
+- `credential.identity_type`: `human | service | agent`
+- `runtime_session.lifecycle_state`: `active | paused | completed | failed | expired`
+- `approval_checkpoint.status`: `pending | approved | rejected | expired | bypassed`
+- `governed_operation.operation_kind`: `inference | tool_read | tool_write | browser_read | browser_write | memory_recall | memory_retain | memory_reflect | delegation_submit | delegation_continue | delegation_cancel`
+- `governed_operation.side_effect_level`: `none | low | material | high`
+
+### 8.18 Agent Card (A2A)
+
+A machine-readable manifest describing an agent's capabilities, reachability, and authentication requirements for inter-agent coordination.
+
+Recommended attributes:
+- `agent_card_id`
+- `tenant_id`
+- `agent_name`
+- `agent_url`
+- `capabilities`
+- `auth_methods` (OAuth 2.0, API keys, mTLS)
+- `supported_input_formats`
+- `supported_output_formats`
+- `status`
+- `trust_level`
+- `created_at`
+- `updated_at`
+
+### 8.19 A2A Task
+
+A task delegated between agents via the A2A protocol.
+
+Recommended attributes:
+- `a2a_task_id`
+- `tenant_id`
+- `delegating_agent_id`
+- `target_agent_card_id`
+- `task_status` (`submitted`, `working`, `completed`, `failed`, `cancelled`)
+- `task_description`
+- `delegation_chain_depth`
+- `budget_allocation`
+- `timeout_ms`
+- `result_summary`
+- `created_at`
+- `completed_at`
+
+### 8.20 Semantic Cache Entry
+
+A cached response keyed by semantic similarity to previous requests.
+
+Recommended attributes:
+- `cache_entry_id`
+- `tenant_id`
+- `project_id`
+- `embedding_vector`
+- `similarity_threshold`
+- `cached_response_summary`
+- `model_alias`
+- `ttl`
+- `hit_count`
+- `created_at`
+- `last_hit_at`
+
+### 8.21 Runtime Session
+
+A durable or semi-durable context for stateful protocols such as Realtime, MCP, browser-assisted runs, or multi-step agent execution.
+
+Recommended attributes:
+- `runtime_session_id`
+- `tenant_id`
+- `project_id`
+- `credential_id`
+- `principal_id`
+- `protocol_family`
+- `lifecycle_state`
+- `started_by_request_id`
+- `delegated_subject_id` nullable
+- `session_budget_policy_id` nullable
+- `approval_state` nullable
+- `created_at`
+- `updated_at`
+- `ended_at` nullable
+
+### 8.22 Approval Checkpoint
+
+A durable pause or decision point where human or policy approval is required before execution may continue.
+
+Recommended attributes:
+- `approval_checkpoint_id`
+- `tenant_id`
+- `project_id`
+- `runtime_session_id` nullable
+- `request_id` nullable
+- `a2a_task_id` nullable
+- `governed_operation_id`
+- `approval_reason_code`
+- `status`
+- `requested_at`
+- `resolved_at` nullable
+- `resolved_by_principal_id` nullable
+- `resolution_summary` nullable
+
+### 8.23 Governed Operation
+
+A normalized description of one execution step that may carry side effects, delegated authority, or special retention and approval rules.
+
+Recommended attributes:
+- `governed_operation_id`
+- `tenant_id`
+- `project_id`
+- `request_id` nullable
+- `runtime_session_id` nullable
+- `a2a_task_id` nullable
+- `operation_kind`
+- `operation_name`
+- `side_effect_level`
+- `target_system_class`
+- `input_summary`
+- `output_summary` nullable
+- `policy_outcome`
+- `approval_checkpoint_id` nullable
+- `started_at`
+- `completed_at` nullable
 
 ---

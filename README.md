@@ -44,8 +44,9 @@ This split specification preserves the original engineering intent:
 - TanStack Start for a typed frontend console
 - Mantine for the shared frontend design system and console primitives
 - Turbo-managed monorepo workflows for incremental local development and CI
-- protocol-native ingress and adapter-based egress (optimized for 2026 multi-modal traffic)
-- native support for Model Context Protocol (MCP) and Realtime WebRTC proxying
+- protocol-native ingress and adapter-based egress (optimized for 2026 multi-modal and agentic traffic)
+- native support for Model Context Protocol (MCP) via Streamable HTTP and Agent-to-Agent (A2A) protocol with Agent Card discovery
+- Realtime WebRTC proxying targeting OpenAI Realtime API GA
 - immutable usage and ledger design
 - first-class routing, semantic caching, policy, security, and observability
 

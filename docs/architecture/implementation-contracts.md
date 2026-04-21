@@ -77,6 +77,10 @@ V1 is successful if it can do all of the following in a coherent way:
 - create immutable ledger and audit artifacts
 - reconstruct a failure using redacted diagnostics
 
+Additional V1 invariant:
+
+- preserve caller identity, effective acting principal, and delegation chain semantics when the request originates from a non-human or delegated context
+
 ## 2. V1 Capability Surfaces
 
 The following artifacts should exist as identifiable concepts in code and storage, even if the first implementation models some of them more lightly than the long-term design:
@@ -89,6 +93,15 @@ The following artifacts should exist as identifiable concepts in code and storag
 - `UsageEvent`
 - `LedgerEntry`
 - `ReplayCapsule`
+- delegated identity chain summary
+
+Explicit non-goal for the first implementation:
+
+- a general-purpose agent memory subsystem owned by the gateway
+
+Allowed first-step scope:
+
+- govern memory-bearing traffic, classify memory-related operations, and preserve auditable metadata when upstream systems perform retain/recall/reflect style work
 
 Invariant:
 
@@ -105,21 +118,25 @@ Implementation freedom:
 Recommended request sequence:
 
 1. authenticate and authorize
-2. resolve effective configuration and produce `config_snapshot_id`
-3. expand candidates
-4. filter by capability, policy, provenance, and health
-5. score candidates
-6. run admission control using budget, rate, and concurrency state
-7. select target
-8. execute upstream call or realtime session
-9. emit `route_receipt`
-10. emit `usage_event`
-11. persist ledger and audit follow-up records asynchronously where possible
+2. resolve caller identity, delegated subject if present, and protocol family
+3. resolve effective configuration and produce `config_snapshot_id`
+4. normalize protocol-specific input into canonical request semantics
+5. expand candidates
+6. filter by capability, policy, provenance, and health
+7. score candidates
+8. run admission control using budget, rate, and concurrency state
+9. select target
+10. execute upstream call, realtime session, MCP interaction, or A2A task step
+11. emit `route_receipt`
+12. emit `usage_event`
+13. persist ledger and audit follow-up records asynchronously where possible
 
 Invariant:
 
 - upstream execution should not happen before admission control
 - if a later stage changes an earlier decision, the system should either prohibit that mutation or re-run the impacted checks and record the transition explicitly
+- Chat Completions compatibility must not become the canonical internal OpenAI-family representation; the internal shape should align with Responses-era item and tool semantics
+- MCP and A2A should not be collapsed into one generic remote-invocation abstraction without an explicit bridging policy
 
 ## 4. Canonical Enums
 
@@ -285,6 +302,7 @@ Implementation freedom:
 Guardrail:
 
 - do not introduce admin APIs for concepts that still have no runtime effect in the first implementation slice
+- do not let compatibility-only public APIs dictate the internal request model when a newer canonical provider contract already exists
 
 ## 9. Route Receipt Minimum Shape
 
@@ -352,6 +370,8 @@ The following are the primary acceptance invariants for agents:
 - provenance class is enforced by policy, not treated as free-form metadata
 - prompt content is not stored by default in diagnostics tables
 - retries do not create duplicate final ledger debits
+- route receipts and replay artifacts preserve delegation context when a request was agent-initiated or delegated
+- semantic cache is bypassed by default for stateful realtime flows, terminal A2A task transitions, and side-effecting MCP tool operations unless policy explicitly allows it
 
 ## 11.1 Suggested Delivery Slices
 
@@ -401,6 +421,8 @@ Unless a task explicitly calls for them, the following should usually be treated
 - adding a rules engine, plugin framework, or policy DSL before a second concrete caller forces that abstraction
 - shipping placeholder resources or endpoints that are not exercised by the documented request path
 - copying upstream protocol fields wholesale into internal domain models without deciding which ones actually affect routing, admission, billing, or diagnostics
+- turning semantic cache into a de facto general memory platform without a separate ownership, retention, and policy model
+- treating long-running A2A or agent workflow continuation as just another synchronous HTTP retry problem
 
 ## 11.4 Preferred Agent Behavior
 

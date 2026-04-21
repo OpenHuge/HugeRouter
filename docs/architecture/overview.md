@@ -6,14 +6,15 @@ AI Traffic OS is a multi-tenant, protocol-native AI gateway platform designed to
 
 The system is explicitly **not** a traditional "API forwarding panel". It is designed as a layered control plane and data plane architecture that can support:
 
-- OpenAI-compatible APIs (including Realtime WebRTC & WebSocket)
+- OpenAI-compatible APIs (including Realtime WebRTC & WebSocket, GA endpoints as of 2026-04)
 - Anthropic-native APIs
 - Gemini-native APIs
 - Realtime and streaming protocols (WebRTC audio/video with ephemeral tokens)
-- Agentic orchestration and tool execution via Model Context Protocol (MCP)
-- Future agent-facing protocols such as A2A-style (Agent-to-Agent) exchanges
+- Agentic orchestration and tool execution via Model Context Protocol (MCP) with Streamable HTTP transport
+- Agent-to-Agent (A2A) protocol for multi-agent coordination, task delegation, and Agent Card discovery
 - Proxying of other gateways and transit services
-- Enterprise-grade routing, semantic caching, metering, security, auditing, and observability
+- Semantic caching for repeated prompts and agentic workflows
+- Enterprise-grade routing, metering, security, auditing, and observability
 
 This specification defines a **monorepo architecture** where:
 
@@ -32,14 +33,15 @@ The result should be a platform that can evolve from a developer-first gateway i
 
 ### 2.1 Primary Goals
 
-1. Build a protocol-native AI gateway rather than a single-format OpenAI facade, optimized for 2026 multi-modal traffic.
+1. Build a protocol-native AI gateway rather than a single-format OpenAI facade, optimized for 2026 multi-modal and agentic traffic.
 2. Separate hot-path data plane concerns from control plane concerns.
 3. Support multi-tenant isolation and usage metering from day one.
-4. Provide dynamic routing based on health, capability, cost, latency, and policy, including agent-aware routing via MCP.
+4. Provide dynamic routing based on health, capability, cost, latency, and policy, including agent-aware routing via MCP and A2A.
 5. Expose a modern, typed admin console and tenant console.
-6. Maintain high observability and debuggability for streaming, realtime WebRTC, and non-streaming traffic.
-7. Provide a strong security baseline suitable for commercial operation, including ephemeral key generation for secure browser-based voice agents.
-8. Enable future extensibility through adapters, policies, semantic caching, and plugin-style execution boundaries.
+6. Maintain high observability and debuggability for streaming, realtime WebRTC, agentic sessions, and non-streaming traffic.
+7. Provide a strong security baseline suitable for commercial operation, aligned with OWASP Top 10 for LLM Applications (2025) and OWASP Top 10 for Agentic Applications (2026), including ephemeral key generation for secure browser-based voice agents.
+8. Enable extensibility through adapters, policies, semantic caching, and plugin-style execution boundaries.
+9. Serve as the central governance layer for agentic AI infrastructure, managing agent coordination, tool-use governance, and multi-agent workflow observability.
 
 ### 2.2 Secondary Goals
 
@@ -162,31 +164,34 @@ Observability and supportability features must therefore default to:
 The platform is composed of the following major layers:
 
 1. **Northbound API Layer**  
-   Accepts OpenAI (including Realtime/WebRTC), Anthropic, Gemini, MCP (Model Context Protocol), and future protocols.
+   Accepts OpenAI (including Realtime/WebRTC GA), Anthropic, Gemini, MCP (Model Context Protocol via Streamable HTTP), A2A (Agent-to-Agent via Agent Cards), and future protocols.
 
 2. **Protocol Parsing and Internal Representation Layer**  
    Parses protocol-specific requests into an internal semantic representation.
 
 3. **Routing and Policy Layer**  
-   Selects targets based on capabilities, cost, latency, tenant rules, region rules, and health.
+   Selects targets based on capabilities, cost, latency, tenant rules, region rules, health, and agent coordination context.
 
-4. **Adapter Layer**  
-   Maps the internal representation to specific upstream providers or upstream gateways.
+4. **Semantic Caching Layer**  
+   Evaluates semantic similarity of incoming requests against cached responses to reduce redundant upstream calls, particularly effective for repeated agentic prompts.
 
-5. **Composition and Registry Layer**  
+5. **Adapter Layer**  
+   Maps the internal representation to specific upstream providers, upstream gateways, or A2A-compliant agent endpoints.
+
+6. **Composition and Registry Layer**  
    Assembles protocol handlers, policy stages, adapters, metering sinks, and observability hooks into each service runtime.
 
-6. **Metering and Ledger Layer**  
-   Records token usage, image usage, time-based usage, and billing events.
+7. **Metering and Ledger Layer**  
+   Records token usage, image usage, time-based usage, A2A task usage, and billing events.
 
-7. **Control Plane Layer**  
-   Manages tenants, keys, projects, pricing, route definitions, provider resources, policies, and administration.
+8. **Control Plane Layer**  
+   Manages tenants, keys, projects, pricing, route definitions, provider resources, agent registrations, policies, and administration.
 
-8. **Observability and Analytics Layer**  
-   Collects traces, logs, metrics, route evaluations, usage records, and cost analytics.
+9. **Observability and Analytics Layer**  
+   Collects traces, logs, metrics, route evaluations, agentic session traces, usage records, and cost analytics.
 
-9. **Frontend Console Layer**  
-   Provides admin and tenant user interfaces using TanStack Start.
+10. **Frontend Console Layer**  
+    Provides admin and tenant user interfaces using TanStack Start v1.
 
 ## 4.1 Reference Pattern Lens
 

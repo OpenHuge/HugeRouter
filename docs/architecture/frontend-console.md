@@ -7,8 +7,13 @@ The console is implemented with **TanStack Start** and uses **Mantine** as the s
 As of **April 20, 2026**, the recommended baseline is:
 
 - React `19.2+`
-- Mantine `9.x`
-- TanStack Start **v1 RC** pinned to an exact version
+- Mantine `9.0.x`
+- TanStack Start `1.x`
+
+Repository policy:
+
+- keep Start, Router, and tightly coupled packages pinned to exact versions in the repository even when the upstream project is on a `1.x` line
+- treat the lockfile and exact version set as part of the architecture baseline, not as incidental package-manager output
 
 ### 23.1 Frontend Applications
 
@@ -84,6 +89,12 @@ Use TanStack Query for:
 Route loaders and server functions should remain the first choice for route-critical data and auth-aware mutations. Query hooks should wrap the generated client rather than duplicating endpoint definitions in application code.
 
 TanStack Start global middleware should be introduced early through `src/start.ts` so auth, tracing, and request context are not retrofitted after routes are already proliferating.
+
+OpenAI-facing console features should be designed around Responses-era artifacts first:
+
+- show response, tool, and event-oriented diagnostics rather than only chat-message transcripts
+- model request inspection around typed items and request metadata, not only `choices[0].message`
+- keep Chat Completions compatibility views as adapters at the UI edge, not as the canonical internal representation
 
 ### 23.5 Mantine Usage Model
 

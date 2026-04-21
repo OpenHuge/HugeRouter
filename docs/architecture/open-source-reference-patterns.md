@@ -25,6 +25,13 @@ The current reference set is:
 - Kong Gateway
 - OpenTelemetry
 - LiteLLM
+- OpenAI Agents SDK
+- LangGraph
+- Mastra
+- Microsoft Agent Framework
+- Pydantic AI
+- Browser Use
+- Hindsight
 
 ## 1.1 Community Pressure Signals
 
@@ -149,7 +156,121 @@ Application to this repository:
 - budget controls belong in the product model early, even if advanced forecasting comes later
 - northbound compatibility can start with OpenAI-shaped APIs, but the IR must remain broader than a single provider format
 
-## 8. What We Adopt Immediately
+Additional signal from recent LiteLLM direction:
+
+- one gateway can expose model, agent, MCP, and A2A surfaces side by side
+- that convenience should not erase the distinction between compatibility APIs and canonical internal semantics
+
+Architectural implication:
+
+- HugeRouter should welcome multiple northbound compatibility surfaces, but route receipts, policy, metering, and diagnostics should still anchor on canonical domain artifacts rather than whichever compatibility endpoint happened to be called
+
+## 8. OpenAI Agents SDK: Sessions, Guardrails, and Traceable Runs
+
+The OpenAI Agents SDK is a useful reference because it treats sessions, tracing, human-in-the-loop, handoffs, and realtime agents as core runtime concepts rather than side features.
+
+Patterns to adopt:
+
+- keep request, session, task, and operation scopes distinct
+- treat tracing as a runtime contract, not just a logs concern
+- model approval and human intervention as normal lifecycle steps
+- keep handoffs and delegation visible instead of flattening them into one opaque model call
+
+Application to this repository:
+
+- HugeRouter should preserve separate identifiers and diagnostics context for request, runtime session, delegated task, and governed operation
+- approval checkpoints should be first-class artifacts, not ad hoc flags
+- route receipts, replay capsules, and audit events should be able to explain agent handoff and session context without storing full transcript content
+
+## 9. LangGraph and Microsoft Agent Framework: Durable Agent State and Long-Running Work
+
+Recent agent runtimes such as LangGraph and Microsoft Agent Framework have reinforced one design lesson: multi-agent work should be modeled as durable, resumable stateful execution, not as a series of fragile best-effort RPC hops.
+
+Patterns to adopt:
+
+- treat long-running agent and A2A work as explicit state machines with stable identifiers
+- preserve pause, resume, retry, and human-in-the-loop intervention as first-class lifecycle concepts
+- keep task continuation and task terminal-state handling explicit rather than inferring them from chat history or logs
+- make orchestration visibility part of the runtime contract, not an afterthought
+
+Application to this repository:
+
+- A2A task handling should be modeled as a durable lifecycle with immutable terminal states
+- route receipts, replay capsules, and async envelopes should preserve enough context to explain task continuation and delegated execution
+- the gateway should not assume agent work is synchronous simply because one protocol hop uses HTTP
+- external agents, third-party tools, and non-local runtimes should remain explicit trust boundaries rather than disappearing into generic "successful delegation"
+
+## 10. Mastra and Pydantic AI: Typed Capabilities, Memory, and Human Oversight
+
+Recent agent frameworks such as Mastra and Pydantic AI have converged on several useful defaults:
+
+- typed capabilities and strongly validated IO
+- memory and context treated as explicit subsystems
+- human approval or interruption as part of normal execution, not exceptional control flow
+- MCP and A2A treated as integration surfaces rather than hidden framework internals
+
+Patterns to adopt:
+
+- keep typed schemas at the package and protocol boundary
+- model human approval and delegated continuation as expected workflow states
+- expose memory-relevant metadata and policy hooks without turning the gateway into the canonical memory owner for every agent
+
+Application to this repository:
+
+- HugeRouter should govern memory traffic, retention class, and policy eligibility where memory-bearing systems are involved
+- HugeRouter should not become a general-purpose agent memory platform by default
+- the gateway should preserve typed protocol contracts and approval states so operator tooling can reason about them cleanly
+- typed policy and protocol boundaries should beat free-form metadata whenever an operation affects routing, approval, or retention
+
+## 11. Browser Use: High-Side-Effect Tools and Browser-Bound Identity
+
+Browser Use is a strong cautionary reference because it makes three realities explicit: browser agents carry authenticated session state, custom tools are easy to add, and browser actions can mutate external systems in ways that are much more sensitive than plain inference.
+
+Patterns to adopt:
+
+- classify browser and tool operations by side-effect level instead of treating them as one generic tool category
+- treat browser-authenticated state, cookies, and synced profiles as sensitive delegated credentials
+- keep external-action governance visible even when the runtime makes automation feel ergonomic
+
+Application to this repository:
+
+- HugeRouter should distinguish `browser_read` from `browser_write`, and low-side-effect tool calls from material external mutations
+- approval policy should be able to pause or isolate browser and tool operations before execution continues
+- replay and audit artifacts should preserve that browser-authenticated or delegated credentials were involved without exposing the underlying secret material
+
+## 12. Hindsight: Memory Is Not Just Retrieval
+
+Newer open source memory systems such as Hindsight show a shift from "chat history recall" to a richer retain/recall/reflect model with multiple retrieval strategies and explicit memory classes.
+
+Patterns to adopt:
+
+- assume memory-bearing agents may distinguish between raw events, learned summaries, and durable observations
+- keep per-user and per-agent memory isolation explicit
+- expect memory systems to emit their own identifiers, provenance, and lifecycle metadata
+
+Application to this repository:
+
+- the gateway should treat memory systems as governed upstream resources, not flatten them into ordinary vector search
+- policy and observability should be able to distinguish ordinary inference calls from memory retain/recall/reflect style operations
+- semantic cache should remain distinct from agent memory, even if both use embeddings or similarity search under the hood
+
+## 13. OpenTelemetry Collector: Pipeline Components and Distribution Discipline
+
+OpenTelemetry has evolved beyond naming guidance; the Collector ecosystem now reinforces a strong component model of receivers, processors, exporters, connectors, and extensions.
+
+Patterns to adopt:
+
+- treat telemetry pipelines as composable components with clear responsibilities
+- separate ingest, transform, and export concerns
+- keep internal telemetry pipelines distributable and reducible, rather than forcing one giant always-on collector shape
+
+Application to this repository:
+
+- HugeRouter should think about diagnostics and telemetry pipelines the same way it thinks about request pipelines: typed stages, explicit ordering, and clear handoff semantics
+- the platform should preserve room for connector-style fan-out from traces to metrics or support artifacts without making those derived views the source of truth
+- observability deployment should support a minimal local distribution first and richer production distributions later
+
+## 14. What We Adopt Immediately
 
 The following are now considered implementation defaults:
 
@@ -159,8 +280,13 @@ The following are now considered implementation defaults:
 - CP/DP separation is real, not merely conceptual
 - telemetry naming is governed centrally
 - gateway keys, upstream secrets, budgets, and routing strategies are first-class domain concepts
+- long-running agent and A2A work is treated as durable lifecycle state, not just request/response traffic
+- request, session, task, and operation identifiers remain distinct when governance or diagnostics require it
+- approval checkpoints are a normal control outcome for high-risk tool, browser, memory-write, or delegation flows
+- semantic cache and agent memory are treated as related but distinct concerns
+- compatibility endpoints do not define canonical internal semantics by themselves
 
-## 9. What We Deliberately Do Not Copy
+## 15. What We Deliberately Do Not Copy
 
 We are not copying these parts directly:
 
@@ -168,14 +294,22 @@ We are not copying these parts directly:
 - Envoy's full xDS control plane complexity
 - Kong's exact deployment topology or operational product model
 - LiteLLM's Python implementation model or OpenAI-format-first worldview as the long-term platform boundary
+- OpenAI Agents SDK as the gateway's internal runtime framework
+- LangGraph or Microsoft Agent Framework as the application's orchestration runtime
+- Mastra or Pydantic AI as the gateway's internal service framework
+- Browser Use's browser runtime as a built-in gateway execution substrate
+- Hindsight's memory-system internals as a requirement for the gateway's own storage model
 
 These projects are reference patterns, not product templates.
 
-## 10. Development Implication
+## 16. Development Implication
 
 Because these reference patterns are now captured explicitly, implementation should assume:
 
 - shared packages and crates are contracts, not convenience folders
 - routing and auth order must be testable
 - CP/DP compatibility, config snapshotting, and telemetry semantics are build-time concerns, not cleanup tasks for later
+- task lifecycles, delegation, and human intervention states should be modeled explicitly once agentic execution enters scope
+- high-side-effect browser, tool, memory-write, and delegation operations should be governable without inventing a full agent runtime inside the gateway
+- semantic cache should not quietly expand into a generic memory subsystem
 - feature work that breaks these patterns should be treated as an architecture change, not a small refactor

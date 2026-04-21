@@ -72,6 +72,7 @@ Recommended default:
 
 - include `trace_id` and `request_id` whenever the message originated from a request lifecycle
 - use `schema_version` even if only one version exists initially
+- include delegated identity context when the producer acted on behalf of another subject and that fact affects audit, billing, or routing interpretation
 
 Implementation freedom:
 
@@ -93,6 +94,7 @@ The first implementation should usually standardize only the event families that
 Guardrail:
 
 - do not standardize a topic family merely because the noun exists in the architecture docs
+- do not publish protocol-bridge events until a real MCP-to-A2A or A2A-to-MCP runtime path exists
 
 ## 6. Event Semantics
 
@@ -155,6 +157,7 @@ Recommended defaults:
 Guardrail:
 
 - do not rely on delivery order alone to preserve billing or admission correctness
+- for stateful protocols, do not assume one session or task has exactly one message; model ordering per request, session, or task key explicitly
 
 ## 10. Retry and Failure Semantics
 

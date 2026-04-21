@@ -50,6 +50,7 @@ The first implementation should be able to point to an authoritative durable rec
 - usage events
 - ledger entries
 - audit events
+- delegated identity or acting-principal summary when non-human or delegated execution materially affects authorization, routing, or audit interpretation
 
 Recommended default:
 
@@ -92,6 +93,7 @@ Recommended default:
 - `route_receipt` should explain why a request was or was not routed
 - `usage_event` should describe measured or estimated consumption phases
 - `ledger_entry` should remain the immutable accounting artifact that affects balances or cost reporting
+- delegated identity context should remain reconstructable from durable records, not inferred only from logs
 
 Guardrail:
 
@@ -155,6 +157,7 @@ Recommended default:
 - keep immutable accounting and audit artifacts longer than transient operational caches
 - keep replay and diagnostics artifacts redacted by default
 - make raw payload retention an explicit exception path rather than a baseline design choice
+- keep provider-retention dependence low enough that supportability still works when upstream storage is disabled or privacy-preserving options are used
 
 ## 12. Transaction and Write-Path Guidance
 

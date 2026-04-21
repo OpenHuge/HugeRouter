@@ -20,6 +20,9 @@ The system must support multiple usage dimensions, including:
 - realtime session minutes
 - tool call count
 - file storage bytes
+- A2A task delegation count
+- A2A task compute duration
+- semantic cache hit savings (avoided upstream tokens)
 - vector operation units if added in the future
 
 ### 14.3 Usage Event Flow
@@ -56,6 +59,8 @@ Derived projections include:
 - spend by upstream provider
 - gross margin by route
 - cached token savings estimate
+- semantic cache hit rate and savings by tenant/project
+- A2A task volume and cost by delegating agent
 - anomaly score
 
 ### 14.6 Idempotency

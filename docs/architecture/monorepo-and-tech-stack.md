@@ -151,8 +151,8 @@ ai-traffic-os/
 
 - **Language:** Rust
 - **Edition:** Stable Rust, pinned via `rust-toolchain.toml`
-- **Primary web framework:** Axum
-- **Async runtime:** Tokio
+- **Primary web framework:** Axum `0.8.x` (current stable in this repository baseline, Tower-native middleware)
+- **Async runtime:** Tokio `1.x` (current stable line in this repository baseline)
 - **Serialization:** Serde
 - **Error handling:** `thiserror` + `anyhow` at service boundaries where appropriate
 - **Validation:** validator or custom domain validation layer
@@ -209,19 +209,25 @@ ai-traffic-os/
 
 ### 7.6 Version Channel Policy
 
-As of **April 20, 2026**, the recommended frontend baseline is:
+As of **April 20, 2026**, the repository frontend baseline is:
 
 - Node.js `24.x` LTS for local development and CI
 - React `19.2+`
-- Mantine `9.x`
-- TanStack Start **v1 RC**, pinned to an exact version until 1.0 stable ships
+- Mantine `9.0.x`
+- TanStack Start `1.x`
 
 Implementation policy:
 
-- pin TanStack Start, TanStack Router, and closely coupled Start packages to exact versions during the pre-1.0 window
-- pin Mantine to a specific minor line during initial implementation and upgrade intentionally with changelog review
+- keep TanStack Start, TanStack Router, and closely coupled packages pinned to exact versions in the repository until upgrade cadence, compatibility expectations, and lockfile review discipline are proven in CI
+- pin Mantine to the `9.0.x` minor line during initial implementation and upgrade intentionally with changelog review
 - commit `packageManager` in the root `package.json` and use Corepack in CI
 - treat framework major upgrades as explicit architecture changes, not routine dependency bumps
+
+As of **April 20, 2026**, the repository backend baseline is:
+
+- Axum `0.8.x`
+- Tokio `1.x`
+- Rust stable, pinned via `rust-toolchain.toml`
 
 ### 7.7 Monorepo Task Policy
 

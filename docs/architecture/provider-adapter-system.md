@@ -18,6 +18,12 @@ Each provider adapter is responsible for:
 - provider metadata enrichment
 - declaring capabilities, configuration schema, and operational traits
 
+If the target is not a plain model provider, the adapter must also make its lifecycle model explicit:
+
+- MCP-oriented adapters expose tool and capability interaction semantics
+- A2A-oriented adapters expose task submission, continuation, and terminal-state semantics
+- realtime adapters expose session setup, control, and teardown semantics
+
 ### 12.2 Design Principle
 
 The first implementation should optimize for:
@@ -139,9 +145,17 @@ Important boundary rule:
 - account-pool adapters
 - OAuth-backed adapters
 - realtime adapters
+- A2A agent adapters (routing tasks to external agents discovered via Agent Cards)
+- semantic cache adapters (checking and populating semantic similarity cache before upstream dispatch)
 - experimental adapters
 
 These categories should be represented as metadata, not hard-coded branches. The routing and diagnostics layers should reason from manifest and capability descriptors rather than from crate names.
+
+Protocol-boundary guardrail:
+
+- do not collapse provider, MCP server, and A2A agent integrations into one generic "remote endpoint" abstraction too early
+- adapters may share plumbing, but manifests must still declare whether they execute prompt/response work, tool/context work, or task/delegation work
+- bridge behavior between those categories should be explicit and reviewable because lifecycle and auth semantics differ materially
 
 ### 12.8 Isolation Rules
 

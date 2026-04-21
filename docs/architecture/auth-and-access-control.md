@@ -10,6 +10,7 @@ Supported mechanisms:
 - JWT bearer tokens
 - signed ephemeral session tokens
 - mTLS for enterprise/private ingress
+- agent identity tokens (for non-human agentic callers via A2A or MCP)
 
 ### 13.2 Credential Scope
 
@@ -25,6 +26,14 @@ Credentials may be scoped to:
 - region restriction
 - expiration time
 
+Delegated and non-human credentials should additionally support:
+
+- caller identity type (`human`, `service`, `agent`)
+- delegated subject or originating principal
+- maximum delegation depth
+- allowed protocol families such as `responses`, `realtime`, `mcp`, or `a2a`
+- allowed tool or agent target classes
+
 ### 13.3 Authorization Model
 
 The control plane should implement RBAC with optional ABAC-style condition support.
@@ -37,6 +46,7 @@ Suggested roles:
 - security admin
 - developer
 - read-only auditor
+- agent (non-human autonomous identity with constrained scope)
 
 ### 13.4 Key Management
 
@@ -67,6 +77,15 @@ A virtual key may carry:
 
 Provider secrets should never be reused as customer-facing credentials.
 
+Recommended default:
+
+- the gateway should issue and validate its own northbound credentials even when the eventual upstream also uses OAuth or API keys
+- remote agent or MCP credentials should be bound to a gateway-recognized principal record before they affect routing or tool-use policy
+
+Guardrail:
+
+- do not let upstream bearer material become the platform's de facto customer identity model
+
 ### 13.6 Budget and Override Controls
 
 Authentication and budget governance are closely linked in AI gateways.
@@ -90,5 +109,29 @@ Borrowing from mature gateway CP/DP patterns, communication between control-plan
 - least-privilege credential distribution
 
 The hot path must not require direct access to raw control-plane credentials stores.
+
+### 13.8 Non-Human Identity (NHI) Management
+
+As agents become first-class principals (per OWASP Agentic Top 10 2026), the platform must support:
+
+- explicit agent identity registration with capability declarations
+- agent credentials with mandatory expiration, scope, and budget policies
+- distinguishable audit trails for agent vs. human actions
+- A2A Agent Card validation as part of inbound authentication for inter-agent traffic
+- delegation chain tracking to trace multi-hop agent interactions back to the originating human or service principal
+- automatic credential rotation and lifecycle management for agent identities
+
+Recommended delegation model:
+
+- separate the authenticated caller from the effective acting principal
+- record both the immediate caller and the originating subject when delegation is present
+- reject delegation chains that exceed configured depth or attempt privilege expansion
+- preserve delegation chain identifiers in route receipts, audit artifacts, and async message context
+
+MCP and A2A boundary rule:
+
+- MCP auth should prove who may use a tool or capability surface
+- A2A auth should prove who may delegate, accept, or continue a task
+- do not assume one credential can safely imply both permissions without an explicit binding policy
 
 ---

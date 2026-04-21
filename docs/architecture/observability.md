@@ -37,6 +37,13 @@ Each request should include:
 - metering span
 - ledger emit span
 
+For stateful protocols, the trace model should also preserve stable session and task correlation:
+
+- realtime session or call span
+- MCP request or tool-execution span
+- A2A task span and task-update spans
+- delegation-chain attributes when a task crosses agent boundaries
+
 ### 17.4 Key Metrics
 
 - request count
@@ -56,6 +63,10 @@ Each request should include:
 - policy denial count
 - trust-class traffic mix
 - redaction coverage rate
+- semantic cache hit rate and similarity distribution
+- A2A task delegation count and completion rate
+- agent identity traffic mix
+- agentic session duration and tool call depth
 
 ### 17.5 Log Requirements
 
@@ -76,6 +87,10 @@ Logs should be structured JSON and include:
 - config snapshot ID
 - quota reservation ID or outcome
 - redaction tier
+- caller identity type
+- delegated subject or origin principal when present
+- realtime call or session ID when applicable
+- A2A task ID and task terminal state when applicable
 
 Sensitive payload logging must be disabled by default and opt-in with redaction controls.
 
@@ -110,9 +125,12 @@ In addition to baseline HTTP and service telemetry, the platform should standard
 - route policy ID
 - fallback count
 - retry classification
-- cache decision
+- cache decision (semantic cache hit, miss, bypass, or invalidation)
 - usage unit family
 - estimated and final billable cost
+- agent identity type (human, service, agent)
+- A2A task ID and delegation chain depth
+- agentic session ID and tool call sequence
 
 This follows the OpenTelemetry discipline of semantic conventions while allowing product-specific extensions where the standard has no native concept.
 
@@ -128,6 +146,7 @@ Every request should be able to emit a compact diagnostic event timeline contain
 - quota and budget admission outcome
 - retry and fallback transitions
 - final normalization and usage extraction result
+- protocol-specific lifecycle edges such as realtime session creation, MCP tool dispatch, or A2A task continuation
 
 These events should be structured enough for support tooling and post-incident analysis, not just for log search.
 
@@ -155,8 +174,15 @@ The system should produce a replay capsule or support bundle containing:
 - redacted policy decisions
 - upstream error classification
 - metering and ledger correlation IDs
+- delegated identity chain summary when a non-human principal acted on behalf of another subject
+- protocol lifecycle summary such as realtime call ID, MCP tool name, or A2A task state timeline
 
 This capsule should be sufficient to explain most customer-visible failures without exposing full prompt content.
+
+Provider-retention guardrail:
+
+- support tooling should not depend on provider-side stored conversations or upstream replay features being enabled
+- assume privacy-preserving upstream options such as `store: false` or equivalent are the default posture where available
 
 
 ---

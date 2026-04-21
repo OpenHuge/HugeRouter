@@ -28,6 +28,10 @@ The routing engine should consider:
 - ingress or regional failure-domain health
 - session affinity constraints
 - provider account health
+- semantic cache hit eligibility and similarity score
+- A2A agent card capability matching
+- agent identity and delegation chain context
+- protocol family and lifecycle shape, such as stateless request, realtime session, MCP tool interaction, or A2A task continuation
 
 ### 11.2 Route Selection Stages
 
@@ -76,6 +80,13 @@ Supported strategies should include:
 - shadow traffic for evaluation
 - intent- or class-aware routing with confidence thresholds and deterministic fallback behavior
 - budget-aware quality floor selection, where the cheapest target must still satisfy tenant-defined quality or capability minima
+- semantic cache-first routing, where cache-eligible requests check for semantically similar cached responses before upstream dispatch
+- A2A agent delegation routing, where tasks are routed to the best-matching agent based on Agent Card capability declarations
+- multi-agent workflow-aware routing, where sequential agent steps in a delegation chain are routed with shared context and budget awareness
+
+Default policy:
+
+- semantic-cache-first routing should be disabled by default for stateful realtime sessions, terminal A2A task transitions, and side-effecting MCP tool operations unless a narrower policy explicitly allows it
 
 ### 11.4 Route Policies
 
@@ -97,7 +108,10 @@ A route policy should define:
 - allowed provenance classes
 - quota reserve strategy
 - time-to-first-token budget
+- semantic cache policy (eligible, bypass, or invalidate)
+- A2A delegation scope and allowed agent targets
 - route explanation sampling or retention tier
+- protocol-bridge policy, such as whether MCP-to-A2A or A2A-to-MCP bridging is allowed for a route family
 
 ### 11.5 Health and Quarantine
 
@@ -128,6 +142,7 @@ The system should support:
 - provider-native RPM and TPM windows, including sub-minute windows where upstreams enforce them
 - hierarchical limits across platform, tenant, project, credential, and provider resource
 - concurrency caps for long-lived streaming or realtime sessions
+- task-budget and step-budget controls for delegated A2A workflows
 - pre-admission reserve accounting for estimated request cost
 - hard-stop and soft-throttle modes with explicit policy control
 

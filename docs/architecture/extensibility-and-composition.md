@@ -42,11 +42,18 @@ The first-class extension points should be:
 
 - protocol parsers and serializers
 - provider adapters
+- A2A agent adapters and Agent Card resolvers
+- semantic cache strategies
 - policy stages and evaluators
 - metering extractors and sinks
 - notification transports
 - audit exporters
 - diagnostics enrichers
+
+Guardrail from recent agent frameworks:
+
+- extension points that model durable task orchestration, human approval, or memory should earn their existence through a concrete workflow need, not through speculative framework symmetry
+- the gateway may integrate with orchestration or memory systems without having to internalize their entire runtime model
 
 Each extension point should define:
 
@@ -100,6 +107,11 @@ Recommended request-path composition:
 11. telemetry, diagnostics, and audit hooks
 
 This makes behavior rearrangeable, testable, and replaceable without cloning service handlers.
+
+Additional composition rule:
+
+- request-path middleware should remain distinct from long-running task orchestration machinery
+- if a future feature requires resumable state machines, model that as an adjacent orchestration surface with explicit handoff points rather than burying it inside ordinary HTTP middleware
 
 ### 13.8 Dependency Rules
 

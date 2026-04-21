@@ -128,7 +128,7 @@ Contains:
 
 ### 34.3 Protocol crates
 
-`protocol-openai`, `protocol-anthropic`, `protocol-gemini`, `protocol-realtime`
+`protocol-openai`, `protocol-anthropic`, `protocol-gemini`, `protocol-realtime`, `protocol-a2a`
 
 Contain:
 
@@ -136,6 +136,7 @@ Contain:
 - parsing and serialization
 - protocol-specific validation
 - compatibility layers
+- A2A Agent Card discovery and task lifecycle models (for `protocol-a2a`)
 
 ### 34.4 `crates/provider-traits`
 
@@ -246,7 +247,17 @@ Contains:
 - metrics wrappers
 - trace propagation helpers
 
-### 34.16 `crates/testing-kit`
+### 34.16 `crates/semantic-cache`
+
+Contains:
+
+- embedding generation and vector similarity search abstractions
+- cache eligibility evaluation
+- cache entry lifecycle (insert, hit, invalidate, expire)
+- pgvector integration with migration to dedicated vector store support
+- degraded-mode bypass when vector store is unavailable
+
+### 34.17 `crates/testing-kit`
 
 Contains:
 

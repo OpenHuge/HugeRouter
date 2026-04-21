@@ -10,7 +10,7 @@ As of **April 20, 2026**, the recommended implementation baseline is:
 
 - backend: Rust workspace
 - frontend runtime: Node.js `24.x` LTS
-- frontend framework: TanStack Start **v1 RC** pinned to an exact version
+- frontend framework: TanStack Start `1.x`, pinned to an exact repository version
 - React baseline: `19.2+`
 - component foundation: Mantine `9.x`
 - monorepo orchestrator: Turbo
@@ -21,7 +21,7 @@ As of **April 20, 2026**, the recommended implementation baseline is:
 These decisions should be treated as closed for the initial development window:
 
 1. **Frontend framework risk policy**
-   TanStack Start remains RC, so we proceed with it, but we pin exact versions and do not adopt new RC drops automatically.
+   TanStack Start is on the `1.x` line, but the repository still pins exact versions and does not auto-adopt upstream changes without an explicit lockfile and compatibility review.
 2. **Northbound OpenAI scope**
    The first gateway slice may ship Chat Completions compatibility first, but IR and route abstractions must be designed around Responses-era concepts so `/v1/responses` can land without a redesign.
 3. **MCP transport**
@@ -93,7 +93,7 @@ Recommended implementation order:
 
 Development is considered ready to start when all of the following are true:
 
-- architecture decisions for Turbo, Mantine, pluggability, and RC version policy are documented
+- architecture decisions for Turbo, Mantine, pluggability, and exact-version policy are documented
 - leading open source reference patterns have been translated into repository rules rather than left as informal inspiration
 - root workspace files exist
 - local frontend can boot with Mantine theme and TanStack Start middleware
