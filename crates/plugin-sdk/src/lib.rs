@@ -6,4 +6,3 @@ pub struct PluginManifest {
     pub version: String,
     pub capability: String,
 }
-

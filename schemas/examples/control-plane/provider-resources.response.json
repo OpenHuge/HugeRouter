@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "provider_resource_id": "prvrsrc_openai_primary",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "provider_id": "openai",
+      "name": "openai-us-east-primary",
+      "status": "active",
+      "provenance_class": "official_api",
+      "credential_owner_type": "platform",
+      "deployment_scope": "shared",
+      "region": "us-east-1",
+      "endpoint_base_url": "https://api.openai.com/v1",
+      "auth_kind": "api_key",
+      "health_state": "healthy",
+      "budget_policy_id": "budgetpol_default",
+      "capabilities": {
+        "supports_streaming": true,
+        "supports_tool_calling": true,
+        "supports_json_mode": true
+      },
+      "version": 7,
+      "created_at": "2026-04-20T00:00:00Z",
+      "updated_at": "2026-04-21T11:15:00Z"
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UsageEventRecordedMessage",
+  "type": "object",
+  "required": [
+    "idempotency_key",
+    "message_id",
+    "message_type",
+    "occurred_at",
+    "payload",
+    "producer",
+    "schema_version"
+  ],
+  "properties": {
+    "idempotency_key": {
+      "type": "string"
+    },
+    "message_id": {
+      "type": "string"
+    },
+    "message_type": {
+      "$ref": "#/definitions/MessageType"
+    },
+    "occurred_at": {
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/definitions/UsageEventRecorded"
+    },
+    "producer": {
+      "$ref": "#/definitions/ServiceName"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "trace_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "MessageType": {
+      "type": "string",
+      "enum": [
+        "usage_event.recorded",
+        "ledger_entry.created",
+        "budget_threshold.exceeded",
+        "provider_resource.quarantined",
+        "provider_resource.degraded",
+        "audit_event.created",
+        "config_snapshot.activated",
+        "replay_capsule.build_requested"
+      ]
+    },
+    "MonetaryAmount": {
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProviderResourceId": {
+      "type": "string"
+    },
+    "RouteReceiptId": {
+      "type": "string"
+    },
+    "ServiceName": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    },
+    "UsageEvent": {
+      "type": "object",
+      "required": [
+        "estimated_cost",
+        "idempotency_key",
+        "model_alias",
+        "phase",
+        "project_id",
+        "provider_resource_id",
+        "recorded_at",
+        "route_receipt_id",
+        "tenant_id",
+        "usage",
+        "usage_event_id"
+      ],
+      "properties": {
+        "estimated_cost": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "model_alias": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/definitions/UsagePhase"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider_resource_id": {
+          "$ref": "#/definitions/ProviderResourceId"
+        },
+        "recorded_at": {
+          "type": "string"
+        },
+        "route_receipt_id": {
+          "$ref": "#/definitions/RouteReceiptId"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "usage": {
+          "$ref": "#/definitions/UsageMetrics"
+        },
+        "usage_event_id": {
+          "$ref": "#/definitions/UsageEventId"
+        }
+      }
+    },
+    "UsageEventId": {
+      "type": "string"
+    },
+    "UsageEventRecorded": {
+      "type": "object",
+      "required": [
+        "usage_event"
+      ],
+      "properties": {
+        "usage_event": {
+          "$ref": "#/definitions/UsageEvent"
+        }
+      }
+    },
+    "UsageMetrics": {
+      "type": "object",
+      "required": [
+        "cached_input_tokens",
+        "input_tokens",
+        "output_tokens"
+      ],
+      "properties": {
+        "cached_input_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "UsagePhase": {
+      "type": "string",
+      "enum": [
+        "reserve",
+        "partial",
+        "final",
+        "release"
+      ]
+    }
+  }
+}

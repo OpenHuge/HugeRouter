@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "project_id": "proj_core",
+      "tenant_id": "tenant_acme",
+      "slug": "core-routing",
+      "display_name": "Core Routing",
+      "version": 9,
+      "created_at": "2026-04-20T00:00:00Z",
+      "updated_at": "2026-04-21T09:45:00Z"
+    }
+  ]
+}

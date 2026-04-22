@@ -1,0 +1,32 @@
+{
+  "message_id": "msg_usage_123",
+  "message_type": "usage_event.recorded",
+  "schema_version": 1,
+  "occurred_at": "2026-04-21T12:16:05Z",
+  "producer": "gateway-api",
+  "trace_id": "trace_123",
+  "request_id": "req_123",
+  "idempotency_key": "usageevt_123:final",
+  "payload": {
+    "usage_event": {
+      "usage_event_id": "usageevt_123",
+      "route_receipt_id": "routercpt_123",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "provider_resource_id": "prvrsrc_openai_primary",
+      "model_alias": "reasoning-fast",
+      "phase": "final",
+      "idempotency_key": "usageevt_123:final",
+      "usage": {
+        "input_tokens": 1200,
+        "output_tokens": 320,
+        "cached_input_tokens": 64
+      },
+      "estimated_cost": {
+        "currency": "USD",
+        "amount": "0.1420"
+      },
+      "recorded_at": "2026-04-21T12:16:05Z"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RouteSimulationRequest",
+  "type": "object",
+  "required": [
+    "credential_scope",
+    "expected_max_output_tokens",
+    "expected_prompt_tokens",
+    "model_alias",
+    "project_id",
+    "protocol_family",
+    "region",
+    "required_capabilities",
+    "tenant_id",
+    "traffic_class"
+  ],
+  "properties": {
+    "credential_scope": {
+      "$ref": "#/definitions/CredentialId"
+    },
+    "expected_max_output_tokens": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "expected_prompt_tokens": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "model_alias": {
+      "type": "string"
+    },
+    "project_id": {
+      "$ref": "#/definitions/ProjectId"
+    },
+    "protocol_family": {
+      "$ref": "#/definitions/ProtocolFamily"
+    },
+    "region": {
+      "type": "string"
+    },
+    "required_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    },
+    "traffic_class": {
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "CredentialId": {
+      "type": "string"
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProtocolFamily": {
+      "type": "string",
+      "enum": [
+        "openai_chat",
+        "openai_responses",
+        "mcp_streamable_http",
+        "realtime_webrtc"
+      ]
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

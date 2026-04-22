@@ -43,10 +43,13 @@ These decisions should be treated as closed for the initial development window:
 - pin Mantine to a specific minor line during bootstrap
 - commit `packageManager` in root `package.json`
 - use Corepack in local setup and CI
+- pin Node.js to `24.15.0`
+- pin `pnpm` to `10.33.0`
 
 ### 3.2 Runtime Strategy
 
-- use Node.js LTS, not Current, in CI
+- use Node.js `24.15.0` LTS in local development, devcontainer, and CI
+- use Rust `1.94.1` in local development, devcontainer, and CI
 - avoid mixing React 18 and React 19 packages in the workspace
 - prefer one React version across `apps/*` and shared UI packages
 
@@ -89,6 +92,17 @@ Recommended implementation order:
 9. wire Turbo tasks, outputs, and CI cache settings
 10. add local stack, telemetry bootstrap, and schema generation pipeline
 
+Canonical bootstrap and verification path:
+
+1. `corepack enable`
+2. `corepack prepare pnpm@10.33.0 --activate`
+3. `pnpm doctor`
+4. `pnpm install --frozen-lockfile`
+5. `pnpm lint`
+6. `pnpm typecheck`
+7. `pnpm test`
+8. `pnpm build`
+
 ## 6. Go/No-Go Checklist
 
 Development is considered ready to start when all of the following are true:
@@ -103,6 +117,7 @@ Development is considered ready to start when all of the following are true:
 - Storybook renders shared shell primitives
 - schema generation path is defined
 - local Postgres, Redis, NATS, and OTel stack can start with one command
+- `pnpm verify:toolchain` provides one explicit contributor check for Node, `pnpm`, and Rust version drift
 - CI plan includes Rust checks, frontend typecheck, tests, and component build verification
 - CI can report repository boundary drift before shared packages start proliferating
 

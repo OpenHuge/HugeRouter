@@ -1,0 +1,14 @@
+{
+  "placeholderAllowed": {
+    "storybook": "Track 06 owns Storybook interaction and visual coverage; the current quality gate is the Storybook build.",
+    "@huge-router/design-tokens": "Track 06 owns shared frontend package test coverage; placeholder status is explicit until that track lands.",
+    "@huge-router/test-utils": "Track 06 owns shared frontend package test coverage; placeholder status is explicit until that track lands.",
+    "@huge-router/ts-api-client": "Track 01 owns generated TypeScript client coverage; placeholder status is explicit until schema generation lands.",
+    "@huge-router/ts-shared-schema": "Track 01 owns generated schema coverage; placeholder status is explicit until schema generation lands.",
+    "@huge-router/ui-kit": "Track 06 owns shared frontend package test coverage; placeholder status is explicit until that track lands."
+  },
+  "noTestScriptAllowed": {
+    "@huge-router/eslint-config": "Configuration-only package with no runtime surface to exercise.",
+    "@huge-router/typescript-config": "Configuration-only package with no runtime surface to exercise."
+  }
+}

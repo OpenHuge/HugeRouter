@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConfigSnapshot",
+  "type": "object",
+  "required": [
+    "budget_policy_id",
+    "config_snapshot_id",
+    "project_id",
+    "provider_resource_ids",
+    "revision",
+    "route_policy_id",
+    "status",
+    "tenant_id"
+  ],
+  "properties": {
+    "activated_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "budget_policy_id": {
+      "$ref": "#/definitions/BudgetPolicyId"
+    },
+    "config_snapshot_id": {
+      "$ref": "#/definitions/ConfigSnapshotId"
+    },
+    "project_id": {
+      "$ref": "#/definitions/ProjectId"
+    },
+    "provider_resource_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ProviderResourceId"
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "route_policy_id": {
+      "$ref": "#/definitions/RoutePolicyId"
+    },
+    "status": {
+      "$ref": "#/definitions/ConfigSnapshotStatus"
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    }
+  },
+  "definitions": {
+    "BudgetPolicyId": {
+      "type": "string"
+    },
+    "ConfigSnapshotId": {
+      "type": "string"
+    },
+    "ConfigSnapshotStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "superseded"
+      ]
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProviderResourceId": {
+      "type": "string"
+    },
+    "RoutePolicyId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

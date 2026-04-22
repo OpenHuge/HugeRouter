@@ -1,0 +1,593 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "HugeRouter Gateway API",
+    "description": "Stable gateway contracts for chat routing and normalized failures.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "v1"
+  },
+  "paths": {
+    "/v1/gateway/chat/completions": {
+      "post": {
+        "tags": [
+          "gateway"
+        ],
+        "operationId": "gateway_chat_completion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Chat routed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdmissionResult": {
+        "type": "string",
+        "enum": [
+          "admitted",
+          "rejected_budget",
+          "rejected_rate_limit",
+          "rejected_concurrency",
+          "rejected_policy",
+          "rejected_no_candidate"
+        ]
+      },
+      "ChatMessage": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ChatMessageRole"
+          }
+        }
+      },
+      "ChatMessageRole": {
+        "type": "string",
+        "enum": [
+          "system",
+          "user",
+          "assistant",
+          "tool"
+        ]
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": [
+          "model_alias",
+          "messages",
+          "required_capabilities",
+          "expected_prompt_tokens",
+          "max_output_tokens",
+          "temperature_milli",
+          "tools"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_prompt_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "model_alias": {
+            "type": "string"
+          },
+          "required_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "temperature_milli": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolDefinition"
+            }
+          }
+        }
+      },
+      "ConfigSnapshotId": {
+        "type": "string"
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/NormalizedError"
+          }
+        }
+      },
+      "ExcludedTarget": {
+        "type": "object",
+        "required": [
+          "provider_resource_id",
+          "reason"
+        ],
+        "properties": {
+          "provider_resource_id": {
+            "$ref": "#/components/schemas/ProviderResourceId"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "FallbackTransition": {
+        "type": "object",
+        "required": [
+          "from_provider_resource_id",
+          "to_provider_resource_id",
+          "reason"
+        ],
+        "properties": {
+          "from_provider_resource_id": {
+            "$ref": "#/components/schemas/ProviderResourceId"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "to_provider_resource_id": {
+            "$ref": "#/components/schemas/ProviderResourceId"
+          }
+        }
+      },
+      "GatewayChatRequest": {
+        "type": "object",
+        "required": [
+          "request",
+          "chat"
+        ],
+        "properties": {
+          "chat": {
+            "$ref": "#/components/schemas/ChatRequest"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestEnvelope"
+          }
+        }
+      },
+      "GatewayChatResponse": {
+        "type": "object",
+        "required": [
+          "route_receipt",
+          "usage_event",
+          "provider_response_id",
+          "output_text"
+        ],
+        "properties": {
+          "output_text": {
+            "type": "string"
+          },
+          "provider_response_id": {
+            "type": "string"
+          },
+          "route_receipt": {
+            "$ref": "#/components/schemas/RouteReceipt"
+          },
+          "usage_event": {
+            "$ref": "#/components/schemas/UsageEvent"
+          }
+        }
+      },
+      "MonetaryAmount": {
+        "type": "object",
+        "required": [
+          "currency",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          }
+        }
+      },
+      "NormalizedError": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "request_id",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "upstream_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upstream_status_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "validation_issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            }
+          }
+        }
+      },
+      "ProjectId": {
+        "type": "string"
+      },
+      "ProtocolFamily": {
+        "type": "string",
+        "enum": [
+          "openai_chat",
+          "openai_responses",
+          "mcp_streamable_http",
+          "realtime_webrtc"
+        ]
+      },
+      "ProviderResourceId": {
+        "type": "string"
+      },
+      "RequestEnvelope": {
+        "type": "object",
+        "required": [
+          "protocol_family",
+          "source_service",
+          "request_id",
+          "trace_id",
+          "tenant_id",
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "protocol_family": {
+            "$ref": "#/components/schemas/ProtocolFamily"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "source_service": {
+            "$ref": "#/components/schemas/ServiceName"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteReceipt": {
+        "type": "object",
+        "required": [
+          "route_receipt_id",
+          "tenant_id",
+          "project_id",
+          "request_id",
+          "trace_id",
+          "protocol_family",
+          "model_alias",
+          "config_snapshot_id",
+          "admission_result",
+          "excluded_targets",
+          "score_breakdown",
+          "fallback_transitions",
+          "created_at"
+        ],
+        "properties": {
+          "admission_result": {
+            "$ref": "#/components/schemas/AdmissionResult"
+          },
+          "config_snapshot_id": {
+            "$ref": "#/components/schemas/ConfigSnapshotId"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "excluded_targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExcludedTarget"
+            }
+          },
+          "fallback_transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FallbackTransition"
+            }
+          },
+          "model_alias": {
+            "type": "string"
+          },
+          "normalized_error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NormalizedError"
+              }
+            ]
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "protocol_family": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "route_receipt_id": {
+            "$ref": "#/components/schemas/RouteReceiptId"
+          },
+          "score_breakdown": {
+            "$ref": "#/components/schemas/ScoreBreakdown"
+          },
+          "selected_target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResourceId"
+              }
+            ]
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteReceiptId": {
+        "type": "string"
+      },
+      "ScoreBreakdown": {
+        "type": "object",
+        "required": [
+          "latency",
+          "cost",
+          "health",
+          "trust"
+        ],
+        "properties": {
+          "cost": {
+            "type": "number",
+            "format": "float"
+          },
+          "health": {
+            "type": "number",
+            "format": "float"
+          },
+          "latency": {
+            "type": "number",
+            "format": "float"
+          },
+          "trust": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
+      "ServiceName": {
+        "type": "string"
+      },
+      "TenantId": {
+        "type": "string"
+      },
+      "ToolDefinition": {
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "UsageEvent": {
+        "type": "object",
+        "required": [
+          "usage_event_id",
+          "route_receipt_id",
+          "tenant_id",
+          "project_id",
+          "provider_resource_id",
+          "model_alias",
+          "phase",
+          "idempotency_key",
+          "usage",
+          "estimated_cost",
+          "recorded_at"
+        ],
+        "properties": {
+          "estimated_cost": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "model_alias": {
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/UsagePhase"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider_resource_id": {
+            "$ref": "#/components/schemas/ProviderResourceId"
+          },
+          "recorded_at": {
+            "type": "string"
+          },
+          "route_receipt_id": {
+            "$ref": "#/components/schemas/RouteReceiptId"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageMetrics"
+          },
+          "usage_event_id": {
+            "$ref": "#/components/schemas/UsageEventId"
+          }
+        }
+      },
+      "UsageEventId": {
+        "type": "string"
+      },
+      "UsageMetrics": {
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens"
+        ],
+        "properties": {
+          "cached_input_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "UsagePhase": {
+        "type": "string",
+        "enum": [
+          "reserve",
+          "partial",
+          "final",
+          "release"
+        ]
+      },
+      "ValidationIssue": {
+        "type": "object",
+        "required": [
+          "field",
+          "message"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "gateway",
+      "description": "Protocol ingress contracts"
+    }
+  ]
+}

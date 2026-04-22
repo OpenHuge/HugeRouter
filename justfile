@@ -8,8 +8,12 @@ stack_logs_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-lo
 bootstrap:
   corepack enable
   corepack prepare pnpm@10.33.0 --activate
-  pnpm install
-  node ./scripts/run-cargo.mjs check --workspace
+  pnpm verify:toolchain
+  pnpm install --frozen-lockfile
+  pnpm rust:check
+
+doctor:
+  pnpm verify:toolchain
 
 dev-frontend:
   pnpm turbo run dev --filter=console-web
@@ -24,19 +28,23 @@ dev-all:
   pnpm turbo run dev --parallel --filter=console-web --filter=storybook
 
 test:
-  node ./scripts/run-cargo.mjs test --workspace
-  pnpm turbo run test
+  pnpm test
 
 lint:
-  node ./scripts/run-cargo.mjs clippy --workspace --all-targets
-  pnpm turbo run lint
+  pnpm lint
+
+typecheck:
+  pnpm typecheck
+
+build:
+  pnpm build
 
 fmt:
   node ./scripts/run-cargo.mjs fmt --all
   pnpm exec prettier --write .
 
 generate:
-  pnpm turbo run generate
+  pnpm generate
 
 stack-up:
   {{stack_up_command}}

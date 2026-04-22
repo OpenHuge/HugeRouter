@@ -1,6 +1,6 @@
 use anyhow::Result;
 use gateway_api::app;
-use runtime_composition::{announce_startup, ServiceRuntime};
+use runtime_composition::{ServiceRuntime, announce_startup};
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

@@ -13,4 +13,3 @@ pub fn announce_startup(runtime: ServiceRuntime) {
         "HugeRouter service bootstrap placeholder is online"
     );
 }
-

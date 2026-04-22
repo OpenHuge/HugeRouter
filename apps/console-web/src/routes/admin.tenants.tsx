@@ -5,9 +5,12 @@ import { PageHeader } from '@huge-router/ui-kit'
 
 const placeholderTenants = [
   tenantSchema.parse({
-    id: 'ten_bootstrap',
+    tenant_id: 'tenant_bootstrap',
     slug: 'bootstrap',
-    displayName: 'Bootstrap Tenant'
+    display_name: 'Bootstrap Tenant',
+    version: 1,
+    created_at: '2026-04-22T00:00:00Z',
+    updated_at: '2026-04-22T00:00:00Z'
   })
 ]
 
@@ -37,12 +40,12 @@ function AdminTenantsPage() {
               <Table.Th>Display Name</Table.Th>
             </Table.Tr>
           </Table.Thead>
-          <Table.Tbody>
-            {placeholderTenants.map((tenant) => (
-              <Table.Tr key={tenant.id}>
-                <Table.Td>{tenant.id}</Table.Td>
+            <Table.Tbody>
+              {placeholderTenants.map((tenant) => (
+              <Table.Tr key={tenant.tenant_id}>
+                <Table.Td>{tenant.tenant_id}</Table.Td>
                 <Table.Td>{tenant.slug}</Table.Td>
-                <Table.Td>{tenant.displayName}</Table.Td>
+                <Table.Td>{tenant.display_name}</Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -51,4 +54,3 @@ function AdminTenantsPage() {
     </Stack>
   )
 }
-

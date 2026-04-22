@@ -3,16 +3,28 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=24.11.1"
+    "node": "24.15.0",
+    "pnpm": "10.33.0"
   },
   "scripts": {
     "dev": "turbo run dev --parallel",
-    "build": "turbo run build && node ./scripts/run-cargo.mjs check --workspace",
-    "lint": "turbo run lint && node ./scripts/run-cargo.mjs clippy --workspace --all-targets",
-    "typecheck": "turbo run typecheck && node ./scripts/run-cargo.mjs check --workspace",
-    "test": "turbo run test && node ./scripts/run-cargo.mjs test --workspace",
-    "generate": "turbo run generate",
+    "build": "node ./scripts/run-quality-pipeline.mjs build",
+    "lint": "node ./scripts/run-quality-pipeline.mjs lint",
+    "typecheck": "node ./scripts/run-quality-pipeline.mjs typecheck",
+    "test": "node ./scripts/run-quality-pipeline.mjs test",
+    "generate": "node ./scripts/run-cargo.mjs run -p protocol-ir --example generate-contracts --",
     "storybook": "turbo run storybook --filter=storybook",
+    "doctor": "node ./scripts/verify-toolchain.mjs",
+    "verify:toolchain": "node ./scripts/verify-toolchain.mjs",
+    "verify:workspace-tests": "node ./scripts/verify-workspace-tests.mjs",
+    "js:build": "pnpm exec turbo run build --output-logs=errors-only",
+    "js:lint": "pnpm exec turbo run lint --output-logs=errors-only",
+    "js:typecheck": "pnpm exec turbo run typecheck --output-logs=errors-only",
+    "js:test": "pnpm verify:workspace-tests && pnpm exec turbo run test --output-logs=errors-only",
+    "rust:check": "node ./scripts/run-cargo.mjs check --workspace",
+    "rust:test": "node ./scripts/run-cargo.mjs test --workspace",
+    "rust:lint": "node ./scripts/run-cargo.mjs clippy --workspace --all-targets -- -D warnings",
+    "rust:fmt:check": "node ./scripts/run-cargo.mjs fmt --all -- --check",
     "fmt": "prettier --write . && node ./scripts/run-cargo.mjs fmt --all"
   },
   "devDependencies": {

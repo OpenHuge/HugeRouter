@@ -1,0 +1,236 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: 24.15.0
+  PNPM_VERSION: 10.33.0
+  RUST_VERSION: 1.94.1
+
+jobs:
+  javascript-lint:
+    name: JavaScript Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-javascript-lint-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'apps/**/package.json', 'packages/**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-javascript-lint-
+            ${{ runner.os }}-turbo-
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify toolchain
+        run: pnpm verify:toolchain
+
+      - name: Run lint
+        run: pnpm js:lint
+
+  javascript-typecheck:
+    name: JavaScript Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-javascript-typecheck-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'apps/**/package.json', 'packages/**/package.json', 'apps/**/tsconfig.json', 'packages/**/tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-javascript-typecheck-
+            ${{ runner.os }}-turbo-
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify toolchain
+        run: pnpm verify:toolchain
+
+      - name: Run typecheck
+        run: pnpm js:typecheck
+
+  javascript-test:
+    name: JavaScript Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-javascript-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'apps/**/package.json', 'packages/**/package.json', 'apps/**/src/**', 'packages/**/src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-javascript-test-
+            ${{ runner.os }}-turbo-
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify toolchain
+        run: pnpm verify:toolchain
+
+      - name: Run tests
+        run: pnpm js:test
+
+  javascript-build:
+    name: JavaScript Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${PNPM_VERSION} --activate
+
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-javascript-build-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'apps/**/package.json', 'packages/**/package.json', 'apps/**/src/**', 'packages/**/src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-javascript-build-
+            ${{ runner.os }}-turbo-
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify toolchain
+        run: pnpm verify:toolchain
+
+      - name: Run build
+        run: pnpm js:build
+
+  rust-format:
+    name: Rust Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-format
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  rust-clippy:
+    name: Rust Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-clippy
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rust-check:
+    name: Rust Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-check
+
+      - name: Run cargo check
+        run: cargo check --workspace
+
+  rust-test:
+    name: Rust Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-test
+
+      - name: Run cargo test
+        run: cargo test --workspace

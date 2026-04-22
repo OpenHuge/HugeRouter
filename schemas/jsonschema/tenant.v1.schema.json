@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tenant",
+  "type": "object",
+  "required": [
+    "created_at",
+    "display_name",
+    "slug",
+    "tenant_id",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "created_at": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "slug": {
+      "type": "string"
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

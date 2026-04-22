@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProviderResource",
+  "type": "object",
+  "required": [
+    "auth_kind",
+    "capabilities",
+    "created_at",
+    "credential_owner_type",
+    "deployment_scope",
+    "endpoint_base_url",
+    "health_state",
+    "name",
+    "provenance_class",
+    "provider_id",
+    "provider_resource_id",
+    "region",
+    "status",
+    "tenant_id",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "auth_kind": {
+      "$ref": "#/definitions/AuthKind"
+    },
+    "budget_policy_id": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/BudgetPolicyId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capabilities": {
+      "$ref": "#/definitions/ProviderCapabilities"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "credential_owner_type": {
+      "$ref": "#/definitions/CredentialOwnerType"
+    },
+    "deployment_scope": {
+      "$ref": "#/definitions/DeploymentScope"
+    },
+    "endpoint_base_url": {
+      "type": "string"
+    },
+    "health_state": {
+      "$ref": "#/definitions/HealthState"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project_id": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ProjectId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provenance_class": {
+      "$ref": "#/definitions/ProvenanceClass"
+    },
+    "provider_id": {
+      "type": "string"
+    },
+    "provider_resource_id": {
+      "$ref": "#/definitions/ProviderResourceId"
+    },
+    "region": {
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/definitions/ProviderResourceStatus"
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "AuthKind": {
+      "type": "string",
+      "enum": [
+        "api_key",
+        "o_auth_client_credentials",
+        "session_broker"
+      ]
+    },
+    "BudgetPolicyId": {
+      "type": "string"
+    },
+    "CredentialOwnerType": {
+      "type": "string",
+      "enum": [
+        "platform",
+        "tenant",
+        "project",
+        "partner"
+      ]
+    },
+    "DeploymentScope": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "tenant_dedicated",
+        "project_dedicated"
+      ]
+    },
+    "HealthState": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "degraded",
+        "quarantined",
+        "draining",
+        "disabled"
+      ]
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProvenanceClass": {
+      "type": "string",
+      "enum": [
+        "official_api",
+        "official_gateway",
+        "byo_customer_credential",
+        "dedicated_managed_account",
+        "shared_brokered_pool",
+        "unofficial_client_channel"
+      ]
+    },
+    "ProviderCapabilities": {
+      "type": "object",
+      "required": [
+        "supports_json_mode",
+        "supports_streaming",
+        "supports_tool_calling"
+      ],
+      "properties": {
+        "supports_json_mode": {
+          "type": "boolean"
+        },
+        "supports_streaming": {
+          "type": "boolean"
+        },
+        "supports_tool_calling": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProviderResourceId": {
+      "type": "string"
+    },
+    "ProviderResourceStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "disabled",
+        "draining",
+        "quarantined",
+        "deleted"
+      ]
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}
