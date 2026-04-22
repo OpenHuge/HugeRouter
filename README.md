@@ -83,7 +83,7 @@ Convenience commands:
 
 The repository includes a compose-based devcontainer in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json).
 
-- The workspace container installs Node `24.11.1`, `pnpm 10.33.0`, Rust `1.95.0`, and uses the official `ghcr.io/devcontainers/features/github-cli:1` feature so `gh` is available the same way it is in GitHub Codespaces.
+- The workspace container installs Node `24.11.1`, `pnpm 10.33.0`, Rust `1.94.1`, and uses the official `ghcr.io/devcontainers/features/github-cli:1` feature so `gh` is available the same way it is in GitHub Codespaces.
 - `onCreate` installs `@openai/codex` into a user-owned npm global prefix.
 - `updateContent` installs workspace dependencies.
 - `postCreate` and `postStart` persist Codex config in `.devcontainer/local/codex/config.toml` and GitHub CLI config in `.devcontainer/local/gh`.

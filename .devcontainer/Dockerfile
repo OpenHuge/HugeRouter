@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/devcontainers/base:bookworm
 
 ARG NODE_VERSION=24.11.1
 ARG PNPM_VERSION=10.33.0
-ARG RUST_VERSION=1.95.0
+ARG RUST_VERSION=1.94.1
 ARG USERNAME=vscode
 
 RUN apt-get update \

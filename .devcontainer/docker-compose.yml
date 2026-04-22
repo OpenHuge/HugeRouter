@@ -6,7 +6,7 @@ services:
       args:
         NODE_VERSION: "24.15.0"
         PNPM_VERSION: "10.33.0"
-        RUST_VERSION: "1.95.0"
+        RUST_VERSION: "1.94.1"
     command: /bin/sh -c "while sleep 1000; do :; done"
     depends_on:
       grafana:

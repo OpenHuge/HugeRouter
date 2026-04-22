@@ -6,7 +6,7 @@ Make the repository reproducible, testable, and enforceable so that every other 
 
 ## Current Baseline
 
-- The repo pins Rust `1.95.0` in `rust-toolchain.toml`, but the current local machine is on `rustc 1.94.1`, which blocks all backend verification before compilation starts.
+- The repo now pins Rust `1.94.1` in `rust-toolchain.toml` so local shell, Cargo manifests, and repository documentation agree on the supported baseline.
 - `package.json`, `turbo.json`, and `justfile` provide a working monorepo baseline, but `.github/workflows` is not present yet.
 - `.devcontainer` and `infra/docker/compose.yaml` already define a credible local stack for Node, Rust, PostgreSQL, Redis, NATS, OpenTelemetry, Prometheus, and Grafana.
 - Several workspace test scripts still succeed with placeholder output instead of real checks.
@@ -76,7 +76,7 @@ If another track needs a root-script hook added, expose a stable command surface
   - `pnpm build`
   - `cargo check --workspace`
   - `cargo test --workspace`
-- If local Rust `1.95.0` is still unavailable, verify the Rust commands inside the devcontainer or CI-equivalent environment and document the exact method.
+- If local Rust `1.94.1` is still unavailable, verify the Rust commands inside the devcontainer or CI-equivalent environment and document the exact method.
 
 ## Definition Of Done
 

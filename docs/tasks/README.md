@@ -6,7 +6,7 @@ This directory is the execution-ready version of the project plan. The existing 
 
 - The TypeScript workspace is real and usable, but still shallow. `apps/console-web` has a working TanStack Start shell, login page, overview page, admin tenants page, and one meaningful Vitest test. `packages/ui-kit`, `packages/ts-api-client`, and `packages/ts-shared-schema` exist, but they are still minimal.
 - The Rust workspace has meaningful domain and protocol scaffolding in `crates/core-domain` and `crates/protocol-ir`, plus a bootstrap `gateway-api` flow that returns an OpenAI-shaped placeholder response. Most other Rust services are startup placeholders only.
-- `pnpm test` currently fails at the workspace level because JavaScript tests complete and then `cargo test --workspace` is invoked under local `rustc 1.94.1`, while the repo requires Rust `1.95.0` via `rust-toolchain.toml`.
+- The workspace now targets Rust `1.94.1`, matching the current local toolchain and avoiding the previous bootstrap failure caused by a higher pinned version.
 - Test coverage is not yet representative. Several packages still use no-op test scripts, and there are no backend integration tests yet.
 
 ## Global Rules For Every Agent

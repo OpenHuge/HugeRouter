@@ -21,7 +21,7 @@ resolver = "3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/example/huge-router"
-rust-version = "1.95.0"
+rust-version = "1.94.1"
 version = "0.1.0"
 
 [workspace.dependencies]
@@ -43,4 +43,3 @@ unsafe_code = "forbid"
 all = "warn"
 nursery = "warn"
 pedantic = "warn"
-
