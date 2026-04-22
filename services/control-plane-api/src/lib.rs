@@ -42,6 +42,7 @@ static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 #[derive(Clone, Debug)]
 pub struct ControlPlaneState {
     frontend_base_url: String,
+    internal_gateway_token: Option<String>,
     store: StoreMode,
 }
 
@@ -53,6 +54,9 @@ impl ControlPlaneState {
         Ok(Self {
             frontend_base_url: std::env::var("CONSOLE_WEB_BASE_URL")
                 .unwrap_or_else(|_| FRONTEND_BASE_URL.to_string()),
+            internal_gateway_token: std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             store: StoreMode::from_env().await?,
         })
     }
@@ -61,6 +65,7 @@ impl ControlPlaneState {
     fn memory() -> Self {
         Self {
             frontend_base_url: FRONTEND_BASE_URL.to_string(),
+            internal_gateway_token: Some("test-internal-token".to_string()),
             store: StoreMode::memory(),
         }
     }
@@ -1029,7 +1034,7 @@ async fn resolve_api_key_for_gateway(
     Json(request): Json<GatewayApiKeyResolveRequest>,
 ) -> Result<Json<GatewayApiKeyResolveResponse>, ApiError> {
     let context = next_request_context();
-    require_internal_gateway_auth(&headers, &context)?;
+    require_internal_gateway_auth(&state, &headers, &context)?;
     let resolved = state
         .store
         .resolve_api_key(&request.api_key)
@@ -1256,13 +1261,18 @@ async fn require_platform_admin_session(
 
 #[allow(clippy::result_large_err)]
 fn require_internal_gateway_auth(
+    state: &ControlPlaneState,
     headers: &HeaderMap,
     context: &RequestContext,
 ) -> Result<(), ApiError> {
-    let configured_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "dev-internal-token".to_string());
+    let configured_token = state.internal_gateway_token.as_deref().ok_or_else(|| {
+            ApiError::internal(
+                "internal_auth_unconfigured",
+                "CONTROL_PLANE_INTERNAL_TOKEN must be configured for internal gateway calls"
+                    .to_string(),
+                context,
+            )
+        })?;
     let Some(value) = headers.get(AUTHORIZATION) else {
         return Err(ApiError::unauthorized(
             "auth_invalid",
@@ -2525,7 +2535,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/internal/gateway/api-keys/resolve")
-                    .header(AUTHORIZATION, "Bearer dev-internal-token")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2552,7 +2562,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/internal/gateway/api-keys/resolve")
-                    .header(AUTHORIZATION, "Bearer dev-internal-token")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({

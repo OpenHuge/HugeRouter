@@ -39,9 +39,8 @@ use provider_traits::{
     ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -1326,10 +1325,6 @@ fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn hash_api_key(api_key: &str) -> String {
-    format!("{:x}", Sha256::digest(api_key.as_bytes()))
-}
-
 fn status_for_error_code(code: &str) -> StatusCode {
     match code {
         "auth_invalid" => StatusCode::UNAUTHORIZED,
@@ -1542,17 +1537,9 @@ struct CachedActiveConfig {
 #[derive(Debug, Clone)]
 struct ControlPlaneApiKeyStore {
     base_url: String,
-    cache: Arc<Mutex<HashMap<String, CachedApiKeyScope>>>,
-    cache_ttl: Duration,
     client: reqwest::Client,
-    internal_token: String,
+    internal_token: Option<String>,
     resolve_path: String,
-}
-
-#[derive(Debug, Clone)]
-struct CachedApiKeyScope {
-    scope: GatewayApiKeyScope,
-    fetched_at: Instant,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1698,44 +1685,34 @@ impl ControlPlaneApiKeyStore {
     fn from_env() -> Self {
         let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
-        let cache_ttl = std::env::var("GATEWAY_AUTH_CACHE_TTL_MS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .map_or_else(|| Duration::from_secs(5), Duration::from_millis);
         let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
             .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "dev-internal-token".to_string());
+            .filter(|value| !value.trim().is_empty());
         let resolve_path = std::env::var("GATEWAY_API_KEY_RESOLVE_PATH")
             .unwrap_or_else(|_| "/internal/gateway/api-keys/resolve".to_string());
 
-        Self::new(
-            base_url,
-            resolve_path,
-            internal_token,
-            cache_ttl,
-            reqwest::Client::new(),
-        )
+        Self::new(base_url, resolve_path, internal_token, reqwest::Client::new())
     }
 
     fn new(
         base_url: impl Into<String>,
         resolve_path: impl Into<String>,
-        internal_token: impl Into<String>,
-        cache_ttl: Duration,
+        internal_token: Option<String>,
         client: reqwest::Client,
     ) -> Self {
         Self {
             base_url: base_url.into(),
-            cache: Arc::new(Mutex::new(HashMap::new())),
-            cache_ttl,
             client,
-            internal_token: internal_token.into(),
+            internal_token,
             resolve_path: resolve_path.into(),
         }
     }
 
     async fn fetch_scope(&self, api_key: &str) -> Result<GatewayApiKeyScope, String> {
+        let internal_token = self.internal_token.as_ref().ok_or_else(|| {
+            "CONTROL_PLANE_INTERNAL_TOKEN must be configured for gateway auth resolution"
+                .to_string()
+        })?;
         let base = self.base_url.trim_end_matches('/');
         let path = if self.resolve_path.starts_with('/') {
             self.resolve_path.clone()
@@ -1746,10 +1723,7 @@ impl ControlPlaneApiKeyStore {
         let response = self
             .client
             .post(&url)
-            .header(
-                AUTHORIZATION,
-                format!("Bearer {}", self.internal_token),
-            )
+            .header(AUTHORIZATION, format!("Bearer {internal_token}"))
             .json(&GatewayApiKeyResolveRequest {
                 api_key: api_key.to_string(),
             })
@@ -1778,25 +1752,7 @@ impl ControlPlaneApiKeyStore {
 #[async_trait]
 impl ApiKeyScopeStore for ControlPlaneApiKeyStore {
     async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String> {
-        let cache_key = hash_api_key(api_key);
-        {
-            let cache = self.cache.lock().await;
-            if let Some(entry) = cache.get(&cache_key)
-                && entry.fetched_at.elapsed() <= self.cache_ttl
-            {
-                return Ok(entry.scope.clone());
-            }
-        }
-
-        let scope = self.fetch_scope(api_key).await?;
-        self.cache.lock().await.insert(
-            cache_key,
-            CachedApiKeyScope {
-                scope: scope.clone(),
-                fetched_at: Instant::now(),
-            },
-        );
-        Ok(scope)
+        self.fetch_scope(api_key).await
     }
 }
 
@@ -2907,8 +2863,7 @@ mod tests {
         let store = ControlPlaneApiKeyStore::new(
             base_url,
             "/internal/gateway/api-keys/resolve",
-            "dev-internal-token",
-            Duration::from_secs(60),
+            Some("dev-internal-token".to_string()),
             reqwest::Client::new(),
         );
 
@@ -2917,8 +2872,24 @@ mod tests {
 
         assert_eq!(first.credential_id, "cred_gateway_test");
         assert_eq!(second.project_id.as_deref(), Some("proj_core"));
-        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 1);
+        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 2);
 
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn control_plane_api_key_store_fails_when_internal_token_is_missing() {
+        let (base_url, _request_count, handle) = spawn_control_plane_server(false).await;
+        let store = ControlPlaneApiKeyStore::new(
+            base_url,
+            "/internal/gateway/api-keys/resolve",
+            None,
+            reqwest::Client::new(),
+        );
+
+        let error = store.resolve("test").await.unwrap_err();
+
+        assert!(error.contains("CONTROL_PLANE_INTERNAL_TOKEN must be configured"));
         handle.abort();
     }
 
@@ -2971,6 +2942,66 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["error"]["code"], "auth_forbidden");
+    }
+
+    #[tokio::test]
+    async fn allows_tenant_scoped_api_keys_without_project_scope() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_tenant_scoped".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 6,
+                        output_tokens: 4,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore {
+                scope: GatewayApiKeyScope {
+                    credential_id: "cred_tenant_shared".to_string(),
+                    tenant_id: "tenant_acme".to_string(),
+                    project_id: None,
+                    status: "active".to_string(),
+                },
+            }),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            usage_event_sink: Arc::new(RecordingUsageEventSink::default()),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
