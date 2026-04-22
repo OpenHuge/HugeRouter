@@ -88,6 +88,7 @@ target
 .turbo
 tmp-tanstack/
 .devcontainer/local/
+packages/typescript-config/dist-types/
 
 # Gatsby files
 .cache/
