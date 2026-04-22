@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
-    AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId,
-    ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope,
-    ExcludedTarget, HealthState, LogoutResponse, MonetaryAmount, OAuthProvider, Project,
-    ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
+    AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId, ConfigSnapshot,
+    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, ExcludedTarget,
+    HealthState, LogoutResponse, MonetaryAmount, OAuthProvider, Project, ProjectId,
+    ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
     ProviderResourceStatus, RoutePolicy, RoutePolicyId, RouteReceipt, ScoreBreakdown, Tenant,
-    TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
-    TenantMembershipStatus, TenantSummary, UnlinkAuthProviderResponse, UserId, UserIdentity,
+    TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
+    TenantSummary, UnlinkAuthProviderResponse, UserId, UserIdentity,
 };
 use protocol_ir::{
     ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
@@ -15,7 +15,10 @@ use protocol_ir::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Postgres, Row, postgres::PgPoolOptions, types::Json};
-use std::{collections::HashMap, sync::{Arc, RwLock}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub const EMAIL_BOOTSTRAP_CODE: &str = "111111";
@@ -341,15 +344,43 @@ impl SeedData {
         };
 
         let memberships = vec![
-            membership("tmemb_platform", &tenant_platform, TenantMembershipRole::Admin),
+            membership(
+                "tmemb_platform",
+                &tenant_platform,
+                TenantMembershipRole::Admin,
+            ),
             membership("tmemb_acme", &tenant_acme, TenantMembershipRole::Admin),
-            membership("tmemb_northstar", &tenant_northstar, TenantMembershipRole::Member),
+            membership(
+                "tmemb_northstar",
+                &tenant_northstar,
+                TenantMembershipRole::Member,
+            ),
         ];
         let links = vec![
-            link(AuthProvider::Email, "ops@huge-router.dev", Some("ops@huge-router.dev"), false),
-            link(AuthProvider::Github, "github_ops", Some("ops@huge-router.dev"), true),
-            link(AuthProvider::Google, "google_ops", Some("ops@huge-router.dev"), true),
-            link(AuthProvider::Wechat, "wechat_ops", Some("ops@huge-router.dev"), true),
+            link(
+                AuthProvider::Email,
+                "ops@huge-router.dev",
+                Some("ops@huge-router.dev"),
+                false,
+            ),
+            link(
+                AuthProvider::Github,
+                "github_ops",
+                Some("ops@huge-router.dev"),
+                true,
+            ),
+            link(
+                AuthProvider::Google,
+                "google_ops",
+                Some("ops@huge-router.dev"),
+                true,
+            ),
+            link(
+                AuthProvider::Wechat,
+                "wechat_ops",
+                Some("ops@huge-router.dev"),
+                true,
+            ),
         ];
 
         Self {
@@ -363,9 +394,18 @@ impl SeedData {
                 user: ops_user,
                 identities: vec![
                     UserIdentityKey::Email("ops@huge-router.dev".to_string()),
-                    UserIdentityKey::ProviderSubject(AuthProvider::Github, "github_ops".to_string()),
-                    UserIdentityKey::ProviderSubject(AuthProvider::Google, "google_ops".to_string()),
-                    UserIdentityKey::ProviderSubject(AuthProvider::Wechat, "wechat_ops".to_string()),
+                    UserIdentityKey::ProviderSubject(
+                        AuthProvider::Github,
+                        "github_ops".to_string(),
+                    ),
+                    UserIdentityKey::ProviderSubject(
+                        AuthProvider::Google,
+                        "google_ops".to_string(),
+                    ),
+                    UserIdentityKey::ProviderSubject(
+                        AuthProvider::Wechat,
+                        "wechat_ops".to_string(),
+                    ),
                 ],
                 memberships,
                 links,
@@ -437,13 +477,15 @@ impl StoreMode {
     pub fn provider_catalog() -> Vec<AuthProviderAvailability> {
         PROVIDER_CATALOG
             .iter()
-            .map(|(provider, display_name, start_path)| AuthProviderAvailability {
-                provider: *provider,
-                display_name: (*display_name).to_string(),
-                enabled: true,
-                start_path: (*start_path).to_string(),
-                reason_code: None,
-            })
+            .map(
+                |(provider, display_name, start_path)| AuthProviderAvailability {
+                    provider: *provider,
+                    display_name: (*display_name).to_string(),
+                    enabled: true,
+                    start_path: (*start_path).to_string(),
+                    reason_code: None,
+                },
+            )
             .collect()
     }
 
@@ -546,7 +588,14 @@ impl StoreMode {
             ),
             Self::Postgres(store) => {
                 store
-                    .issue_session(session_id, provider, identity_key, workspace_slug, now, expires_at)
+                    .issue_session(
+                        session_id,
+                        provider,
+                        identity_key,
+                        workspace_slug,
+                        now,
+                        expires_at,
+                    )
                     .await
             }
         }
@@ -603,7 +652,11 @@ impl StoreMode {
     pub async fn list_tenants(&self) -> Result<TenantsResponse> {
         match self {
             Self::Memory(store) => Ok(TenantsResponse {
-                data: store.read().expect("memory store read lock").tenants.clone(),
+                data: store
+                    .read()
+                    .expect("memory store read lock")
+                    .tenants
+                    .clone(),
             }),
             Self::Postgres(store) => store.list_tenants().await,
         }
@@ -612,7 +665,11 @@ impl StoreMode {
     pub async fn list_projects(&self) -> Result<ProjectsResponse> {
         match self {
             Self::Memory(store) => Ok(ProjectsResponse {
-                data: store.read().expect("memory store read lock").projects.clone(),
+                data: store
+                    .read()
+                    .expect("memory store read lock")
+                    .projects
+                    .clone(),
             }),
             Self::Postgres(store) => store.list_projects().await,
         }
@@ -631,7 +688,10 @@ impl StoreMode {
         }
     }
 
-    pub async fn get_provider_resource(&self, provider_resource_id: &str) -> Result<Option<ProviderResource>> {
+    pub async fn get_provider_resource(
+        &self,
+        provider_resource_id: &str,
+    ) -> Result<Option<ProviderResource>> {
         match self {
             Self::Memory(store) => Ok(store
                 .read()
@@ -657,7 +717,10 @@ impl StoreMode {
         }
     }
 
-    pub async fn get_config_snapshot(&self, config_snapshot_id: &str) -> Result<Option<ConfigSnapshotResponse>> {
+    pub async fn get_config_snapshot(
+        &self,
+        config_snapshot_id: &str,
+    ) -> Result<Option<ConfigSnapshotResponse>> {
         match self {
             Self::Memory(store) => {
                 let store = store.read().expect("memory store read lock");
@@ -677,7 +740,10 @@ impl StoreMode {
         }
     }
 
-    pub async fn activate_config_snapshot(&self, config_snapshot_id: &str) -> Result<Option<ConfigSnapshotResponse>> {
+    pub async fn activate_config_snapshot(
+        &self,
+        config_snapshot_id: &str,
+    ) -> Result<Option<ConfigSnapshotResponse>> {
         match self {
             Self::Memory(store) => Ok(activate_memory_config_snapshot(
                 &mut store.write().expect("memory store write lock"),
@@ -687,17 +753,22 @@ impl StoreMode {
         }
     }
 
-    pub async fn simulate_route(&self, request: RouteSimulationRequest) -> Result<RouteSimulationResponse> {
+    pub async fn simulate_route(
+        &self,
+        request: RouteSimulationRequest,
+    ) -> Result<RouteSimulationResponse> {
         match self {
-            Self::Memory(store) => simulate_memory_route(
-                &store.read().expect("memory store read lock"),
-                &request,
-            ),
+            Self::Memory(store) => {
+                simulate_memory_route(&store.read().expect("memory store read lock"), &request)
+            }
             Self::Postgres(store) => store.simulate_route(request).await,
         }
     }
 
-    pub async fn get_route_receipt(&self, route_receipt_id: &str) -> Result<Option<RouteReceiptResponse>> {
+    pub async fn get_route_receipt(
+        &self,
+        route_receipt_id: &str,
+    ) -> Result<Option<RouteReceiptResponse>> {
         match self {
             Self::Memory(store) => Ok(store
                 .read()
@@ -717,7 +788,9 @@ impl PostgresStore {
             .max_connections(5)
             .connect(database_url)
             .await
-            .with_context(|| format!("failed to connect to control-plane database at {database_url}"))?;
+            .with_context(|| {
+                format!("failed to connect to control-plane database at {database_url}")
+            })?;
         let store = Self { pool };
         store.migrate().await?;
         store.seed().await?;
@@ -763,7 +836,10 @@ impl PostgresStore {
         for provider_resource in seed.provider_resources {
             let provider_resource_id = provider_resource.provider_resource_id.to_string();
             let tenant_id = provider_resource.tenant_id.to_string();
-            let project_id = provider_resource.project_id.as_ref().map(ToString::to_string);
+            let project_id = provider_resource
+                .project_id
+                .as_ref()
+                .map(ToString::to_string);
             let provider_id = provider_resource.provider_id.clone();
             sqlx::query(
                 "INSERT INTO provider_resources (provider_resource_id, tenant_id, project_id, provider_id, payload)
@@ -891,10 +967,11 @@ impl PostgresStore {
     }
 
     async fn ensure_known_email(&self, email: &str) -> Result<bool> {
-        let row = sqlx::query("SELECT user_id FROM users WHERE lower(primary_email) = lower($1) LIMIT 1")
-            .bind(email)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row =
+            sqlx::query("SELECT user_id FROM users WHERE lower(primary_email) = lower($1) LIMIT 1")
+                .bind(email)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.is_some())
     }
 
@@ -939,7 +1016,10 @@ impl PostgresStore {
         now: &str,
         expires_at: &str,
     ) -> Result<AuthLoginResult> {
-        let user = self.lookup_user(identity_key).await?.context("identity not found")?;
+        let user = self
+            .lookup_user(identity_key)
+            .await?
+            .context("identity not found")?;
         let memberships = self.list_memberships(&user.user_id).await?;
         let active_membership = memberships
             .iter()
@@ -986,10 +1066,11 @@ impl PostgresStore {
     }
 
     async fn get_session(&self, session_id: &str) -> Result<Option<AuthLoginResult>> {
-        let row = sqlx::query("SELECT payload FROM sessions WHERE session_id = $1 AND state = 'active'")
-            .bind(session_id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row =
+            sqlx::query("SELECT payload FROM sessions WHERE session_id = $1 AND state = 'active'")
+                .bind(session_id)
+                .fetch_optional(&self.pool)
+                .await?;
         let Some(row) = row else {
             return Ok(None);
         };
@@ -1022,14 +1103,12 @@ impl PostgresStore {
         let removed = if provider == AuthProvider::Email {
             false
         } else {
-            sqlx::query(
-                "DELETE FROM auth_provider_links WHERE user_id = $1 AND provider = $2",
-            )
-            .bind(session.session.user.user_id.as_str())
-            .bind(auth_provider_slug(provider))
-            .execute(&self.pool)
-            .await?
-            .rows_affected()
+            sqlx::query("DELETE FROM auth_provider_links WHERE user_id = $1 AND provider = $2")
+                .bind(session.session.user.user_id.as_str())
+                .bind(auth_provider_slug(provider))
+                .execute(&self.pool)
+                .await?
+                .rows_affected()
                 > 0
         };
         Ok(Some(UnlinkAuthProviderResponse { provider, removed }))
@@ -1040,7 +1119,10 @@ impl PostgresStore {
             .fetch_all(&self.pool)
             .await?;
         Ok(TenantsResponse {
-            data: rows.into_iter().map(|row| row.get::<Json<Tenant>, _>("payload").0).collect(),
+            data: rows
+                .into_iter()
+                .map(|row| row.get::<Json<Tenant>, _>("payload").0)
+                .collect(),
         })
     }
 
@@ -1049,14 +1131,18 @@ impl PostgresStore {
             .fetch_all(&self.pool)
             .await?;
         Ok(ProjectsResponse {
-            data: rows.into_iter().map(|row| row.get::<Json<Project>, _>("payload").0).collect(),
+            data: rows
+                .into_iter()
+                .map(|row| row.get::<Json<Project>, _>("payload").0)
+                .collect(),
         })
     }
 
     async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
-        let rows = sqlx::query("SELECT payload FROM provider_resources ORDER BY provider_resource_id")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query("SELECT payload FROM provider_resources ORDER BY provider_resource_id")
+                .fetch_all(&self.pool)
+                .await?;
         Ok(ProviderResourcesResponse {
             data: rows
                 .into_iter()
@@ -1065,11 +1151,15 @@ impl PostgresStore {
         })
     }
 
-    async fn get_provider_resource(&self, provider_resource_id: &str) -> Result<Option<ProviderResource>> {
-        let row = sqlx::query("SELECT payload FROM provider_resources WHERE provider_resource_id = $1")
-            .bind(provider_resource_id)
-            .fetch_optional(&self.pool)
-            .await?;
+    async fn get_provider_resource(
+        &self,
+        provider_resource_id: &str,
+    ) -> Result<Option<ProviderResource>> {
+        let row =
+            sqlx::query("SELECT payload FROM provider_resources WHERE provider_resource_id = $1")
+                .bind(provider_resource_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|row| row.get::<Json<ProviderResource>, _>("payload").0))
     }
 
@@ -1085,7 +1175,10 @@ impl PostgresStore {
         })
     }
 
-    async fn get_config_snapshot(&self, config_snapshot_id: &str) -> Result<Option<ConfigSnapshotResponse>> {
+    async fn get_config_snapshot(
+        &self,
+        config_snapshot_id: &str,
+    ) -> Result<Option<ConfigSnapshotResponse>> {
         let resolved_id = if config_snapshot_id == ACTIVE_CONFIG_ALIAS {
             sqlx::query("SELECT config_snapshot_id FROM active_config_pointers WHERE pointer_key = 'default'")
                 .fetch_optional(&self.pool)
@@ -1106,7 +1199,10 @@ impl PostgresStore {
         }))
     }
 
-    async fn activate_config_snapshot(&self, config_snapshot_id: &str) -> Result<Option<ConfigSnapshotResponse>> {
+    async fn activate_config_snapshot(
+        &self,
+        config_snapshot_id: &str,
+    ) -> Result<Option<ConfigSnapshotResponse>> {
         let row = sqlx::query("SELECT payload FROM config_snapshots WHERE config_snapshot_id = $1")
             .bind(config_snapshot_id)
             .fetch_optional(&self.pool)
@@ -1132,10 +1228,15 @@ impl PostgresStore {
         .bind(config_snapshot_id)
         .execute(&self.pool)
         .await?;
-        Ok(Some(ConfigSnapshotResponse { config_snapshot: snapshot }))
+        Ok(Some(ConfigSnapshotResponse {
+            config_snapshot: snapshot,
+        }))
     }
 
-    async fn simulate_route(&self, request: RouteSimulationRequest) -> Result<RouteSimulationResponse> {
+    async fn simulate_route(
+        &self,
+        request: RouteSimulationRequest,
+    ) -> Result<RouteSimulationResponse> {
         let tenants = self.list_provider_resources().await?.data;
         let policies = self.list_route_policies().await?.data;
         let active_snapshot = self
@@ -1146,7 +1247,10 @@ impl PostgresStore {
         build_route_simulation_response(&tenants, &policies, &active_snapshot, &request)
     }
 
-    async fn get_route_receipt(&self, route_receipt_id: &str) -> Result<Option<RouteReceiptResponse>> {
+    async fn get_route_receipt(
+        &self,
+        route_receipt_id: &str,
+    ) -> Result<Option<RouteReceiptResponse>> {
         let row = sqlx::query("SELECT payload FROM route_receipts WHERE route_receipt_id = $1")
             .bind(route_receipt_id)
             .fetch_optional(&self.pool)
@@ -1159,10 +1263,12 @@ impl PostgresStore {
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
         let row = match identity_key {
             IdentityLookup::Email(email) => {
-                sqlx::query("SELECT payload FROM users WHERE lower(primary_email) = lower($1) LIMIT 1")
-                    .bind(email)
-                    .fetch_optional(&self.pool)
-                    .await?
+                sqlx::query(
+                    "SELECT payload FROM users WHERE lower(primary_email) = lower($1) LIMIT 1",
+                )
+                .bind(email)
+                .fetch_optional(&self.pool)
+                .await?
             }
             IdentityLookup::ProviderSubject(provider, subject) => {
                 sqlx::query(
@@ -1418,7 +1524,9 @@ fn build_route_simulation_response(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let selected_target = eligible_candidates.first().map(|candidate| candidate.provider_resource_id.clone());
+    let selected_target = eligible_candidates
+        .first()
+        .map(|candidate| candidate.provider_resource_id.clone());
 
     Ok(RouteSimulationResponse {
         simulation_id: format!("sim_{}", request.model_alias),
@@ -1462,7 +1570,8 @@ fn link(
     can_unlink: bool,
 ) -> AuthProviderLink {
     AuthProviderLink {
-        link_id: core_domain::AuthProviderLinkId::parse(format!("authlink_{provider_subject}")).unwrap(),
+        link_id: core_domain::AuthProviderLinkId::parse(format!("authlink_{provider_subject}"))
+            .unwrap(),
         provider,
         provider_subject: provider_subject.to_string(),
         email: email.map(std::string::ToString::to_string),
@@ -1473,7 +1582,10 @@ fn link(
 }
 
 pub fn ensure_workspace_slug(workspace_slug: &str) -> bool {
-    matches!(workspace_slug, "platform-admin" | "acme-retail" | "northstar-labs")
+    matches!(
+        workspace_slug,
+        "platform-admin" | "acme-retail" | "northstar-labs"
+    )
 }
 
 pub fn now_rfc3339() -> String {

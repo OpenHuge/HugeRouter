@@ -19,11 +19,11 @@ use core_domain::{
     UsageMetrics, UsagePhase, ValidationIssue,
 };
 use openai::OpenAiAdapter;
+use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
 use provider_traits::{
     ProviderAdapterRegistry, ProviderEndpoint, ProviderError, ProviderErrorKind,
     ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
 };
-use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -1111,7 +1111,9 @@ impl ControlPlaneConfigStore {
                     .find(|candidate| &candidate.provider_resource_id == provider_resource_id)
                     .cloned()
                     .ok_or_else(|| {
-                        format!("provider resource {provider_resource_id} is missing from control plane")
+                        format!(
+                            "provider resource {provider_resource_id} is missing from control plane"
+                        )
                     })?;
 
                 Ok(ProviderTargetRuntime {
@@ -1154,7 +1156,9 @@ impl ControlPlaneConfigStore {
                 .text()
                 .await
                 .unwrap_or_else(|_| "unable to read response body".to_string());
-            return Err(format!("control plane returned HTTP {status} for {url}: {body}"));
+            return Err(format!(
+                "control plane returned HTTP {status} for {url}: {body}"
+            ));
         }
         response
             .json::<T>()
@@ -1196,8 +1200,7 @@ fn api_key_for_provider(provider_id: &str) -> String {
 fn upstream_model_for_provider(provider_id: &str) -> Option<String> {
     match provider_id {
         "openai" => Some(
-            std::env::var("GATEWAY_OPENAI_MODEL")
-                .unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
+            std::env::var("GATEWAY_OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
         ),
         _ => None,
     }
@@ -1214,7 +1217,10 @@ fn usd_per_1k_tokens_for_provider(provider_id: &str) -> f64 {
 }
 
 fn static_latency_score_for_region(preferred_regions: &[String], region: &str) -> f32 {
-    if preferred_regions.iter().any(|preferred| preferred == region) {
+    if preferred_regions
+        .iter()
+        .any(|preferred| preferred == region)
+    {
         0.95
     } else {
         0.8
@@ -1390,11 +1396,11 @@ mod tests {
         app_with_state, evaluate_route, normalize_request,
     };
     use axum::{
+        Json, Router,
         body::{Body, to_bytes},
         extract::State,
         http::{Request, StatusCode},
         routing::get,
-        Json, Router,
     };
     use core_domain::{
         AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
@@ -1402,12 +1408,12 @@ mod tests {
         ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
         RoutePolicy, RoutePolicyId, TenantId,
     };
+    use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
     use provider_traits::{
         AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
         ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
         ProviderUsage, StreamingSupport,
     };
-    use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
     use std::{
         collections::BTreeMap,
         sync::{
@@ -1664,7 +1670,10 @@ mod tests {
         let app = Router::new()
             .route("/v1/config-snapshots/active", get(control_plane_snapshot))
             .route("/v1/route-policies", get(control_plane_route_policies))
-            .route("/v1/provider-resources", get(control_plane_provider_resources))
+            .route(
+                "/v1/provider-resources",
+                get(control_plane_provider_resources),
+            )
             .with_state(FixtureState {
                 fail,
                 fixture: control_plane_fixture(),
@@ -2059,8 +2068,14 @@ mod tests {
 
         let config = store.load().await.unwrap();
 
-        assert_eq!(config.config_snapshot.config_snapshot_id.as_str(), "cfgsnap_test");
-        assert_eq!(config.route_policy.route_policy_id.as_str(), "routepol_default");
+        assert_eq!(
+            config.config_snapshot.config_snapshot_id.as_str(),
+            "cfgsnap_test"
+        );
+        assert_eq!(
+            config.route_policy.route_policy_id.as_str(),
+            "routepol_default"
+        );
         assert_eq!(config.provider_targets.len(), 2);
         assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
 

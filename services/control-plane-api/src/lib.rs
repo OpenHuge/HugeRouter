@@ -2,6 +2,7 @@ mod store;
 
 use anyhow::Result;
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::{
         HeaderMap, HeaderValue, Method,
@@ -9,12 +10,11 @@ use axum::{
     },
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use core_domain::{
     AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, EmailLoginCompleteRequest,
-    EmailLoginStartRequest, EmailLoginStartResponse, OAuthCallbackRequest,
-    OAuthLoginStartRequest, OAuthLoginStartResponse, UnlinkAuthProviderResponse,
+    EmailLoginStartRequest, EmailLoginStartResponse, OAuthCallbackRequest, OAuthLoginStartRequest,
+    OAuthLoginStartResponse, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
     ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
@@ -111,12 +111,27 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route("/healthz", get(health))
         .route("/api/control-plane/auth/providers", get(get_auth_providers))
         .route("/api/control-plane/auth/session", get(get_current_session))
-        .route("/api/control-plane/auth/email/start", post(start_email_login))
-        .route("/api/control-plane/auth/email/complete", post(complete_email_login))
-        .route("/api/control-plane/auth/oauth/{provider}/start", post(start_oauth_login))
-        .route("/api/control-plane/auth/oauth/{provider}/callback", post(complete_oauth_login))
+        .route(
+            "/api/control-plane/auth/email/start",
+            post(start_email_login),
+        )
+        .route(
+            "/api/control-plane/auth/email/complete",
+            post(complete_email_login),
+        )
+        .route(
+            "/api/control-plane/auth/oauth/{provider}/start",
+            post(start_oauth_login),
+        )
+        .route(
+            "/api/control-plane/auth/oauth/{provider}/callback",
+            post(complete_oauth_login),
+        )
         .route("/api/control-plane/auth/logout", post(logout))
-        .route("/api/control-plane/auth/links", get(list_auth_provider_links))
+        .route(
+            "/api/control-plane/auth/links",
+            get(list_auth_provider_links),
+        )
         .route(
             "/api/control-plane/auth/links/{provider}",
             post(unlink_auth_provider).delete(unlink_auth_provider),
@@ -124,15 +139,24 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route("/v1/tenants", get(list_tenants))
         .route("/v1/projects", get(list_projects))
         .route("/v1/provider-resources", get(list_provider_resources))
-        .route("/v1/provider-resources/{provider_resource_id}", get(get_provider_resource))
+        .route(
+            "/v1/provider-resources/{provider_resource_id}",
+            get(get_provider_resource),
+        )
         .route("/v1/route-policies", get(list_route_policies))
-        .route("/v1/config-snapshots/{config_snapshot_id}", get(get_config_snapshot))
+        .route(
+            "/v1/config-snapshots/{config_snapshot_id}",
+            get(get_config_snapshot),
+        )
         .route(
             "/v1/config-snapshots/{config_snapshot_id}/activate",
             post(activate_config_snapshot),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
-        .route("/v1/route-receipts/{route_receipt_id}", get(get_route_receipt))
+        .route(
+            "/v1/route-receipts/{route_receipt_id}",
+            get(get_route_receipt),
+        )
         .layer(
             CorsLayer::new()
                 .allow_origin(allow_origin)
@@ -154,7 +178,9 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-async fn get_auth_providers(State(_state): State<ControlPlaneState>) -> Json<core_domain::AuthProvidersResponse> {
+async fn get_auth_providers(
+    State(_state): State<ControlPlaneState>,
+) -> Json<core_domain::AuthProvidersResponse> {
     Json(core_domain::AuthProvidersResponse {
         providers: StoreMode::provider_catalog(),
     })
@@ -175,13 +201,18 @@ async fn start_email_login(
     Json(request): Json<EmailLoginStartRequest>,
 ) -> Result<Json<EmailLoginStartResponse>, ApiError> {
     let context = next_request_context();
-    if !state.store.ensure_known_email(&request.email).await.map_err(|error| {
-        ApiError::internal(
-            "storage_unavailable",
-            format!("failed to verify login email: {error}"),
-            &context,
-        )
-    })? {
+    if !state
+        .store
+        .ensure_known_email(&request.email)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to verify login email: {error}"),
+                &context,
+            )
+        })?
+    {
         return Err(ApiError::unauthorized(
             "auth_user_not_found",
             "no bootstrap user exists for this email".to_string(),
@@ -191,7 +222,10 @@ async fn start_email_login(
     if !ensure_workspace_slug(&request.workspace_slug) {
         return Err(ApiError::bad_request(
             "workspace_unknown",
-            format!("workspace `{}` is not available in bootstrap mode", request.workspace_slug),
+            format!(
+                "workspace `{}` is not available in bootstrap mode",
+                request.workspace_slug
+            ),
             &context,
         ));
     }
@@ -199,7 +233,12 @@ async fn start_email_login(
     let flow_id = format!("authflow_{}", context.sequence);
     state
         .store
-        .create_email_flow(&flow_id, &request.email, &request.workspace_slug, &expires_at(600))
+        .create_email_flow(
+            &flow_id,
+            &request.email,
+            &request.workspace_slug,
+            &expires_at(600),
+        )
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -291,7 +330,10 @@ async fn start_oauth_login(
     if !ensure_workspace_slug(&request.workspace_slug) {
         return Err(ApiError::bad_request(
             "workspace_unknown",
-            format!("workspace `{}` is not available in bootstrap mode", request.workspace_slug),
+            format!(
+                "workspace `{}` is not available in bootstrap mode",
+                request.workspace_slug
+            ),
             &context,
         ));
     }
@@ -299,7 +341,12 @@ async fn start_oauth_login(
     let state_token = format!("oauth_state_{}", context.sequence);
     state
         .store
-        .create_oauth_flow(&state_token, provider, &request.workspace_slug, &expires_at(600))
+        .create_oauth_flow(
+            &state_token,
+            provider,
+            &request.workspace_slug,
+            &expires_at(600),
+        )
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -410,13 +457,17 @@ async fn logout(
         )
     })?;
 
-    let logout_response = state.store.revoke_session(&session_id).await.map_err(|error| {
-        ApiError::internal(
-            "storage_unavailable",
-            format!("failed to revoke session: {error}"),
-            &context,
-        )
-    })?;
+    let logout_response = state
+        .store
+        .revoke_session(&session_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to revoke session: {error}"),
+                &context,
+            )
+        })?;
 
     Ok(clear_session_cookie(Json(logout_response)))
 }
@@ -427,7 +478,9 @@ async fn list_auth_provider_links(
 ) -> Result<Json<AuthProviderLinksResponse>, ApiError> {
     let context = next_request_context();
     let session = require_session(&state, &headers, &context).await?;
-    Ok(Json(AuthProviderLinksResponse { links: session.links }))
+    Ok(Json(AuthProviderLinksResponse {
+        links: session.links,
+    }))
 }
 
 async fn unlink_auth_provider(
@@ -466,7 +519,9 @@ async fn unlink_auth_provider(
     Ok(Json(response))
 }
 
-async fn list_tenants(State(state): State<ControlPlaneState>) -> Result<Json<TenantsResponse>, ApiError> {
+async fn list_tenants(
+    State(state): State<ControlPlaneState>,
+) -> Result<Json<TenantsResponse>, ApiError> {
     Ok(Json(state.store.list_tenants().await.map_err(|error| {
         ApiError::internal(
             "storage_unavailable",
@@ -476,26 +531,32 @@ async fn list_tenants(State(state): State<ControlPlaneState>) -> Result<Json<Ten
     })?))
 }
 
-async fn list_projects(State(state): State<ControlPlaneState>) -> Result<Json<ProjectsResponse>, ApiError> {
-    Ok(Json(state.store.list_projects().await.map_err(|error| {
-        ApiError::internal(
-            "storage_unavailable",
-            format!("failed to load projects: {error}"),
-            &next_request_context(),
-        )
-    })?))
+async fn list_projects(
+    State(state): State<ControlPlaneState>,
+) -> Result<Json<ProjectsResponse>, ApiError> {
+    Ok(Json(state.store.list_projects().await.map_err(
+        |error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load projects: {error}"),
+                &next_request_context(),
+            )
+        },
+    )?))
 }
 
 async fn list_provider_resources(
     State(state): State<ControlPlaneState>,
 ) -> Result<Json<ProviderResourcesResponse>, ApiError> {
-    Ok(Json(state.store.list_provider_resources().await.map_err(|error| {
-        ApiError::internal(
-            "storage_unavailable",
-            format!("failed to load provider resources: {error}"),
-            &next_request_context(),
-        )
-    })?))
+    Ok(Json(state.store.list_provider_resources().await.map_err(
+        |error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load provider resources: {error}"),
+                &next_request_context(),
+            )
+        },
+    )?))
 }
 
 async fn get_provider_resource(
@@ -527,13 +588,15 @@ async fn get_provider_resource(
 async fn list_route_policies(
     State(state): State<ControlPlaneState>,
 ) -> Result<Json<RoutePoliciesResponse>, ApiError> {
-    Ok(Json(state.store.list_route_policies().await.map_err(|error| {
-        ApiError::internal(
-            "storage_unavailable",
-            format!("failed to load route policies: {error}"),
-            &next_request_context(),
-        )
-    })?))
+    Ok(Json(state.store.list_route_policies().await.map_err(
+        |error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load route policies: {error}"),
+                &next_request_context(),
+            )
+        },
+    )?))
 }
 
 async fn get_config_snapshot(
@@ -593,13 +656,15 @@ async fn create_route_simulation(
     Json(request): Json<RouteSimulationRequest>,
 ) -> Result<Json<RouteSimulationResponse>, ApiError> {
     let context = next_request_context();
-    Ok(Json(state.store.simulate_route(request).await.map_err(|error| {
-        ApiError::bad_request(
-            "route_simulation_failed",
-            format!("route simulation could not be completed: {error}"),
-            &context,
-        )
-    })?))
+    Ok(Json(state.store.simulate_route(request).await.map_err(
+        |error| {
+            ApiError::bad_request(
+                "route_simulation_failed",
+                format!("route simulation could not be completed: {error}"),
+                &context,
+            )
+        },
+    )?))
 }
 
 async fn get_route_receipt(
@@ -633,15 +698,13 @@ async fn require_session(
     headers: &HeaderMap,
     context: &RequestContext,
 ) -> Result<core_domain::AuthLoginResult, ApiError> {
-    resolve_session(state, headers)
-        .await?
-        .ok_or_else(|| {
-            ApiError::unauthorized(
-                "auth_invalid",
-                "HugeRouter session is missing or expired".to_string(),
-                context,
-            )
-        })
+    resolve_session(state, headers).await?.ok_or_else(|| {
+        ApiError::unauthorized(
+            "auth_invalid",
+            "HugeRouter session is missing or expired".to_string(),
+            context,
+        )
+    })
 }
 
 async fn resolve_session(
@@ -660,7 +723,10 @@ async fn resolve_session(
     })
 }
 
-fn parse_oauth_provider(provider: &str, context: &RequestContext) -> Result<core_domain::OAuthProvider, ApiError> {
+fn parse_oauth_provider(
+    provider: &str,
+    context: &RequestContext,
+) -> Result<core_domain::OAuthProvider, ApiError> {
     match provider {
         "github" => Ok(core_domain::OAuthProvider::Github),
         "google" => Ok(core_domain::OAuthProvider::Google),
@@ -821,7 +887,12 @@ mod tests {
     #[tokio::test]
     async fn health_endpoint_returns_ok() {
         let response = app_with_state(ControlPlaneState::memory())
-            .oneshot(Request::builder().uri("/healthz").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -851,9 +922,12 @@ mod tests {
             .await
             .unwrap();
 
-        let start_body: Value =
-            serde_json::from_slice(&to_bytes(start_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let start_body: Value = serde_json::from_slice(
+            &to_bytes(start_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         let flow_id = start_body["flowId"].as_str().unwrap();
         assert_eq!(start_body["verificationMode"], "one_time_code");
 
@@ -886,9 +960,12 @@ mod tests {
             .to_string();
         assert!(set_cookie.contains("huge_router_session=sess_"));
 
-        let body: Value =
-            serde_json::from_slice(&to_bytes(complete_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let body: Value = serde_json::from_slice(
+            &to_bytes(complete_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(body["session"]["authenticatedBy"], "email");
         assert_eq!(body["links"][0]["provider"], "email");
     }
@@ -899,12 +976,18 @@ mod tests {
 
         let tenants = app
             .clone()
-            .oneshot(Request::builder().uri("/v1/tenants").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/tenants")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(tenants.status(), StatusCode::OK);
         let tenants_body: Value =
-            serde_json::from_slice(&to_bytes(tenants.into_body(), usize::MAX).await.unwrap()).unwrap();
+            serde_json::from_slice(&to_bytes(tenants.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         assert_eq!(tenants_body["data"].as_array().unwrap().len(), 3);
 
         let snapshot = app
@@ -922,7 +1005,8 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.status(), StatusCode::OK);
         let snapshot_body: Value =
-            serde_json::from_slice(&to_bytes(snapshot.into_body(), usize::MAX).await.unwrap()).unwrap();
+            serde_json::from_slice(&to_bytes(snapshot.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         assert_eq!(
             snapshot_body["config_snapshot"]["config_snapshot_id"],
             "cfgsnap_gateway_v1"
@@ -962,7 +1046,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         assert_eq!(body["selected_target"], "prvrsrc_openai_primary");
     }
 }
