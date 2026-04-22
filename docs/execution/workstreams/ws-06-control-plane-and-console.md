@@ -85,6 +85,7 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - Guard destructive operations with explicit confirmation UX.
 - Build shared layout and feedback primitives in `packages/ui-kit` first, then compose feature pages from those pieces.
 - Keep theme decisions centralized in `packages/design-tokens` so route modules do not reconfigure HeroUI locally.
+- Build locale plumbing for Simplified Chinese (`zh-CN`) and English (`en`) into the shell and auth surfaces early so later routes do not hardcode copy.
 
 ### CTL-002 - Implement tenant, project, environment, and API key CRUD
 
@@ -175,6 +176,7 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - CRUD flows are fully typed from generated client
 - forms validate client-side and server-side
 - role-based page guards work
+- user-facing copy is wired through the shared `zh-CN` / `en` localization boundary rather than route-local literals
 
 **Implementation notes:**
 
@@ -231,12 +233,14 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - usage charts
 - budget threshold views
 - balance and invoice projections
+- payment initiation and status surfaces for the first billing collection flow
 
 **Acceptance criteria:**
 
 - dashboards match projection APIs
 - time-range filters and tenant scopes work
 - large tables are paginated and exportable
+- the first payment flow exposed in the console supports WeChat Pay only and makes that scope explicit in the UI
 
 **Implementation notes:**
 

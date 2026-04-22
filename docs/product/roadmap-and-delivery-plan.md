@@ -9,6 +9,7 @@ Deliver:
 - monorepo scaffolding
 - Rust workspace
 - TanStack Start app shell
+- bilingual console shell baseline for Simplified Chinese and English
 - PostgreSQL/Redis/NATS local stack
 - auth skeleton
 - trace pipeline skeleton
@@ -45,6 +46,7 @@ Deliver:
 - pricing engine
 - balance projections
 - billing dashboard
+- WeChat Pay as the first supported payment collection method
 - audit improvements
 - replay capsule and supportability maturity
 

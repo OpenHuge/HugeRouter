@@ -404,10 +404,12 @@
   - usage charts
   - budget threshold views
   - balance and invoice projections
+  - payment initiation and status surfaces for the first billing collection flow
 - **Acceptance criteria:**
   - dashboards match projection APIs
   - time-range filters and tenant scopes work
   - large tables are paginated and exportable
+  - the first payment flow exposed in the console supports WeChat Pay only and states that scope clearly
 
 ### DB-001 - Design relational schema, migrations, and repository primitives
 
@@ -677,10 +679,12 @@
   - aggregated usage endpoints
   - balance endpoints
   - billing export endpoints
+  - payment record and status endpoints for the initial collection flow
 - **Acceptance criteria:**
   - APIs support tenant/project/time filtering
   - responses are paginated for large datasets
   - exports are asynchronous where needed
+  - the first payment collection path is modeled for WeChat Pay without leaking provider-specific semantics into ledger records
 
 ### SEC-001 - Define RBAC model, scopes, and authorization middleware
 

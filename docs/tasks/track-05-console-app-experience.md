@@ -34,7 +34,9 @@ If a needed UI primitive or client contract is missing, consume the public surfa
 3. Model capability matrix and downgrade guidance for route authoring.
 4. Guardrail, redaction, and sealed payload access policy surfaces.
 5. Role-specific dashboards for engineering, finance, operations, security, and channel operators.
-6. Frontend tests that prove important workflows, errors, optimistic states, and access controls.
+6. A real login UX for email, GitHub, Google, and WeChat backed by Track `02` auth APIs.
+7. A bilingual console baseline for Simplified Chinese and English, including locale selection and shared formatting behavior.
+8. Frontend tests that prove important workflows, errors, optimistic states, and access controls.
 
 ## Ordered Plan
 
@@ -52,10 +54,21 @@ If a needed UI primitive or client contract is missing, consume the public surfa
 4. Add guardrail and redaction UX.
    - Configure PII redaction, prompt-injection checks, output validation, content safety, retention, and sealed payload capture.
    - Provide audit views for policy changes and payload access.
-5. Make state transitions explicit.
+5. Preserve login, session, and locale foundations.
+   - Move request and session context setup behind one explicit boundary.
+   - Keep the auth model intentionally simple if Track `02` has not yet delivered full identity support, but do not invent a parallel auth contract in app code.
+   - Wire email login start and completion UI.
+   - Wire GitHub, Google, and WeChat sign-in buttons to backend-owned start and callback paths.
+   - Add callback completion, cancellation, and failure states.
+   - Fetch the current HugeRouter session and tenant membership before rendering authenticated routes.
+   - Support provider-disabled and tenant-access-denied states without dropping into generic transport errors.
+   - Move user-facing copy out of route-local literals and into a translation boundary that can serve `zh-CN` and `en`.
+   - Support locale selection on `/login` and preserve it through the authenticated shell.
+   - Format dates, times, numbers, and currency through shared locale-aware helpers instead of inline formatting.
+6. Make state transitions explicit.
    - Add empty, loading, optimistic, and failure states.
    - Avoid rendering raw transport errors directly into the UI.
-6. Keep app code inside app ownership.
+7. Keep app code inside app ownership.
    - Consume `ui-kit`, `ts-api-client`, and `ts-shared-schema` as published packages.
    - Do not duplicate shared components or schemas in `apps/console-web`.
 
@@ -65,13 +78,18 @@ If a needed UI primitive or client contract is missing, consume the public surfa
 - Tests for loading, empty, success, and error states using deterministic client mocks or request handlers.
 - Tests for navigation behavior and route guards where auth/session logic changes.
 - Accessibility checks for key screens and forms where practical.
-- Regression tests for existing login entry points, callback success/failure, logout, expired session handling, and tenant-denied states.
+- Tests that cover all supported login entry points: email, GitHub, Google, and WeChat.
+- Tests for callback success, callback failure, logout, expired session handling, and tenant-selection or tenant-denied states where applicable.
+- Tests for locale switching and fallback behavior on `/login` and at least one authenticated route in both `zh-CN` and `en`.
 
 ## Definition Of Done
 
 - Operator workflows for pricing, budgets, route strategies, diagnostics, capabilities, guardrails, and audit are driven by typed client calls.
 - Existing login and authenticated route entry continue to use backend-owned session contracts.
 - Tests cover the major state transitions of the new operator screens.
+- Placeholder bootstrap data is removed from page implementations.
+- `/login` and authenticated route entry no longer stop at presentation-only auth placeholders.
+- The login flow and shared shell render in both `zh-CN` and `en` without route-local hardcoded copy.
 - The app consumes shared packages instead of redefining contracts or primitives locally.
 - Future UI work can add features by extending established data and state patterns.
 

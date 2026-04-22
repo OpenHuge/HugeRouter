@@ -162,15 +162,18 @@ Capture usage on the hot path, write immutable ledger records, compute projectio
 - aggregated usage endpoints
 - balance endpoints
 - billing export endpoints
+- payment record and status endpoints for the initial collection flow
 
 **Acceptance criteria:**
 
 - APIs support tenant/project/time filtering
 - responses are paginated for large datasets
 - exports are asynchronous where needed
+- the first payment collection path is modeled for WeChat Pay without hardcoding provider-specific semantics into ledger records
 
 **Implementation notes:**
 
 - The gateway hot path should only emit usage events, never compute full balances.
 - Ledger persistence must be append-only and replayable.
 - Projections are disposable and repairable; ledger entries are not.
+- Model payment attempts and confirmations separately from funding ledger entries so more payment methods can be added later without changing billing invariants.
