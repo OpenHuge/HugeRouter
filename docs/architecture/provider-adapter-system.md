@@ -88,13 +88,13 @@ Each adapter manifest should declare at least:
 - stability level such as `stable`, `beta`, or `experimental`
 - manifest schema version
 - supported routing hints such as latency-aware, cost-aware, or priority-aware selection
-- compatibility range for config snapshots or route resources
+- compatibility range for config snapshots and the current route-policy contract surface, with future extension to typed route resources once those contracts exist
 
 ### 12.4.1 Manifest Boundary Rule
 
 Adapter manifests should be the runtime truth for what executable code supports.
 
-Control-plane resources should not assume an adapter can do something unless the loaded manifest declares it. Conversely, the runtime should not accept a provider or route resource whose required capability, lifecycle family, or schema version falls outside the manifest compatibility contract.
+Control-plane resources should not assume an adapter can do something unless the loaded manifest declares it. Conversely, the runtime should not accept a provider resource or effective route-policy snapshot whose required capability, lifecycle family, or schema version falls outside the manifest compatibility contract. If typed route resources are added later, they should be held to the same boundary instead of bypassing manifest checks.
 
 ### 12.5 Registry Model
 
@@ -219,7 +219,7 @@ It should be possible to:
 
 The runtime should validate compatibility across four layers:
 
-- route resource schema version
+- current route-policy contract version, with future extension to typed route-resource versions once they exist
 - provider resource schema version
 - adapter manifest schema version
 - running binary compatibility version
