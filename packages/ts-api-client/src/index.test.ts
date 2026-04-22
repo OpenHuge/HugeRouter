@@ -20,17 +20,12 @@ const jsonResponse = (status: number, payload: unknown) =>
     }
   })
 
-const toRequestUrl = (input: RequestInfo | URL) => {
-  if (typeof input === 'string') {
-    return input
-  }
-
-  if (input instanceof URL) {
-    return input.toString()
-  }
-
-  return input.url
-}
+const resolveRequestUrl = (input: RequestInfo | URL) =>
+  typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url
 
 void test('generated operation metadata stays in sync with the schema manifest', () => {
   const manifest = readJson('../../../schemas/jsonschema/contracts.manifest.json')
@@ -42,6 +37,7 @@ void test('generated operation metadata stays in sync with the schema manifest',
 })
 
 void test('control-plane client resolves the documented endpoints and parses responses', async () => {
+  const tenantsResponse = readJson('../../../schemas/examples/control-plane/tenants.response.json')
   const projectsResponse = readJson('../../../schemas/examples/control-plane/projects.response.json')
   const providerResourcesResponse = readJson(
     '../../../schemas/examples/control-plane/provider-resources.response.json'
@@ -52,8 +48,12 @@ void test('control-plane client resolves the documented endpoints and parses res
 
   const calls: Array<{ url: string; method?: string }> = []
   const fetchImpl = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = toRequestUrl(input)
+    const url = resolveRequestUrl(input)
     calls.push({ url, method: init?.method })
+
+    if (url.endsWith('/v1/tenants')) {
+      return Promise.resolve(jsonResponse(200, tenantsResponse))
+    }
 
     if (url.endsWith('/v1/projects')) {
       return Promise.resolve(jsonResponse(200, projectsResponse))
@@ -66,7 +66,6 @@ void test('control-plane client resolves the documented endpoints and parses res
     if (url.endsWith('/v1/route-receipts/routercpt_123')) {
       return Promise.resolve(jsonResponse(200, routeReceiptResponse))
     }
-
     return Promise.resolve(
       jsonResponse(404, readJson('../../../schemas/examples/gateway/error.response.json'))
     )
@@ -77,14 +76,20 @@ void test('control-plane client resolves the documented endpoints and parses res
     fetch: fetchImpl
   })
 
+  const tenants = await client.listTenants()
   const projects = await client.listProjects()
   const resources = await client.listProviderResources()
   const receipt = await client.getRouteReceipt('routercpt_123')
 
+  assert.equal(tenants[0]?.tenant_id, 'tenant_acme')
   assert.equal(projects[0]?.project_id, 'proj_core')
   assert.equal(resources[0]?.provider_resource_id, 'prvrsrc_openai_primary')
   assert.equal(receipt.route_receipt_id, 'routercpt_123')
   assert.deepEqual(calls, [
+    {
+      url: 'https://api.example.test/v1/tenants',
+      method: 'GET'
+    },
     {
       url: 'https://api.example.test/v1/projects',
       method: 'GET'
@@ -107,20 +112,14 @@ void test('gateway client validates requests and normalizes contract errors', as
 
   const client = createGatewayClient({
     baseUrl: 'https://gateway.example.test',
-    fetch: (input: RequestInfo | URL) => {
-      if (toRequestUrl(input).endsWith('/v1/gateway/chat/completions?fail=true')) {
-        return Promise.resolve(jsonResponse(422, errorResponse))
-      }
-
-      return Promise.resolve(jsonResponse(200, gatewayResponse))
-    }
+    fetch: () => Promise.resolve(jsonResponse(200, gatewayResponse))
   })
 
   const response = await client.createChatCompletion(gatewayRequest as never)
   assert.equal(response.provider_response_id, 'resp_openai_123')
 
   const failingClient = createGatewayClient({
-    baseUrl: 'https://gateway.example.test?fail=true',
+    baseUrl: 'https://gateway.example.test',
     fetch: () => Promise.resolve(jsonResponse(422, errorResponse))
   })
 
