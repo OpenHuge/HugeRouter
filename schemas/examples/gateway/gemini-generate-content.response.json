@@ -1,0 +1,23 @@
+{
+  "responseId": "resp_gemini_123",
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "The outage was likely triggered by routing policy misconfiguration."
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 88,
+    "candidatesTokenCount": 27,
+    "totalTokenCount": 115,
+    "cachedContentTokenCount": 0
+  },
+  "modelVersion": "gemini-1.5-pro-latest"
+}

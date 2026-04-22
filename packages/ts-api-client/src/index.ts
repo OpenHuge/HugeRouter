@@ -8,8 +8,12 @@ import {
   emailLoginCompleteRequestSchema,
   emailLoginStartRequestSchema,
   emailLoginStartResponseSchema,
+  gatewayAnthropicMessagesRequestSchema,
+  gatewayAnthropicMessagesResponseSchema,
   gatewayChatRequestSchema,
   gatewayChatResponseSchema,
+  gatewayGeminiGenerateContentRequestSchema,
+  gatewayGeminiGenerateContentResponseSchema,
   logoutResponseSchema,
   oauthCallbackRequestSchema,
   oauthLoginStartRequestSchema,
@@ -19,6 +23,8 @@ import {
   providerResourceSchema,
   providerResourcesResponseSchema,
   routePoliciesResponseSchema,
+  routeReceiptDiagnosticsResponseSchema,
+  routeReceiptsResponseSchema,
   routeReceiptResponseSchema,
   routeSimulationRequestSchema,
   routeSimulationResponseSchema,
@@ -32,8 +38,12 @@ import {
   type EmailLoginStartRequest,
   type EmailLoginStartResponse,
   type ErrorEnvelope,
+  type GatewayAnthropicMessagesRequest,
+  type GatewayAnthropicMessagesResponse,
   type GatewayChatRequest,
   type GatewayChatResponse,
+  type GatewayGeminiGenerateContentRequest,
+  type GatewayGeminiGenerateContentResponse,
   type LogoutResponse,
   type OAuthCallbackRequest,
   type OAuthLoginStartRequest,
@@ -43,6 +53,8 @@ import {
   type ProviderResource,
   type RoutePolicy,
   type RouteReceipt,
+  type RouteReceiptDiagnosticsResponse,
+  type RouteReceiptsResponse,
   type RouteSimulationRequest,
   type RouteSimulationResponse,
   type Tenant
@@ -136,7 +148,11 @@ export type ControlPlaneClient = {
   simulateRoute: (
     request: RouteSimulationRequest
   ) => Promise<RouteSimulationResponse>
+  listRouteReceipts: () => Promise<RouteReceiptsResponse['data']>
   getRouteReceipt: (routeReceiptId: string) => Promise<RouteReceipt>
+  getRouteReceiptDiagnostics: (
+    routeReceiptId: string
+  ) => Promise<RouteReceiptDiagnosticsResponse>
 }
 
 export type GatewayClient = {
@@ -145,6 +161,12 @@ export type GatewayClient = {
   createChatCompletion: (
     request: GatewayChatRequest
   ) => Promise<GatewayChatResponse>
+  createAnthropicMessages: (
+    request: GatewayAnthropicMessagesRequest
+  ) => Promise<GatewayAnthropicMessagesResponse>
+  createGeminiGenerateContent: (
+    request: GatewayGeminiGenerateContentRequest
+  ) => Promise<GatewayGeminiGenerateContentResponse>
 }
 
 const resolveOperation = (id: OperationId) => {
@@ -495,6 +517,17 @@ export const createControlPlaneClient = (
         parse: (payload) => routeSimulationResponseSchema.parse(payload)
       })
     },
+    async listRouteReceipts() {
+      const operation = resolveOperation('listRouteReceipts')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        parse: (payload) => routeReceiptsResponseSchema.parse(payload).data
+      })
+    },
     async getRouteReceipt(routeReceiptId) {
       const operation = resolveOperation('getRouteReceipt')
       const parsed = await requestJson({
@@ -507,6 +540,18 @@ export const createControlPlaneClient = (
         parse: (payload) => routeReceiptResponseSchema.parse(payload)
       })
       return parsed.route_receipt
+    },
+    async getRouteReceiptDiagnostics(routeReceiptId) {
+      const operation = resolveOperation('getRouteReceiptDiagnostics')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        params: { route_receipt_id: routeReceiptId },
+        parse: (payload) => routeReceiptDiagnosticsResponseSchema.parse(payload)
+      })
     }
   }
 }
@@ -532,6 +577,34 @@ export const createGatewayClient = (
         body: gatewayChatRequestSchema.parse(request),
         parse: (payload) => gatewayChatResponseSchema.parse(payload)
       })
+    },
+    async createAnthropicMessages(request) {
+      const operation = resolveGatewayOperation('createAnthropicMessages')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        body: gatewayAnthropicMessagesRequestSchema.parse(request),
+        parse: (payload) => gatewayAnthropicMessagesResponseSchema.parse(payload)
+      })
+    },
+    async createGeminiGenerateContent(request) {
+      const operation = resolveGatewayOperation('createGeminiGenerateContent')
+      const parsedRequest = gatewayGeminiGenerateContentRequestSchema.parse(request)
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        params: {
+          model: parsedRequest.model
+        },
+        body: parsedRequest,
+        parse: (payload) => gatewayGeminiGenerateContentResponseSchema.parse(payload)
+      })
     }
   }
 }
@@ -545,5 +618,20 @@ void expectType<ProviderResource[]>(
 )
 void expectType<RoutePolicy[]>(
   [] as Awaited<ReturnType<ControlPlaneClient['listRoutePolicies']>>
+)
+void expectType<RouteReceipt>(
+  {} as Awaited<ReturnType<ControlPlaneClient['getRouteReceipt']>>
+)
+void expectType<RouteReceipt[]>(
+  [] as Awaited<ReturnType<ControlPlaneClient['listRouteReceipts']>>
+)
+void expectType<RouteReceiptDiagnosticsResponse>(
+  {} as Awaited<ReturnType<ControlPlaneClient['getRouteReceiptDiagnostics']>>
+)
+void expectType<GatewayAnthropicMessagesRequest>(
+  {} as Parameters<GatewayClient['createAnthropicMessages']>[0]
+)
+void expectType<GatewayGeminiGenerateContentRequest>(
+  {} as Parameters<GatewayClient['createGeminiGenerateContent']>[0]
 )
 void expectType<GatewayChatRequest>({} as Parameters<GatewayClient['createChatCompletion']>[0])

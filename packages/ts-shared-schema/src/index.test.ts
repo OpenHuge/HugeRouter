@@ -4,12 +4,20 @@ import { readFileSync } from 'node:fs'
 import {
   authProviderLinkSchema,
   authSessionSchema,
+  authSessionResponseSchema,
   configSnapshotResponseSchema,
   contractDigest,
   emailLoginCompleteRequestSchema,
   emailLoginStartRequestSchema,
+  gatewayAnthropicMessagesErrorSchema,
+  gatewayAnthropicMessagesRequestSchema,
+  gatewayAnthropicMessagesResponseSchema,
+  gatewayGeminiGenerateContentErrorSchema,
+  gatewayGeminiGenerateContentRequestSchema,
+  gatewayGeminiGenerateContentResponseSchema,
   gatewayChatRequestSchema,
   gatewayChatResponseSchema,
+  routeReceiptDiagnosticsResponseSchema,
   oauthCallbackRequestSchema,
   oauthLoginStartResponseSchema,
   oauthProviderSchema,
@@ -51,6 +59,7 @@ void test('control-plane examples conform to shared zod schemas', () => {
   const simulationResponse = readJson(
     '../../../schemas/examples/control-plane/route-simulation.response.json'
   )
+  const sessionResponse = readJson('../../../schemas/examples/auth/session-response.json')
 
   assert.equal(tenantsResponseSchema.parse(tenants).data[0]?.tenant_id, 'tenant_acme')
   assert.equal(projectsResponseSchema.parse(projects).data[0]?.project_id, 'proj_core')
@@ -74,11 +83,34 @@ void test('control-plane examples conform to shared zod schemas', () => {
     routeSimulationResponseSchema.parse(simulationResponse).selected_target,
     'prvrsrc_openai_primary'
   )
+  assert.equal(
+    authSessionResponseSchema.parse(sessionResponse).session?.sessionId,
+    'sess_123'
+  )
 })
 
 void test('gateway and event examples conform to shared zod schemas', () => {
   const gatewayRequest = readJson('../../../schemas/examples/gateway/chat.request.json')
   const gatewayResponse = readJson('../../../schemas/examples/gateway/chat.response.json')
+  const anthropicRequest = readJson('../../../schemas/examples/gateway/anthropic-messages.request.json')
+  const anthropicResponse = readJson(
+    '../../../schemas/examples/gateway/anthropic-messages.response.json'
+  )
+  const anthropicError = readJson(
+    '../../../schemas/examples/gateway/anthropic-messages.error.response.json'
+  )
+  const geminiRequest = readJson(
+    '../../../schemas/examples/gateway/gemini-generate-content.request.json'
+  )
+  const geminiResponse = readJson(
+    '../../../schemas/examples/gateway/gemini-generate-content.response.json'
+  )
+  const geminiError = readJson(
+    '../../../schemas/examples/gateway/gemini-generate-content.error.response.json'
+  )
+  const routeReceiptDiagnostics = readJson(
+    '../../../schemas/examples/control-plane/route-receipt-diagnostics.response.json'
+  )
   const usageMessage = readJson(
     '../../../schemas/examples/events/usage-event-recorded.message.json'
   )
@@ -94,6 +126,34 @@ void test('gateway and event examples conform to shared zod schemas', () => {
   assert.equal(
     usageEventRecordedMessageSchema.parse(usageMessage).message_type,
     'usage_event.recorded'
+  )
+  assert.equal(
+    gatewayAnthropicMessagesRequestSchema.parse(anthropicRequest).messages[0]?.role,
+    'user'
+  )
+  assert.equal(
+    gatewayAnthropicMessagesResponseSchema.parse(anthropicResponse).content[0]?.type,
+    'text'
+  )
+  assert.equal(
+    gatewayAnthropicMessagesErrorSchema.parse(anthropicError).error.code,
+    'validation_failed'
+  )
+  assert.equal(
+    gatewayGeminiGenerateContentRequestSchema.parse(geminiRequest).contents[0]?.role,
+    'user'
+  )
+  assert.equal(
+    gatewayGeminiGenerateContentResponseSchema.parse(geminiResponse).candidates[0]?.content?.role,
+    'model'
+  )
+  assert.equal(
+    gatewayGeminiGenerateContentErrorSchema.parse(geminiError).error.code,
+    'validation_failed'
+  )
+  assert.equal(
+    routeReceiptDiagnosticsResponseSchema.parse(routeReceiptDiagnostics).route_receipt.route_receipt_id,
+    'routercpt_123'
   )
 })
 

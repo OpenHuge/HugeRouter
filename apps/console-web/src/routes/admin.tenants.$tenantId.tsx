@@ -23,6 +23,8 @@ function TenantDetailPage() {
           title="Tenant detail"
         />
         <RouteErrorState
+          kind={result?.kind}
+          message={result?.state === 'error' ? result?.message : undefined}
           description="The selected tenant could not be loaded. Return to the tenant list and try again."
           title="Tenant unavailable"
         />

@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "route_receipt_id": "routercpt_123",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "request_id": "req_123",
+      "trace_id": "trace_123",
+      "protocol_family": "openai_chat",
+      "model_alias": "reasoning-fast",
+      "config_snapshot_id": "cfgsnap_default",
+      "admission_result": "admitted",
+      "selected_target": "prvrsrc_openai_primary",
+      "excluded_targets": [
+        {
+          "provider_resource_id": "prvrsrc_backup",
+          "reason": "rejected_provenance_class"
+        }
+      ],
+      "score_breakdown": {
+        "latency": 0.82,
+        "cost": 0.66,
+        "health": 0.97,
+        "trust": 1.0
+      },
+      "fallback_transitions": [],
+      "created_at": "2026-04-21T12:16:00Z"
+    }
+  ]
+}

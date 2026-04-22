@@ -27,6 +27,8 @@ function OverviewPage() {
           title="Overview"
         />
         <RouteErrorState
+          kind={result?.kind}
+          message={result?.state === 'error' ? result?.message : undefined}
           description="The console could not load the current workspace summary. Try again after the control-plane API is available."
           title="Overview unavailable"
         />

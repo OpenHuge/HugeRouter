@@ -9,8 +9,12 @@ version.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+anyhow.workspace = true
+async-nats = { version = "0.38.0" }
+futures = { version = "0.3.31" }
 tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
-

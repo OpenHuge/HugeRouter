@@ -1,20 +1,27 @@
 import {
   createControlPlaneClient,
+  ControlPlaneClientError,
   type ControlPlaneClient
 } from '@huge-router/ts-api-client'
-import type {
-  ConfigSnapshot,
-  Project,
-  ProviderResource,
-  RoutePolicy,
-  RouteSimulationResponse
+import {
+  configSnapshotSchema,
+  type ConfigSnapshot,
+  type Project,
+  type ProviderResource,
+  type RoutePolicy,
+  routeReceiptSchema,
+  type RouteReceipt,
+  type RouteSimulationResponse
 } from '@huge-router/ts-shared-schema'
 import type { AuthSessionEnvelope } from '../auth/auth-contract'
 import { authSessionQueryKey } from '../auth/auth-queries'
 import { getQueryClient } from '../../lib/query-client'
 import type {
+  ApiKeyView,
   OverviewData,
+  ConfigSnapshotView,
   ProjectSummary,
+  RouteReceiptDiagnosticView,
   RoutePolicyView,
   TenantDetail,
   TenantSummary
@@ -25,7 +32,12 @@ export type ConsoleDataService = {
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>
   listProviderResources: () => Promise<ProviderResource[]>
   listRoutePolicies: () => Promise<RoutePolicyView[]>
+  listRouteReceipts: () => Promise<RouteReceiptDiagnosticView[]>
   listTenants: () => Promise<TenantSummary[]>
+  listConfigSnapshots: () => Promise<ConfigSnapshotView[]>
+  activateConfigSnapshot: (configSnapshotId: string) => Promise<ConfigSnapshotView>
+  listApiKeys: () => Promise<ApiKeyView[]>
+  revokeApiKey: (apiKeyId: string, version: number) => Promise<void>
 }
 
 const CONTROL_PLANE_BASE_URL = import.meta.env.VITE_CONTROL_PLANE_BASE_URL
@@ -36,6 +48,181 @@ const client = createControlPlaneClient({
   baseUrl: CONTROL_PLANE_BASE_URL,
   fetch: (input, init) => globalThis.fetch(input, init)
 })
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value)
+
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+
+  return undefined
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  return undefined
+}
+
+function toControlPlaneUrl(path: string) {
+  if (!CONTROL_PLANE_BASE_URL) {
+    return path
+  }
+
+  const baseUrl = CONTROL_PLANE_BASE_URL.endsWith('/')
+    ? CONTROL_PLANE_BASE_URL
+    : `${CONTROL_PLANE_BASE_URL}/`
+
+  return new URL(path, baseUrl).toString()
+}
+
+function isNotFoundErrorStatus(status: number) {
+  return status === 404 || status === 405 || status === 501
+}
+
+function hasArray(value: unknown): value is unknown[] {
+  return Array.isArray(value)
+}
+
+type ParsedControlPlaneError = {
+  code?: string
+  message: string
+  requestId?: string
+  traceId?: string
+}
+
+function parseErrorPayload(payload: unknown): ParsedControlPlaneError | undefined {
+  if (!isRecord(payload)) {
+    return undefined
+  }
+
+  const nested = payload.error
+  const payloadRequestId = stringOrUndefined(pickRecordValue(payload, ['requestId', 'request_id']))
+  const payloadTraceId = stringOrUndefined(pickRecordValue(payload, ['traceId', 'trace_id']))
+  const payloadCode = stringOrUndefined(pickRecordValue(payload, ['code']))
+  const payloadMessage = stringOrUndefined(pickRecordValue(payload, ['message']))
+
+  if (isRecord(nested)) {
+    return {
+      code: stringOrUndefined(pickRecordValue(nested, ['code'])) ?? payloadCode,
+      message:
+        stringOrUndefined(pickRecordValue(nested, ['message'])) ??
+        payloadMessage ??
+        'Request failed.',
+      requestId: stringOrUndefined(pickRecordValue(nested, ['requestId', 'request_id'])) ??
+        payloadRequestId,
+      traceId: stringOrUndefined(pickRecordValue(nested, ['traceId', 'trace_id'])) ??
+        payloadTraceId
+    }
+  }
+
+  return {
+    code: payloadCode,
+    message: payloadMessage ?? 'Request failed.',
+    requestId: payloadRequestId,
+    traceId: payloadTraceId
+  }
+}
+
+async function requestControlPlaneJson<T>(
+  path: string,
+  parse: (payload: unknown) => T,
+  init: RequestInit = {}
+): Promise<T> {
+  const response = await globalThis.fetch(toControlPlaneUrl(path), {
+    credentials: 'include',
+    ...init
+  })
+  const responseText = await response.text()
+  let payload: unknown = null
+
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText)
+    } catch {
+      payload = responseText
+    }
+  }
+
+  if (!response.ok) {
+    const normalized = parseErrorPayload(payload)
+
+    throw new ControlPlaneClientError(
+      normalized?.message ?? `Control plane request failed with status ${response.status}`,
+      response.status,
+      {
+        code: normalized?.code,
+        meta: {
+          requestId: normalized?.requestId,
+          traceId: normalized?.traceId
+        }
+      }
+    )
+  }
+
+  return parse(payload)
+}
+
+function pickRecordValue<T>(record: Record<string, unknown>, keys: string[]): T | undefined {
+  for (const key of keys) {
+    const value = record[key]
+
+    if (value !== undefined) {
+      return value as T
+    }
+  }
+
+  return undefined
+}
+
+function extractListPayload(payload: unknown, keys: string[], fallbackToSingle = false) {
+  if (hasArray(payload)) {
+    return payload
+  }
+
+  if (!isRecord(payload)) {
+    return []
+  }
+
+  for (const key of keys) {
+    const value = payload[key]
+
+    if (hasArray(value)) {
+      return value
+    }
+  }
+
+  if (fallbackToSingle && (payload.config_snapshot || payload.config_snapshot_id)) {
+    return [payload]
+  }
+
+  return []
+}
+
+function isControlPlaneError(value: unknown): value is ControlPlaneClientError {
+  return value instanceof ControlPlaneClientError
+}
+
+function isRecoverableMissingEndpoint(error: unknown) {
+  return isControlPlaneError(error) ? isNotFoundErrorStatus(error.status) : false
+}
 
 function getAuthEnvelope() {
   return getQueryClient().getQueryData<AuthSessionEnvelope>(authSessionQueryKey)
@@ -59,14 +246,25 @@ function isPlatformAdmin() {
     : false
 }
 
-function filterByTenant<T extends { tenant_id: string }>(items: T[]) {
+function tenantIdFromRecord(item: unknown) {
+  if (!isRecord(item)) {
+    return undefined
+  }
+
+  return (
+    stringOrUndefined(pickRecordValue<string>(item, ['tenant_id'])) ??
+    stringOrUndefined(pickRecordValue<string>(item, ['tenantId']))
+  )
+}
+
+function filterByTenant<T>(items: T[]) {
   const tenantId = getActiveTenantId()
 
   if (!tenantId || isPlatformAdmin()) {
     return items
   }
 
-  return items.filter((item) => item.tenant_id === tenantId)
+  return items.filter((item) => tenantIdFromRecord(item) === tenantId)
 }
 
 function toProjectSummary(project: Project): ProjectSummary {
@@ -99,6 +297,152 @@ function mapRoutePolicies(
             .map((providerId) => providerNames.get(providerId) ?? providerId)
         : []
   }))
+}
+
+function providerLabelById(providerResources: ProviderResource[]) {
+  return new Map(providerResources.map((provider) => [provider.provider_resource_id, provider.name]))
+}
+
+function mapProviderLabel(providerResourceId: string, providersById: Map<string, string>) {
+  return providersById.get(providerResourceId) ?? providerResourceId
+}
+
+function parseSingleRouteReceipt(payload: unknown): RouteReceipt {
+  if (!isRecord(payload)) {
+    throw new Error('Malformed route receipt response payload')
+  }
+
+  const rawReceipt = isRecord(payload.route_receipt) ? payload.route_receipt : payload
+
+  return routeReceiptSchema.parse(rawReceipt)
+}
+
+function parseRouteReceiptList(payload: unknown) {
+  const receipts = extractListPayload(payload, ['data', 'route_receipts', 'receipts', 'items'])
+
+  return receipts.map(parseSingleRouteReceipt)
+}
+
+function toRouteReceiptDiagnostic(receipt: RouteReceipt, providerById: Map<string, string>): RouteReceiptDiagnosticView {
+  const selectedTargetLabel = receipt.selected_target
+    ? mapProviderLabel(receipt.selected_target, providerById)
+    : 'No selected target'
+
+  const excludedTargets = receipt.excluded_targets.map((target) => ({
+    providerLabel: mapProviderLabel(target.provider_resource_id, providerById),
+    providerResourceId: target.provider_resource_id,
+    reason: target.reason
+  }))
+
+  const fallbackTransitions = receipt.fallback_transitions.map((transition) => ({
+    fromProviderLabel: mapProviderLabel(transition.from_provider_resource_id, providerById),
+    fromProviderResourceId: transition.from_provider_resource_id,
+    reason: transition.reason,
+    toProviderLabel: mapProviderLabel(transition.to_provider_resource_id, providerById),
+    toProviderResourceId: transition.to_provider_resource_id
+  }))
+
+  return {
+    admissionResult: receipt.admission_result,
+    configSnapshotId: receipt.config_snapshot_id,
+    createdAt: receipt.created_at,
+    excludedTargets,
+    fallbackTransitions,
+    modelAlias: receipt.model_alias,
+    normalizedError: receipt.normalized_error,
+    protocolFamily: receipt.protocol_family,
+    routeReceiptId: receipt.route_receipt_id,
+    requestId: receipt.request_id,
+    selectedTargetLabel,
+    selectedTargetReason: receipt.selected_target ? null : 'No target selected',
+    selectedTargetResourceId: receipt.selected_target ?? 'none',
+    traceId: receipt.trace_id
+  }
+}
+
+function toConfigSnapshotView(snapshot: ConfigSnapshot): ConfigSnapshotView {
+  return {
+    budgetPolicyId: snapshot.budget_policy_id,
+    configSnapshotId: snapshot.config_snapshot_id,
+    activatedAt: snapshot.activated_at,
+    providerResourceIds: snapshot.provider_resource_ids,
+    routePolicyId: snapshot.route_policy_id,
+    revision: snapshot.revision,
+    projectId: snapshot.project_id,
+    status: snapshot.status,
+    tenantId: snapshot.tenant_id
+  }
+}
+
+function parseControlPlaneSnapshotList(payload: unknown): unknown[] {
+  return extractListPayload(payload, ['data', 'config_snapshots', 'snapshots', 'items'], true)
+}
+
+function parseSingleSnapshot(payload: unknown) {
+  if (!isRecord(payload)) {
+    throw new Error('Malformed config snapshot response payload')
+  }
+
+  const snapshotRecord =
+    (payload.config_snapshot ? pickRecordValue<unknown>(payload, ['config_snapshot']) : payload)
+
+  const snapshot = configSnapshotSchema.parse(snapshotRecord)
+
+  return toConfigSnapshotView(snapshot)
+}
+
+function parseConfigSnapshotList(payload: unknown) {
+  const snapshots = parseControlPlaneSnapshotList(payload)
+
+  return snapshots.map((snapshot) => parseSingleSnapshot(snapshot))
+}
+
+function parseApiKeyRecord(record: unknown): ApiKeyView {
+  if (!isRecord(record)) {
+    throw new Error('Malformed api key response payload')
+  }
+
+  const apiKeyId =
+    stringOrUndefined(pickRecordValue<string>(record, ['api_key_id', 'apiKeyId', 'id'])) ??
+    'unknown'
+  const displayName =
+    stringOrUndefined(pickRecordValue<string>(record, ['display_name', 'displayName'])) ??
+    'API key'
+  const keyPrefix =
+    stringOrUndefined(pickRecordValue<string>(record, ['key_prefix', 'keyPrefix'])) ?? '••••'
+  const providerResourceId =
+    stringOrUndefined(
+      pickRecordValue<string>(record, ['provider_resource_id', 'providerResourceId'])
+    ) ?? 'unassigned'
+  const canRevoke = booleanOrUndefined(pickRecordValue<boolean>(record, ['can_revoke', 'canRevoke'])) ??
+    true
+  const isActive = booleanOrUndefined(pickRecordValue<boolean>(record, ['is_active', 'isActive'])) ?? true
+  const version =
+    numberOrUndefined(pickRecordValue<number>(record, ['version'])) ??
+    numberOrUndefined(pickRecordValue<string>(record, ['version'])) ??
+    1
+  const tenantId =
+    stringOrUndefined(pickRecordValue<string>(record, ['tenant_id', 'tenantId'])) ??
+    undefined
+
+  return {
+    apiKeyId,
+    canRevoke,
+    createdAt: stringOrUndefined(pickRecordValue<string>(record, ['created_at', 'createdAt'])) ?? '',
+    displayName,
+    isActive,
+    keyPrefix,
+    providerResourceId,
+    tenantId,
+    updatedAt: stringOrUndefined(pickRecordValue<string>(record, ['updated_at', 'updatedAt'])) ?? '',
+    version
+  }
+}
+
+function parseApiKeyList(payload: unknown) {
+  return extractListPayload(payload, ['data', 'api_keys', 'apiKeys', 'items']).map(
+    parseApiKeyRecord
+  )
 }
 
 async function getActiveSnapshotOrNull(apiClient: ControlPlaneClient) {
@@ -148,6 +492,138 @@ async function getRouteSimulationOrNull(
   } catch {
     return null
   }
+}
+
+async function listConfigSnapshotsFromControlPlane() {
+  try {
+    return await requestControlPlaneJson('/v1/config-snapshots', parseConfigSnapshotList, {
+      headers: {
+        Accept: 'application/json'
+      },
+      method: 'GET'
+    })
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      const activeSnapshot = await getActiveSnapshotOrNull(client)
+
+      return activeSnapshot ? [toConfigSnapshotView(activeSnapshot)] : []
+    }
+
+    throw error
+  }
+}
+
+async function activateConfigSnapshotFromControlPlane(configSnapshotId: string) {
+  try {
+    const activeSnapshot = await client.activateConfigSnapshot(configSnapshotId)
+
+    return toConfigSnapshotView(activeSnapshot)
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      const activated = await requestControlPlaneJson(
+        `/v1/config-snapshots/${encodeURIComponent(configSnapshotId)}/activate`,
+        parseSingleSnapshot,
+        {
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          method: 'POST'
+        }
+      )
+
+      return activated
+    }
+
+    throw error
+  }
+}
+
+async function listApiKeysFromControlPlane() {
+  try {
+    return await requestControlPlaneJson('/v1/api-keys', parseApiKeyList, {
+      headers: {
+        Accept: 'application/json'
+      },
+      method: 'GET'
+    })
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      return []
+    }
+
+    throw error
+  }
+}
+
+async function listRouteReceiptsFromControlPlane() {
+  try {
+    return await requestControlPlaneJson('/v1/route-receipts', parseRouteReceiptList, {
+      headers: {
+        Accept: 'application/json'
+      },
+      method: 'GET'
+    })
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      return []
+    }
+
+    throw error
+  }
+}
+
+async function revokeApiKeyFromControlPlane(apiKeyId: string, version: number) {
+  const endpoint = `/v1/api-keys/${encodeURIComponent(apiKeyId)}/revoke`
+  const body = JSON.stringify({ version })
+
+  const requestBodyHeaders = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json'
+  }
+
+  try {
+    await requestControlPlaneJson(endpoint, () => undefined, {
+      body,
+      headers: requestBodyHeaders,
+      method: 'DELETE'
+    })
+
+    return
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      await requestControlPlaneJson(endpoint, () => undefined, {
+        body,
+        headers: requestBodyHeaders,
+        method: 'POST'
+      })
+
+      return
+    }
+
+    throw error
+  }
+}
+
+async function listTenantApiKeysFromControlPlane() {
+  const keys = await listApiKeysFromControlPlane()
+  const tenantId = getActiveTenantId()
+
+  if (!tenantId || isPlatformAdmin()) {
+    return keys
+  }
+
+  const providerResources = await client.listProviderResources()
+  const allowedProviderIds = new Set(
+    providerResources.filter((provider) => provider.tenant_id === tenantId)
+      .map((provider) => provider.provider_resource_id)
+  )
+
+  return keys.filter(
+    (key) =>
+      key.tenantId === tenantId ||
+      (key.tenantId === undefined && allowedProviderIds.has(key.providerResourceId))
+  )
 }
 
 function selectedProviderLabel(
@@ -286,6 +762,20 @@ const defaultConsoleDataService: ConsoleDataService = {
     return mapRoutePolicies(filteredPolicies, filteredProviders, activeSnapshot)
   },
 
+  async listRouteReceipts() {
+    const [routeReceipts, providerResources] = await Promise.all([
+      listRouteReceiptsFromControlPlane(),
+      client.listProviderResources()
+    ])
+    const filteredReceipts = filterByTenant(routeReceipts)
+    const providerById = providerLabelById(filterByTenant(providerResources))
+
+    return filteredReceipts
+      .map((receipt) => toRouteReceiptDiagnostic(receipt, providerById))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 10)
+  },
+
   async listTenants() {
     const { activeSnapshot, projects, providerResources, routePolicies, tenants } =
       await loadControlPlaneData()
@@ -307,6 +797,31 @@ const defaultConsoleDataService: ConsoleDataService = {
       slug: tenant.slug,
       updatedAt: tenant.updated_at
     }))
+  },
+
+  async listConfigSnapshots() {
+    const snapshots = await listConfigSnapshotsFromControlPlane()
+    const filteredSnapshots = filterByTenant(snapshots)
+
+    return filteredSnapshots.sort((left, right) =>
+      right.revision === left.revision
+        ? right.configSnapshotId.localeCompare(left.configSnapshotId)
+        : right.revision - left.revision
+    )
+  },
+
+  async activateConfigSnapshot(configSnapshotId) {
+    const activated = await activateConfigSnapshotFromControlPlane(configSnapshotId)
+
+    return activated
+  },
+
+  async listApiKeys() {
+    return listTenantApiKeysFromControlPlane()
+  },
+
+  async revokeApiKey(apiKeyId, version) {
+    await revokeApiKeyFromControlPlane(apiKeyId, version)
   }
 }
 

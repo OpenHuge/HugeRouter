@@ -1,0 +1,9 @@
+services:
+  postgres:
+    profiles: ["smoke"]
+
+  redis:
+    profiles: ["smoke"]
+
+  nats:
+    profiles: ["smoke"]

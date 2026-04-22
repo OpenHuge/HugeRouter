@@ -13,9 +13,11 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as LoginCallbackRouteImport } from './routes/login.callback'
+import { Route as AppSnapshotsRouteImport } from './routes/app.snapshots'
 import { Route as AppRoutesRouteImport } from './routes/app.routes'
 import { Route as AppProvidersRouteImport } from './routes/app.providers'
 import { Route as AppOverviewRouteImport } from './routes/app.overview'
+import { Route as AppApiKeysRouteImport } from './routes/app.api-keys'
 import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
 import { Route as AdminTenantsTenantIdRouteImport } from './routes/admin.tenants.$tenantId'
 
@@ -39,6 +41,11 @@ const LoginCallbackRoute = LoginCallbackRouteImport.update({
   path: '/callback',
   getParentRoute: () => LoginRoute,
 } as any)
+const AppSnapshotsRoute = AppSnapshotsRouteImport.update({
+  id: '/snapshots',
+  path: '/snapshots',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppRoutesRoute = AppRoutesRouteImport.update({
   id: '/routes',
   path: '/routes',
@@ -52,6 +59,11 @@ const AppProvidersRoute = AppProvidersRouteImport.update({
 const AppOverviewRoute = AppOverviewRouteImport.update({
   id: '/overview',
   path: '/overview',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppApiKeysRoute = AppApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
   getParentRoute: () => AppRoute,
 } as any)
 const AdminTenantsRoute = AdminTenantsRouteImport.update({
@@ -70,9 +82,11 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
+  '/app/api-keys': typeof AppApiKeysRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/routes': typeof AppRoutesRoute
+  '/app/snapshots': typeof AppSnapshotsRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
 }
@@ -81,9 +95,11 @@ export interface FileRoutesByTo {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
+  '/app/api-keys': typeof AppApiKeysRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/routes': typeof AppRoutesRoute
+  '/app/snapshots': typeof AppSnapshotsRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
 }
@@ -93,9 +109,11 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
+  '/app/api-keys': typeof AppApiKeysRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/routes': typeof AppRoutesRoute
+  '/app/snapshots': typeof AppSnapshotsRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
 }
@@ -106,9 +124,11 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/admin/tenants'
+    | '/app/api-keys'
     | '/app/overview'
     | '/app/providers'
     | '/app/routes'
+    | '/app/snapshots'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
   fileRoutesByTo: FileRoutesByTo
@@ -117,9 +137,11 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/admin/tenants'
+    | '/app/api-keys'
     | '/app/overview'
     | '/app/providers'
     | '/app/routes'
+    | '/app/snapshots'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
   id:
@@ -128,9 +150,11 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/admin/tenants'
+    | '/app/api-keys'
     | '/app/overview'
     | '/app/providers'
     | '/app/routes'
+    | '/app/snapshots'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
   fileRoutesById: FileRoutesById
@@ -171,6 +195,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginCallbackRouteImport
       parentRoute: typeof LoginRoute
     }
+    '/app/snapshots': {
+      id: '/app/snapshots'
+      path: '/snapshots'
+      fullPath: '/app/snapshots'
+      preLoaderRoute: typeof AppSnapshotsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/routes': {
       id: '/app/routes'
       path: '/routes'
@@ -190,6 +221,13 @@ declare module '@tanstack/react-router' {
       path: '/overview'
       fullPath: '/app/overview'
       preLoaderRoute: typeof AppOverviewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/api-keys': {
+      id: '/app/api-keys'
+      path: '/api-keys'
+      fullPath: '/app/api-keys'
+      preLoaderRoute: typeof AppApiKeysRouteImport
       parentRoute: typeof AppRoute
     }
     '/admin/tenants': {
@@ -232,15 +270,19 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppRouteChildren {
+  AppApiKeysRoute: typeof AppApiKeysRoute
   AppOverviewRoute: typeof AppOverviewRoute
   AppProvidersRoute: typeof AppProvidersRoute
   AppRoutesRoute: typeof AppRoutesRoute
+  AppSnapshotsRoute: typeof AppSnapshotsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppApiKeysRoute: AppApiKeysRoute,
   AppOverviewRoute: AppOverviewRoute,
   AppProvidersRoute: AppProvidersRoute,
   AppRoutesRoute: AppRoutesRoute,
+  AppSnapshotsRoute: AppSnapshotsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

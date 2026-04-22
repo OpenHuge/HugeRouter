@@ -10,6 +10,16 @@ export const tenantNav = [
     description: 'Route policy coverage and selected provider targets'
   },
   {
+    href: '/app/snapshots',
+    label: 'Snapshots',
+    description: 'Config snapshots and active snapshot selection'
+  },
+  {
+    href: '/app/api-keys',
+    label: 'API Keys',
+    description: 'API key inventory and revoke actions'
+  },
+  {
     href: '/app/providers',
     label: 'Providers',
     description: 'Provider inventory, health, and routing scope'
