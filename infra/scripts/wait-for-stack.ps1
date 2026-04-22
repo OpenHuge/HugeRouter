@@ -1,29 +1,69 @@
 param(
-  [int]$TimeoutSeconds = 180
+  [ValidateSet('core', 'full', 'observability')]
+  [string]$Mode = $(if ($env:HUGE_ROUTER_STACK_MODE) { $env:HUGE_ROUTER_STACK_MODE } else { 'core' }),
+  [int]$TimeoutSeconds = $(if ($env:HUGE_ROUTER_STACK_TIMEOUT_SECONDS) { [int]$env:HUGE_ROUTER_STACK_TIMEOUT_SECONDS } else { 180 })
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-$checks = @(
-  'http://127.0.0.1:8222/healthz',
-  'http://127.0.0.1:13133/',
-  'http://127.0.0.1:9090/-/ready',
-  'http://127.0.0.1:3001/api/health'
-)
+function Get-ServiceList {
+  param([string]$RequestedMode)
 
-foreach ($url in $checks) {
-  while ((Get-Date) -lt $deadline) {
-    try {
-      Invoke-WebRequest -Uri $url -UseBasicParsing | Out-Null
-      break
-    } catch {
-      Start-Sleep -Seconds 2
+  switch ($RequestedMode) {
+    'core' { return @('postgres', 'redis', 'nats') }
+    'observability' { return @('otel-collector', 'prometheus', 'grafana') }
+    'full' { return @('postgres', 'redis', 'nats', 'otel-collector', 'prometheus', 'grafana') }
+    default { throw "Unsupported stack mode: $RequestedMode" }
+  }
+}
+
+$composeFile = (Resolve-Path (Join-Path $PSScriptRoot '..\docker\compose.yaml')).Path
+$composeArgs = @('-f', $composeFile)
+
+if ($Mode -ne 'core') {
+  $composeArgs += @('--profile', 'observability')
+}
+
+$services = Get-ServiceList -RequestedMode $Mode
+$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+
+while ((Get-Date) -lt $deadline) {
+  $allReady = $true
+
+  foreach ($service in $services) {
+    $containerId = (docker compose @composeArgs ps -q $service).Trim()
+
+    if (-not $containerId) {
+      $allReady = $false
+      continue
+    }
+
+    $status = (docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $containerId 2>$null).Trim()
+
+    if ($status -ne 'healthy' -and $status -ne 'running') {
+      $allReady = $false
     }
   }
 
-  if ((Get-Date) -ge $deadline) {
-    throw "Timed out waiting for $url"
+  if ($allReady) {
+    Write-Host "Stack mode $Mode is ready."
+    exit 0
   }
+
+  Start-Sleep -Seconds 2
+}
+
+Write-Error "Timed out waiting for stack mode $Mode after ${TimeoutSeconds}s."
+
+foreach ($service in $services) {
+  $containerId = (docker compose @composeArgs ps -q $service).Trim()
+
+  if (-not $containerId) {
+    Write-Error "- ${service}: not started"
+    continue
+  }
+
+  $status = (docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $containerId 2>$null).Trim()
+  Write-Error "- ${service}: $status"
 }

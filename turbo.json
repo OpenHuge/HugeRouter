@@ -3,7 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": []
+      "outputs": ["dist/**", "dist-types/**", ".tanstack/**", "storybook-static/**", "tsconfig.tsbuildinfo"]
     },
     "lint": {
       "dependsOn": ["^lint"],
