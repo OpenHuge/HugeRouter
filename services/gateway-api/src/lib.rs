@@ -20,13 +20,12 @@ use core_domain::{
 };
 use openai::OpenAiAdapter;
 use protocol_anthropic::{
-    AnthropicMessageRequest, AnthropicMessageResponse,
-    AnthropicResponseContentBlock, AnthropicUsage, MappingError as AnthropicMappingError,
+    AnthropicMessageRequest, AnthropicMessageResponse, AnthropicResponseContentBlock,
+    AnthropicUsage, MappingError as AnthropicMappingError,
 };
 use protocol_gemini::{
     CompatibilityError as GeminiCompatibilityError, GenerateContentRequest,
-    GenerateContentResponse,
-    from_provider_response as gemini_from_provider_response,
+    GenerateContentResponse, from_provider_response as gemini_from_provider_response,
 };
 use protocol_ir::{
     ConfigSnapshotResponse, MessageEnvelope, MessageType, ProviderResourcesResponse,
@@ -223,7 +222,10 @@ pub fn app_with_state(state: GatewayState) -> Router {
         .route("/healthz", get(health))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(anthropic_messages))
-        .route("/v1beta/models/{*model_action}", post(gemini_generate_content))
+        .route(
+            "/v1beta/models/{*model_action}",
+            post(gemini_generate_content),
+        )
         .with_state(state)
 }
 
@@ -752,8 +754,7 @@ fn ensure_scope_matches_config(
             StatusCode::FORBIDDEN,
             normalized_error(
                 "auth_forbidden",
-                "API key project scope does not match the active gateway configuration"
-                    .to_string(),
+                "API key project scope does not match the active gateway configuration".to_string(),
                 context,
                 false,
             ),
@@ -841,10 +842,8 @@ fn normalize_anthropic_request(
     request: AnthropicMessageRequest,
     context: &RequestContext,
 ) -> Result<NormalizedChatRequest, GatewayError> {
-    let normalized =
-        protocol_anthropic::normalize_request(request).map_err(|error| {
-            anthropic_mapping_error(&error, context)
-        })?;
+    let normalized = protocol_anthropic::normalize_request(request)
+        .map_err(|error| anthropic_mapping_error(&error, context))?;
     let mut messages = Vec::with_capacity(
         normalized.messages.len() + usize::from(normalized.system_prompt.is_some()),
     );
@@ -874,9 +873,8 @@ fn normalize_gemini_request(
     request: GenerateContentRequest,
     context: &RequestContext,
 ) -> Result<NormalizedChatRequest, GatewayError> {
-    let provider_request = protocol_gemini::to_provider_request(&request).map_err(|error| {
-        gemini_mapping_error(error, context)
-    })?;
+    let provider_request = protocol_gemini::to_provider_request(&request)
+        .map_err(|error| gemini_mapping_error(error, context))?;
 
     Ok(NormalizedChatRequest {
         model_alias: provider_request.model,
@@ -923,10 +921,7 @@ fn anthropic_mapping_error_field(error: &AnthropicMappingError) -> String {
     }
 }
 
-fn gemini_mapping_error(
-    error: GeminiCompatibilityError,
-    context: &RequestContext,
-) -> GatewayError {
+fn gemini_mapping_error(error: GeminiCompatibilityError, context: &RequestContext) -> GatewayError {
     GatewayError::new(
         StatusCode::BAD_REQUEST,
         validation_error(
@@ -1406,7 +1401,8 @@ fn anthropic_success_response(success: &ExecutionSuccess) -> Response {
 }
 
 fn gemini_success_response(success: &ExecutionSuccess) -> Response {
-    let payload: GenerateContentResponse = gemini_from_provider_response(&success.provider_response);
+    let payload: GenerateContentResponse =
+        gemini_from_provider_response(&success.provider_response);
     let mut response = Json(payload).into_response();
     insert_success_headers(
         &mut response,
@@ -1691,7 +1687,12 @@ impl ControlPlaneApiKeyStore {
         let resolve_path = std::env::var("GATEWAY_API_KEY_RESOLVE_PATH")
             .unwrap_or_else(|_| "/internal/gateway/api-keys/resolve".to_string());
 
-        Self::new(base_url, resolve_path, internal_token, reqwest::Client::new())
+        Self::new(
+            base_url,
+            resolve_path,
+            internal_token,
+            reqwest::Client::new(),
+        )
     }
 
     fn new(
@@ -3205,7 +3206,10 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["responseId"], "resp_gemini_123");
-        assert_eq!(payload["candidates"][0]["content"]["parts"][0]["text"], "gemini summary");
+        assert_eq!(
+            payload["candidates"][0]["content"]["parts"][0]["text"],
+            "gemini summary"
+        );
         assert_eq!(payload["usageMetadata"]["totalTokenCount"], 22);
     }
 

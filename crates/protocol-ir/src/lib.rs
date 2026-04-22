@@ -3,12 +3,12 @@
 use anyhow::Context;
 use core_domain::{
     AdmissionResult, ConfigSnapshot, ConfigSnapshotId, ErrorEnvelope, LedgerEntry, MonetaryAmount,
-    Project, ProjectId, ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt,
-    RouteReceiptId, ServiceName, Tenant, TenantId, UsageEvent, UsagePhase,
+    Project, ProjectId, ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId,
+    RouteReceipt, RouteReceiptId, ServiceName, Tenant, TenantId, UsageEvent, UsagePhase,
 };
-use serde_json::Value;
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -372,9 +372,17 @@ pub struct GatewayGeminiGenerateContentRequest {
     pub tools: Vec<Value>,
     #[serde(default)]
     pub stream: bool,
-    #[serde(rename = "systemInstruction", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "systemInstruction",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub system_instruction: Option<GatewayGeminiSystemInstruction>,
-    #[serde(rename = "generationConfig", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "generationConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub generation_config: Option<GatewayGeminiGenerationConfig>,
 }
 
@@ -1699,8 +1707,9 @@ mod tests {
         ChatRequest, ConfigSnapshotActivated, MessageEnvelope, MessageType, ProtocolFamily,
         RequestEnvelope, collect_contract_artifacts, sample_gateway_anthropic_messages_request,
         sample_gateway_anthropic_messages_response, sample_gateway_chat_request,
-        sample_gateway_gemini_generate_content_request, sample_gateway_gemini_generate_content_response,
-        sample_route_receipt_diagnostics, sample_usage_event_recorded_message, workspace_root,
+        sample_gateway_gemini_generate_content_request,
+        sample_gateway_gemini_generate_content_response, sample_route_receipt_diagnostics,
+        sample_usage_event_recorded_message, workspace_root,
     };
     use core_domain::{ConfigSnapshot, ProjectId, ServiceName, TenantId};
 
@@ -1822,26 +1831,22 @@ mod tests {
         let anthropic_request = sample_gateway_anthropic_messages_request();
         let anthropic_response = sample_gateway_anthropic_messages_response();
         assert_eq!(
-            serde_json::to_value(&anthropic_request)
-                .unwrap()["messages"][0]["role"],
+            serde_json::to_value(&anthropic_request).unwrap()["messages"][0]["role"],
             "user"
         );
         assert_eq!(
-            serde_json::to_value(&anthropic_response)
-                .unwrap()["content"][0]["type"],
+            serde_json::to_value(&anthropic_response).unwrap()["content"][0]["type"],
             "text"
         );
 
         let gemini_request = sample_gateway_gemini_generate_content_request();
         let gemini_response = sample_gateway_gemini_generate_content_response();
         assert_eq!(
-            serde_json::to_value(&gemini_request)
-                .unwrap()["contents"][0]["role"],
+            serde_json::to_value(&gemini_request).unwrap()["contents"][0]["role"],
             "user"
         );
         assert_eq!(
-            serde_json::to_value(&gemini_response)
-                .unwrap()["candidates"][0]["content"]["role"],
+            serde_json::to_value(&gemini_response).unwrap()["candidates"][0]["content"]["role"],
             "model"
         );
     }

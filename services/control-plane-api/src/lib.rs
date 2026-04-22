@@ -27,8 +27,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
     ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, EMAIL_BOOTSTRAP_CODE,
-    IdentityLookup, RouteReceiptsResponse, SESSION_TTL_SECONDS, StoreMode,
-    ensure_workspace_slug, expires_at, now_rfc3339, oauth_provider_slug,
+    IdentityLookup, RouteReceiptsResponse, SESSION_TTL_SECONDS, StoreMode, ensure_workspace_slug,
+    expires_at, now_rfc3339, oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -1243,8 +1243,7 @@ async fn require_platform_admin_session(
         membership.tenant.slug == "platform-admin"
             && matches!(
                 membership.role,
-                core_domain::TenantMembershipRole::Owner
-                    | core_domain::TenantMembershipRole::Admin
+                core_domain::TenantMembershipRole::Owner | core_domain::TenantMembershipRole::Admin
             )
     });
 
@@ -1266,13 +1265,13 @@ fn require_internal_gateway_auth(
     context: &RequestContext,
 ) -> Result<(), ApiError> {
     let configured_token = state.internal_gateway_token.as_deref().ok_or_else(|| {
-            ApiError::internal(
-                "internal_auth_unconfigured",
-                "CONTROL_PLANE_INTERNAL_TOKEN must be configured for internal gateway calls"
-                    .to_string(),
-                context,
-            )
-        })?;
+        ApiError::internal(
+            "internal_auth_unconfigured",
+            "CONTROL_PLANE_INTERNAL_TOKEN must be configured for internal gateway calls"
+                .to_string(),
+            context,
+        )
+    })?;
     let Some(value) = headers.get(AUTHORIZATION) else {
         return Err(ApiError::unauthorized(
             "auth_invalid",
@@ -1486,16 +1485,19 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::{ControlPlaneState, app_with_state};
+    use crate::store::IdentityLookup;
     use axum::{
         body::{Body, to_bytes},
-        http::{Request, StatusCode, header::{AUTHORIZATION, COOKIE, SET_COOKIE}},
+        http::{
+            Request, StatusCode,
+            header::{AUTHORIZATION, COOKIE, SET_COOKIE},
+        },
     };
     use core_domain::{
-        AdmissionResult, AuthProvider, ConfigSnapshotId, ExcludedTarget, ProjectId, ProviderResourceId,
-        RouteReceipt, ScoreBreakdown, TenantId,
+        AdmissionResult, AuthProvider, ConfigSnapshotId, ExcludedTarget, ProjectId,
+        ProviderResourceId, RouteReceipt, ScoreBreakdown, TenantId,
     };
     use serde_json::Value;
-    use crate::store::IdentityLookup;
 
     async fn platform_admin_cookie(state: &ControlPlaneState) -> String {
         let session_id = "sess_platform_admin_test";
@@ -1719,27 +1721,33 @@ mod tests {
     #[tokio::test]
     async fn list_route_receipts_supports_filters_and_sorting() {
         let state = ControlPlaneState::memory();
-        state.store.insert_route_receipt_for_tests(sample_route_receipt(
-            "routercpt_cp_a",
-            "tenant_acme",
-            "proj_core",
-            "openai_chat",
-            "2026-04-22T00:01:00Z",
-        ));
-        state.store.insert_route_receipt_for_tests(sample_route_receipt(
-            "routercpt_cp_b",
-            "tenant_acme",
-            "proj_core",
-            "openai_responses",
-            "2026-04-22T00:03:00Z",
-        ));
-        state.store.insert_route_receipt_for_tests(sample_route_receipt(
-            "routercpt_cp_c",
-            "tenant_platform",
-            "proj_research",
-            "openai_chat",
-            "2026-04-22T00:02:00Z",
-        ));
+        state
+            .store
+            .insert_route_receipt_for_tests(sample_route_receipt(
+                "routercpt_cp_a",
+                "tenant_acme",
+                "proj_core",
+                "openai_chat",
+                "2026-04-22T00:01:00Z",
+            ));
+        state
+            .store
+            .insert_route_receipt_for_tests(sample_route_receipt(
+                "routercpt_cp_b",
+                "tenant_acme",
+                "proj_core",
+                "openai_responses",
+                "2026-04-22T00:03:00Z",
+            ));
+        state
+            .store
+            .insert_route_receipt_for_tests(sample_route_receipt(
+                "routercpt_cp_c",
+                "tenant_platform",
+                "proj_research",
+                "openai_chat",
+                "2026-04-22T00:02:00Z",
+            ));
 
         let app = app_with_state(state.clone());
         let list_all = app

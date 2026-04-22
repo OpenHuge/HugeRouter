@@ -26,7 +26,10 @@ impl AnthropicAdapter {
     }
 
     #[must_use]
-    pub fn with_version(transport: Arc<dyn HttpTransport>, anthropic_version: impl Into<String>) -> Self {
+    pub fn with_version(
+        transport: Arc<dyn HttpTransport>,
+        anthropic_version: impl Into<String>,
+    ) -> Self {
         Self {
             transport,
             anthropic_version: anthropic_version.into(),
@@ -63,7 +66,10 @@ impl ProviderAdapter for AnthropicAdapter {
                 "stream=true is not supported in non-streaming adapter mode",
                 false,
             )
-            .with_detail("provider_resource_id", &context.endpoint.provider_resource_id));
+            .with_detail(
+                "provider_resource_id",
+                &context.endpoint.provider_resource_id,
+            ));
         }
 
         let http_request = HttpRequest {
@@ -82,15 +88,21 @@ impl ProviderAdapter for AnthropicAdapter {
             body: build_upstream_request(request),
         };
 
-        let response = self.transport.post_json(http_request).await.map_err(|error| {
-            let kind = match error.kind {
-                HttpTransportErrorKind::Timeout => ProviderErrorKind::Timeout,
-                HttpTransportErrorKind::Network => ProviderErrorKind::Unavailable,
-            };
+        let response = self
+            .transport
+            .post_json(http_request)
+            .await
+            .map_err(|error| {
+                let kind = match error.kind {
+                    HttpTransportErrorKind::Timeout => ProviderErrorKind::Timeout,
+                    HttpTransportErrorKind::Network => ProviderErrorKind::Unavailable,
+                };
 
-            ProviderError::new(kind, error.message, error.retryable)
-                .with_detail("provider_resource_id", &context.endpoint.provider_resource_id)
-        })?;
+                ProviderError::new(kind, error.message, error.retryable).with_detail(
+                    "provider_resource_id",
+                    &context.endpoint.provider_resource_id,
+                )
+            })?;
 
         if response.status >= 400 {
             return Err(map_error_response(
@@ -101,17 +113,17 @@ impl ProviderAdapter for AnthropicAdapter {
         }
 
         let payload = serde_json::from_str::<AnthropicMessageResponse>(
-            response
-                .body
-                .as_deref()
-                .ok_or_else(|| {
-                    ProviderError::new(
-                        ProviderErrorKind::Protocol,
-                        "Anthropic returned an empty response body",
-                        false,
-                    )
-                    .with_detail("provider_resource_id", &context.endpoint.provider_resource_id)
-                })?,
+            response.body.as_deref().ok_or_else(|| {
+                ProviderError::new(
+                    ProviderErrorKind::Protocol,
+                    "Anthropic returned an empty response body",
+                    false,
+                )
+                .with_detail(
+                    "provider_resource_id",
+                    &context.endpoint.provider_resource_id,
+                )
+            })?,
         )
         .map_err(|error| {
             ProviderError::new(
@@ -119,7 +131,10 @@ impl ProviderAdapter for AnthropicAdapter {
                 format!("failed to decode Anthropic response: {error}"),
                 false,
             )
-            .with_detail("provider_resource_id", &context.endpoint.provider_resource_id)
+            .with_detail(
+                "provider_resource_id",
+                &context.endpoint.provider_resource_id,
+            )
         })?;
 
         let output_text = protocol_anthropic::response_text(&payload).map_err(|error| {
@@ -128,7 +143,10 @@ impl ProviderAdapter for AnthropicAdapter {
                 format!("invalid Anthropic response content: {error}"),
                 false,
             )
-            .with_detail("provider_resource_id", &context.endpoint.provider_resource_id)
+            .with_detail(
+                "provider_resource_id",
+                &context.endpoint.provider_resource_id,
+            )
         })?;
 
         let finish_reason = payload
@@ -177,13 +195,15 @@ fn map_error_response(
     body: Option<&str>,
     provider_resource_id: &str,
 ) -> ProviderError {
-    let parsed_error = body.and_then(|raw| serde_json::from_str::<AnthropicErrorResponse>(raw).ok());
+    let parsed_error =
+        body.and_then(|raw| serde_json::from_str::<AnthropicErrorResponse>(raw).ok());
     let upstream_code = parsed_error
         .as_ref()
         .and_then(|error| error.error.as_ref().and_then(|value| value.code.clone()));
-    let message = parsed_error.as_ref().and_then(AnthropicErrorResponse::message).unwrap_or_else(|| {
-        format!("Anthropic returned HTTP {status}")
-    });
+    let message = parsed_error
+        .as_ref()
+        .and_then(AnthropicErrorResponse::message)
+        .unwrap_or_else(|| format!("Anthropic returned HTTP {status}"));
     let (kind, retryable) = match status {
         401 | 403 => (ProviderErrorKind::Auth, false),
         400 | 402 | 404 => (ProviderErrorKind::InvalidRequest, false),
@@ -324,17 +344,18 @@ mod tests {
 
     #[async_trait]
     impl HttpTransport for MockTransport {
-        async fn post_json(&self, request: HttpRequest) -> Result<HttpResponse, HttpTransportError> {
+        async fn post_json(
+            &self,
+            request: HttpRequest,
+        ) -> Result<HttpResponse, HttpTransportError> {
             self.requests.lock().unwrap().push(request);
-            self.responses
-                .lock()
-                .unwrap()
-                .pop()
-                .unwrap_or_else(|| Err(HttpTransportError {
+            self.responses.lock().unwrap().pop().unwrap_or_else(|| {
+                Err(HttpTransportError {
                     kind: HttpTransportErrorKind::Network,
                     message: "no response prepared".to_string(),
                     retryable: true,
-                }))
+                })
+            })
         }
     }
 
@@ -448,18 +469,14 @@ mod tests {
     #[test]
     fn maps_provider_request_messages_to_anthropic_messages_payload() {
         let body = build_upstream_request(&request());
-        let messages = body["messages"].as_array().expect("messages should be array");
+        let messages = body["messages"]
+            .as_array()
+            .expect("messages should be array");
         assert_eq!(body["model"], "claude-opus-4-0");
         assert_eq!(body["max_tokens"], 1024);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"], "user");
-        assert_eq!(
-            messages[0]["content"][0]["type"],
-            "text"
-        );
-        assert_eq!(
-            messages[0]["content"][0]["text"],
-            "Hello Anthropic"
-        );
+        assert_eq!(messages[0]["content"][0]["type"], "text");
+        assert_eq!(messages[0]["content"][0]["text"], "Hello Anthropic");
     }
 }

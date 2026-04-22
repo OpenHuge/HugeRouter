@@ -43,11 +43,7 @@ pub struct CompatibilityError {
 }
 
 impl CompatibilityError {
-    fn new(
-        kind: CompatibilityErrorKind,
-        field: &'static str,
-        detail: impl Into<String>,
-    ) -> Self {
+    fn new(kind: CompatibilityErrorKind, field: &'static str, detail: impl Into<String>) -> Self {
         Self {
             kind,
             field,
