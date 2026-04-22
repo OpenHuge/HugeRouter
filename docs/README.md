@@ -39,6 +39,7 @@
 ## Product
 
 - [Roadmap and Delivery Plan](product/roadmap-and-delivery-plan.md)
+- [Parallel Development Tracks](tasks/README.md)
 
 ## ADR
 
