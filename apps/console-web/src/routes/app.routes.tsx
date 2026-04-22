@@ -1,110 +1,113 @@
-import { Badge, Card, Group, List, Stack, Table, Text } from '@mantine/core'
-import { createFileRoute } from '@tanstack/react-router'
-import { PageHeader } from '@huge-router/ui-kit'
-import { loadRouteData } from '../features/control-plane/loaders'
+import { Badge, Card, Group, List, Stack, Table, Text } from "@mantine/core";
+import { createFileRoute } from "@tanstack/react-router";
+import { PageHeader } from "@huge-router/ui-kit";
+import { loadRouteData } from "../features/control-plane/loaders";
 import {
   EmptyCollectionState,
   RouteErrorState,
-  RouteLoadingState
-} from '../features/control-plane/route-state'
+  RouteLoadingState,
+} from "../features/control-plane/route-state";
 import type {
   RouteReceiptDiagnosticView,
-  RoutePolicyView
-} from '../features/control-plane/types'
-import { getConsoleDataService } from '../features/control-plane/service'
+  RoutePolicyView,
+} from "../features/control-plane/types";
+import { getConsoleDataService } from "../features/control-plane/service";
 
 const protocolLabelByFamily: Record<string, string> = {
-  anthropic_messages: 'Anthropic Messages',
-  gemini_generate_content: 'Gemini Generate Content',
-  mcp_streamable_http: 'MCP Streamable HTTP',
-  openai_chat: 'OpenAI Chat',
-  openai_responses: 'OpenAI Responses',
-  realtime_webrtc: 'Realtime WebRTC'
-}
+  anthropic_messages: "Anthropic Messages",
+  gemini_generate_content: "Gemini Generate Content",
+  mcp_streamable_http: "MCP Streamable HTTP",
+  openai_chat: "OpenAI Chat",
+  openai_responses: "OpenAI Responses",
+  realtime_webrtc: "Realtime WebRTC",
+};
 
 const protocolColorByFamily: Record<string, string> = {
-  anthropic_messages: 'orange',
-  gemini_generate_content: 'lime',
-  mcp_streamable_http: 'indigo',
-  openai_chat: 'blue',
-  openai_responses: 'violet',
-  realtime_webrtc: 'teal'
-}
+  anthropic_messages: "orange",
+  gemini_generate_content: "lime",
+  mcp_streamable_http: "indigo",
+  openai_chat: "blue",
+  openai_responses: "violet",
+  realtime_webrtc: "teal",
+};
 
 const protocolOrder = [
-  'openai_chat',
-  'anthropic_messages',
-  'gemini_generate_content',
-  'openai_responses',
-  'mcp_streamable_http',
-  'realtime_webrtc'
-]
+  "openai_chat",
+  "anthropic_messages",
+  "gemini_generate_content",
+  "openai_responses",
+  "mcp_streamable_http",
+  "realtime_webrtc",
+];
 
 type RoutePoliciesPageData = {
-  routePolicies: RoutePolicyView[]
-  routeReceipts: RouteReceiptDiagnosticView[]
-}
+  routePolicies: RoutePolicyView[];
+  routeReceipts: RouteReceiptDiagnosticView[];
+};
 
 function protocolDisplay(protocolFamily: string) {
-  return protocolLabelByFamily[protocolFamily] ?? protocolFamily
+  return protocolLabelByFamily[protocolFamily] ?? protocolFamily;
 }
 
 function protocolColor(protocolFamily: string) {
-  return protocolColorByFamily[protocolFamily] ?? 'gray'
+  return protocolColorByFamily[protocolFamily] ?? "gray";
 }
 
 function routePoliciesByProtocol(routePolicies: RoutePolicyView[]) {
-  return routePolicies.reduce<Record<string, RoutePolicyView[]>>((acc, policy) => {
-    const group = policy.protocolFamily
-    acc[group] ??= []
-    acc[group].push(policy)
-    return acc
-  }, {})
+  return routePolicies.reduce<Record<string, RoutePolicyView[]>>(
+    (acc, policy) => {
+      const group = policy.protocolFamily;
+      acc[group] ??= [];
+      acc[group].push(policy);
+      return acc;
+    },
+    {},
+  );
 }
 
 function listSortedProtocols(groups: Record<string, RoutePolicyView[]>) {
   return Object.entries(groups).sort(([left], [right]) => {
-    const leftIndex = protocolOrder.indexOf(left)
-    const rightIndex = protocolOrder.indexOf(right)
+    const leftIndex = protocolOrder.indexOf(left);
+    const rightIndex = protocolOrder.indexOf(right);
 
     if (leftIndex >= 0 && rightIndex >= 0) {
-      return leftIndex - rightIndex
+      return leftIndex - rightIndex;
     }
 
     if (leftIndex >= 0) {
-      return -1
+      return -1;
     }
 
     if (rightIndex >= 0) {
-      return 1
+      return 1;
     }
 
-    return left.localeCompare(right)
-  })
+    return left.localeCompare(right);
+  });
 }
 
-export const Route = createFileRoute('/app/routes')({
+export const Route = createFileRoute("/app/routes")({
   loader: () =>
     loadRouteData(async () => {
       const [routePolicies, routeReceipts] = await Promise.all([
         getConsoleDataService().listRoutePolicies(),
-        getConsoleDataService().listRouteReceipts()
-      ])
+        getConsoleDataService().listRouteReceipts(),
+      ]);
 
       return {
         routePolicies,
-        routeReceipts
-      } as RoutePoliciesPageData
+        routeReceipts,
+      } as RoutePoliciesPageData;
     }),
   pendingComponent: () => <RouteLoadingState label="Loading routes" />,
   pendingMs: 0,
-  component: RoutePoliciesPage
-})
+  component: RoutePoliciesPage,
+});
 
 function RoutePoliciesPage() {
-  const result = Route.useLoaderData()
+  const result = Route.useLoaderData();
 
-  if (!result || result.state === 'error') {
+  if (!result || result.state === "error") {
     return (
       <Stack>
         <PageHeader
@@ -113,17 +116,17 @@ function RoutePoliciesPage() {
         />
         <RouteErrorState
           kind={result?.kind}
-          message={result?.state === 'error' ? result?.message : undefined}
+          message={result?.state === "error" ? result?.message : undefined}
           description="Route policy and diagnostics data could not be loaded from the control-plane service."
           title="Routes unavailable"
         />
       </Stack>
-    )
+    );
   }
 
-  const { routePolicies, routeReceipts } = result.data
-  const groupedPolicies = routePoliciesByProtocol(routePolicies)
-  const protocolGroups = listSortedProtocols(groupedPolicies)
+  const { routePolicies, routeReceipts } = result.data;
+  const groupedPolicies = routePoliciesByProtocol(routePolicies);
+  const protocolGroups = listSortedProtocols(groupedPolicies);
 
   return (
     <Stack>
@@ -151,7 +154,7 @@ function RoutePoliciesPage() {
                   {protocolLabelByFamily[protocolLabel] ?? protocolLabel}
                 </Badge>
                 <Text c="dimmed" size="sm">
-                  {policies.length} polic{policies.length === 1 ? 'y' : 'ies'}
+                  {policies.length} polic{policies.length === 1 ? "y" : "ies"}
                 </Text>
               </Group>
               <Table mb="md" striped withTableBorder>
@@ -169,15 +172,21 @@ function RoutePoliciesPage() {
                   {policies.map((policy) => (
                     <Table.Tr key={policy.id}>
                       <Table.Td>{policy.name}</Table.Td>
-                      <Table.Td>{protocolDisplay(policy.protocolFamily)}</Table.Td>
+                      <Table.Td>
+                        {protocolDisplay(policy.protocolFamily)}
+                      </Table.Td>
                       <Table.Td>{policy.modelAlias}</Table.Td>
                       <Table.Td>
                         {policy.selectedProviders.length > 0
-                          ? policy.selectedProviders.join(', ')
-                          : 'Inactive snapshot'}
+                          ? policy.selectedProviders.join(", ")
+                          : "Inactive snapshot"}
                       </Table.Td>
-                      <Table.Td>{policy.preferredRegions.join(', ') || 'Any region'}</Table.Td>
-                      <Table.Td>{policy.requiredCapabilities.join(', ')}</Table.Td>
+                      <Table.Td>
+                        {policy.preferredRegions.join(", ") || "Any region"}
+                      </Table.Td>
+                      <Table.Td>
+                        {policy.requiredCapabilities.join(", ")}
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -201,26 +210,24 @@ function RoutePoliciesPage() {
         ) : (
           <Table striped withTableBorder>
             <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Receipt ID</Table.Th>
-                  <Table.Th>Protocol</Table.Th>
-                  <Table.Th>Model alias</Table.Th>
-                  <Table.Th>Selected target</Table.Th>
-                  <Table.Th>Excluded targets</Table.Th>
-                  <Table.Th>Fallback transitions</Table.Th>
-                  <Table.Th>Diagnostics</Table.Th>
-                  <Table.Th>Normalized error</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
+              <Table.Tr>
+                <Table.Th>Receipt ID</Table.Th>
+                <Table.Th>Protocol</Table.Th>
+                <Table.Th>Model alias</Table.Th>
+                <Table.Th>Selected target</Table.Th>
+                <Table.Th>Excluded targets</Table.Th>
+                <Table.Th>Fallback transitions</Table.Th>
+                <Table.Th>Diagnostics</Table.Th>
+                <Table.Th>Normalized error</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
             <Table.Tbody>
               {routeReceipts.map((receipt) => (
                 <Table.Tr key={receipt.routeReceiptId}>
                   <Table.Td>{receipt.routeReceiptId}</Table.Td>
                   <Table.Td>{protocolDisplay(receipt.protocolFamily)}</Table.Td>
                   <Table.Td>{receipt.modelAlias}</Table.Td>
-                  <Table.Td>
-                    {receipt.selectedTargetLabel}
-                  </Table.Td>
+                  <Table.Td>{receipt.selectedTargetLabel}</Table.Td>
                   <Table.Td>
                     {receipt.excludedTargets.length === 0 ? (
                       <Text c="dimmed" size="sm">
@@ -247,8 +254,8 @@ function RoutePoliciesPage() {
                           <List.Item
                             key={`${transition.fromProviderResourceId}-${transition.toProviderResourceId}-${transition.reason}`}
                           >
-                            {transition.fromProviderLabel} &rarr; {transition.toProviderLabel} (
-                            {transition.reason})
+                            {transition.fromProviderLabel} &rarr;{" "}
+                            {transition.toProviderLabel} ({transition.reason})
                           </List.Item>
                         ))}
                       </List>
@@ -266,7 +273,9 @@ function RoutePoliciesPage() {
                         {receipt.decisionTimeline.length > 0 ? (
                           <List size="sm" withPadding>
                             {receipt.decisionTimeline.map((item) => (
-                              <List.Item key={`${receipt.routeReceiptId}-${item.stage}`}>
+                              <List.Item
+                                key={`${receipt.routeReceiptId}-${item.stage}`}
+                              >
                                 {item.stage}: {item.message}
                               </List.Item>
                             ))}
@@ -278,7 +287,8 @@ function RoutePoliciesPage() {
                               <List.Item
                                 key={`${receipt.routeReceiptId}-${attempt.providerResourceId}-${attempt.attempt}`}
                               >
-                                {attempt.providerLabel} attempt {attempt.attempt} ({attempt.latencyMs}
+                                {attempt.providerLabel} attempt{" "}
+                                {attempt.attempt} ({attempt.latencyMs}
                                 ms, {attempt.status})
                               </List.Item>
                             ))}
@@ -321,5 +331,5 @@ function RoutePoliciesPage() {
         )}
       </Card>
     </Stack>
-  )
+  );
 }

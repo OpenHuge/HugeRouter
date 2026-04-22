@@ -46,8 +46,7 @@ async fn main() -> Result<()> {
     let publisher = async_nats::connect(&config.nats.url)
         .await
         .context("failed to connect routing-worker publisher to NATS")?;
-    let event_subject_prefix =
-        read_env_or_default(WORKER_PREFIX, "EVENT_SUBJECT_PREFIX", "events");
+    let event_subject_prefix = read_env_or_default(WORKER_PREFIX, "EVENT_SUBJECT_PREFIX", "events");
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -69,7 +68,9 @@ async fn main() -> Result<()> {
         let event_subject_prefix = event_subject_prefix.clone();
         Box::pin(async move {
             match handle_probe_observation(&pool, &message.payload, quarantine_threshold).await {
-                Ok(RouteHealthUpdate::Duplicate { provider_resource_id }) => {
+                Ok(RouteHealthUpdate::Duplicate {
+                    provider_resource_id,
+                }) => {
                     info!(
                         provider_resource_id,
                         "routing worker ignored duplicate probe observation"

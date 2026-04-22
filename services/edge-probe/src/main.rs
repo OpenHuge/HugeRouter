@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use async_nats::Client;
 use reqwest::Client as HttpClient;
 use runtime_composition::{
-    ServiceRuntime, announce_startup, init_tracing, install_shutdown_listener,
-    load_worker_config, read_env_or_default,
+    ServiceRuntime, announce_startup, init_tracing, install_shutdown_listener, load_worker_config,
+    read_env_or_default,
 };
 use std::{env, time::Duration};
 use tracing::{info, warn};
@@ -34,9 +34,13 @@ async fn main() -> Result<()> {
         DEFAULT_NATS_SUBJECT,
     );
 
-    let target_url = read_env_or_default(WORKER_PREFIX, "TARGET_URL", "http://127.0.0.1:8080/healthz");
-    let provider_resource_id =
-        read_env_or_default(WORKER_PREFIX, "PROVIDER_RESOURCE_ID", "prvrsrc_openai_primary");
+    let target_url =
+        read_env_or_default(WORKER_PREFIX, "TARGET_URL", "http://127.0.0.1:8080/healthz");
+    let provider_resource_id = read_env_or_default(
+        WORKER_PREFIX,
+        "PROVIDER_RESOURCE_ID",
+        "prvrsrc_openai_primary",
+    );
     let interval_ms = env::var("EDGE_PROBE_INTERVAL_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -111,7 +115,12 @@ async fn run_probe_iteration(
             let status_code = response.status().as_u16();
             assess_probe_result(Some(status_code), latency_ms, None, degraded_latency_ms)
         }
-        Err(error) => assess_probe_result(None, latency_ms, Some(error.to_string()), degraded_latency_ms),
+        Err(error) => assess_probe_result(
+            None,
+            latency_ms,
+            Some(error.to_string()),
+            degraded_latency_ms,
+        ),
     };
 
     let payload = ProbeEventPayload {

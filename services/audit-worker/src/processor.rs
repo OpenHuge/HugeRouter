@@ -101,7 +101,10 @@ pub async fn prune_audit_events(pool: &PgPool, retention_days: u64) -> Result<u6
     Ok(result.rows_affected())
 }
 
-pub async fn persist_audit_envelope(pool: &PgPool, envelope: &AuditMessageEnvelope) -> Result<bool> {
+pub async fn persist_audit_envelope(
+    pool: &PgPool,
+    envelope: &AuditMessageEnvelope,
+) -> Result<bool> {
     let result = sqlx::query(
         r#"
         INSERT INTO audit_events (
@@ -179,7 +182,10 @@ mod tests {
         }"#;
 
         let envelope = parse_audit_envelope(payload).expect("parse");
-        assert_eq!(envelope.occurred_at.as_deref(), Some("2026-04-23T00:00:00Z"));
+        assert_eq!(
+            envelope.occurred_at.as_deref(),
+            Some("2026-04-23T00:00:00Z")
+        );
         assert_eq!(envelope.trace_id.as_deref(), Some("trace_123"));
         assert_eq!(envelope.request_id.as_deref(), Some("req_123"));
     }

@@ -61,9 +61,7 @@ fn infer_severity(message_type: &str, payload: &Value) -> IncidentSeverity {
     }
 
     match message_type {
-        "provider_resource.quarantined" | "budget_threshold.exceeded" => {
-            IncidentSeverity::Critical
-        }
+        "provider_resource.quarantined" | "budget_threshold.exceeded" => IncidentSeverity::Critical,
         "provider_resource.degraded" => IncidentSeverity::Warning,
         _ => IncidentSeverity::Info,
     }
@@ -136,7 +134,11 @@ pub fn parse_notification_envelope(payload: &[u8]) -> Result<NotificationEnvelop
         provider_resource_id: provider_resource_id.clone(),
         severity,
         incident_key,
-        summary: incident_summary(&message_type, provider_resource_id.as_deref(), &nested_payload),
+        summary: incident_summary(
+            &message_type,
+            provider_resource_id.as_deref(),
+            &nested_payload,
+        ),
         raw_payload,
     })
 }

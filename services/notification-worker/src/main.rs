@@ -55,7 +55,13 @@ async fn main() -> Result<()> {
     let handler: MessageHandler = Arc::new(move |message| {
         let pool = Arc::clone(&pool);
         Box::pin(async move {
-            match processor::handle_notification_envelope(&pool, &message.payload, rate_limit_seconds).await {
+            match processor::handle_notification_envelope(
+                &pool,
+                &message.payload,
+                rate_limit_seconds,
+            )
+            .await
+            {
                 Ok(outcome) => {
                     info!(
                         incident_key = outcome.envelope.incident_key,

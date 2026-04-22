@@ -1,49 +1,51 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync } from "node:child_process";
 
 function runGit(args) {
-  return execFileSync('git', args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
-  }).trim()
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 function safeRunGit(args) {
   try {
-    return runGit(args)
+    return runGit(args);
   } catch {
-    return ''
+    return "";
   }
 }
 
-const currentTag = process.env.GITHUB_REF_NAME || safeRunGit(['describe', '--tags', '--exact-match'])
-const tags = safeRunGit(['tag', '--sort=-creatordate'])
-  .split('\n')
+const currentTag =
+  process.env.GITHUB_REF_NAME ||
+  safeRunGit(["describe", "--tags", "--exact-match"]);
+const tags = safeRunGit(["tag", "--sort=-creatordate"])
+  .split("\n")
   .map((value) => value.trim())
-  .filter(Boolean)
+  .filter(Boolean);
 
 const previousTag = currentTag
-  ? tags.find((value) => value !== currentTag) ?? null
-  : tags[0] ?? null
+  ? (tags.find((value) => value !== currentTag) ?? null)
+  : (tags[0] ?? null);
 
-const revisionRange = previousTag ? `${previousTag}..HEAD` : 'HEAD'
+const revisionRange = previousTag ? `${previousTag}..HEAD` : "HEAD";
 const commitLines = safeRunGit([
-  'log',
+  "log",
   revisionRange,
-  '--pretty=format:- %h %s (%an)'
-])
+  "--pretty=format:- %h %s (%an)",
+]);
 
 const sections = [
-  `# HugeRouter Release Notes${currentTag ? ` - ${currentTag}` : ''}`,
-  '',
+  `# HugeRouter Release Notes${currentTag ? ` - ${currentTag}` : ""}`,
+  "",
   `Generated on ${new Date().toISOString()}.`,
-  ''
-]
+  "",
+];
 
 if (previousTag) {
-  sections.push(`Changes since \`${previousTag}\`:`, '')
+  sections.push(`Changes since \`${previousTag}\`:`, "");
 } else {
-  sections.push('Changes included in this release:', '')
+  sections.push("Changes included in this release:", "");
 }
 
-sections.push(commitLines || '- No commits found for the selected range.', '')
-process.stdout.write(sections.join('\n'))
+sections.push(commitLines || "- No commits found for the selected range.", "");
+process.stdout.write(sections.join("\n"));

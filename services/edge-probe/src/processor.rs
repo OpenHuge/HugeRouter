@@ -4,12 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProbeAssessment {
     Healthy,
-    Degraded {
-        reason: String,
-    },
-    Unhealthy {
-        reason: String,
-    },
+    Degraded { reason: String },
+    Unhealthy { reason: String },
 }
 
 #[derive(Debug, Clone)]
@@ -137,7 +133,8 @@ mod tests {
 
     #[test]
     fn classifies_transport_failure_as_unhealthy() {
-        let assessment = assess_probe_result(None, 120, Some("connection refused".to_string()), 1_500);
+        let assessment =
+            assess_probe_result(None, 120, Some("connection refused".to_string()), 1_500);
         assert_eq!(
             assessment,
             ProbeAssessment::Unhealthy {

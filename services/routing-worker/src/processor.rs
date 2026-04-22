@@ -93,10 +93,7 @@ pub fn parse_probe_observation(payload: &[u8]) -> Result<ProbeObservationEnvelop
     Ok(envelope)
 }
 
-async fn persist_probe_event(
-    pool: &PgPool,
-    envelope: &ProbeObservationEnvelope,
-) -> Result<bool> {
+async fn persist_probe_event(pool: &PgPool, envelope: &ProbeObservationEnvelope) -> Result<bool> {
     let result = sqlx::query(
         r#"
         INSERT INTO provider_probe_events (
@@ -180,7 +177,10 @@ fn resolve_next_states(
     if provider_resource.status == ProviderResourceStatus::Quarantined
         || provider_resource.health_state == HealthState::Quarantined
     {
-        return (HealthState::Quarantined, ProviderResourceStatus::Quarantined);
+        return (
+            HealthState::Quarantined,
+            ProviderResourceStatus::Quarantined,
+        );
     }
 
     let next_health_state = match observed_status {
@@ -251,20 +251,19 @@ pub async fn handle_probe_observation(
         });
     }
 
-    let row = sqlx::query(
-        "SELECT payload FROM provider_resources WHERE provider_resource_id = $1",
-    )
-    .bind(&envelope.payload.provider_resource_id)
-    .fetch_optional(pool)
-    .await
-    .context("loading provider resource for health update failed")?
-    .context("provider resource not found for probe observation")?;
+    let row = sqlx::query("SELECT payload FROM provider_resources WHERE provider_resource_id = $1")
+        .bind(&envelope.payload.provider_resource_id)
+        .fetch_optional(pool)
+        .await
+        .context("loading provider resource for health update failed")?
+        .context("provider resource not found for probe observation")?;
     let payload: Value = row.try_get("payload")?;
     let mut provider_resource: ProviderResource =
         serde_json::from_value(payload).context("invalid provider resource payload in postgres")?;
 
     let previous_health_state = provider_resource.health_state;
-    let unhealthy_streak = recent_unhealthy_streak(pool, &provider_resource.provider_resource_id.to_string()).await?;
+    let unhealthy_streak =
+        recent_unhealthy_streak(pool, &provider_resource.provider_resource_id.to_string()).await?;
     let (next_health_state, next_status) = resolve_next_states(
         &provider_resource,
         envelope.payload.observed_status,
@@ -333,12 +332,8 @@ mod tests {
     #[test]
     fn resolves_quarantine_when_failure_budget_is_exhausted() {
         let provider_resource = sample_provider_resource();
-        let (next_health, next_status) = resolve_next_states(
-            &provider_resource,
-            ObservedProbeStatus::Unhealthy,
-            3,
-            3,
-        );
+        let (next_health, next_status) =
+            resolve_next_states(&provider_resource, ObservedProbeStatus::Unhealthy, 3, 3);
 
         assert_eq!(next_health, HealthState::Quarantined);
         assert_eq!(next_status, ProviderResourceStatus::Quarantined);
@@ -350,12 +345,8 @@ mod tests {
         provider_resource.status = ProviderResourceStatus::Quarantined;
         provider_resource.health_state = HealthState::Quarantined;
 
-        let (next_health, next_status) = resolve_next_states(
-            &provider_resource,
-            ObservedProbeStatus::Healthy,
-            0,
-            3,
-        );
+        let (next_health, next_status) =
+            resolve_next_states(&provider_resource, ObservedProbeStatus::Healthy, 0, 3);
 
         assert_eq!(next_health, HealthState::Quarantined);
         assert_eq!(next_status, ProviderResourceStatus::Quarantined);
@@ -376,7 +367,13 @@ mod tests {
         }"#;
 
         let envelope = parse_probe_observation(payload).expect("parse");
-        assert_eq!(envelope.payload.provider_resource_id, "prvrsrc_openai_primary");
-        assert_eq!(envelope.payload.observed_status, ObservedProbeStatus::Degraded);
+        assert_eq!(
+            envelope.payload.provider_resource_id,
+            "prvrsrc_openai_primary"
+        );
+        assert_eq!(
+            envelope.payload.observed_status,
+            ObservedProbeStatus::Degraded
+        );
     }
 }
