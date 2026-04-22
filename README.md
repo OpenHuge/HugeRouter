@@ -103,6 +103,7 @@ The repository includes a compose-based devcontainer in [`.devcontainer/devconta
 - `just stack-up-full` adds the observability profile (`otel-collector`, `prometheus`, `grafana`) on top of the core stack.
 - `just stack-up-observability` is available when you only want the observability sidecars.
 - `just stack-wait` waits for the selected stack mode to report healthy containers before you boot services against it.
+- The NATS service is pinned to `nats:2.12.7-alpine3.22` because the shared `nats:2.12.7` tag resolves to a `scratch` variant, which does not include `/bin/sh` or `wget` and therefore cannot satisfy the configured health check.
 - The PostgreSQL service is pinned to `postgres:18.3-bookworm`. This is a Debian-based image, not Alpine, and PostgreSQL 18+ expects the persistent volume to target `/var/lib/postgresql` rather than `/var/lib/postgresql/data`.
 
 Recommended entry documents before starting implementation:

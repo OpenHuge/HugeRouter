@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { resetSessionForTests, signIn } from '../auth/session'
+import { useControlPlaneFetchMock } from '../../test/control-plane-fetch'
 import { loadRouteData } from './loaders'
 import {
   getConsoleDataService,
@@ -8,6 +9,8 @@ import {
 } from './service'
 
 describe('console data service', () => {
+  useControlPlaneFetchMock()
+
   beforeEach(() => {
     resetSessionForTests()
     setConsoleDataServiceForTests(null)
@@ -25,14 +28,17 @@ describe('console data service', () => {
     expect(overview.workspace).toBe('acme-retail')
     expect(overview.activeProviders).toBe(2)
     expect(overview.activeRoutes).toBe(2)
+    expect(overview.activeSnapshotId).toBe('cfgsnap_gateway_v1')
+    expect(overview.selectedProvider).toBe('OpenAI Primary')
     expect(overview.projects).toHaveLength(3)
     expect(overview.projects[0]).toEqual({
-      id: 'proj_acme_ops',
-      name: 'Retail Operations Control'
+      id: 'proj_core',
+      name: 'Core Gateway',
+      slug: 'core-gateway'
     })
   })
 
-  it('falls back to the seeded tenant when the session is anonymous', async () => {
+  it('falls back to the active snapshot tenant when the session is anonymous', async () => {
     const overview = await getConsoleDataService().getOverview()
 
     expect(overview.tenantLabel).toBe('Acme Retail')
@@ -48,8 +54,8 @@ describe('console data service', () => {
     const policies = await getConsoleDataService().listRoutePolicies()
 
     expect(policies).toHaveLength(1)
-    expect(policies[0]?.tenantId).toBe('tenant_northstar')
-    expect(policies[0]?.name).toBe('Northstar Support Agent')
+    expect(policies[0]?.id).toBe('routepol_northstar_research')
+    expect(policies[0]?.name).toBe('Northstar Research')
   })
 
   it('returns all route policies for admin sessions', async () => {
@@ -67,8 +73,11 @@ describe('console data service', () => {
     const detail = await getConsoleDataService().getTenantDetail('tenant_acme')
 
     expect(detail.displayName).toBe('Acme Retail')
-    expect(detail.primaryRegion).toBe('us-east-1')
-    expect(detail.providers.map((provider) => provider.id)).not.toContain('provider_google_eu')
+    expect(detail.activeConfigSnapshotId).toBe('cfgsnap_gateway_v1')
+    expect(detail.providers.map((provider) => provider.provider_resource_id)).toEqual([
+      'prvrsrc_openai_primary',
+      'prvrsrc_openai_backup'
+    ])
     expect(detail.routePolicies).toHaveLength(2)
   })
 
@@ -84,8 +93,10 @@ describe('console data service', () => {
         return Promise.resolve({
           activeProviders: 1,
           activeRoutes: 1,
-          monthlySpendUsd: 1,
+          activeSnapshotId: 'cfgsnap_override',
+          estimatedCostUsd: '0.000001',
           projects: [],
+          selectedProvider: 'Override Provider',
           tenantLabel: 'Override Tenant',
           workspace: 'override-workspace'
         })
@@ -109,8 +120,10 @@ describe('console data service', () => {
     expect(await getConsoleDataService().getOverview()).toEqual({
       activeProviders: 1,
       activeRoutes: 1,
-      monthlySpendUsd: 1,
+      activeSnapshotId: 'cfgsnap_override',
+      estimatedCostUsd: '0.000001',
       projects: [],
+      selectedProvider: 'Override Provider',
       tenantLabel: 'Override Tenant',
       workspace: 'override-workspace'
     })

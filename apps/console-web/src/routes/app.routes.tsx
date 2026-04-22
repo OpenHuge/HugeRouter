@@ -1,7 +1,6 @@
 import { Badge, Card, Group, Stack, Table, Text } from '@mantine/core'
 import { createFileRoute } from '@tanstack/react-router'
 import { PageHeader } from '@huge-router/ui-kit'
-import { formatPercent } from '../features/control-plane/format'
 import { loadRouteData } from '../features/control-plane/loaders'
 import {
   EmptyCollectionState,
@@ -24,7 +23,7 @@ function RoutePoliciesPage() {
     return (
       <Stack>
         <PageHeader
-          description="Review the first route-management slice, including model aliases, selected targets, and delivery health."
+          description="Review active route policies, required capabilities, and selected targets from the current config snapshot."
           title="Routes"
         />
         <RouteErrorState
@@ -40,7 +39,7 @@ function RoutePoliciesPage() {
   return (
     <Stack>
       <PageHeader
-        description="Review the first route-management slice, including model aliases, selected targets, and delivery health."
+        description="Review active route policies, required capabilities, and selected targets from the current config snapshot."
         title="Routes"
       />
       <Card padding="lg" radius="md" shadow="sm">
@@ -61,9 +60,9 @@ function RoutePoliciesPage() {
               <Table.Tr>
                 <Table.Th>Name</Table.Th>
                 <Table.Th>Model alias</Table.Th>
-                <Table.Th>Selected provider</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Success rate</Table.Th>
+                <Table.Th>Selected providers</Table.Th>
+                <Table.Th>Preferred regions</Table.Th>
+                <Table.Th>Capabilities</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -71,13 +70,13 @@ function RoutePoliciesPage() {
                 <Table.Tr key={policy.id}>
                   <Table.Td>{policy.name}</Table.Td>
                   <Table.Td>{policy.modelAlias}</Table.Td>
-                  <Table.Td>{policy.selectedProvider}</Table.Td>
                   <Table.Td>
-                    <Badge color={policy.status === 'active' ? 'teal' : 'yellow'} variant="light">
-                      {policy.status}
-                    </Badge>
+                    {policy.selectedProviders.length > 0
+                      ? policy.selectedProviders.join(', ')
+                      : 'Inactive snapshot'}
                   </Table.Td>
-                  <Table.Td>{formatPercent(policy.successRate)}</Table.Td>
+                  <Table.Td>{policy.preferredRegions.join(', ') || 'Any region'}</Table.Td>
+                  <Table.Td>{policy.requiredCapabilities.join(', ')}</Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>

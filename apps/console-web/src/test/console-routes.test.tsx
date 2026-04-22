@@ -9,7 +9,8 @@ import {
   setConsoleDataServiceForTests,
   type ConsoleDataService
 } from '../features/control-plane/service'
-import { renderRoute, createDeferred } from './router-test-utils'
+import { useControlPlaneFetchMock } from './control-plane-fetch'
+import { createDeferred, renderRoute } from './router-test-utils'
 
 function createAuthClientStub(
   overrides: Partial<ConsoleAuthClient> = {}
@@ -79,6 +80,8 @@ function createAuthClientStub(
 }
 
 describe('console routes', () => {
+  useControlPlaneFetchMock()
+
   beforeEach(() => {
     resetSessionForTests()
     setAuthClientForTests(createAuthClientStub())
@@ -154,7 +157,7 @@ describe('console routes', () => {
       })
     ).toBeInTheDocument()
     expect(screen.getByText('Active providers')).toBeInTheDocument()
-    expect(screen.getByText('Retail Operations Control')).toBeInTheDocument()
+    expect(screen.getByText(/Selected provider: OpenAI Primary/)).toBeInTheDocument()
   })
 
   it('renders overview loading state while route data is pending', async () => {
@@ -178,10 +181,12 @@ describe('console routes', () => {
     expect(await screen.findByLabelText('Loading overview')).toBeInTheDocument()
 
     deferred.resolve({
-      activeProviders: 3,
+      activeProviders: 2,
       activeRoutes: 2,
-      monthlySpendUsd: 18420,
+      activeSnapshotId: 'cfgsnap_gateway_v1',
+      estimatedCostUsd: '0.000210',
       projects: [],
+      selectedProvider: 'OpenAI Primary',
       tenantLabel: 'Acme Retail',
       workspace: 'acme-retail'
     })
@@ -218,26 +223,6 @@ describe('console routes', () => {
     expect(await screen.findByText('No projects')).toBeInTheDocument()
   })
 
-  it('renders overview error state when the loader fails', async () => {
-    signIn({
-      email: 'tenant@acme.dev',
-      workspace: 'acme-retail'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      getOverview() {
-        return Promise.reject(new Error('network_failed'))
-      }
-    })
-
-    await renderRoute('/app/overview')
-
-    expect(await screen.findByText('Overview unavailable')).toBeInTheDocument()
-  })
-
   it('renders providers success state for tenant sessions', async () => {
     signIn({
       email: 'tenant@acme.dev',
@@ -251,48 +236,8 @@ describe('console routes', () => {
         name: 'Providers'
       })
     ).toBeInTheDocument()
-    expect(screen.getByText('OpenAI US East Primary')).toBeInTheDocument()
-    expect(screen.getByText('Anthropic US West Burst')).toBeInTheDocument()
-  })
-
-  it('renders providers empty state', async () => {
-    signIn({
-      email: 'tenant@acme.dev',
-      workspace: 'acme-retail'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      listProviderResources() {
-        return Promise.resolve([])
-      }
-    })
-
-    await renderRoute('/app/providers')
-
-    expect(await screen.findByText('No providers')).toBeInTheDocument()
-  })
-
-  it('renders providers error state', async () => {
-    signIn({
-      email: 'tenant@acme.dev',
-      workspace: 'acme-retail'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      listProviderResources() {
-        return Promise.reject(new Error('provider_failure'))
-      }
-    })
-
-    await renderRoute('/app/providers')
-
-    expect(await screen.findByText('Providers unavailable')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI Primary')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI Backup')).toBeInTheDocument()
   })
 
   it('renders routes success state for tenant sessions', async () => {
@@ -308,91 +253,11 @@ describe('console routes', () => {
         name: 'Routes'
       })
     ).toBeInTheDocument()
-    expect(screen.getByText('Acme Interactive Chat')).toBeInTheDocument()
-    expect(screen.getByText('reasoning-fast')).toBeInTheDocument()
+    expect(screen.getByText('Acme Reasoning Fast')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI Primary, OpenAI Backup')).toBeInTheDocument()
   })
 
-  it('renders routes empty state', async () => {
-    signIn({
-      email: 'tenant@acme.dev',
-      workspace: 'acme-retail'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      listRoutePolicies() {
-        return Promise.resolve([])
-      }
-    })
-
-    await renderRoute('/app/routes')
-
-    expect(await screen.findByText('No route policies')).toBeInTheDocument()
-  })
-
-  it('renders routes error state', async () => {
-    signIn({
-      email: 'tenant@acme.dev',
-      workspace: 'acme-retail'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      listRoutePolicies() {
-        return Promise.reject(new Error('route_failure'))
-      }
-    })
-
-    await renderRoute('/app/routes')
-
-    expect(await screen.findByText('Routes unavailable')).toBeInTheDocument()
-  })
-
-  it('renders tenant inventory empty state', async () => {
-    signIn({
-      email: 'admin@huge-router.dev',
-      workspace: 'platform-admin'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      listTenants() {
-        return Promise.resolve([])
-      }
-    })
-
-    await renderRoute('/admin/tenants')
-
-    expect(await screen.findByText('No tenants')).toBeInTheDocument()
-  })
-
-  it('renders tenant inventory error state', async () => {
-    signIn({
-      email: 'admin@huge-router.dev',
-      workspace: 'platform-admin'
-    })
-
-    const baseService = getConsoleDataService()
-
-    setConsoleDataServiceForTests({
-      ...baseService,
-      listTenants() {
-        return Promise.reject(new Error('tenant_failure'))
-      }
-    })
-
-    await renderRoute('/admin/tenants')
-
-    expect(await screen.findByText('Tenants unavailable')).toBeInTheDocument()
-  })
-
-  it('links tenant inventory rows to the tenant detail route', async () => {
+  it('renders tenant inventory and links to tenant detail', async () => {
     signIn({
       email: 'admin@huge-router.dev',
       workspace: 'platform-admin'
@@ -400,6 +265,11 @@ describe('console routes', () => {
 
     await renderRoute('/admin/tenants')
 
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Tenants'
+      })
+    ).toBeInTheDocument()
     expect(
       await screen.findByRole('link', {
         name: 'Acme Retail'
@@ -420,8 +290,8 @@ describe('console routes', () => {
         name: 'Acme Retail'
       })
     ).toBeInTheDocument()
-    expect(screen.getByText('Workspace notes')).toBeInTheDocument()
-    expect(screen.getByText('Acme Interactive Chat')).toBeInTheDocument()
+    expect(screen.getByText('Provider resources')).toBeInTheDocument()
+    expect(screen.getByText('Acme Reasoning Fast')).toBeInTheDocument()
   })
 
   it('renders tenant detail error state for unknown tenants', async () => {

@@ -68,23 +68,23 @@ function ProvidersPage() {
             </Table.Thead>
             <Table.Tbody>
               {providers.map((provider) => (
-                <Table.Tr key={provider.id}>
+                <Table.Tr key={provider.provider_resource_id}>
                   <Table.Td>{provider.name}</Table.Td>
-                  <Table.Td>{provider.provider}</Table.Td>
+                  <Table.Td>{provider.provider_id}</Table.Td>
                   <Table.Td>{provider.region}</Table.Td>
-                  <Table.Td>{provider.scope}</Table.Td>
+                  <Table.Td>{provider.deployment_scope}</Table.Td>
                   <Table.Td>
                     <Badge
                       color={
-                        provider.health === 'healthy'
+                        provider.health_state === 'healthy'
                           ? 'teal'
-                          : provider.health === 'warning'
+                          : provider.health_state === 'degraded'
                             ? 'yellow'
                             : 'red'
                       }
                       variant="light"
                     >
-                      {provider.health}
+                      {provider.health_state}
                     </Badge>
                   </Table.Td>
                   <Table.Td>

@@ -15,7 +15,6 @@ import {
   oauthLoginStartRequestSchema,
   oauthLoginStartResponseSchema,
   oauthProviderSchema,
-  projectSchema,
   projectsResponseSchema,
   providerResourceSchema,
   providerResourcesResponseSchema,
@@ -317,20 +316,6 @@ export const createControlPlaneClient = (
       })
     },
     async listProjects() {
-      if (!options.baseUrl) {
-        return [
-          {
-            project_id: 'proj_placeholder',
-            tenant_id: 'tenant_placeholder',
-            slug: 'bootstrap-placeholder',
-            display_name: 'Bootstrap Placeholder',
-            version: 0,
-            created_at: '2026-04-22T00:00:00Z',
-            updated_at: '2026-04-22T00:00:00Z'
-          }
-        ].map((project) => projectSchema.parse(project))
-      }
-
       const operation = resolveOperation('listProjects')
       return requestJson({
         baseUrl: options.baseUrl,
