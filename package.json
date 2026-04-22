@@ -25,6 +25,7 @@
     "rust:test": "node ./scripts/run-cargo.mjs test --workspace",
     "rust:lint": "node ./scripts/run-cargo.mjs clippy --workspace --all-targets -- -D warnings",
     "rust:fmt:check": "node ./scripts/run-cargo.mjs fmt --all -- --check",
+    "release:notes": "node ./scripts/generate-changelog.mjs",
     "fmt": "prettier --write . && node ./scripts/run-cargo.mjs fmt --all"
   },
   "devDependencies": {
