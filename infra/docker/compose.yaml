@@ -31,7 +31,7 @@ services:
       - redis-data:/data
 
   nats:
-    image: nats:2.12.7
+    image: nats:2.12.7-alpine3.22
     command: ["-js", "-m", "8222"]
     ports:
       - "${NATS_CLIENT_PORT:-4222}:4222"
