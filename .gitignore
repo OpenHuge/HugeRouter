@@ -86,7 +86,6 @@ dist
 storybook-static
 target
 .turbo
-pnpm-lock.yaml
 tmp-tanstack/
 .devcontainer/local/
 
