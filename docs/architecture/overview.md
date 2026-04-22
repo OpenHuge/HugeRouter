@@ -27,9 +27,7 @@ The result should be a platform that can evolve from a developer-first gateway i
 
 For the cross-cutting analysis that connects product characteristics, open source lessons, operator pain points, future trends, and bottom-layer design checks, see [Foundation Risk and Trend Analysis](foundation-risk-and-trend-analysis.md).
 
-
 ---
-
 
 ## 2. Goals
 
@@ -61,9 +59,7 @@ For the cross-cutting analysis that connects product characteristics, open sourc
 4. This system is not intended to own business workflows outside AI traffic management.
 5. This system is not a generic API gateway for arbitrary enterprise APIs, although some patterns overlap.
 
-
 ---
-
 
 ## 3. Product Principles
 
@@ -97,15 +93,39 @@ The system should be optimized for pluggability through stable contracts, manife
 
 ### 3.8 Learn From Mature Open Source Systems
 
-The platform should borrow proven patterns from leading open source systems where those patterns fit the problem:
+The platform should borrow proven patterns from leading open source systems where those patterns fit the problem.
+
+Those patterns should be taken from source-backed behavior whenever possible: repository structure, typed resources, manifests, operator-facing docs, and explicit runtime behavior matter more than category labels or marketing pages.
+
+The current highest-value references are:
 
 - Backstage for explicit package boundaries and app-first composition
-- Envoy for ordered filter chains and typed extension contracts
+- Envoy and Envoy AI Gateway for ordered filter chains, typed extension contracts, and AI-specific route resources
 - Kong Gateway for practical control-plane/data-plane operational separation
 - OpenTelemetry for observability semantic contracts
 - LiteLLM for virtual keys, budgets, and practical multi-provider gateway ergonomics
+- Portkey for nested routing and fallback composition patterns where those patterns are concrete enough to translate safely
 
 These references inform our architecture, but do not define our product boundary.
+
+### 3.8.1 Code-First Reference Policy
+
+When a similar project influences HugeRouter, the specification should answer three questions:
+
+- what concrete strength was validated in source or official technical material
+- how that strength translates into a repository rule, contract, or runtime behavior here
+- what we are deliberately not copying so the product boundary stays clear
+
+Where the local repository is still ahead in ambition but behind in implementation, the spec should also say whether a behavior is shipped, bootstrap-only, or planned.
+
+The primary downstream specifications that carry this rule into concrete subsystem contracts are:
+
+- `routing-system.md`
+- `policy-system.md`
+- `protocol-ir-and-protocols.md`
+- `provider-adapter-system.md`
+- `multi-tenancy-and-configuration.md`
+- `metering-ledger-pricing.md`
 
 ### 3.9 Provenance Over Cheapest-Path Shortcuts
 
@@ -157,9 +177,7 @@ Observability and supportability features must therefore default to:
 - opt-in sealed payload capture with explicit retention and access policy
 - redaction and tokenization before any support-facing surface
 
-
 ---
-
 
 ## 4. High-Level Architecture
 
@@ -204,5 +222,7 @@ When implementation choices are ambiguous, prefer the interpretation that preser
 - package-level composition instead of deep feature entanglement
 - centrally governed telemetry semantics
 - virtualized consumer credentials instead of leaking upstream credentials into the product surface
+- behaviors that have been proven concrete in source or official technical material
+- clear separation between implemented baseline, bootstrap behavior, and planned target state
 
 ---

@@ -2,6 +2,14 @@
 
 [Back to Docs Index](../README.md)
 
+### 27.0 Current Implementation Reality
+
+The repository should currently be described this way:
+
+- `implemented`: tenant, project, provider resource, route policy, and config snapshot concepts exist and active snapshot reads already influence the gateway
+- `bootstrap-only`: control-plane auth and some admin surfaces are still oriented around seeded or bootstrap behavior
+- `planned`: authoritative staged rollout, last-known-good stale diagnostics, compatibility gates, and full control-plane publish or rollback orchestration
+
 ### 27.1 Isolation Levels
 
 The platform should support:
@@ -26,9 +34,21 @@ Configuration should resolve in the following order where relevant:
 
 The resolved configuration should be frozen into a request-scoped snapshot ID so that diagnostics, billing, and support can explain behavior against the exact policy state that was active at execution time.
 
+### 27.4 Snapshot Binding Rule
+
+Every material execution path should bind to one effective configuration snapshot before upstream execution begins.
+
+That snapshot should govern at least:
+
+- route policy resolution
+- provider target eligibility
+- budget and quota policy
+- provenance and residency policy
+- protocol or adapter compatibility expectations
+
+The hot path should not reconstruct effective configuration by re-reading mutable control-plane state after the snapshot has been chosen.
 
 ---
-
 
 ## 28. Configuration Management
 
@@ -67,5 +87,41 @@ The control plane should support:
 - emergency kill switches for tenants, credentials, or provider resources
 
 This is especially important for routing, pricing, provenance policy, and redaction settings, where a bad mutation can create immediate spend, availability, or compliance incidents.
+
+### 28.5 Control Plane and Data Plane Snapshot Contract
+
+Configuration publication should follow an explicit CP/DP contract:
+
+1. control plane validates schema and cross-resource references
+2. control plane computes an activation candidate snapshot
+3. compatibility checks run against adapter manifests and runtime version contracts
+4. data plane adopts the new snapshot only after validation succeeds
+5. if adoption fails, the data plane continues using the last-known-good snapshot
+
+The data plane should expose whether it is serving:
+
+- current snapshot
+- stale but last-known-good snapshot
+- no valid snapshot available
+
+### 28.6 Compatibility Gate
+
+Snapshot activation should check compatibility across at least:
+
+- config snapshot schema version
+- route resource and provider resource schema versions
+- adapter manifest compatibility range
+- runtime binary compatibility version
+
+An activation that fails compatibility must not partially mutate live routing behavior.
+
+### 28.7 Rollback and Stale-Serving Rules
+
+Operational rules:
+
+- CP unavailability must not require ordinary request execution to round-trip to mutable control-plane state
+- DP instances may continue serving from the last-known-good compatible snapshot for a bounded stale window
+- stale-serving status must be visible to diagnostics and operations tooling
+- emergency rollback should reactivate the most recent known-compatible snapshot, not reconstruct state ad hoc
 
 ---

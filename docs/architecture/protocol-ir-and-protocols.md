@@ -6,6 +6,14 @@ The system must define a protocol-independent internal representation called **I
 
 The IR is the canonical semantic form used after parsing northbound requests and before rendering southbound upstream requests.
 
+### 9.0 Current Implementation Reality
+
+The repository should currently be described this way:
+
+- `implemented`: one OpenAI-compatible synchronous northbound path and one real OpenAI adapter path
+- `bootstrap-only`: contracts, schemas, and typed shared packages are substantially ahead of runtime breadth
+- `planned`: Responses-native canonicalization in runtime, MCP execution, A2A execution, realtime execution, and typed protocol-resource registration across all protocol families
+
 ### 9.1 Why an IR Exists
 
 Without an IR, protocol translations become brittle and lossy. The IR allows the platform to:
@@ -103,9 +111,40 @@ Design rule:
 
 This keeps the gateway aligned with the long-term OpenAI direction while still allowing compatibility ingress surfaces.
 
+### 9.7 Typed Protocol and Route Resource Model
+
+Protocol support should be expressed as typed resources rather than handler-local flags.
+
+The architecture should distinguish at least these resource types:
+
+- `NorthboundProtocolSurface`: one ingress compatibility surface such as Chat Completions, Responses, MCP, or A2A
+- `RouteResource`: one declarative route object that maps intent and policy to candidate target classes
+- `ProviderResource`: one concrete upstream execution target or account-backed endpoint
+- `AdapterManifest`: one runtime-declared execution capability and lifecycle contract
+- `McpResource`: one governed MCP server or MCP capability endpoint
+- `A2aResource`: one governed A2A agent target or discovery result
+
+Minimum typed metadata expected on every resource:
+
+- stable identifier
+- schema version
+- protocol family or lifecycle family
+- capability declarations
+- auth mode declarations
+- residency or regional attributes
+- observability labels safe for diagnostics
+- stability level such as `stable`, `beta`, or `experimental`
+
+Boundary rule:
+
+- northbound compatibility surfaces describe ingress semantics
+- route resources describe control-plane intent
+- provider, MCP, and A2A resources describe governed remote execution surfaces
+- manifests describe what runtime code can actually execute
+
+No one resource type should absorb the responsibilities of the others.
 
 ---
-
 
 ## 10. Protocol Support
 
@@ -149,6 +188,11 @@ The gateway should be able to:
 - resolve a parser/serializer pair by protocol family and version
 - expose handler capability metadata to diagnostics and control plane APIs
 - add new protocol handlers without rewriting unrelated ingress paths
+
+Handler and resource rule:
+
+- protocol handlers should resolve from typed protocol-surface metadata and typed route resources, not from switch-heavy request handlers
+- a route resource should be able to state which protocol families it accepts northbound and which target lifecycle families it may dispatch southbound
 
 ### 10.5 MCP Transport Direction
 
@@ -208,5 +252,11 @@ For the first implementation:
 - MCP should be represented as a first-class protocol family, not as opaque passthrough JSON
 - A2A should be modeled as an explicit protocol family with Agent Card discovery, task lifecycle, and governance hooks
 - realtime, MCP, and A2A transports should share lifecycle, auth, and trace abstractions where possible instead of forking separate gateway stacks too early
+
+Implementation-state reminder:
+
+- the runtime may ship Chat Completions compatibility first
+- the canonical IR should still be designed around richer Responses-era semantics
+- MCP, A2A, and realtime should remain `planned` until there is real typed registration, real execution wiring, and real receipt or usage semantics in the running services
 
 ---

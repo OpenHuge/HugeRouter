@@ -4,6 +4,14 @@
 
 The provider layer should be explicitly designed for **pluggability** and **composition**. Adapters are not special-case branches inside the gateway. They are modules discovered through a registry, selected by capability and policy, and executed inside a composed runtime pipeline.
 
+### 12.0 Current Implementation Reality
+
+The repository should currently be described this way:
+
+- `implemented`: one adapter trait and registry model plus one real OpenAI adapter
+- `bootstrap-only`: much of the broader provider, control-plane discovery, and diagnostics integration is specified but not yet runtime-complete
+- `planned`: MCP adapters, A2A adapters, realtime bidirectional adapters, manifest exposure to the control plane, and compatibility gating against snapshot versions
+
 ### 12.1 Adapter Responsibilities
 
 Each provider adapter is responsible for:
@@ -45,10 +53,10 @@ trait ProviderAdapter {
   fn manifest(&self) -> AdapterManifest;
   fn supported_capabilities(&self) -> CapabilityProfile;
   fn configuration_schema(&self) -> AdapterConfigSchema;
-  
+
   // Stateless execution
   async fn execute(&self, request: AiRequestIr, ctx: ExecutionContext) -> AdapterResult;
-  
+
   // Stateful bidirectional execution (for WebSockets / WebRTC)
   async fn execute_bidirectional(&self, stream: BidirectionalStream, ctx: ExecutionContext) -> Result<(), GatewayError>;
 
@@ -66,8 +74,10 @@ trait AdapterFactory {
 
 Each adapter manifest should declare at least:
 
+- adapter identifier
 - adapter kind
 - provider kind
+- lifecycle family such as `inference`, `mcp`, `a2a`, or `realtime`
 - supported protocols
 - capability profile
 - region or residency constraints
@@ -78,6 +88,13 @@ Each adapter manifest should declare at least:
 - stability level such as `stable`, `beta`, or `experimental`
 - manifest schema version
 - supported routing hints such as latency-aware, cost-aware, or priority-aware selection
+- compatibility range for config snapshots or route resources
+
+### 12.4.1 Manifest Boundary Rule
+
+Adapter manifests should be the runtime truth for what executable code supports.
+
+Control-plane resources should not assume an adapter can do something unless the loaded manifest declares it. Conversely, the runtime should not accept a provider or route resource whose required capability, lifecycle family, or schema version falls outside the manifest compatibility contract.
 
 ### 12.5 Registry Model
 
@@ -119,6 +136,11 @@ Suggested pipeline order:
 This makes adapter behavior composable without duplicating cross-cutting logic in every provider crate.
 
 Inspired by Envoy-style filter discipline, this pipeline order is an architectural contract. If a later stage can alter route or target resolution after policy has already been enforced, the system must either prohibit that mutation or force explicit re-evaluation and audit capture.
+
+Execution-state rule:
+
+- route strategy and admission outcomes must remain visible outside the adapter
+- adapters may emit hints and normalized errors, but they must not silently redefine routing policy or budget policy
 
 ### 12.6.1 Routing Strategy Boundary
 
@@ -192,5 +214,16 @@ It should be possible to:
 - validate whether a provider resource matches an adapter config schema
 - preview capability compatibility before saving route definitions
 - surface adapter stability and operational constraints in diagnostics
+
+### 12.11 Compatibility Contract
+
+The runtime should validate compatibility across four layers:
+
+- route resource schema version
+- provider resource schema version
+- adapter manifest schema version
+- running binary compatibility version
+
+If these layers do not overlap safely, the control plane should refuse activation and the data plane should continue using the last-known-good compatible snapshot rather than partially activating incompatible config.
 
 ---
