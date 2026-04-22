@@ -6,6 +6,8 @@ This document records the architecture patterns we are intentionally borrowing f
 
 The goal is not to clone any single product. The goal is to avoid inventing first-version architecture in areas where mature projects have already proven better defaults.
 
+The default intake rule for this document is now code-first: a reference only meaningfully influences HugeRouter when repository structure, API resources, manifests, runtime behavior, or official operator-facing documentation make the strength concrete enough to translate into a repository rule.
+
 ## 1. Selection Criteria
 
 Reference products were selected because they are strong in one or more of these dimensions:
@@ -16,6 +18,7 @@ Reference products were selected because they are strong in one or more of these
 - observability contracts
 - multi-tenant gateway operations
 - admin console composition in large monorepos
+- concrete source-backed evidence for routing, admission, policy, or runtime behavior
 
 The current reference set is:
 
@@ -23,6 +26,7 @@ The current reference set is:
 - Envoy
 - Envoy AI Gateway
 - Kong Gateway
+- Portkey
 - OpenTelemetry
 - LiteLLM
 - OpenAI Agents SDK
@@ -33,7 +37,18 @@ The current reference set is:
 - Browser Use
 - Hindsight
 
-## 1.1 Community Pressure Signals
+## 1.1 Code-First Reference Intake
+
+For a reference to change HugeRouter's specification, at least one of the following should be visible in source or official technical material:
+
+- typed resources, manifests, or configuration schemas that show how the capability is modeled
+- request-path or control-plane behavior that is explicit enough to copy as a rule
+- operational failure behavior that is concrete enough to test
+- diagnostics, budget, routing, or auth semantics that are observable rather than marketing-only
+
+When those conditions are not met, the project may still be worth watching, but it should not set HugeRouter defaults yet.
+
+## 1.2 Community Pressure Signals
 
 In addition to named open source references, the architecture is intentionally shaped by repeated operator pain signals visible across public issue trackers and builder communities.
 
@@ -270,9 +285,89 @@ Application to this repository:
 - the platform should preserve room for connector-style fan-out from traces to metrics or support artifacts without making those derived views the source of truth
 - observability deployment should support a minimal local distribution first and richer production distributions later
 
-## 14. What We Adopt Immediately
+## 14. 2026 Peer-Derived Priorities We Should Copy First
 
-The following are now considered implementation defaults:
+Current repository reality matters when choosing what to copy next.
+
+Today the codebase already proves:
+
+- one synchronous OpenAI-compatible gateway path is real
+- one real OpenAI upstream adapter is real
+- control-plane auth, seed data, config snapshot reads, and route simulation are more mature than most other subsystems
+- workers, streaming, realtime, durable usage persistence, and full observability pipelines are still mostly scaffolded or planned
+
+Because of that baseline, the most valuable peer-derived priorities are not more abstract principles. They are concrete product behaviors that close the current gap between the repository's real runtime and the broader specification.
+
+The current spec deepening pass for those priorities lives primarily in:
+
+- `routing-system.md`
+- `policy-system.md`
+- `protocol-ir-and-protocols.md`
+- `provider-adapter-system.md`
+- `multi-tenancy-and-configuration.md`
+- `metering-ledger-pricing.md`
+
+### 14.1 LiteLLM and Kong: Routing, Fallback, and Budget Admission Must Be Concrete
+
+What current peer projects make clear:
+
+- routing strategy names should be product-level concepts, not hidden implementation detail
+- fallback order, retry eligibility, cooldown, and exclusion reasons should be inspectable
+- budget and rate checks belong in admission control before upstream spend occurs
+- response headers and route receipts should explain routing and limit behavior consistently
+
+Translation for HugeRouter:
+
+- `routing-system.md` should define named strategy families and their observable decision fields
+- route receipts should capture retry and fallback transitions as first-class artifacts, not only debug headers
+- budget, quota, and concurrency rejection states should be specified as terminal admission outcomes, then implemented on the hot path
+- rate-limit and budget headers should become part of the external behavior contract once the gateway exposes them
+
+### 14.2 Envoy AI Gateway: AI Traffic Features Should Be Typed Resources, Not Handler Special Cases
+
+What current peer projects make clear:
+
+- AI routing, MCP routing, quota, and inference-target selection stay maintainable when modeled as typed resources
+- control-plane resources should describe intent; data-plane code should execute validated snapshots
+- endpoint picker and protocol-specific behavior should remain explicit extension points
+
+Translation for HugeRouter:
+
+- MCP, A2A, northbound protocol compatibility, and provider target selection should converge on typed manifests and typed route resources
+- `protocol-ir`, `provider-traits`, and config snapshot schemas should remain the canonical place where those contracts live
+- new AI protocol surfaces should not be introduced first as ad hoc flags in service handlers
+
+### 14.3 Kong Hybrid Mode: CP/DP Failure Behavior Must Be Specified Before Scale
+
+What current peer projects make clear:
+
+- a gateway becomes operationally trustworthy only when CP/DP disconnect behavior is explicit
+- data planes need last-known-good snapshot behavior rather than live dependency on mutable control-plane state
+- version and extension compatibility rules need to be part of the platform contract
+
+Translation for HugeRouter:
+
+- `overview.md` and `multi-tenancy-and-configuration.md` should treat stale-aware snapshot serving as a contract, not an aspiration
+- compatibility between config snapshot shape, adapter manifests, and runtime binaries should be documented as a release gate
+- configuration publication, rollback, and stale snapshot diagnostics should be testable behavior
+
+### 14.4 Portkey: Policy Composition and Failure Domains Need First-Class Traceability
+
+What current peer projects make clear:
+
+- retries, fallbacks, load balancing, guardrails, and conditional routing are most useful when composable
+- operators need to see which nested rule fired, not merely that a request failed
+- pricing catalogs and routing rules should be independent artifacts, even when the product combines them
+
+Translation for HugeRouter:
+
+- policy and routing specs should distinguish selection, guardrail, admission, retry, and fallback stages explicitly
+- nested policy outcomes should remain traceable in route receipts and redacted diagnostics
+- pricing catalogs should remain separable from route policy definitions and from immutable usage facts
+
+## 15. What We Adopt Immediately
+
+The following are now considered implementation defaults because peer projects make the benefit concrete and the current HugeRouter repository needs them soon:
 
 - package and plugin boundaries are explicit and app-first
 - request-path ordering is part of the architecture contract
@@ -280,13 +375,14 @@ The following are now considered implementation defaults:
 - CP/DP separation is real, not merely conceptual
 - telemetry naming is governed centrally
 - gateway keys, upstream secrets, budgets, and routing strategies are first-class domain concepts
+- routing strategy, exclusion, retry, fallback, and admission outcomes must become explicit external or internal artifacts rather than incidental logs
 - long-running agent and A2A work is treated as durable lifecycle state, not just request/response traffic
 - request, session, task, and operation identifiers remain distinct when governance or diagnostics require it
 - approval checkpoints are a normal control outcome for high-risk tool, browser, memory-write, or delegation flows
 - semantic cache and agent memory are treated as related but distinct concerns
 - compatibility endpoints do not define canonical internal semantics by themselves
 
-## 15. What We Deliberately Do Not Copy
+## 16. What We Deliberately Do Not Copy
 
 We are not copying these parts directly:
 
@@ -302,7 +398,7 @@ We are not copying these parts directly:
 
 These projects are reference patterns, not product templates.
 
-## 16. Development Implication
+## 17. Development Implication
 
 Because these reference patterns are now captured explicitly, implementation should assume:
 
@@ -312,4 +408,6 @@ Because these reference patterns are now captured explicitly, implementation sho
 - task lifecycles, delegation, and human intervention states should be modeled explicitly once agentic execution enters scope
 - high-side-effect browser, tool, memory-write, and delegation operations should be governable without inventing a full agent runtime inside the gateway
 - semantic cache should not quietly expand into a generic memory subsystem
+- spec changes should cite the source-backed reference strength they are adopting when a comparable external pattern exists
+- spec changes should distinguish whether the behavior is already implemented, bootstrap-only, or still planned in this repository
 - feature work that breaks these patterns should be treated as an architecture change, not a small refactor

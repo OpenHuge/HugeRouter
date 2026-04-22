@@ -9,10 +9,11 @@ HugeRouter is not a generic API proxy. It is a protocol-native AI traffic platfo
 Reference anchors checked for this analysis:
 
 - Backstage frontend plugin and app composition documentation
-- Envoy extension configuration and Envoy AI Gateway data-plane documentation
-- Kong Gateway hybrid mode documentation
+- Envoy extension configuration, Envoy AI Gateway repository and data-plane documentation
+- Kong Gateway repository plus hybrid mode and AI gateway documentation
 - OpenTelemetry GenAI semantic conventions
-- LiteLLM gateway positioning around virtual keys, budgets, and rate limits
+- LiteLLM repository plus routing and gateway documentation
+- Portkey gateway repository and fallback or routing documentation where the behavior is concrete enough to evaluate
 
 ## 1. Product Characteristics
 
@@ -31,6 +32,8 @@ The bottom-layer design should therefore avoid three common traps:
 - treating observability, budget controls, or provenance checks as optional add-ons instead of admission-path concerns
 
 ## 2. Open Source Lessons
+
+The adoption rule for this section is code-first: lessons should be derived from concrete source-backed behavior, typed resources, or operator-facing technical documentation that exposes how the system actually behaves.
 
 ### 2.1 Backstage
 
@@ -424,10 +427,12 @@ Build first:
 - static registry and composition helpers in `plugin-registry` and `runtime-composition`
 - route candidate, route receipt, and admission result models
 - telemetry semantic constants
+- a source-review matrix that maps borrowed external strengths to HugeRouter rules and labels each one as implemented, bootstrap-only, or planned
 
 Exit criteria:
 
 - a request can be parsed, routed, admitted or rejected, and explained with stable IDs even if only one provider adapter exists
+- the first implementation slice can explain which peer-proven behaviors it copied and which ones are still planned
 
 ### 7.2 Gateway Slice
 
@@ -473,13 +478,23 @@ Before merging a feature that touches the gateway path, confirm:
 - Does it make retries and fallback visible in cost and diagnostics?
 - Does it remain deterministic under the same snapshot and health inputs?
 - Does it have a rollback or last-known-good behavior when config changes fail?
+- Does the spec cite the relevant external reference strength when one exists, or explicitly justify the novel behavior?
+- Does the spec label the behavior as implemented, bootstrap-only, or planned in this repository?
 
-## 9. External Reference Links
+## 9. External References and Source Repositories Reviewed
 
 - Backstage frontend plugins: <https://backstage.io/docs/frontend-system/architecture/plugins>
 - Backstage app architecture: <https://backstage.io/docs/next/overview/architecture-overview/>
 - Envoy extension configuration: <https://www.envoyproxy.io/docs/envoy/latest/configuration/overview/extension.html>
+- Envoy AI Gateway repository: <https://github.com/envoyproxy/ai-gateway>
 - Envoy AI Gateway data plane: <https://aigateway.envoyproxy.io/docs/concepts/architecture/data-plane/>
-- Kong Gateway hybrid mode: <https://docs.konghq.com/gateway/latest/production/deployment-topologies/hybrid-mode/>
+- Envoy AI Gateway MCP capability: <https://aigateway.envoyproxy.io/docs/capabilities/mcp/>
+- Kong Gateway repository: <https://github.com/Kong/kong>
+- Kong Gateway hybrid mode: <https://developer.konghq.com/gateway/hybrid-mode/>
+- Kong AI Proxy Advanced: <https://developer.konghq.com/plugins/ai-proxy-advanced/>
 - OpenTelemetry GenAI semantic conventions: <https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/>
+- LiteLLM repository: <https://github.com/BerriAI/litellm>
+- LiteLLM routing docs: <https://docs.litellm.ai/docs/routing>
 - LiteLLM open source gateway overview: <https://www.litellm.ai/oss>
+- Portkey gateway repository: <https://github.com/Portkey-AI/gateway>
+- Portkey AI gateway fallbacks: <https://portkey.ai/docs/product/ai-gateway/fallbacks>

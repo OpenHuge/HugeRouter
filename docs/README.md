@@ -2,6 +2,15 @@
 
 ## Architecture
 
+Recent priority docs for the source-backed spec deepening pass:
+
+- [Routing System](architecture/routing-system.md) for named strategy families, admission outcomes, and route receipts
+- [Policy System](architecture/policy-system.md) for normalized reason codes and policy/routing/admission boundaries
+- [Protocol IR and Protocol Support](architecture/protocol-ir-and-protocols.md) for typed protocol and route resource modeling
+- [Provider Adapter System](architecture/provider-adapter-system.md) for manifest boundaries and compatibility contracts
+- [Multi-Tenancy and Configuration](architecture/multi-tenancy-and-configuration.md) for CP/DP snapshot and rollback behavior
+- [Metering, Ledger, and Pricing](architecture/metering-ledger-pricing.md) for budget reservation lifecycle and pricing catalog sources
+
 - [Overview](architecture/overview.md)
 - [Foundation Risk and Trend Analysis](architecture/foundation-risk-and-trend-analysis.md)
 - [Implementation Contracts](architecture/implementation-contracts.md)
