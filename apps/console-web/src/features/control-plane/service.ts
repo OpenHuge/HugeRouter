@@ -7,8 +7,7 @@ import type {
   Project,
   ProviderResource,
   RoutePolicy,
-  RouteSimulationResponse,
-  Tenant
+  RouteSimulationResponse
 } from '@huge-router/ts-shared-schema'
 import type { AuthSessionEnvelope } from '../auth/auth-contract'
 import { authSessionQueryKey } from '../auth/auth-queries'

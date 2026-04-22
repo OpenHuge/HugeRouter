@@ -42,6 +42,9 @@ pub struct ControlPlaneState {
 }
 
 impl ControlPlaneState {
+    /// # Errors
+    ///
+    /// Returns an error when the configured persistent store cannot be initialized.
     pub async fn from_env() -> Result<Self> {
         Ok(Self {
             frontend_base_url: std::env::var("CONSOLE_WEB_BASE_URL")
@@ -91,6 +94,9 @@ struct RequestContext {
     sequence: u64,
 }
 
+/// # Errors
+///
+/// Returns an error when the configured control-plane state cannot be initialized.
 pub async fn app() -> Result<Router> {
     Ok(app_with_state(ControlPlaneState::from_env().await?))
 }
@@ -148,9 +154,9 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-async fn get_auth_providers(State(state): State<ControlPlaneState>) -> Json<core_domain::AuthProvidersResponse> {
+async fn get_auth_providers(State(_state): State<ControlPlaneState>) -> Json<core_domain::AuthProvidersResponse> {
     Json(core_domain::AuthProvidersResponse {
-        providers: state.store.provider_catalog(),
+        providers: StoreMode::provider_catalog(),
     })
 }
 

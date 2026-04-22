@@ -20,7 +20,7 @@ Object.defineProperty(window, 'matchMedia', {
 function QueryProbe() {
   const { data } = useQuery({
     queryKey: ['probe'],
-    queryFn: async () => 'loaded'
+    queryFn: () => Promise.resolve('loaded')
   })
 
   return <div>{data ?? 'pending'}</div>

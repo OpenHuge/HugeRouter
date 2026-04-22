@@ -1054,8 +1054,7 @@ impl ControlPlaneConfigStore {
         let cache_ttl = std::env::var("GATEWAY_CONFIG_CACHE_TTL_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_millis)
-            .unwrap_or_else(|| Duration::from_secs(5));
+            .map_or_else(|| Duration::from_secs(5), Duration::from_millis);
 
         Self::new(base_url, snapshot_ref, cache_ttl, reqwest::Client::new())
     }
@@ -1097,8 +1096,8 @@ impl ControlPlaneConfigStore {
             .find(|policy| policy.route_policy_id == snapshot.route_policy_id)
             .ok_or_else(|| {
                 format!(
-                    "route policy {} is missing from control plane",
-                    snapshot.route_policy_id
+                    "route policy {route_policy_id} is missing from control plane",
+                    route_policy_id = snapshot.route_policy_id
                 )
             })?;
 
@@ -1112,10 +1111,7 @@ impl ControlPlaneConfigStore {
                     .find(|candidate| &candidate.provider_resource_id == provider_resource_id)
                     .cloned()
                     .ok_or_else(|| {
-                        format!(
-                            "provider resource {} is missing from control plane",
-                            provider_resource_id
-                        )
+                        format!("provider resource {provider_resource_id} is missing from control plane")
                     })?;
 
                 Ok(ProviderTargetRuntime {
@@ -1172,16 +1168,15 @@ impl ActiveConfigStore for ControlPlaneConfigStore {
     async fn load(&self) -> Result<ActiveGatewayConfig, String> {
         {
             let cache = self.cache.lock().await;
-            if let Some(entry) = cache.as_ref() {
-                if entry.fetched_at.elapsed() <= self.cache_ttl {
-                    return Ok(entry.config.clone());
-                }
+            if let Some(entry) = cache.as_ref()
+                && entry.fetched_at.elapsed() <= self.cache_ttl
+            {
+                return Ok(entry.config.clone());
             }
         }
 
         let fetched = self.fetch_active_config().await?;
-        let mut cache = self.cache.lock().await;
-        *cache = Some(CachedActiveConfig {
+        *self.cache.lock().await = Some(CachedActiveConfig {
             config: fetched.clone(),
             fetched_at: Instant::now(),
         });
@@ -1682,7 +1677,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        (format!("http://{}", address), request_count, handle)
+        (format!("http://{address}"), request_count, handle)
     }
 
     #[test]

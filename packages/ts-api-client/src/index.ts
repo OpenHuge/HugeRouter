@@ -15,7 +15,6 @@ import {
   oauthLoginStartRequestSchema,
   oauthLoginStartResponseSchema,
   oauthProviderSchema,
-  projectSchema,
   projectsResponseSchema,
   providerResourceSchema,
   providerResourcesResponseSchema,

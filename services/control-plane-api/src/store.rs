@@ -123,6 +123,7 @@ pub enum UserIdentityKey {
 }
 
 impl SeedData {
+    #[allow(clippy::too_many_lines)]
     pub fn bootstrap() -> Self {
         let now = "2026-04-22T00:00:00Z".to_string();
         let tenant_platform = Tenant::new(
@@ -335,7 +336,7 @@ impl SeedData {
             primary_email: Some("ops@huge-router.dev".to_string()),
             display_name: "Operations Admin".to_string(),
             avatar_url: None,
-            created_at: now.clone(),
+            created_at: now,
             last_login_at: None,
         };
 
@@ -433,7 +434,7 @@ impl StoreMode {
         }
     }
 
-    pub fn provider_catalog(&self) -> Vec<AuthProviderAvailability> {
+    pub fn provider_catalog() -> Vec<AuthProviderAvailability> {
         PROVIDER_CATALOG
             .iter()
             .map(|(provider, display_name, start_path)| AuthProviderAvailability {
@@ -590,11 +591,11 @@ impl StoreMode {
         provider: AuthProvider,
     ) -> Result<Option<UnlinkAuthProviderResponse>> {
         match self {
-            Self::Memory(store) => unlink_memory_provider(
+            Self::Memory(store) => Ok(unlink_memory_provider(
                 &mut store.write().expect("memory store write lock"),
                 session_id,
                 provider,
-            ),
+            )),
             Self::Postgres(store) => store.unlink_provider(session_id, provider).await,
         }
     }
@@ -678,17 +679,20 @@ impl StoreMode {
 
     pub async fn activate_config_snapshot(&self, config_snapshot_id: &str) -> Result<Option<ConfigSnapshotResponse>> {
         match self {
-            Self::Memory(store) => activate_memory_config_snapshot(
+            Self::Memory(store) => Ok(activate_memory_config_snapshot(
                 &mut store.write().expect("memory store write lock"),
                 config_snapshot_id,
-            ),
+            )),
             Self::Postgres(store) => store.activate_config_snapshot(config_snapshot_id).await,
         }
     }
 
     pub async fn simulate_route(&self, request: RouteSimulationRequest) -> Result<RouteSimulationResponse> {
         match self {
-            Self::Memory(store) => simulate_memory_route(&store.read().expect("memory store read lock"), request),
+            Self::Memory(store) => simulate_memory_route(
+                &store.read().expect("memory store read lock"),
+                &request,
+            ),
             Self::Postgres(store) => store.simulate_route(request).await,
         }
     }
@@ -727,6 +731,7 @@ impl PostgresStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn seed(&self) -> Result<()> {
         let seed = SeedData::bootstrap();
         for tenant in seed.tenants {
@@ -970,7 +975,7 @@ impl PostgresStore {
         .bind(session.session_id.as_str())
         .bind(user.user_id.as_str())
         .bind("active")
-        .bind(session.active_tenant_id.as_ref().map(|id| id.as_str()))
+        .bind(session.active_tenant_id.as_ref().map(core_domain::TenantId::as_str))
         .bind(auth_provider_slug(provider))
         .bind(&session.expires_at)
         .bind(Json(session.clone()))
@@ -1138,7 +1143,7 @@ impl PostgresStore {
             .await?
             .context("active config snapshot missing")?
             .config_snapshot;
-        build_route_simulation_response(&tenants, &policies, &active_snapshot, request)
+        build_route_simulation_response(&tenants, &policies, &active_snapshot, &request)
     }
 
     async fn get_route_receipt(&self, route_receipt_id: &str) -> Result<Option<RouteReceiptResponse>> {
@@ -1252,7 +1257,7 @@ fn issue_memory_session(
         session_id: AuthSessionId::parse(session_id.to_string()).unwrap(),
         state: AuthSessionState::Active,
         user,
-        active_tenant_id: Some(active_membership.tenant.id.clone()),
+        active_tenant_id: Some(active_membership.tenant.id),
         memberships,
         authenticated_by: provider,
         created_at: now.to_string(),
@@ -1274,10 +1279,8 @@ fn unlink_memory_provider(
     store: &mut MemoryStore,
     session_id: &str,
     provider: AuthProvider,
-) -> Result<Option<UnlinkAuthProviderResponse>> {
-    let Some(session) = store.sessions.get_mut(session_id) else {
-        return Ok(None);
-    };
+) -> Option<UnlinkAuthProviderResponse> {
+    let session = store.sessions.get_mut(session_id)?;
     let removed = if provider == AuthProvider::Email {
         false
     } else {
@@ -1292,32 +1295,29 @@ fn unlink_memory_provider(
         session.links.len() != before
     };
 
-    Ok(Some(UnlinkAuthProviderResponse { provider, removed }))
+    Some(UnlinkAuthProviderResponse { provider, removed })
 }
 
 fn activate_memory_config_snapshot(
     store: &mut MemoryStore,
     config_snapshot_id: &str,
-) -> Result<Option<ConfigSnapshotResponse>> {
-    let Some(index) = store
+) -> Option<ConfigSnapshotResponse> {
+    let index = store
         .config_snapshots
         .iter()
-        .position(|item| item.config_snapshot_id.as_str() == config_snapshot_id)
-    else {
-        return Ok(None);
-    };
+        .position(|item| item.config_snapshot_id.as_str() == config_snapshot_id)?;
     let snapshot = &mut store.config_snapshots[index];
     snapshot.status = ConfigSnapshotStatus::Active;
     snapshot.activated_at = Some(now_rfc3339());
     store.active_config_snapshot_id = config_snapshot_id.to_string();
-    Ok(Some(ConfigSnapshotResponse {
+    Some(ConfigSnapshotResponse {
         config_snapshot: snapshot.clone(),
-    }))
+    })
 }
 
 fn simulate_memory_route(
     store: &MemoryStore,
-    request: RouteSimulationRequest,
+    request: &RouteSimulationRequest,
 ) -> Result<RouteSimulationResponse> {
     let active_snapshot = store
         .config_snapshots
@@ -1337,7 +1337,7 @@ fn build_route_simulation_response(
     provider_resources: &[ProviderResource],
     route_policies: &[RoutePolicy],
     active_snapshot: &ConfigSnapshot,
-    request: RouteSimulationRequest,
+    request: &RouteSimulationRequest,
 ) -> Result<RouteSimulationResponse> {
     let route_policy = route_policies
         .iter()
@@ -1483,13 +1483,14 @@ pub fn now_rfc3339() -> String {
 }
 
 pub fn expires_at(seconds: u64) -> String {
-    let timestamp = OffsetDateTime::now_utc() + time::Duration::seconds(seconds as i64);
+    let seconds_i64 = i64::try_from(seconds).unwrap_or(i64::MAX);
+    let timestamp = OffsetDateTime::now_utc() + time::Duration::seconds(seconds_i64);
     timestamp
         .format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-pub fn oauth_provider_slug(provider: OAuthProvider) -> &'static str {
+pub const fn oauth_provider_slug(provider: OAuthProvider) -> &'static str {
     match provider {
         OAuthProvider::Github => "github",
         OAuthProvider::Google => "google",
@@ -1497,7 +1498,7 @@ pub fn oauth_provider_slug(provider: OAuthProvider) -> &'static str {
     }
 }
 
-pub fn auth_provider_slug(provider: AuthProvider) -> &'static str {
+pub const fn auth_provider_slug(provider: AuthProvider) -> &'static str {
     match provider {
         AuthProvider::Email => "email",
         AuthProvider::Github => "github",
@@ -1506,14 +1507,14 @@ pub fn auth_provider_slug(provider: AuthProvider) -> &'static str {
     }
 }
 
-fn login_flow_kind_slug(kind: LoginFlowKind) -> &'static str {
+const fn login_flow_kind_slug(kind: LoginFlowKind) -> &'static str {
     match kind {
         LoginFlowKind::Email => "email",
         LoginFlowKind::OAuth => "oauth",
     }
 }
 
-fn config_snapshot_status_slug(status: ConfigSnapshotStatus) -> &'static str {
+const fn config_snapshot_status_slug(status: ConfigSnapshotStatus) -> &'static str {
     match status {
         ConfigSnapshotStatus::Draft => "draft",
         ConfigSnapshotStatus::Active => "active",
@@ -1522,50 +1523,50 @@ fn config_snapshot_status_slug(status: ConfigSnapshotStatus) -> &'static str {
 }
 
 const MIGRATIONS: &[&str] = &[
-    r#"CREATE TABLE IF NOT EXISTS tenants (
+    r"CREATE TABLE IF NOT EXISTS tenants (
         tenant_id TEXT PRIMARY KEY,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS projects (
+    )",
+    r"CREATE TABLE IF NOT EXISTS projects (
         project_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS provider_resources (
+    )",
+    r"CREATE TABLE IF NOT EXISTS provider_resources (
         provider_resource_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         project_id TEXT NULL,
         provider_id TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS route_policies (
+    )",
+    r"CREATE TABLE IF NOT EXISTS route_policies (
         route_policy_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS config_snapshots (
+    )",
+    r"CREATE TABLE IF NOT EXISTS config_snapshots (
         config_snapshot_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         project_id TEXT NOT NULL,
         status TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS active_config_pointers (
+    )",
+    r"CREATE TABLE IF NOT EXISTS active_config_pointers (
         pointer_key TEXT PRIMARY KEY,
         config_snapshot_id TEXT NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS users (
+    )",
+    r"CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY,
         primary_email TEXT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS tenant_memberships (
+    )",
+    r"CREATE TABLE IF NOT EXISTS tenant_memberships (
         membership_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         tenant_id TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS auth_provider_links (
+    )",
+    r"CREATE TABLE IF NOT EXISTS auth_provider_links (
         link_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         provider TEXT NOT NULL,
@@ -1573,10 +1574,10 @@ const MIGRATIONS: &[&str] = &[
         email TEXT NULL,
         can_unlink BOOLEAN NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE UNIQUE INDEX IF NOT EXISTS auth_provider_links_subject_key
-       ON auth_provider_links (provider, provider_subject)"#,
-    r#"CREATE TABLE IF NOT EXISTS sessions (
+    )",
+    r"CREATE UNIQUE INDEX IF NOT EXISTS auth_provider_links_subject_key
+       ON auth_provider_links (provider, provider_subject)",
+    r"CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         state TEXT NOT NULL,
@@ -1584,8 +1585,8 @@ const MIGRATIONS: &[&str] = &[
         authenticated_by TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS login_flows (
+    )",
+    r"CREATE TABLE IF NOT EXISTS login_flows (
         flow_id TEXT PRIMARY KEY,
         flow_kind TEXT NOT NULL,
         email TEXT NULL,
@@ -1593,9 +1594,9 @@ const MIGRATIONS: &[&str] = &[
         workspace_slug TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         payload JSONB NOT NULL
-    )"#,
-    r#"CREATE TABLE IF NOT EXISTS route_receipts (
+    )",
+    r"CREATE TABLE IF NOT EXISTS route_receipts (
         route_receipt_id TEXT PRIMARY KEY,
         payload JSONB NOT NULL
-    )"#,
+    )",
 ];
