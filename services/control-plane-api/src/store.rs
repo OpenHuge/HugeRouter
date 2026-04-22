@@ -3,15 +3,21 @@
     clippy::branches_sharing_code,
     clippy::cast_sign_loss,
     clippy::collapsible_if,
+    clippy::format_collect,
+    clippy::format_push_string,
     clippy::items_after_test_module,
     clippy::match_like_matches_macro,
+    clippy::needless_raw_string_hashes,
     clippy::needless_pass_by_value,
     clippy::option_as_ref_deref,
     clippy::or_fun_call,
+    clippy::redundant_clone,
     clippy::redundant_closure,
     clippy::significant_drop_tightening,
     clippy::struct_field_names,
+    clippy::unused_async,
     clippy::too_many_lines,
+    clippy::too_many_arguments,
     clippy::trivially_copy_pass_by_ref
 )]
 
@@ -26,9 +32,15 @@ use core_domain::{
     TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
     TenantSummary, UnlinkAuthProviderResponse, UserId, UserIdentity,
 };
+use metering::{AdditionalUsageDimensions, PricingCatalog, PricingSource, default_budget_micros, default_catalog, quote_usage_with_additions};
 use protocol_ir::{
-    ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
+    BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
+    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, PricingCatalogEntry,
+    PricingCatalogResponse, PricingSimulationLineItem, PricingSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse,
+    ProviderResourcesResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteSimulationRequest,
+    RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow,
+    UsageSummary, UsageSummaryResponse,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -66,6 +78,12 @@ const PROVIDER_CATALOG: &[(AuthProvider, &str, &str)] = &[
     ),
 ];
 
+const OIDC_PROVIDER_CATALOG_ENTRY: (AuthProvider, &str, &str) = (
+    AuthProvider::Oidc,
+    "Continue with Enterprise SSO",
+    "/api/control-plane/auth/oauth/oidc/start",
+);
+
 #[derive(Debug, Clone)]
 pub enum StoreMode {
     Memory(Arc<RwLock<MemoryStore>>),
@@ -93,6 +111,7 @@ pub struct MemoryStore {
     sessions: HashMap<String, StoredSession>,
     login_flows: HashMap<String, LoginFlow>,
     route_receipts: HashMap<String, RouteReceipt>,
+    billing_export_jobs: Vec<BillingExportJobRecord>,
     route_policy_disabled_ids: HashSet<String>,
     api_keys: Vec<ApiKeyRecord>,
 }
@@ -130,6 +149,20 @@ pub struct ApiKeysResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteReceiptsResponse {
     pub data: Vec<RouteReceipt>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BillingExportJobRecord {
+    pub job: BillingExportJob,
+    pub content: Option<String>,
+    pub content_type: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageBreakdownGroupBy {
+    Provider,
+    Model,
+    Day,
 }
 
 #[derive(Debug, Clone)]
@@ -563,6 +596,7 @@ impl MemoryStore {
             sessions: HashMap::new(),
             login_flows: HashMap::new(),
             route_receipts: HashMap::new(),
+            billing_export_jobs: Vec::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
         }
@@ -582,7 +616,7 @@ impl StoreMode {
     }
 
     pub fn provider_catalog() -> Vec<AuthProviderAvailability> {
-        PROVIDER_CATALOG
+        let mut catalog = PROVIDER_CATALOG
             .iter()
             .map(
                 |(provider, display_name, start_path)| AuthProviderAvailability {
@@ -593,7 +627,19 @@ impl StoreMode {
                     reason_code: None,
                 },
             )
-            .collect()
+            .collect::<Vec<_>>();
+
+        if oidc_enabled() {
+            catalog.push(AuthProviderAvailability {
+                provider: OIDC_PROVIDER_CATALOG_ENTRY.0,
+                display_name: OIDC_PROVIDER_CATALOG_ENTRY.1.to_string(),
+                enabled: true,
+                start_path: OIDC_PROVIDER_CATALOG_ENTRY.2.to_string(),
+                reason_code: None,
+            });
+        }
+
+        catalog
     }
 
     pub async fn ensure_known_email(&self, email: &str) -> Result<bool> {
@@ -703,6 +749,41 @@ impl StoreMode {
                         now,
                         expires_at,
                     )
+                    .await
+            }
+        }
+    }
+
+    pub async fn upsert_oidc_user(
+        &self,
+        subject: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        workspace_slug: &str,
+        role: TenantMembershipRole,
+        now: &str,
+    ) -> Result<UserIdentity> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let user_id = upsert_memory_oidc_user(
+                    &mut store,
+                    subject,
+                    email,
+                    display_name,
+                    workspace_slug,
+                    role,
+                    now,
+                )?;
+                store
+                    .users
+                    .get(&user_id)
+                    .cloned()
+                    .context("oidc user should exist after upsert")
+            }
+            Self::Postgres(store) => {
+                store
+                    .upsert_oidc_user(subject, email, display_name, workspace_slug, role, now)
                     .await
             }
         }
@@ -1157,6 +1238,174 @@ impl StoreMode {
         }
     }
 
+    pub async fn get_usage_summary(
+        &self,
+        tenant_id: &str,
+        project_id: Option<String>,
+        window_start: Option<String>,
+        window_end: Option<String>,
+    ) -> Result<UsageSummaryResponse> {
+        match self {
+            Self::Memory(_) => Ok(sample_usage_summary_response(
+                tenant_id,
+                project_id.as_deref(),
+                window_start.as_deref(),
+                window_end.as_deref(),
+            )),
+            Self::Postgres(store) => {
+                store
+                    .get_usage_summary(tenant_id, project_id, window_start, window_end)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_usage_breakdown(
+        &self,
+        tenant_id: &str,
+        project_id: Option<String>,
+        window_start: Option<String>,
+        window_end: Option<String>,
+        group_by: UsageBreakdownGroupBy,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<UsageBreakdownResponse> {
+        match self {
+            Self::Memory(_) => Ok(sample_usage_breakdown_response(
+                tenant_id,
+                project_id.as_deref(),
+                group_by,
+                cursor,
+                limit,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .get_usage_breakdown(
+                        tenant_id,
+                        project_id,
+                        window_start,
+                        window_end,
+                        group_by,
+                        cursor,
+                        limit,
+                    )
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_balance_projection(
+        &self,
+        tenant_id: &str,
+        project_id: Option<String>,
+    ) -> Result<BalanceProjectionResponse> {
+        match self {
+            Self::Memory(_) => Ok(sample_balance_projection_response(
+                tenant_id,
+                project_id.as_deref(),
+            )),
+            Self::Postgres(store) => store.get_balance_projection(tenant_id, project_id).await,
+        }
+    }
+
+    pub async fn get_pricing_catalog(&self) -> Result<PricingCatalogResponse> {
+        Ok(sample_pricing_catalog_response())
+    }
+
+    pub async fn create_pricing_simulation(
+        &self,
+        request: PricingSimulationRequest,
+    ) -> Result<PricingSimulationResponse> {
+        Ok(simulate_pricing(request))
+    }
+
+    pub async fn create_billing_export(
+        &self,
+        request: BillingExportRequest,
+    ) -> Result<BillingExportJobResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let export_job_id = format!("export_mem_{}", store.billing_export_jobs.len() + 1);
+                let requested_at = now_rfc3339();
+                let job = BillingExportJob {
+                    export_job_id: export_job_id.clone(),
+                    status: "queued".to_string(),
+                    format: request.format.clone(),
+                    requested_at: requested_at.clone(),
+                    completed_at: None,
+                    error_message: None,
+                    tenant_id: request.tenant_id.clone(),
+                    project_id: request.project_id.clone(),
+                };
+                let record = BillingExportJobRecord {
+                    job: job.clone(),
+                    content: Some("bucket,provider_id,model_alias,input_tokens,output_tokens,cached_input_tokens,provider_cost,billable_price\n2026-04-21,openai,reasoning-fast,18420,6245,1220,0.124500,0.152025\n".to_string()),
+                    content_type: "text/csv".to_string(),
+                };
+                store.billing_export_jobs.push(record);
+                Ok(BillingExportJobResponse { data: job })
+            }
+            Self::Postgres(store) => store.create_billing_export(request).await,
+        }
+    }
+
+    pub async fn list_billing_exports(
+        &self,
+        tenant_id: Option<String>,
+        project_id: Option<String>,
+    ) -> Result<BillingExportJobsResponse> {
+        match self {
+            Self::Memory(store) => Ok(BillingExportJobsResponse {
+                data: filter_billing_export_jobs(
+                    store.read().expect("memory store read lock").billing_export_jobs
+                        .iter()
+                        .map(|record| record.job.clone())
+                        .collect(),
+                    tenant_id,
+                    project_id,
+                ),
+            }),
+            Self::Postgres(store) => store.list_billing_exports(tenant_id, project_id).await,
+        }
+    }
+
+    pub async fn get_billing_export(
+        &self,
+        export_job_id: &str,
+    ) -> Result<Option<BillingExportJobResponse>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .billing_export_jobs
+                .iter()
+                .find(|record| record.job.export_job_id == export_job_id)
+                .map(|record| BillingExportJobResponse {
+                    data: maybe_complete_memory_export_job(record.job.clone(), record.content.is_some()),
+                })),
+            Self::Postgres(store) => store.get_billing_export(export_job_id).await,
+        }
+    }
+
+    pub async fn download_billing_export(&self, export_job_id: &str) -> Result<Option<(String, String)>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .billing_export_jobs
+                .iter()
+                .find(|record| record.job.export_job_id == export_job_id)
+                .and_then(|record| {
+                    record
+                        .content
+                        .as_ref()
+                        .map(|content| (record.content_type.clone(), content.clone()))
+                })),
+            Self::Postgres(store) => store.download_billing_export(export_job_id).await,
+        }
+    }
+
     #[cfg(test)]
     pub fn insert_route_receipt_for_tests(&self, route_receipt: RouteReceipt) {
         match self {
@@ -1429,10 +1678,18 @@ impl PostgresStore {
         now: &str,
         expires_at: &str,
     ) -> Result<AuthLoginResult> {
-        let user = self
-            .lookup_user(identity_key)
-            .await?
-            .context("identity not found")?;
+        let user = match self.lookup_user(identity_key).await? {
+            Some(user) => user,
+            None if provider == AuthProvider::Oidc => {
+                match identity_key {
+                    IdentityLookup::ProviderSubject(AuthProvider::Oidc, subject) => {
+                        self.ensure_oidc_user(subject, workspace_slug, now).await?
+                    }
+                    _ => anyhow::bail!("identity not found"),
+                }
+            }
+            None => anyhow::bail!("identity not found"),
+        };
         let memberships = self.list_memberships(&user.user_id).await?;
         let active_membership = memberships
             .iter()
@@ -1476,6 +1733,133 @@ impl PostgresStore {
         .await?;
 
         Ok(AuthLoginResult { session, links })
+    }
+
+    async fn ensure_oidc_user(
+        &self,
+        subject: &str,
+        workspace_slug: &str,
+        now: &str,
+    ) -> Result<UserIdentity> {
+        self.upsert_oidc_user(
+            subject,
+            std::env::var("CONTROL_PLANE_OIDC_EMAIL").ok().as_deref(),
+            std::env::var("CONTROL_PLANE_OIDC_DISPLAY_NAME")
+                .ok()
+                .as_deref(),
+            workspace_slug,
+            if workspace_slug == "platform-admin" {
+                TenantMembershipRole::Admin
+            } else {
+                TenantMembershipRole::Member
+            },
+            now,
+        )
+        .await
+    }
+
+    async fn upsert_oidc_user(
+        &self,
+        subject: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        workspace_slug: &str,
+        role: TenantMembershipRole,
+        now: &str,
+    ) -> Result<UserIdentity> {
+        let row = sqlx::query("SELECT payload FROM tenants WHERE payload->>'slug' = $1 LIMIT 1")
+            .bind(workspace_slug)
+            .fetch_optional(&self.pool)
+            .await?
+            .context("workspace not found for oidc login")?;
+        let tenant = row.get::<Json<Tenant>, _>("payload").0;
+
+        let digest = Sha256::digest(subject.as_bytes());
+        let subject_hash = digest
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let user_id = format!("user_{subject_hash}");
+        let primary_email = email
+            .map(str::to_string)
+            .or_else(|| {
+                std::env::var("CONTROL_PLANE_OIDC_EMAIL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_else(|| format!("{subject}@enterprise.example"));
+        let display_name = display_name
+            .map(str::to_string)
+            .or_else(|| {
+                std::env::var("CONTROL_PLANE_OIDC_DISPLAY_NAME")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_else(|| "Enterprise SSO User".to_string());
+
+        let user = UserIdentity {
+            user_id: UserId::parse(user_id.clone()).unwrap(),
+            primary_email: Some(primary_email.clone()),
+            display_name,
+            avatar_url: None,
+            created_at: now.to_string(),
+            last_login_at: Some(now.to_string()),
+        };
+
+        sqlx::query(
+            "INSERT INTO users (user_id, primary_email, payload) VALUES ($1, $2, $3)
+             ON CONFLICT (user_id) DO UPDATE SET primary_email = EXCLUDED.primary_email, payload = EXCLUDED.payload",
+        )
+        .bind(&user_id)
+        .bind(&primary_email)
+        .bind(Json(user.clone()))
+        .execute(&self.pool)
+        .await?;
+
+        let membership = membership(
+            &format!("tmemb_oidc_{subject_hash}"),
+            &tenant,
+            role,
+        );
+        let membership_id = membership.membership_id.to_string();
+        let membership_tenant_id = membership.tenant.id.to_string();
+        sqlx::query(
+            "INSERT INTO tenant_memberships (membership_id, user_id, tenant_id, payload)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (membership_id) DO UPDATE SET user_id = EXCLUDED.user_id, tenant_id = EXCLUDED.tenant_id, payload = EXCLUDED.payload",
+        )
+        .bind(&membership_id)
+        .bind(&user_id)
+        .bind(&membership_tenant_id)
+        .bind(Json(membership))
+        .execute(&self.pool)
+        .await?;
+
+        let link = link(AuthProvider::Oidc, subject, Some(&primary_email), false);
+        let link_id = link.link_id.to_string();
+        sqlx::query(
+            "INSERT INTO auth_provider_links (link_id, user_id, provider, provider_subject, email, can_unlink, payload)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (link_id) DO UPDATE SET
+               user_id = EXCLUDED.user_id,
+               provider = EXCLUDED.provider,
+               provider_subject = EXCLUDED.provider_subject,
+               email = EXCLUDED.email,
+               can_unlink = EXCLUDED.can_unlink,
+               payload = EXCLUDED.payload",
+        )
+        .bind(&link_id)
+        .bind(&user_id)
+        .bind(auth_provider_slug(AuthProvider::Oidc))
+        .bind(subject)
+        .bind(Some(primary_email.as_str()))
+        .bind(false)
+        .bind(Json(link))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(user)
     }
 
     async fn get_session(&self, session_id: &str) -> Result<Option<AuthLoginResult>> {
@@ -2041,6 +2425,395 @@ impl PostgresStore {
         })
     }
 
+    async fn get_usage_summary(
+        &self,
+        tenant_id: &str,
+        project_id: Option<String>,
+        window_start: Option<String>,
+        window_end: Option<String>,
+    ) -> Result<UsageSummaryResponse> {
+        let window_start_value =
+            window_start.unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+        let window_end_value = window_end.unwrap_or_else(now_rfc3339);
+        let row = sqlx::query(
+            r#"
+            SELECT
+                COALESCE(SUM(event_count), 0) AS event_count,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                COALESCE(SUM(provider_cost_micros), 0) AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0) AS billable_cost_micros,
+                COALESCE(MIN(currency), 'USD') AS currency
+            FROM usage_daily_projections
+            WHERE tenant_id = $1
+              AND ($2::text IS NULL OR project_id = $2)
+              AND usage_date >= DATE($3::timestamptz)
+              AND usage_date <= DATE($4::timestamptz)
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(project_id.as_deref())
+        .bind(&window_start_value)
+        .bind(&window_end_value)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let currency = row.get::<String, _>("currency");
+        Ok(UsageSummaryResponse {
+            data: UsageSummary {
+                tenant_id: TenantId::parse(tenant_id.to_string())?,
+                project_id: project_id.map(ProjectId::parse).transpose()?,
+                window_start: window_start_value,
+                window_end: window_end_value,
+                currency: currency.clone(),
+                event_count: u64::try_from(row.get::<i64, _>("event_count")).unwrap_or_default(),
+                input_tokens: u64::try_from(row.get::<i64, _>("input_tokens")).unwrap_or_default(),
+                output_tokens: u64::try_from(row.get::<i64, _>("output_tokens")).unwrap_or_default(),
+                cached_input_tokens: u64::try_from(row.get::<i64, _>("cached_input_tokens"))
+                    .unwrap_or_default(),
+                provider_cost: format_monetary_amount(
+                    &currency,
+                    row.get::<i64, _>("provider_cost_micros"),
+                ),
+                billable_price: format_monetary_amount(
+                    &currency,
+                    row.get::<i64, _>("billable_cost_micros"),
+                ),
+            },
+        })
+    }
+
+    async fn get_usage_breakdown(
+        &self,
+        tenant_id: &str,
+        project_id: Option<String>,
+        window_start: Option<String>,
+        window_end: Option<String>,
+        group_by: UsageBreakdownGroupBy,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<UsageBreakdownResponse> {
+        let offset = parse_cursor_offset(cursor.as_deref());
+        let limit = limit.unwrap_or(50).max(1);
+        let window_start_value =
+            window_start.unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+        let window_end_value = window_end.unwrap_or_else(now_rfc3339);
+        let (bucket_select, provider_select, model_select, group_expr) = match group_by {
+            UsageBreakdownGroupBy::Provider => (
+                "provider_id AS bucket",
+                "provider_id AS provider_id",
+                "NULL::text AS model_alias",
+                "provider_id",
+            ),
+            UsageBreakdownGroupBy::Model => (
+                "model_alias AS bucket",
+                "NULL::text AS provider_id",
+                "model_alias AS model_alias",
+                "model_alias",
+            ),
+            UsageBreakdownGroupBy::Day => (
+                "TO_CHAR(usage_date, 'YYYY-MM-DD') AS bucket",
+                "NULL::text AS provider_id",
+                "NULL::text AS model_alias",
+                "usage_date",
+            ),
+        };
+        let sql = format!(
+            r#"
+            SELECT
+                {bucket_select},
+                {provider_select},
+                {model_select},
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                COALESCE(SUM(provider_cost_micros), 0) AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0) AS billable_cost_micros,
+                COALESCE(MIN(currency), 'USD') AS currency
+            FROM usage_daily_projections
+            WHERE tenant_id = $1
+              AND ($2::text IS NULL OR project_id = $2)
+              AND usage_date >= DATE($3::timestamptz)
+              AND usage_date <= DATE($4::timestamptz)
+            GROUP BY {group_expr}
+            ORDER BY {group_expr}
+            OFFSET $5 LIMIT $6
+            "#
+        );
+        let rows = sqlx::query(&sql)
+            .bind(tenant_id)
+            .bind(project_id.as_deref())
+            .bind(&window_start_value)
+            .bind(&window_end_value)
+            .bind(i64::try_from(offset).unwrap_or(i64::MAX))
+            .bind(i64::from(limit))
+            .fetch_all(&self.pool)
+            .await?;
+
+        let data = rows
+            .iter()
+            .map(|row| {
+                let currency = row.get::<String, _>("currency");
+                UsageBreakdownRow {
+                    bucket: row.get::<String, _>("bucket"),
+                    provider_id: row.get::<Option<String>, _>("provider_id"),
+                    model_alias: row.get::<Option<String>, _>("model_alias"),
+                    input_tokens: u64::try_from(row.get::<i64, _>("input_tokens"))
+                        .unwrap_or_default(),
+                    output_tokens: u64::try_from(row.get::<i64, _>("output_tokens"))
+                        .unwrap_or_default(),
+                    cached_input_tokens: u64::try_from(row.get::<i64, _>("cached_input_tokens"))
+                        .unwrap_or_default(),
+                    provider_cost: format_monetary_amount(
+                        &currency,
+                        row.get::<i64, _>("provider_cost_micros"),
+                    ),
+                    billable_price: format_monetary_amount(
+                        &currency,
+                        row.get::<i64, _>("billable_cost_micros"),
+                    ),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let next_cursor = if data.len() == usize::try_from(limit).unwrap_or(usize::MAX) {
+            Some((offset + data.len()).to_string())
+        } else {
+            None
+        };
+
+        Ok(UsageBreakdownResponse { data, next_cursor })
+    }
+
+    async fn get_balance_projection(
+        &self,
+        tenant_id: &str,
+        project_id: Option<String>,
+    ) -> Result<BalanceProjectionResponse> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                currency,
+                provider_cost_micros,
+                billable_cost_micros,
+                configured_budget_micros,
+                remaining_budget_micros,
+                threshold_status,
+                last_projected_at::text AS last_projected_at
+            FROM balance_projections
+            WHERE tenant_id = $1
+              AND ($2::text IS NULL OR project_id = $2)
+            ORDER BY last_projected_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(project_id.as_deref())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let currency = row.get::<String, _>("currency");
+            let last_projected_at = row.get::<String, _>("last_projected_at");
+            let lag = projection_lag_seconds(&last_projected_at);
+            Ok(BalanceProjectionResponse {
+                data: BalanceProjection {
+                    tenant_id: TenantId::parse(tenant_id.to_string())?,
+                    project_id: project_id.map(ProjectId::parse).transpose()?,
+                    currency: currency.clone(),
+                    provider_cost_total: format_monetary_amount(
+                        &currency,
+                        row.get::<i64, _>("provider_cost_micros"),
+                    ),
+                    billable_total: format_monetary_amount(
+                        &currency,
+                        row.get::<i64, _>("billable_cost_micros"),
+                    ),
+                    configured_budget: format_monetary_amount(
+                        &currency,
+                        row.get::<i64, _>("configured_budget_micros"),
+                    ),
+                    remaining_budget: format_monetary_amount(
+                        &currency,
+                        row.get::<i64, _>("remaining_budget_micros"),
+                    ),
+                    threshold_status: row.get::<String, _>("threshold_status"),
+                    last_projected_at,
+                    projection_lag_seconds: lag,
+                },
+            })
+        } else {
+            let currency = "USD".to_string();
+            let configured_budget_micros =
+                default_budget_micros(tenant_id, project_id.as_deref().unwrap_or("project"));
+            Ok(BalanceProjectionResponse {
+                data: BalanceProjection {
+                    tenant_id: TenantId::parse(tenant_id.to_string())?,
+                    project_id: project_id.map(ProjectId::parse).transpose()?,
+                    currency: currency.clone(),
+                    provider_cost_total: format_monetary_amount(&currency, 0),
+                    billable_total: format_monetary_amount(&currency, 0),
+                    configured_budget: format_monetary_amount(&currency, configured_budget_micros),
+                    remaining_budget: format_monetary_amount(&currency, configured_budget_micros),
+                    threshold_status: "ok".to_string(),
+                    last_projected_at: now_rfc3339(),
+                    projection_lag_seconds: 0,
+                },
+            })
+        }
+    }
+
+    async fn create_billing_export(
+        &self,
+        request: BillingExportRequest,
+    ) -> Result<BillingExportJobResponse> {
+        let export_job_id = format!("export_{}", OffsetDateTime::now_utc().unix_timestamp());
+        let requested_at = now_rfc3339();
+        let export_content = render_billing_export_csv(
+            self,
+            request.tenant_id.as_ref().map(core_domain::TenantId::as_str),
+            request.project_id.as_ref().map(core_domain::ProjectId::as_str),
+            &request.window_start,
+            &request.window_end,
+        )
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO billing_export_jobs (
+                export_job_id,
+                tenant_id,
+                project_id,
+                window_start,
+                window_end,
+                format,
+                status,
+                requested_at,
+                export_content,
+                content_type
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, 'text/csv')
+            "#,
+        )
+        .bind(&export_job_id)
+        .bind(request.tenant_id.as_ref().map(core_domain::TenantId::as_str))
+        .bind(request.project_id.as_ref().map(core_domain::ProjectId::as_str))
+        .bind(&request.window_start)
+        .bind(&request.window_end)
+        .bind(&request.format)
+        .bind(&requested_at)
+        .bind(&export_content)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(BillingExportJobResponse {
+            data: BillingExportJob {
+                export_job_id,
+                status: "queued".to_string(),
+                format: request.format,
+                requested_at,
+                completed_at: None,
+                error_message: None,
+                tenant_id: request.tenant_id,
+                project_id: request.project_id,
+            },
+        })
+    }
+
+    async fn list_billing_exports(
+        &self,
+        tenant_id: Option<String>,
+        project_id: Option<String>,
+    ) -> Result<BillingExportJobsResponse> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                export_job_id,
+                tenant_id,
+                project_id,
+                format,
+                status,
+                requested_at,
+                completed_at,
+                error_message,
+                export_content
+            FROM billing_export_jobs
+            ORDER BY requested_at DESC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut jobs = Vec::new();
+        for row in rows {
+            jobs.push(maybe_complete_postgres_export_job(&self.pool, row).await?);
+        }
+
+        Ok(BillingExportJobsResponse {
+            data: filter_billing_export_jobs(jobs, tenant_id, project_id),
+        })
+    }
+
+    async fn get_billing_export(
+        &self,
+        export_job_id: &str,
+    ) -> Result<Option<BillingExportJobResponse>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                export_job_id,
+                tenant_id,
+                project_id,
+                format,
+                status,
+                requested_at,
+                completed_at,
+                error_message,
+                export_content
+            FROM billing_export_jobs
+            WHERE export_job_id = $1
+            "#
+        )
+        .bind(export_job_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        Ok(Some(BillingExportJobResponse {
+            data: maybe_complete_postgres_export_job(&self.pool, row).await?,
+        }))
+    }
+
+    async fn download_billing_export(
+        &self,
+        export_job_id: &str,
+    ) -> Result<Option<(String, String)>> {
+        let row = sqlx::query(
+            r#"
+            SELECT content_type, export_content
+            FROM billing_export_jobs
+            WHERE export_job_id = $1
+            "#
+        )
+        .bind(export_job_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let content = row.get::<Option<String>, _>("export_content");
+        let content_type = row.get::<Option<String>, _>("content_type");
+        Ok(content.map(|value| {
+            (
+                content_type.unwrap_or_else(|| "text/plain".to_string()),
+                value,
+            )
+        }))
+    }
+
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
         let row = match identity_key {
             IdentityLookup::Email(email) => {
@@ -2119,8 +2892,31 @@ fn issue_memory_session(
             .provider_subject_to_user_id
             .get(&format!("{}:{}", auth_provider_slug(*provider), subject))
             .cloned(),
-    }
-    .context("identity not found")?;
+    };
+    let user_id = match user_id {
+        Some(user_id) => user_id,
+        None if provider == AuthProvider::Oidc => {
+            match identity_key {
+                IdentityLookup::ProviderSubject(AuthProvider::Oidc, subject) => {
+                    upsert_memory_oidc_user(
+                        store,
+                        subject,
+                        None,
+                        None,
+                        workspace_slug,
+                        if workspace_slug == "platform-admin" {
+                            TenantMembershipRole::Admin
+                        } else {
+                            TenantMembershipRole::Member
+                        },
+                        now,
+                    )?
+                }
+                _ => anyhow::bail!("identity not found"),
+            }
+        }
+        None => anyhow::bail!("identity not found"),
+    };
 
     let user = store.users.get(&user_id).cloned().context("missing user")?;
     let memberships = store
@@ -2160,6 +2956,82 @@ fn issue_memory_session(
     );
 
     Ok(AuthLoginResult { session, links })
+}
+
+fn upsert_memory_oidc_user(
+    store: &mut MemoryStore,
+    subject: &str,
+    email: Option<&str>,
+    display_name: Option<&str>,
+    workspace_slug: &str,
+    role: TenantMembershipRole,
+    now: &str,
+) -> Result<String> {
+    let digest = Sha256::digest(subject.as_bytes());
+    let subject_hash = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let user_id = format!("user_{subject_hash}");
+
+    if store.users.contains_key(&user_id) {
+        return Ok(user_id);
+    }
+
+    let tenant = store
+        .tenants
+        .iter()
+        .find(|tenant| tenant.slug == workspace_slug)
+        .cloned()
+        .context("workspace not found for oidc login")?;
+    let primary_email = email
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::var("CONTROL_PLANE_OIDC_EMAIL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| format!("{subject}@enterprise.example"));
+    let user = UserIdentity {
+        user_id: UserId::parse(user_id.clone()).unwrap(),
+        primary_email: Some(primary_email.clone()),
+        display_name: display_name
+            .map(str::to_string)
+            .or_else(|| {
+                std::env::var("CONTROL_PLANE_OIDC_DISPLAY_NAME")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_else(|| "Enterprise SSO User".to_string()),
+        avatar_url: None,
+        created_at: now.to_string(),
+        last_login_at: Some(now.to_string()),
+    };
+    store.users.insert(user_id.clone(), user);
+    store
+        .email_identity_to_user_id
+        .insert(primary_email.to_lowercase(), user_id.clone());
+    store.provider_subject_to_user_id.insert(
+        format!("{}:{}", auth_provider_slug(AuthProvider::Oidc), subject),
+        user_id.clone(),
+    );
+    let membership = membership(
+        &format!("tmemb_oidc_{subject_hash}"),
+        &tenant,
+        role,
+    );
+    store
+        .memberships_by_user
+        .entry(user_id.clone())
+        .or_default()
+        .push(membership);
+    store.provider_links_by_user.insert(
+        user_id.clone(),
+        vec![link(AuthProvider::Oidc, subject, Some(&primary_email), false)],
+    );
+
+    Ok(user_id)
 }
 
 fn unlink_memory_provider(
@@ -2398,6 +3270,364 @@ fn simulate_memory_route(
         &active_snapshot,
         request,
     )
+}
+
+fn format_monetary_amount(currency: &str, micros: i64) -> MonetaryAmount {
+    let sign = if micros < 0 { "-" } else { "" };
+    let absolute = micros.abs();
+    let whole = absolute / 1_000_000;
+    let fractional = absolute % 1_000_000;
+    MonetaryAmount {
+        currency: currency.to_string(),
+        amount: format!("{sign}{whole}.{fractional:06}"),
+    }
+}
+
+fn projection_lag_seconds(timestamp: &str) -> u64 {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .and_then(|parsed| {
+            let duration = chrono::Utc::now().signed_duration_since(parsed.with_timezone(&chrono::Utc));
+            duration.num_seconds().try_into().ok()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_cursor_offset(cursor: Option<&str>) -> usize {
+    cursor
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or_default()
+}
+
+fn simulate_pricing(request: PricingSimulationRequest) -> PricingSimulationResponse {
+    let quote = quote_usage_with_additions(
+        &request.provider_id,
+        &request.usage,
+        AdditionalUsageDimensions {
+            image_generation_units: request.image_generation_units.unwrap_or_default(),
+            audio_seconds: request.audio_seconds.unwrap_or_default(),
+        },
+    );
+    PricingSimulationResponse {
+        catalog_id: quote.catalog_id,
+        catalog_version: quote.catalog_version,
+        currency: quote.currency.clone(),
+        provider_cost: format_monetary_amount(&quote.currency, quote.provider_cost_micros),
+        billable_price: format_monetary_amount(&quote.currency, quote.billable_cost_micros),
+        line_items: quote
+            .line_items
+            .into_iter()
+            .map(|line_item| PricingSimulationLineItem {
+                dimension: pricing_dimension_slug(line_item.dimension),
+                units: line_item.units,
+                provider_cost: format_monetary_amount(
+                    &quote.currency,
+                    line_item.provider_cost_micros,
+                ),
+                billable_price: format_monetary_amount(
+                    &quote.currency,
+                    line_item.billable_cost_micros,
+                ),
+                rate_source: line_item.rate_source,
+            })
+            .collect(),
+    }
+}
+
+fn sample_usage_summary_response(
+    tenant_id: &str,
+    project_id: Option<&str>,
+    window_start: Option<&str>,
+    window_end: Option<&str>,
+) -> UsageSummaryResponse {
+    UsageSummaryResponse {
+        data: UsageSummary {
+            tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
+            project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+            window_start: window_start
+                .unwrap_or("2026-04-01T00:00:00Z")
+                .to_string(),
+            window_end: window_end
+                .unwrap_or("2026-04-30T23:59:59Z")
+                .to_string(),
+            currency: "USD".to_string(),
+            event_count: 14,
+            input_tokens: 18_420,
+            output_tokens: 6_245,
+            cached_input_tokens: 1_220,
+            provider_cost: format_monetary_amount("USD", 124_500),
+            billable_price: format_monetary_amount("USD", 152_025),
+        },
+    }
+}
+
+fn sample_usage_breakdown_response(
+    _tenant_id: &str,
+    _project_id: Option<&str>,
+    group_by: UsageBreakdownGroupBy,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> UsageBreakdownResponse {
+    let rows = match group_by {
+        UsageBreakdownGroupBy::Provider => vec![
+            UsageBreakdownRow {
+                bucket: "openai".to_string(),
+                provider_id: Some("openai".to_string()),
+                model_alias: None,
+                input_tokens: 10_000,
+                output_tokens: 4_000,
+                cached_input_tokens: 500,
+                provider_cost: format_monetary_amount("USD", 82_000),
+                billable_price: format_monetary_amount("USD", 98_400),
+            },
+            UsageBreakdownRow {
+                bucket: "anthropic".to_string(),
+                provider_id: Some("anthropic".to_string()),
+                model_alias: None,
+                input_tokens: 8_420,
+                output_tokens: 2_245,
+                cached_input_tokens: 720,
+                provider_cost: format_monetary_amount("USD", 42_500),
+                billable_price: format_monetary_amount("USD", 53_625),
+            },
+        ],
+        UsageBreakdownGroupBy::Model => vec![
+            UsageBreakdownRow {
+                bucket: "reasoning-fast".to_string(),
+                provider_id: None,
+                model_alias: Some("reasoning-fast".to_string()),
+                input_tokens: 8_420,
+                output_tokens: 2_245,
+                cached_input_tokens: 720,
+                provider_cost: format_monetary_amount("USD", 42_500),
+                billable_price: format_monetary_amount("USD", 53_625),
+            },
+            UsageBreakdownRow {
+                bucket: "support-safe".to_string(),
+                provider_id: None,
+                model_alias: Some("support-safe".to_string()),
+                input_tokens: 10_000,
+                output_tokens: 4_000,
+                cached_input_tokens: 500,
+                provider_cost: format_monetary_amount("USD", 82_000),
+                billable_price: format_monetary_amount("USD", 98_400),
+            },
+        ],
+        UsageBreakdownGroupBy::Day => vec![UsageBreakdownRow {
+            bucket: "2026-04-21".to_string(),
+            provider_id: None,
+            model_alias: None,
+            input_tokens: 18_420,
+            output_tokens: 6_245,
+            cached_input_tokens: 1_220,
+            provider_cost: format_monetary_amount("USD", 124_500),
+            billable_price: format_monetary_amount("USD", 152_025),
+        }],
+    };
+    let offset = parse_cursor_offset(cursor.as_deref());
+    let limit = usize::try_from(limit.unwrap_or(50)).unwrap_or(50);
+    let paged = rows.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+    let next_cursor = if paged.len() == limit {
+        Some((offset + paged.len()).to_string())
+    } else {
+        None
+    };
+    UsageBreakdownResponse {
+        data: paged,
+        next_cursor,
+    }
+}
+
+fn sample_balance_projection_response(
+    tenant_id: &str,
+    project_id: Option<&str>,
+) -> BalanceProjectionResponse {
+    let configured_budget = default_budget_micros(tenant_id, project_id.unwrap_or("project"));
+    let billable_total = 1_540_000;
+    BalanceProjectionResponse {
+        data: BalanceProjection {
+            tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
+            project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+            currency: "USD".to_string(),
+            provider_cost_total: format_monetary_amount("USD", 1_244_000),
+            billable_total: format_monetary_amount("USD", billable_total),
+            configured_budget: format_monetary_amount("USD", configured_budget),
+            remaining_budget: format_monetary_amount("USD", configured_budget - billable_total),
+            threshold_status: "ok".to_string(),
+            last_projected_at: now_rfc3339(),
+            projection_lag_seconds: 0,
+        },
+    }
+}
+
+#[allow(dead_code)]
+fn sample_billing_export_job_response(
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+    format: &str,
+) -> BillingExportJobResponse {
+    BillingExportJobResponse {
+        data: BillingExportJob {
+            export_job_id: "export_123".to_string(),
+            status: "queued".to_string(),
+            format: format.to_string(),
+            requested_at: now_rfc3339(),
+            completed_at: None,
+            error_message: None,
+            tenant_id: tenant_id.map(|value| TenantId::parse(value.to_string()).unwrap()),
+            project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+        },
+    }
+}
+
+fn sample_pricing_catalog_response() -> PricingCatalogResponse {
+    let catalog: PricingCatalog = default_catalog();
+    PricingCatalogResponse {
+        catalog_id: catalog.catalog_id,
+        catalog_version: catalog.catalog_version,
+        currency: catalog.currency,
+        entries: catalog
+            .entries
+            .into_iter()
+            .map(|entry| PricingCatalogEntry {
+                dimension: pricing_dimension_slug(entry.dimension),
+                provider_id: entry.provider_id,
+                model_alias: entry.model_alias,
+                region: entry.region,
+                micros_per_unit: entry.micros_per_unit,
+                unit_denominator: entry.unit_denominator,
+                source: pricing_source_slug(entry.source),
+            })
+            .collect(),
+    }
+}
+
+fn pricing_dimension_slug(dimension: metering::PricingDimension) -> String {
+    match dimension {
+        metering::PricingDimension::InputTokens => "input_tokens".to_string(),
+        metering::PricingDimension::OutputTokens => "output_tokens".to_string(),
+        metering::PricingDimension::CachedInputTokens => "cached_input_tokens".to_string(),
+        metering::PricingDimension::ImageGenerations => "image_generations".to_string(),
+        metering::PricingDimension::AudioSeconds => "audio_seconds".to_string(),
+    }
+}
+
+fn pricing_source_slug(source: PricingSource) -> String {
+    match source {
+        PricingSource::PlatformCatalog => "platform_catalog".to_string(),
+        PricingSource::ProviderNative => "provider_native".to_string(),
+        PricingSource::ContractOverride => "contract_override".to_string(),
+        PricingSource::TenantOverride => "tenant_override".to_string(),
+        PricingSource::Promotional => "promotional".to_string(),
+    }
+}
+
+fn maybe_complete_memory_export_job(mut job: BillingExportJob, has_content: bool) -> BillingExportJob {
+    if job.status == "queued" && has_content {
+        job.status = "completed".to_string();
+        job.completed_at = Some(now_rfc3339());
+    }
+    job
+}
+
+fn filter_billing_export_jobs(
+    mut jobs: Vec<BillingExportJob>,
+    tenant_id: Option<String>,
+    project_id: Option<String>,
+) -> Vec<BillingExportJob> {
+    jobs.retain(|job| {
+        if let Some(tenant_id) = tenant_id.as_deref()
+            && job.tenant_id.as_ref().map(core_domain::TenantId::as_str) != Some(tenant_id)
+        {
+            return false;
+        }
+        if let Some(project_id) = project_id.as_deref()
+            && job.project_id.as_ref().map(core_domain::ProjectId::as_str) != Some(project_id)
+        {
+            return false;
+        }
+        true
+    });
+    jobs.sort_by(|left, right| right.requested_at.cmp(&left.requested_at));
+    jobs
+}
+
+async fn render_billing_export_csv(
+    store: &PostgresStore,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+    window_start: &str,
+    window_end: &str,
+) -> Result<String> {
+    let rows = store
+        .get_usage_breakdown(
+            tenant_id.unwrap_or("tenant_acme"),
+            project_id.map(str::to_string),
+            Some(window_start.to_string()),
+            Some(window_end.to_string()),
+            UsageBreakdownGroupBy::Day,
+            None,
+            Some(500),
+        )
+        .await?;
+
+    let mut csv = String::from(
+        "bucket,provider_id,model_alias,input_tokens,output_tokens,cached_input_tokens,provider_cost,billable_price\n",
+    );
+    for row in rows.data {
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{},{}\n",
+            row.bucket,
+            row.provider_id.unwrap_or_default(),
+            row.model_alias.unwrap_or_default(),
+            row.input_tokens,
+            row.output_tokens,
+            row.cached_input_tokens,
+            row.provider_cost.amount,
+            row.billable_price.amount,
+        ));
+    }
+
+    Ok(csv)
+}
+
+async fn maybe_complete_postgres_export_job(
+    pool: &Pool<Postgres>,
+    row: sqlx::postgres::PgRow,
+) -> Result<BillingExportJob> {
+    let export_job_id = row.get::<String, _>("export_job_id");
+    let mut status = row.get::<String, _>("status");
+    let mut completed_at = row.get::<Option<String>, _>("completed_at");
+    let export_content = row.get::<Option<String>, _>("export_content");
+
+    if status == "queued" && export_content.is_some() {
+        completed_at = Some(now_rfc3339());
+        status = "completed".to_string();
+        sqlx::query(
+            "UPDATE billing_export_jobs SET status = 'completed', completed_at = $2 WHERE export_job_id = $1",
+        )
+        .bind(&export_job_id)
+        .bind(completed_at.as_deref())
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(BillingExportJob {
+        export_job_id,
+        status,
+        format: row.get::<String, _>("format"),
+        requested_at: row.get::<String, _>("requested_at"),
+        completed_at,
+        error_message: row.get::<Option<String>, _>("error_message"),
+        tenant_id: row
+            .get::<Option<String>, _>("tenant_id")
+            .map(TenantId::parse)
+            .transpose()?,
+        project_id: row
+            .get::<Option<String>, _>("project_id")
+            .map(ProjectId::parse)
+            .transpose()?,
+    })
 }
 
 fn build_route_simulation_response(
@@ -2914,6 +4144,7 @@ pub const fn oauth_provider_slug(provider: OAuthProvider) -> &'static str {
         OAuthProvider::Github => "github",
         OAuthProvider::Google => "google",
         OAuthProvider::Wechat => "wechat",
+        OAuthProvider::Oidc => "oidc",
     }
 }
 
@@ -2923,7 +4154,19 @@ pub const fn auth_provider_slug(provider: AuthProvider) -> &'static str {
         AuthProvider::Github => "github",
         AuthProvider::Google => "google",
         AuthProvider::Wechat => "wechat",
+        AuthProvider::Oidc => "oidc",
     }
+}
+
+pub fn oidc_enabled() -> bool {
+    std::env::var("CONTROL_PLANE_OIDC_ISSUER_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+        || std::env::var("CONTROL_PLANE_OIDC_AUTHORIZATION_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .is_some()
 }
 
 const fn login_flow_kind_slug(kind: LoginFlowKind) -> &'static str {
@@ -3034,5 +4277,19 @@ const MIGRATIONS: &[&str] = &[
     r"CREATE TABLE IF NOT EXISTS route_receipts (
         route_receipt_id TEXT PRIMARY KEY,
         payload JSONB NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS billing_export_jobs (
+        export_job_id TEXT PRIMARY KEY,
+        tenant_id TEXT NULL,
+        project_id TEXT NULL,
+        window_start TEXT NOT NULL,
+        window_end TEXT NOT NULL,
+        format TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        completed_at TEXT NULL,
+        error_message TEXT NULL,
+        export_content TEXT NULL,
+        content_type TEXT NULL
     )",
 ];

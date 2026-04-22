@@ -43,6 +43,9 @@ async fn main() -> Result<()> {
     processor::ensure_ledger_table(&pool)
         .await
         .context("failed to create ledger_entries table")?;
+    processor::ensure_projection_tables(&pool)
+        .await
+        .context("failed to create ledger projection tables")?;
 
     info!(
         subject = config.nats.subject,

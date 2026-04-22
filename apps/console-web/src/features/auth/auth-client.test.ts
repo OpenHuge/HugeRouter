@@ -143,4 +143,50 @@ describe("createConsoleAuthClient", () => {
     }
     expect(result.data.state.session.user.isPlatformAdmin).toBe(true);
   });
+
+  it("supports oidc as an interactive provider", async () => {
+    mockClient.completeOAuthLogin.mockResolvedValue({
+      links: [],
+      session: {
+        activeTenantId: "tenant_platform",
+        authenticatedBy: "oidc",
+        createdAt: "2026-04-22T09:30:00Z",
+        expiresAt: "2026-04-29T09:30:00Z",
+        lastAuthenticatedAt: "2026-04-22T09:30:00Z",
+        memberships: [
+          {
+            membershipId: "tmemb_platform",
+            role: "admin",
+            status: "active",
+            tenant: {
+              displayName: "Platform Admin",
+              id: "tenant_platform",
+              slug: "platform-admin",
+            },
+          },
+        ],
+        sessionId: "sess_oidc_platform",
+        state: "active",
+        user: {
+          createdAt: "2026-04-20T09:00:00Z",
+          displayName: "Enterprise Operator",
+          primaryEmail: "enterprise@example.com",
+          userId: "user_oidc",
+        },
+      },
+    });
+
+    const client = createConsoleAuthClient();
+    const result = await client.completeAuthCallback("oidc", {
+      code: "mock-oidc-code",
+      state: "oauth_state_oidc",
+    });
+
+    expect(mockClient.completeOAuthLogin).toHaveBeenCalledWith("oidc", {
+      code: "mock-oidc-code",
+      state: "oauth_state_oidc",
+    });
+    expect(result.data.provider).toBe("oidc");
+    expect(result.data.outcome).toBe("authenticated");
+  });
 });

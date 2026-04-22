@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PricingSimulationResponse",
+  "type": "object",
+  "required": [
+    "billable_price",
+    "catalog_id",
+    "catalog_version",
+    "currency",
+    "line_items",
+    "provider_cost"
+  ],
+  "properties": {
+    "billable_price": {
+      "$ref": "#/definitions/MonetaryAmount"
+    },
+    "catalog_id": {
+      "type": "string"
+    },
+    "catalog_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "currency": {
+      "type": "string"
+    },
+    "line_items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PricingSimulationLineItem"
+      }
+    },
+    "provider_cost": {
+      "$ref": "#/definitions/MonetaryAmount"
+    }
+  },
+  "definitions": {
+    "MonetaryAmount": {
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        }
+      }
+    },
+    "PricingSimulationLineItem": {
+      "type": "object",
+      "required": [
+        "billable_price",
+        "dimension",
+        "provider_cost",
+        "rate_source",
+        "units"
+      ],
+      "properties": {
+        "billable_price": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "dimension": {
+          "type": "string"
+        },
+        "provider_cost": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "rate_source": {
+          "type": "string"
+        },
+        "units": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

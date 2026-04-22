@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const authProviderSchema = z.enum(['email', 'github', 'google', 'wechat'])
+export const authProviderSchema = z.enum(['email', 'github', 'google', 'wechat', 'oidc'])
 
 export type AuthProvider = z.infer<typeof authProviderSchema>
 
@@ -224,7 +224,8 @@ const authProviderLabels: Record<AuthProvider, string> = {
   email: 'Email',
   github: 'GitHub',
   google: 'Google',
-  wechat: 'WeChat'
+  wechat: 'WeChat',
+  oidc: 'Enterprise SSO'
 }
 
 export function getAuthProviderLabel(provider: AuthProvider) {
@@ -232,7 +233,7 @@ export function getAuthProviderLabel(provider: AuthProvider) {
 }
 
 export function getDefaultProviderAvailability(): ProviderAvailability[] {
-  return authProviderSchema.options.map((provider) =>
+  return ['email', 'github', 'google', 'wechat'].map((provider) =>
     providerAvailabilitySchema.parse({
       enabled: true,
       hidden: false,

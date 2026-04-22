@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/core-domain",
+  "crates/metering",
   "crates/plugin-registry",
   "crates/plugin-sdk",
   "crates/protocol-anthropic",

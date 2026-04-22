@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BillingExportJobsResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/BillingExportJob"
+      }
+    }
+  },
+  "definitions": {
+    "BillingExportJob": {
+      "type": "object",
+      "required": [
+        "export_job_id",
+        "format",
+        "requested_at",
+        "status"
+      ],
+      "properties": {
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "export_job_id": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_at": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TenantId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

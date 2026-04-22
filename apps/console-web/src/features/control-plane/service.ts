@@ -4,14 +4,15 @@ import {
   type ControlPlaneClient,
 } from "@huge-router/ts-api-client";
 import {
+  type BillingExportJob,
   configSnapshotSchema,
   type ConfigSnapshot,
   type Project,
   type ProviderResource,
   type RoutePolicy,
-  routeReceiptSchema,
   type RouteReceiptDiagnosticsResponse,
   type RouteReceipt,
+  routeReceiptSchema,
   type RouteSimulationResponse,
 } from "@huge-router/ts-shared-schema";
 import type { AuthSessionEnvelope } from "../auth/auth-contract";
@@ -19,17 +20,35 @@ import { authSessionQueryKey } from "../auth/auth-queries";
 import { getQueryClient } from "../../lib/query-client";
 import type {
   ApiKeyView,
-  OverviewData,
+  BillingExportJobView,
+  BillingDashboardData,
   ConfigSnapshotView,
+  OverviewData,
   ProjectSummary,
   RouteReceiptDiagnosticView,
   RoutePolicyView,
   TenantDetail,
   TenantSummary,
+  UsageBreakdownView,
+  UsageDashboardData,
 } from "./types";
 
 export type ConsoleDataService = {
   getOverview: () => Promise<OverviewData>;
+  getUsageDashboard: (
+    range: "7d" | "30d" | "90d",
+    groupBy: "provider" | "model" | "day",
+    projectId?: string,
+    cursor?: string,
+  ) => Promise<UsageDashboardData>;
+  getBillingDashboard: (
+    range: "7d" | "30d" | "90d",
+    projectId?: string,
+  ) => Promise<BillingDashboardData>;
+  queueBillingExport: (
+    range: "7d" | "30d" | "90d",
+    projectId?: string,
+  ) => Promise<BillingExportJobView>;
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>;
   listProviderResources: () => Promise<ProviderResource[]>;
   listRoutePolicies: () => Promise<RoutePolicyView[]>;
@@ -303,6 +322,59 @@ function toProjectSummary(project: Project): ProjectSummary {
     id: project.project_id,
     name: project.display_name,
     slug: project.slug,
+  };
+}
+
+function formatUsdAmount(amount: { amount: string }) {
+  return amount.amount;
+}
+
+function rangeToWindow(range: "7d" | "30d" | "90d") {
+  const now = new Date();
+  const end = now.toISOString();
+  const start = new Date(now);
+  const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
+  start.setUTCDate(start.getUTCDate() - days);
+
+  return {
+    label:
+      range === "7d"
+        ? "Last 7 days"
+        : range === "90d"
+          ? "Last 90 days"
+          : "Last 30 days",
+    windowEnd: end,
+    windowStart: start.toISOString(),
+  };
+}
+
+function toUsageBreakdownView(
+  row: Awaited<
+    ReturnType<ControlPlaneClient["getUsageBreakdown"]>
+  >["data"][number],
+): UsageBreakdownView {
+  return {
+    billablePriceUsd: formatUsdAmount(row.billable_price),
+    bucket: row.bucket,
+    cachedInputTokens: row.cached_input_tokens,
+    inputTokens: row.input_tokens,
+    modelAlias: row.model_alias,
+    outputTokens: row.output_tokens,
+    providerCostUsd: formatUsdAmount(row.provider_cost),
+    providerId: row.provider_id,
+  };
+}
+
+function toBillingExportJobView(job: BillingExportJob): BillingExportJobView {
+  return {
+    completedAt: job.completed_at,
+    errorMessage: job.error_message,
+    exportJobId: job.export_job_id,
+    format: job.format,
+    projectId: job.project_id,
+    requestedAt: job.requested_at,
+    status: job.status,
+    tenantId: job.tenant_id,
   };
 }
 
@@ -866,6 +938,110 @@ const defaultConsoleDataService: ConsoleDataService = {
       tenantLabel: tenant.display_name,
       workspace: tenant.slug,
     };
+  },
+
+  async getUsageDashboard(range, groupBy, projectId, cursor) {
+    const tenantId = getActiveTenantId();
+
+    if (!tenantId) {
+      throw new Error("tenant_not_found");
+    }
+
+    const window = rangeToWindow(range);
+    const projects = (await client.listProjects())
+      .filter((project) => project.tenant_id === tenantId)
+      .map(toProjectSummary);
+    const [summary, breakdown] = await Promise.all([
+      client.getUsageSummary({
+        project_id: projectId,
+        tenant_id: tenantId,
+        window_end: window.windowEnd,
+        window_start: window.windowStart,
+      }),
+      client.getUsageBreakdown({
+        cursor,
+        group_by: groupBy,
+        project_id: projectId,
+        tenant_id: tenantId,
+        window_end: window.windowEnd,
+        window_start: window.windowStart,
+      }),
+    ]);
+
+    return {
+      activeProjectId: projectId,
+      availableProjects: projects,
+      billablePriceUsd: formatUsdAmount(summary.data.billable_price),
+      breakdown: breakdown.data.map(toUsageBreakdownView),
+      cachedInputTokens: summary.data.cached_input_tokens,
+      eventCount: summary.data.event_count,
+      groupBy,
+      inputTokens: summary.data.input_tokens,
+      nextCursor: breakdown.next_cursor,
+      outputTokens: summary.data.output_tokens,
+      providerCostUsd: formatUsdAmount(summary.data.provider_cost),
+      rangeLabel: window.label,
+      windowEnd: summary.data.window_end,
+      windowStart: summary.data.window_start,
+    };
+  },
+
+  async getBillingDashboard(range, projectId) {
+    const tenantId = getActiveTenantId();
+
+    if (!tenantId) {
+      throw new Error("tenant_not_found");
+    }
+
+    const window = rangeToWindow(range);
+    const projects = (await client.listProjects())
+      .filter((project) => project.tenant_id === tenantId)
+      .map(toProjectSummary);
+    const [projection, exportJobs] = await Promise.all([
+      client.getBalanceProjection({
+        project_id: projectId,
+        tenant_id: tenantId,
+      }),
+      client.listBillingExports({
+        project_id: projectId,
+        tenant_id: tenantId,
+      }),
+    ]);
+
+    return {
+      activeProjectId: projectId,
+      availableProjects: projects,
+      billableTotalUsd: formatUsdAmount(projection.data.billable_total),
+      configuredBudgetUsd: formatUsdAmount(projection.data.configured_budget),
+      exportJobs: exportJobs.data.map(toBillingExportJobView),
+      lastProjectedAt: projection.data.last_projected_at,
+      projectionLagSeconds: projection.data.projection_lag_seconds,
+      providerCostTotalUsd: formatUsdAmount(
+        projection.data.provider_cost_total,
+      ),
+      rangeLabel: window.label,
+      remainingBudgetUsd: formatUsdAmount(projection.data.remaining_budget),
+      thresholdStatus: projection.data.threshold_status,
+    };
+  },
+
+  async queueBillingExport(range, projectId) {
+    const tenantId = getActiveTenantId();
+
+    if (!tenantId) {
+      throw new Error("tenant_not_found");
+    }
+
+    const window = rangeToWindow(range);
+    const exportJob = await client.createBillingExport({
+      format: "csv",
+      project_id: projectId,
+      tenant_id: tenantId,
+      window_end: window.windowEnd,
+      window_start: window.windowStart,
+    });
+
+    return toBillingExportJobView(exportJob.data);
   },
 
   async getTenantDetail(tenantId) {

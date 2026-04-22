@@ -561,6 +561,44 @@ describe("console routes", () => {
     expect(await screen.findByText("No route receipts")).toBeInTheDocument();
   });
 
+  it("renders usage dashboard with range metrics and breakdown table", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/usage");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Usage",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "30d" })).toBeInTheDocument();
+    expect(screen.getByText("Billable price")).toBeInTheDocument();
+    expect(screen.getAllByText("openai").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("reasoning-fast").length).toBeGreaterThan(0);
+  });
+
+  it("renders billing dashboard with projection status and export metadata", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/billing");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Billing",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Configured budget")).toBeInTheDocument();
+    expect(screen.getByText("Export jobs")).toBeInTheDocument();
+    expect(screen.getByText("export_123")).toBeInTheDocument();
+    expect(screen.getByText("ok")).toBeInTheDocument();
+  });
+
   it("renders tenant inventory and links to tenant detail", async () => {
     signIn({
       email: "admin@huge-router.dev",
@@ -616,7 +654,6 @@ describe("console routes", () => {
     });
 
     await renderRoute("/app/overview");
-
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 
     await waitFor(() => {

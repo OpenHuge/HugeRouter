@@ -8,6 +8,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 core-domain = { path = "../../crates/core-domain" }
+metering = { path = "../../crates/metering" }
 protocol-ir = { path = "../../crates/protocol-ir" }
 runtime-composition = { path = "../../crates/runtime-composition" }
 sha2.workspace = true

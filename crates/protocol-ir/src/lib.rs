@@ -4,7 +4,8 @@ use anyhow::Context;
 use core_domain::{
     AdmissionResult, ConfigSnapshot, ConfigSnapshotId, ErrorEnvelope, LedgerEntry, MonetaryAmount,
     Project, ProjectId, ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId,
-    RouteReceipt, RouteReceiptId, ServiceName, Tenant, TenantId, UsageEvent, UsagePhase,
+    RouteReceipt, RouteReceiptId, ServiceName, Tenant, TenantId, UsageEvent, UsageMetrics,
+    UsagePhase,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -470,6 +471,158 @@ pub struct RouteReceiptDiagnosticsResponse {
     pub metadata: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageSummary {
+    pub tenant_id: TenantId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub window_start: String,
+    pub window_end: String,
+    pub currency: String,
+    pub event_count: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageSummaryResponse {
+    pub data: UsageSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageBreakdownRow {
+    pub bucket: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_alias: Option<String>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageBreakdownResponse {
+    pub data: Vec<UsageBreakdownRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BalanceProjection {
+    pub tenant_id: TenantId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub currency: String,
+    pub provider_cost_total: MonetaryAmount,
+    pub billable_total: MonetaryAmount,
+    pub configured_budget: MonetaryAmount,
+    pub remaining_budget: MonetaryAmount,
+    pub threshold_status: String,
+    pub last_projected_at: String,
+    pub projection_lag_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BalanceProjectionResponse {
+    pub data: BalanceProjection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingSimulationRequest {
+    pub provider_id: String,
+    pub model_alias: String,
+    pub usage: UsageMetrics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_generation_units: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_seconds: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingCatalogEntry {
+    pub dimension: String,
+    pub provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    pub micros_per_unit: i64,
+    pub unit_denominator: u64,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingCatalogResponse {
+    pub catalog_id: String,
+    pub catalog_version: u32,
+    pub currency: String,
+    pub entries: Vec<PricingCatalogEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingSimulationLineItem {
+    pub dimension: String,
+    pub units: u64,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+    pub rate_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingSimulationResponse {
+    pub catalog_id: String,
+    pub catalog_version: u32,
+    pub currency: String,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+    pub line_items: Vec<PricingSimulationLineItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<TenantId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub window_start: String,
+    pub window_end: String,
+    pub format: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportJob {
+    pub export_job_id: String,
+    pub status: String,
+    pub format: String,
+    pub requested_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<TenantId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportJobResponse {
+    pub data: BillingExportJob,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportJobsResponse {
+    pub data: Vec<BillingExportJob>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct EligibleCandidate {
     pub provider_resource_id: ProviderResourceId,
@@ -573,6 +726,14 @@ pub struct ContractManifest {
         list_route_policies,
         get_config_snapshot,
         activate_config_snapshot,
+        get_usage_summary,
+        get_usage_breakdown,
+        get_balance_projection,
+        get_pricing_catalog,
+        create_pricing_simulation,
+        create_billing_export,
+        list_billing_exports,
+        get_billing_export,
         create_route_simulation,
         list_route_receipts,
         get_route_receipt,
@@ -594,6 +755,11 @@ pub struct ContractManifest {
             ProviderResource,
             ProviderResourceId,
             ProviderResourcesResponse,
+            PricingCatalogEntry,
+            PricingCatalogResponse,
+            PricingSimulationLineItem,
+            PricingSimulationRequest,
+            PricingSimulationResponse,
             RequestEnvelope,
             RoutePolicy,
             RoutePoliciesResponse,
@@ -607,6 +773,17 @@ pub struct ContractManifest {
             Tenant,
             TenantId,
             TenantsResponse,
+            UsageBreakdownResponse,
+            UsageBreakdownRow,
+            UsageSummary,
+            UsageSummaryResponse,
+            BalanceProjection,
+            BalanceProjectionResponse,
+            BillingExportJob,
+            BillingExportJobResponse,
+            BillingExportJobsResponse,
+            BillingExportRequest,
+            UsageMetrics,
         )
     ),
     tags(
@@ -761,6 +938,130 @@ const fn get_config_snapshot() {}
 const fn activate_config_snapshot() {}
 
 #[utoipa::path(
+    get,
+    path = "/v1/usage/summary",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("window_start" = Option<String>, Query, description = "Inclusive RFC3339 start timestamp"),
+        ("window_end" = Option<String>, Query, description = "Inclusive RFC3339 end timestamp")
+    ),
+    responses(
+        (status = 200, description = "Usage summary for the requested scope", body = UsageSummaryResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_usage_summary() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/usage/breakdown",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("window_start" = Option<String>, Query, description = "Inclusive RFC3339 start timestamp"),
+        ("window_end" = Option<String>, Query, description = "Inclusive RFC3339 end timestamp"),
+        ("group_by" = Option<String>, Query, description = "Breakdown dimension: provider, model, or day"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+        ("limit" = Option<u32>, Query, description = "Maximum number of rows to return")
+    ),
+    responses(
+        (status = 200, description = "Usage breakdown rows", body = UsageBreakdownResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_usage_breakdown() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/projection",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id")
+    ),
+    responses(
+        (status = 200, description = "Billing projection summary", body = BalanceProjectionResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_balance_projection() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/pricing/catalog",
+    tag = "routing",
+    responses(
+        (status = 200, description = "Pricing catalog entries", body = PricingCatalogResponse),
+        (status = 500, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_pricing_catalog() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/pricing/simulations",
+    tag = "routing",
+    request_body = PricingSimulationRequest,
+    responses(
+        (status = 200, description = "Pricing simulation result", body = PricingSimulationResponse),
+        (status = 422, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn create_pricing_simulation() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/billing/exports",
+    tag = "routing",
+    request_body = BillingExportRequest,
+    responses(
+        (status = 202, description = "Accepted billing export job", body = BillingExportJobResponse),
+        (status = 422, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn create_billing_export() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/exports",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id")
+    ),
+    responses(
+        (status = 200, description = "List billing export jobs", body = BillingExportJobsResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn list_billing_exports() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/exports/{export_job_id}",
+    tag = "routing",
+    params(
+        ("export_job_id" = String, Path, description = "Billing export job id")
+    ),
+    responses(
+        (status = 200, description = "Get billing export job", body = BillingExportJobResponse),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_billing_export() {}
+
+#[utoipa::path(
     post,
     path = "/v1/route-simulations",
     tag = "routing",
@@ -898,6 +1199,33 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         schema_artifact::<RouteReceiptDiagnosticsResponse>(
             "schemas/jsonschema/route-receipt-diagnostics-response.v1.schema.json",
         )?,
+        schema_artifact::<UsageSummaryResponse>(
+            "schemas/jsonschema/usage-summary-response.v1.schema.json",
+        )?,
+        schema_artifact::<UsageBreakdownResponse>(
+            "schemas/jsonschema/usage-breakdown-response.v1.schema.json",
+        )?,
+        schema_artifact::<BalanceProjectionResponse>(
+            "schemas/jsonschema/balance-projection-response.v1.schema.json",
+        )?,
+        schema_artifact::<PricingCatalogResponse>(
+            "schemas/jsonschema/pricing-catalog-response.v1.schema.json",
+        )?,
+        schema_artifact::<PricingSimulationRequest>(
+            "schemas/jsonschema/pricing-simulation-request.v1.schema.json",
+        )?,
+        schema_artifact::<PricingSimulationResponse>(
+            "schemas/jsonschema/pricing-simulation-response.v1.schema.json",
+        )?,
+        schema_artifact::<BillingExportRequest>(
+            "schemas/jsonschema/billing-export-request.v1.schema.json",
+        )?,
+        schema_artifact::<BillingExportJobResponse>(
+            "schemas/jsonschema/billing-export-job-response.v1.schema.json",
+        )?,
+        schema_artifact::<BillingExportJobsResponse>(
+            "schemas/jsonschema/billing-export-jobs-response.v1.schema.json",
+        )?,
         schema_artifact::<RouteSimulationRequest>(
             "schemas/jsonschema/route-simulation-request.v1.schema.json",
         )?,
@@ -956,6 +1284,17 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let gemini_response = sample_gateway_gemini_generate_content_response();
     let gemini_error = sample_gateway_gemini_generate_content_error();
     let route_receipt_diagnostics = sample_route_receipt_diagnostics();
+    let usage_summary = sample_usage_summary_response();
+    let usage_breakdown = sample_usage_breakdown_response();
+    let balance_projection = sample_balance_projection_response();
+    let pricing_catalog = sample_pricing_catalog_response();
+    let pricing_simulation_request = sample_pricing_simulation_request();
+    let pricing_simulation_response = sample_pricing_simulation_response();
+    let billing_export_request = sample_billing_export_request();
+    let billing_export_job = sample_billing_export_job_response();
+    let billing_export_jobs = BillingExportJobsResponse {
+        data: vec![billing_export_job.data.clone()],
+    };
     let usage_message = sample_usage_event_recorded_message();
     let snapshot_message = sample_config_snapshot_activated_message();
     let error_envelope = sample_error_envelope();
@@ -1044,6 +1383,42 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
             &route_receipt_diagnostics,
         )?,
         example_artifact(
+            "schemas/examples/control-plane/usage-summary.response.json",
+            &usage_summary,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/usage-breakdown.response.json",
+            &usage_breakdown,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/balance-projection.response.json",
+            &balance_projection,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/pricing-catalog.response.json",
+            &pricing_catalog,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/pricing-simulation.request.json",
+            &pricing_simulation_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/pricing-simulation.response.json",
+            &pricing_simulation_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/billing-export.request.json",
+            &billing_export_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/billing-export.response.json",
+            &billing_export_job,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/billing-exports.response.json",
+            &billing_export_jobs,
+        )?,
+        example_artifact(
             "schemas/examples/events/usage-event-recorded.message.json",
             &usage_message,
         )?,
@@ -1085,6 +1460,14 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'listRoutePolicies', method: 'GET', path: '/v1/route-policies' }},\n\
   {{ id: 'getConfigSnapshot', method: 'GET', path: '/v1/config-snapshots/{{config_snapshot_id}}' }},\n\
   {{ id: 'activateConfigSnapshot', method: 'POST', path: '/v1/config-snapshots/{{config_snapshot_id}}/activate' }},\n\
+  {{ id: 'getUsageSummary', method: 'GET', path: '/v1/usage/summary' }},\n\
+  {{ id: 'getUsageBreakdown', method: 'GET', path: '/v1/usage/breakdown' }},\n\
+  {{ id: 'getBalanceProjection', method: 'GET', path: '/v1/billing/projection' }},\n\
+  {{ id: 'getPricingCatalog', method: 'GET', path: '/v1/pricing/catalog' }},\n\
+  {{ id: 'createPricingSimulation', method: 'POST', path: '/v1/pricing/simulations' }},\n\
+  {{ id: 'createBillingExport', method: 'POST', path: '/v1/billing/exports' }},\n\
+  {{ id: 'listBillingExports', method: 'GET', path: '/v1/billing/exports' }},\n\
+  {{ id: 'getBillingExport', method: 'GET', path: '/v1/billing/exports/{{export_job_id}}' }},\n\
   {{ id: 'simulateRoute', method: 'POST', path: '/v1/route-simulations' }},\n\
   {{ id: 'listRouteReceipts', method: 'GET', path: '/v1/route-receipts' }},\n\
   {{ id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}' }},\n\
@@ -1130,6 +1513,13 @@ fn stable_contracts() -> Vec<String> {
         "gateway_anthropic_messages".to_string(),
         "gateway_gemini_generate_content".to_string(),
         "route_receipt_diagnostics".to_string(),
+        "usage_summary".to_string(),
+        "usage_breakdown".to_string(),
+        "balance_projection".to_string(),
+        "pricing_catalog".to_string(),
+        "pricing_simulation".to_string(),
+        "billing_export_job".to_string(),
+        "billing_export_jobs".to_string(),
         "route_receipt".to_string(),
         "usage_event".to_string(),
         "normalized_error".to_string(),
@@ -1619,6 +2009,259 @@ fn sample_route_receipt_diagnostics() -> RouteReceiptDiagnosticsResponse {
             ("policy_cache_hit".to_string(), "true".to_string()),
             ("candidate_pool_size".to_string(), "3".to_string()),
         ]),
+    }
+}
+
+fn sample_usage_summary_response() -> UsageSummaryResponse {
+    UsageSummaryResponse {
+        data: UsageSummary {
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            window_start: "2026-04-21T00:00:00Z".to_string(),
+            window_end: "2026-04-21T23:59:59Z".to_string(),
+            currency: "USD".to_string(),
+            event_count: 14,
+            input_tokens: 18_420,
+            output_tokens: 6_245,
+            cached_input_tokens: 1_220,
+            provider_cost: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "0.124500".to_string(),
+            },
+            billable_price: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "0.152025".to_string(),
+            },
+        },
+    }
+}
+
+fn sample_usage_breakdown_response() -> UsageBreakdownResponse {
+    UsageBreakdownResponse {
+        data: vec![
+            UsageBreakdownRow {
+                bucket: "openai".to_string(),
+                provider_id: Some("openai".to_string()),
+                model_alias: None,
+                input_tokens: 10_000,
+                output_tokens: 4_000,
+                cached_input_tokens: 500,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.082000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.098400".to_string(),
+                },
+            },
+            UsageBreakdownRow {
+                bucket: "reasoning-fast".to_string(),
+                provider_id: None,
+                model_alias: Some("reasoning-fast".to_string()),
+                input_tokens: 8_420,
+                output_tokens: 2_245,
+                cached_input_tokens: 720,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.042500".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.053625".to_string(),
+                },
+            },
+        ],
+        next_cursor: Some("2".to_string()),
+    }
+}
+
+fn sample_balance_projection_response() -> BalanceProjectionResponse {
+    BalanceProjectionResponse {
+        data: BalanceProjection {
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            currency: "USD".to_string(),
+            provider_cost_total: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "1.244000".to_string(),
+            },
+            billable_total: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "1.540000".to_string(),
+            },
+            configured_budget: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "75.000000".to_string(),
+            },
+            remaining_budget: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "73.460000".to_string(),
+            },
+            threshold_status: "ok".to_string(),
+            last_projected_at: "2026-04-21T12:20:00Z".to_string(),
+            projection_lag_seconds: 18,
+        },
+    }
+}
+
+fn sample_pricing_catalog_response() -> PricingCatalogResponse {
+    PricingCatalogResponse {
+        catalog_id: "pricing_catalog_default".to_string(),
+        catalog_version: 1,
+        currency: "USD".to_string(),
+        entries: vec![
+            PricingCatalogEntry {
+                dimension: "input_tokens".to_string(),
+                provider_id: "openai".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 2_500,
+                unit_denominator: 1_000,
+                source: "provider_native".to_string(),
+            },
+            PricingCatalogEntry {
+                dimension: "image_generations".to_string(),
+                provider_id: "openai".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 18_000,
+                unit_denominator: 1,
+                source: "provider_native".to_string(),
+            },
+            PricingCatalogEntry {
+                dimension: "audio_seconds".to_string(),
+                provider_id: "openai".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 1_500,
+                unit_denominator: 1,
+                source: "provider_native".to_string(),
+            },
+        ],
+    }
+}
+
+fn sample_pricing_simulation_request() -> PricingSimulationRequest {
+    PricingSimulationRequest {
+        provider_id: "openai".to_string(),
+        model_alias: "reasoning-fast".to_string(),
+        usage: UsageMetrics {
+            input_tokens: 1_200,
+            output_tokens: 320,
+            cached_input_tokens: 64,
+        },
+        region: Some("us-east-1".to_string()),
+        image_generation_units: Some(1),
+        audio_seconds: Some(8),
+    }
+}
+
+fn sample_pricing_simulation_response() -> PricingSimulationResponse {
+    PricingSimulationResponse {
+        catalog_id: "pricing_catalog_default".to_string(),
+        catalog_version: 1,
+        currency: "USD".to_string(),
+        provider_cost: MonetaryAmount {
+            currency: "USD".to_string(),
+            amount: "0.005188".to_string(),
+        },
+        billable_price: MonetaryAmount {
+            currency: "USD".to_string(),
+            amount: "0.006225".to_string(),
+        },
+        line_items: vec![
+            PricingSimulationLineItem {
+                dimension: "input_tokens".to_string(),
+                units: 1_200,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.003000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.003600".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "output_tokens".to_string(),
+                units: 320,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.002720".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.003264".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "cached_input_tokens".to_string(),
+                units: 64,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.000048".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.000057".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "image_generations".to_string(),
+                units: 1,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.018000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.021600".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "audio_seconds".to_string(),
+                units: 8,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.012000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.014400".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+        ],
+    }
+}
+
+fn sample_billing_export_request() -> BillingExportRequest {
+    BillingExportRequest {
+        tenant_id: Some(TenantId::parse("tenant_acme").unwrap()),
+        project_id: Some(ProjectId::parse("proj_core").unwrap()),
+        window_start: "2026-04-01T00:00:00Z".to_string(),
+        window_end: "2026-04-30T23:59:59Z".to_string(),
+        format: "csv".to_string(),
+    }
+}
+
+fn sample_billing_export_job_response() -> BillingExportJobResponse {
+    BillingExportJobResponse {
+        data: BillingExportJob {
+            export_job_id: "export_123".to_string(),
+            status: "queued".to_string(),
+            format: "csv".to_string(),
+            requested_at: "2026-04-21T12:25:00Z".to_string(),
+            completed_at: None,
+            error_message: None,
+            tenant_id: Some(TenantId::parse("tenant_acme").unwrap()),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+        },
     }
 }
 

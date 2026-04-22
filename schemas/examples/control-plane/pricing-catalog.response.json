@@ -1,0 +1,31 @@
+{
+  "catalog_id": "pricing_catalog_default",
+  "catalog_version": 1,
+  "currency": "USD",
+  "entries": [
+    {
+      "dimension": "input_tokens",
+      "provider_id": "openai",
+      "region": "global",
+      "micros_per_unit": 2500,
+      "unit_denominator": 1000,
+      "source": "provider_native"
+    },
+    {
+      "dimension": "image_generations",
+      "provider_id": "openai",
+      "region": "global",
+      "micros_per_unit": 18000,
+      "unit_denominator": 1,
+      "source": "provider_native"
+    },
+    {
+      "dimension": "audio_seconds",
+      "provider_id": "openai",
+      "region": "global",
+      "micros_per_unit": 1500,
+      "unit_denominator": 1,
+      "source": "provider_native"
+    }
+  ]
+}

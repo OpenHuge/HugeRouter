@@ -443,6 +443,127 @@ export const routeReceiptsResponseSchema = z.object({
   data: z.array(routeReceiptSchema)
 })
 
+export const usageSummarySchema = z.object({
+  tenant_id: tenantIdSchema,
+  project_id: projectIdSchema.optional(),
+  window_start: dateTimeSchema,
+  window_end: dateTimeSchema,
+  currency: z.string().min(1),
+  event_count: z.number().int().nonnegative(),
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
+  cached_input_tokens: z.number().int().nonnegative(),
+  provider_cost: monetaryAmountSchema,
+  billable_price: monetaryAmountSchema
+})
+
+export const usageSummaryResponseSchema = z.object({
+  data: usageSummarySchema
+})
+
+export const usageBreakdownRowSchema = z.object({
+  bucket: z.string().min(1),
+  provider_id: z.string().min(1).optional(),
+  model_alias: z.string().min(1).optional(),
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
+  cached_input_tokens: z.number().int().nonnegative(),
+  provider_cost: monetaryAmountSchema,
+  billable_price: monetaryAmountSchema
+})
+
+export const usageBreakdownResponseSchema = z.object({
+  data: z.array(usageBreakdownRowSchema),
+  next_cursor: z.string().min(1).optional()
+})
+
+export const balanceProjectionSchema = z.object({
+  tenant_id: tenantIdSchema,
+  project_id: projectIdSchema.optional(),
+  currency: z.string().min(1),
+  provider_cost_total: monetaryAmountSchema,
+  billable_total: monetaryAmountSchema,
+  configured_budget: monetaryAmountSchema,
+  remaining_budget: monetaryAmountSchema,
+  threshold_status: z.string().min(1),
+  last_projected_at: dateTimeSchema,
+  projection_lag_seconds: z.number().int().nonnegative()
+})
+
+export const balanceProjectionResponseSchema = z.object({
+  data: balanceProjectionSchema
+})
+
+export const pricingSimulationRequestSchema = z.object({
+  provider_id: z.string().min(1),
+  model_alias: z.string().min(1),
+  usage: usageMetricsSchema,
+  region: z.string().min(1).optional(),
+  image_generation_units: z.number().int().nonnegative().optional(),
+  audio_seconds: z.number().int().nonnegative().optional()
+})
+
+export const pricingSimulationLineItemSchema = z.object({
+  dimension: z.string().min(1),
+  units: z.number().int().nonnegative(),
+  provider_cost: monetaryAmountSchema,
+  billable_price: monetaryAmountSchema,
+  rate_source: z.string().min(1)
+})
+
+export const pricingSimulationResponseSchema = z.object({
+  catalog_id: z.string().min(1),
+  catalog_version: z.number().int().nonnegative(),
+  currency: z.string().min(1),
+  provider_cost: monetaryAmountSchema,
+  billable_price: monetaryAmountSchema,
+  line_items: z.array(pricingSimulationLineItemSchema)
+})
+
+export const pricingCatalogEntrySchema = z.object({
+  dimension: z.string().min(1),
+  provider_id: z.string().min(1),
+  model_alias: z.string().min(1).optional(),
+  region: z.string().min(1).optional(),
+  micros_per_unit: z.number().int(),
+  unit_denominator: z.number().int().positive(),
+  source: z.string().min(1)
+})
+
+export const pricingCatalogResponseSchema = z.object({
+  catalog_id: z.string().min(1),
+  catalog_version: z.number().int().nonnegative(),
+  currency: z.string().min(1),
+  entries: z.array(pricingCatalogEntrySchema)
+})
+
+export const billingExportRequestSchema = z.object({
+  tenant_id: tenantIdSchema.optional(),
+  project_id: projectIdSchema.optional(),
+  window_start: dateTimeSchema,
+  window_end: dateTimeSchema,
+  format: z.string().min(1)
+})
+
+export const billingExportJobSchema = z.object({
+  export_job_id: z.string().min(1),
+  status: z.string().min(1),
+  format: z.string().min(1),
+  requested_at: dateTimeSchema,
+  completed_at: dateTimeSchema.optional(),
+  error_message: z.string().min(1).optional(),
+  tenant_id: tenantIdSchema.optional(),
+  project_id: projectIdSchema.optional()
+})
+
+export const billingExportJobResponseSchema = z.object({
+  data: billingExportJobSchema
+})
+
+export const billingExportJobsResponseSchema = z.object({
+  data: z.array(billingExportJobSchema)
+})
+
 export const usageEventRecordedMessageSchema = z.object({
   message_id: z.string().min(1),
   message_type: z.literal('usage_event.recorded'),
@@ -471,8 +592,8 @@ export const configSnapshotActivatedMessageSchema = z.object({
   })
 })
 
-export const authProviderSchema = z.enum(['email', 'github', 'google', 'wechat'])
-export const oauthProviderSchema = z.enum(['github', 'google', 'wechat'])
+export const authProviderSchema = z.enum(['email', 'github', 'google', 'wechat', 'oidc'])
+export const oauthProviderSchema = z.enum(['github', 'google', 'wechat', 'oidc'])
 export const tenantMembershipRoleSchema = z.enum(['owner', 'admin', 'member'])
 export const tenantMembershipStatusSchema = z.enum(['active', 'invited', 'suspended'])
 export const authSessionStateSchema = z.enum(['active', 'revoked', 'expired'])
@@ -603,6 +724,21 @@ export type NormalizedError = z.infer<typeof normalizedErrorSchema>
 export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>
 export type RouteReceipt = z.infer<typeof routeReceiptSchema>
 export type UsageEvent = z.infer<typeof usageEventSchema>
+export type UsageSummary = z.infer<typeof usageSummarySchema>
+export type UsageSummaryResponse = z.infer<typeof usageSummaryResponseSchema>
+export type UsageBreakdownRow = z.infer<typeof usageBreakdownRowSchema>
+export type UsageBreakdownResponse = z.infer<typeof usageBreakdownResponseSchema>
+export type BalanceProjection = z.infer<typeof balanceProjectionSchema>
+export type BalanceProjectionResponse = z.infer<typeof balanceProjectionResponseSchema>
+export type PricingSimulationRequest = z.infer<typeof pricingSimulationRequestSchema>
+export type PricingSimulationLineItem = z.infer<typeof pricingSimulationLineItemSchema>
+export type PricingSimulationResponse = z.infer<typeof pricingSimulationResponseSchema>
+export type PricingCatalogEntry = z.infer<typeof pricingCatalogEntrySchema>
+export type PricingCatalogResponse = z.infer<typeof pricingCatalogResponseSchema>
+export type BillingExportRequest = z.infer<typeof billingExportRequestSchema>
+export type BillingExportJob = z.infer<typeof billingExportJobSchema>
+export type BillingExportJobResponse = z.infer<typeof billingExportJobResponseSchema>
+export type BillingExportJobsResponse = z.infer<typeof billingExportJobsResponseSchema>
 export type ChatRequest = z.infer<typeof chatRequestSchema>
 export type GatewayChatRequest = z.infer<typeof gatewayChatRequestSchema>
 export type GatewayChatResponse = z.infer<typeof gatewayChatResponseSchema>
