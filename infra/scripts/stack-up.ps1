@@ -1,5 +1,37 @@
+param(
+  [ValidateSet('core', 'full', 'observability')]
+  [string]$Mode = $(if ($env:HUGE_ROUTER_STACK_MODE) { $env:HUGE_ROUTER_STACK_MODE } else { 'core' }),
+  [string[]]$Service = @()
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-ServiceList {
+  param([string]$RequestedMode)
+
+  switch ($RequestedMode) {
+    'core' { return @('postgres', 'redis', 'nats') }
+    'observability' { return @('otel-collector', 'prometheus', 'grafana') }
+    'full' { return @('postgres', 'redis', 'nats', 'otel-collector', 'prometheus', 'grafana') }
+    default { throw "Unsupported stack mode: $RequestedMode" }
+  }
+}
+
 $composeFile = (Resolve-Path (Join-Path $PSScriptRoot '..\docker\compose.yaml')).Path
-docker compose --profile observability -f $composeFile up -d --remove-orphans
+$composeArgs = @('-f', $composeFile)
+
+if ($Mode -ne 'core') {
+  $composeArgs += @('--profile', 'observability')
+}
+
+$serviceArgs =
+  if ($Service.Count -gt 0) {
+    $Service
+  } elseif ($Mode -eq 'observability') {
+    Get-ServiceList -RequestedMode 'observability'
+  } else {
+    @()
+  }
+
+docker compose @composeArgs up -d --remove-orphans @serviceArgs

@@ -22,9 +22,9 @@ Recommended local stack via Docker Compose:
 - PostgreSQL
 - Redis
 - NATS or Kafka
-- OpenTelemetry collector
-- Prometheus
-- Grafana
+- optional OpenTelemetry collector
+- optional Prometheus
+- optional Grafana
 - optional ClickHouse
 
 ### 29.3 Workspace Tooling Baseline
@@ -61,6 +61,9 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
+just stack-up
+just stack-wait
+just stack-up-full
 just dev-frontend
 just dev-backend
 ```
@@ -90,6 +93,11 @@ just test
 just lint
 just fmt
 just generate
+just stack-up
+just stack-up-full
+just stack-up-observability
+just stack-wait
+just stack-down
 just migrate
 just seed
 ```
@@ -105,6 +113,9 @@ just typecheck      -> pnpm typecheck
 just test           -> pnpm test
 just build          -> pnpm build
 just generate       -> pnpm generate
+just stack-up       -> core Docker Compose services (`postgres`, `redis`, `nats`)
+just stack-up-full  -> core services plus the `observability` profile
+just stack-wait     -> wait for the selected stack mode to report healthy containers
 ```
 
 The exact command names can evolve, but the repository should preserve the principle that developers can discover one canonical entry point per workflow.
@@ -158,6 +169,7 @@ Use monorepo-aware caching and selective execution to keep CI efficient.
 Recommended baseline:
 
 - `actions/setup-node` `pnpm` cache plus `.turbo` cache for JavaScript jobs
+- restorable Turbo task outputs for `dist`, `dist-types`, `.tanstack`, and `storybook-static`
 - Cargo registry, Cargo git, and target caching for Rust jobs via `Swatinem/rust-cache`
 - filtered execution for `apps/console-web`, `apps/storybook`, and changed shared packages
 - remote caching enabled for CI and shared team workflows once the baseline pipeline is green

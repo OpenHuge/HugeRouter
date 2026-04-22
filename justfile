@@ -4,6 +4,8 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 stack_up_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-up.ps1" } else { "./infra/scripts/stack-up.sh" }
 stack_down_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-down.ps1" } else { "./infra/scripts/stack-down.sh" }
 stack_logs_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-logs.ps1" } else { "./infra/scripts/stack-logs.sh" }
+stack_wait_command := if os_family() == "windows" { ".\\infra\\scripts\\wait-for-stack.ps1" } else { "./infra/scripts/wait-for-stack.sh" }
+default_stack_mode := env_var_or_default("HUGE_ROUTER_STACK_MODE", "core")
 
 bootstrap:
   corepack enable
@@ -46,11 +48,20 @@ fmt:
 generate:
   pnpm generate
 
-stack-up:
-  {{stack_up_command}}
+stack-up mode=default_stack_mode:
+  {{stack_up_command}} {{mode}}
+
+stack-up-full:
+  {{stack_up_command}} full
+
+stack-up-observability:
+  {{stack_up_command}} observability
 
 stack-down:
   {{stack_down_command}}
 
-stack-logs:
-  {{stack_logs_command}}
+stack-logs mode=default_stack_mode:
+  {{stack_logs_command}} {{mode}}
+
+stack-wait mode=default_stack_mode:
+  {{stack_wait_command}} {{mode}}

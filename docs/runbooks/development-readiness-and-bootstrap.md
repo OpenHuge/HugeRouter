@@ -90,7 +90,7 @@ Recommended implementation order:
 7. scaffold `crates/protocol-ir` and `provider-traits`
 8. scaffold `services/gateway-api` and `services/control-plane-api`
 9. wire Turbo tasks, outputs, and CI cache settings
-10. add local stack, telemetry bootstrap, and schema generation pipeline
+10. add local stack profiles, telemetry bootstrap, and schema generation pipeline
 
 Canonical bootstrap and verification path:
 
@@ -116,7 +116,7 @@ Development is considered ready to start when all of the following are true:
 - initial JavaScript workspaces declare ownership intent and boundary tags
 - Storybook renders shared shell primitives
 - schema generation path is defined
-- local Postgres, Redis, NATS, and OTel stack can start with one command
+- local Postgres, Redis, and NATS stack can start with one command, with observability sidecars available as an optional profile
 - `pnpm verify:toolchain` provides one explicit contributor check for Node, `pnpm`, and Rust version drift
 - CI plan includes Rust checks, frontend typecheck, tests, and component build verification
 - CI can report repository boundary drift before shared packages start proliferating
