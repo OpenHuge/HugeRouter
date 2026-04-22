@@ -188,9 +188,7 @@ fn resolve_next_states(
         ObservedProbeStatus::Unhealthy if unhealthy_streak >= quarantine_threshold => {
             HealthState::Quarantined
         }
-        ObservedProbeStatus::Degraded | ObservedProbeStatus::Unhealthy => {
-            HealthState::Degraded
-        }
+        ObservedProbeStatus::Degraded | ObservedProbeStatus::Unhealthy => HealthState::Degraded,
     };
 
     let next_status = match next_health_state {
