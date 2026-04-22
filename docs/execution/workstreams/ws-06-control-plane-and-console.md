@@ -139,12 +139,14 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - provider CRUD
 - credential binding
 - route policy CRUD
+- provider-resource support for official APIs and third-party relay or gateway endpoints
 
 **Acceptance criteria:**
 
 - route policies can be created and validated from API
 - secret references are stored without plaintext leakage
 - policy schema validation errors are actionable
+- provider resources can model relay flavor, auth strategy, and required header passthrough without free-form per-site hacks
 
 **Implementation notes:**
 
@@ -202,12 +204,15 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - provider detail pages
 - route editors
 - route diagnostics panels
+- relay-aware provider resource forms and validation flows
+- compatibility-profile selection and preset validation for common relay families
 
 **Acceptance criteria:**
 
 - operators can inspect route health and policy resolution
 - form edits are optimistic only where safe
 - dangerous operations require confirmation
+- operators can create and manage third-party relay resources by endpoint and key across multiple compatibility families, including One API-like, New API-like, Sub2API-like, LiteLLM-like, LMRouter-like, and generic OpenAI-compatible gateways
 
 **Implementation notes:**
 

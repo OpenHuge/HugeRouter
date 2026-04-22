@@ -144,6 +144,9 @@ The UI must support:
 - JSON policy editing with validation
 - route simulation UX
 - trace and request diagnostics viewer
+- provider-resource workflows for both official APIs and third-party relay or gateway endpoints
+- relay-aware provider forms that can capture endpoint URL, key material, gateway flavor, header strategy, and sticky-session requirements
+- compatibility-profile presets for common relay families such as generic OpenAI-compatible, One API, New API, Sub2API, LiteLLM, and LMRouter-style gateways
 - bilingual product copy for Simplified Chinese and English, with user-facing strings externalized from route modules
 - locale-aware formatting for time, numbers, and billing currency values
 - billing payment-entry flows that initially support **WeChat Pay only**, behind a provider-agnostic integration boundary

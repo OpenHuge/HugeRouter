@@ -49,9 +49,12 @@ Advanced ecosystem and realtime tasks.
 
 - adapter for upstream gateway providers
 - health and capability metadata model
+- compatibility profiles for common relay and broker families
 
 **Acceptance criteria:**
 
 - adapter can call an upstream OpenAI-compatible gateway
 - upstream gateway errors preserve diagnostic detail
 - routing engine can score it alongside native providers
+- adapter can authenticate against third-party relay keys and preserve declared relay-required headers without leaking them into unrelated providers
+- profile coverage includes at least generic OpenAI-compatible gateways plus documented family-specific handling for One API-like, New API-like, Sub2API-like, LiteLLM-like, and LMRouter-like upstreams where needed

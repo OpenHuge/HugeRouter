@@ -195,6 +195,59 @@ Important boundary rule:
 
 These categories should be represented as metadata, not hard-coded branches. The routing and diagnostics layers should reason from manifest and capability descriptors rather than from crate names.
 
+### 12.7.1 Upstream Relay and Gateway Compatibility
+
+HugeRouter should explicitly support upstream systems that are themselves AI gateways or relay panels rather than official model-provider APIs.
+
+This includes deployments that expose an OpenAI-compatible data path but internally manage:
+
+- pooled upstream accounts
+- generated downstream API keys
+- sticky-session routing
+- quota, billing, or balance state
+- admin-only account or channel concepts
+
+Compatibility rule:
+
+- treat these systems as `gateway` or `relay` provider kinds, not as if they were the official upstream vendor
+- keep the adapter boundary provider-agnostic enough to support multiple relay families without forking the routing model per site
+- preserve relay-specific metadata such as header passthrough rules, sticky-session behavior, and model-listing quirks in typed config rather than opaque notes
+
+Observed ecosystem signal as of **April 22, 2026**:
+
+- third-party relay sites such as `xfx.plus` expose an OpenAI-compatible `/v1/models` surface
+- the public frontend shape and routing strongly resemble one of several common open-source relay families rather than a bespoke upstream API
+- HugeRouter should therefore target a **compatibility-profile matrix** for relay families, not a one-off adapter per site
+
+Recommended initial compatibility profiles:
+
+- `generic_openai_compatible`
+  For lightweight relays or reverse proxies that mostly expose `/v1/*` without a rich admin model.
+- `one_api_like`
+  For classic One API style deployments and similar OpenAI-compatible aggregation panels.
+- `new_api_like`
+  For New API class systems that expose OpenAI-compatible, Claude-compatible, or Gemini-compatible conversion through one gateway.
+- `sub2api_like`
+  For subscription and account-pool relay systems with channel, account, and package-style management semantics.
+- `litellm_like`
+  For AI gateway products that emphasize virtual keys, model routing, budgets, and multi-provider brokerage behind an OpenAI-compatible edge.
+- `lmrouter_like`
+  For broker-style multi-provider routers that unify many providers behind one key and one config-driven gateway.
+
+Practical adapter requirements for this class of upstream:
+
+- configurable base URL and auth header strategy
+- optional passthrough for relay-required headers such as sticky-session identifiers
+- model discovery through upstream `GET /v1/models` or configured allowlists
+- normalized handling for relay-specific balance, quota, and account-pool failures
+- diagnostics that record the upstream relay site separately from the canonical provider family it fronts
+
+Guardrail:
+
+- payment pages, recharge flows, and admin-only dashboard concepts exposed by an upstream relay must never leak into the gateway hot path contract
+- HugeRouter should integrate with the relay's API and credential boundary, not scrape or depend on the relay's web UI
+- profile names such as `sub2api_like` or `litellm_like` are compatibility shorthands, not promises of full admin-surface parity with those projects
+
 Protocol-boundary guardrail:
 
 - do not collapse provider, MCP server, and A2A agent integrations into one generic "remote endpoint" abstraction too early
