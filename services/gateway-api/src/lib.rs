@@ -1,5 +1,6 @@
 mod openai;
 
+use async_trait::async_trait;
 use axum::{
     Json, Router,
     extract::State,
@@ -11,14 +12,14 @@ use axum::{
     routing::{get, post},
 };
 use core_domain::{
-    AdmissionResult, AuthKind, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
-    CredentialOwnerType, DeploymentScope, ErrorEnvelope, ExcludedTarget, FallbackTransition,
-    HealthState, MonetaryAmount, NormalizedError, ProjectId, ProvenanceClass, ProviderCapabilities,
-    ProviderResource, ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId,
-    RouteReceipt, RouteReceiptId, ScoreBreakdown, TenantId, UsageEvent, UsageEventId, UsageMetrics,
-    UsagePhase, ValidationIssue,
+    AdmissionResult, ConfigSnapshot, ConfigSnapshotId, DeploymentScope, ErrorEnvelope,
+    ExcludedTarget, FallbackTransition, HealthState, MonetaryAmount, NormalizedError,
+    ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceStatus, RoutePolicy,
+    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, UsageEvent, UsageEventId,
+    UsageMetrics, UsagePhase, ValidationIssue,
 };
 use openai::OpenAiAdapter;
+use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
 use provider_traits::{
     ProviderAdapterRegistry, ProviderEndpoint, ProviderError, ProviderErrorKind,
     ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
@@ -30,18 +31,15 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 const GATEWAY_SERVICE_NAME: &str = "gateway-api";
-const DEFAULT_TENANT_ID: &str = "tenant_acme";
-const DEFAULT_PROJECT_ID: &str = "proj_core";
-const DEFAULT_CONFIG_SNAPSHOT_ID: &str = "cfgsnap_gateway_v1";
-const DEFAULT_ROUTE_POLICY_ID: &str = "routepol_openai_chat_default";
-const DEFAULT_PROVIDER_RESOURCE_ID: &str = "prvrsrc_openai_primary";
-
+const DEFAULT_CONTROL_PLANE_BASE_URL: &str = "http://127.0.0.1:8081";
+const DEFAULT_CONTROL_PLANE_SNAPSHOT_REF: &str = "active";
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1_000);
 
 pub type GatewayState = Arc<AppState>;
@@ -192,7 +190,7 @@ pub fn app_with_state(state: GatewayState) -> Router {
 }
 
 fn default_state() -> GatewayState {
-    let config_store = Arc::new(StaticConfigStore::new(default_active_config()));
+    let config_store = Arc::new(ControlPlaneConfigStore::from_env());
     let mut adapter_registry = ProviderAdapterRegistry::new();
     adapter_registry
         .register(Arc::new(OpenAiAdapter::default()))
@@ -233,7 +231,7 @@ async fn process_chat_completion(
     ensure_bearer_auth(authorization_header, &context)?;
     let normalized_request = normalize_request(request, &context)?;
 
-    let active_config = state.config_store.load().map_err(|error| {
+    let active_config = state.config_store.load().await.map_err(|error| {
         GatewayError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             normalized_error(
@@ -1006,102 +1004,234 @@ fn maybe_debug_headers(
     })
 }
 
+#[async_trait]
 trait ActiveConfigStore: Send + Sync {
-    fn load(&self) -> Result<ActiveGatewayConfig, String>;
+    async fn load(&self) -> Result<ActiveGatewayConfig, String>;
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct StaticConfigStore {
     config: ActiveGatewayConfig,
 }
 
+#[cfg(test)]
 impl StaticConfigStore {
     const fn new(config: ActiveGatewayConfig) -> Self {
         Self { config }
     }
 }
 
+#[cfg(test)]
+#[async_trait]
 impl ActiveConfigStore for StaticConfigStore {
-    fn load(&self) -> Result<ActiveGatewayConfig, String> {
+    async fn load(&self) -> Result<ActiveGatewayConfig, String> {
         Ok(self.config.clone())
     }
 }
 
-fn default_active_config() -> ActiveGatewayConfig {
-    let tenant_id = TenantId::parse(DEFAULT_TENANT_ID).expect("tenant id should be valid");
-    let project_id = ProjectId::parse(DEFAULT_PROJECT_ID).expect("project id should be valid");
-    let provider_resource_id = ProviderResourceId::parse(DEFAULT_PROVIDER_RESOURCE_ID)
-        .expect("provider resource id should be valid");
+#[derive(Debug, Clone)]
+struct ControlPlaneConfigStore {
+    base_url: String,
+    cache: Arc<Mutex<Option<CachedActiveConfig>>>,
+    cache_ttl: Duration,
+    client: reqwest::Client,
+    snapshot_ref: String,
+}
 
-    let route_policy = RoutePolicy {
-        route_policy_id: RoutePolicyId::parse(DEFAULT_ROUTE_POLICY_ID)
-            .expect("route policy id should be valid"),
-        tenant_id: tenant_id.clone(),
-        display_name: "OpenAI chat default".to_string(),
-        protocol_family: "openai_chat".to_string(),
-        model_alias: "reasoning-fast".to_string(),
-        required_capabilities: vec!["json_mode".to_string()],
-        preferred_regions: vec!["us-east-1".to_string()],
-        version: 1,
-        created_at: now_rfc3339(),
-        updated_at: now_rfc3339(),
-    };
+#[derive(Debug, Clone)]
+struct CachedActiveConfig {
+    config: ActiveGatewayConfig,
+    fetched_at: Instant,
+}
 
-    let provider_resource = ProviderResource {
-        provider_resource_id: provider_resource_id.clone(),
-        tenant_id: tenant_id.clone(),
-        project_id: Some(project_id.clone()),
-        provider_id: "openai".to_string(),
-        name: "openai-primary".to_string(),
-        status: ProviderResourceStatus::Active,
-        provenance_class: ProvenanceClass::OfficialApi,
-        credential_owner_type: CredentialOwnerType::Platform,
-        deployment_scope: DeploymentScope::Shared,
-        region: std::env::var("GATEWAY_OPENAI_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-        endpoint_base_url: std::env::var("GATEWAY_OPENAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-        auth_kind: AuthKind::ApiKey,
-        health_state: HealthState::Healthy,
-        budget_policy_id: None,
-        capabilities: ProviderCapabilities {
-            supports_streaming: true,
-            supports_tool_calling: true,
-            supports_json_mode: true,
-        },
-        version: 1,
-        created_at: now_rfc3339(),
-        updated_at: now_rfc3339(),
-    };
+impl ControlPlaneConfigStore {
+    fn from_env() -> Self {
+        let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
+            .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
+        let snapshot_ref = std::env::var("GATEWAY_CONTROL_PLANE_SNAPSHOT_REF")
+            .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_SNAPSHOT_REF.to_string());
+        let cache_ttl = std::env::var("GATEWAY_CONFIG_CACHE_TTL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map_or_else(|| Duration::from_secs(5), Duration::from_millis);
 
-    ActiveGatewayConfig {
-        config_snapshot: ConfigSnapshot {
-            config_snapshot_id: ConfigSnapshotId::parse(DEFAULT_CONFIG_SNAPSHOT_ID)
-                .expect("config snapshot id should be valid"),
-            tenant_id,
-            project_id,
-            revision: 1,
-            status: ConfigSnapshotStatus::Active,
-            activated_at: Some(now_rfc3339()),
-            provider_resource_ids: vec![provider_resource_id],
-            route_policy_id: route_policy.route_policy_id.clone(),
-            budget_policy_id: core_domain::BudgetPolicyId::parse("budgetpol_default")
-                .expect("budget policy id should be valid"),
-        },
-        route_policy,
-        provider_targets: vec![ProviderTargetRuntime {
-            resource: provider_resource,
-            priority: 1,
-            upstream_model: Some(
-                std::env::var("GATEWAY_OPENAI_MODEL")
-                    .unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
-            ),
-            api_key: std::env::var("GATEWAY_OPENAI_API_KEY")
-                .or_else(|_| std::env::var("OPENAI_API_KEY"))
-                .unwrap_or_default(),
-            static_latency_score: 0.9,
-            static_cost_score: 0.65,
-            usd_per_1k_tokens: 0.01,
-        }],
+        Self::new(base_url, snapshot_ref, cache_ttl, reqwest::Client::new())
+    }
+
+    fn new(
+        base_url: impl Into<String>,
+        snapshot_ref: impl Into<String>,
+        cache_ttl: Duration,
+        client: reqwest::Client,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            cache: Arc::new(Mutex::new(None)),
+            cache_ttl,
+            client,
+            snapshot_ref: snapshot_ref.into(),
+        }
+    }
+
+    async fn fetch_active_config(&self) -> Result<ActiveGatewayConfig, String> {
+        let snapshot = self
+            .get_json::<ConfigSnapshotResponse>(&format!(
+                "/v1/config-snapshots/{}",
+                self.snapshot_ref
+            ))
+            .await?
+            .config_snapshot;
+        let route_policies = self
+            .get_json::<RoutePoliciesResponse>("/v1/route-policies")
+            .await?
+            .data;
+        let provider_resources = self
+            .get_json::<ProviderResourcesResponse>("/v1/provider-resources")
+            .await?
+            .data;
+
+        let route_policy = route_policies
+            .into_iter()
+            .find(|policy| policy.route_policy_id == snapshot.route_policy_id)
+            .ok_or_else(|| {
+                format!(
+                    "route policy {route_policy_id} is missing from control plane",
+                    route_policy_id = snapshot.route_policy_id
+                )
+            })?;
+
+        let provider_targets = snapshot
+            .provider_resource_ids
+            .iter()
+            .enumerate()
+            .map(|(index, provider_resource_id)| {
+                let resource = provider_resources
+                    .iter()
+                    .find(|candidate| &candidate.provider_resource_id == provider_resource_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "provider resource {provider_resource_id} is missing from control plane"
+                        )
+                    })?;
+
+                Ok(ProviderTargetRuntime {
+                    priority: u32::try_from(index + 1).unwrap_or(u32::MAX),
+                    upstream_model: upstream_model_for_provider(&resource.provider_id),
+                    api_key: api_key_for_provider(&resource.provider_id),
+                    static_latency_score: static_latency_score_for_region(
+                        &route_policy.preferred_regions,
+                        &resource.region,
+                    ),
+                    static_cost_score: static_cost_score_for_scope(resource.deployment_scope),
+                    usd_per_1k_tokens: usd_per_1k_tokens_for_provider(&resource.provider_id),
+                    resource,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        Ok(ActiveGatewayConfig {
+            config_snapshot: snapshot,
+            route_policy,
+            provider_targets,
+        })
+    }
+
+    async fn get_json<T>(&self, path: &str) -> Result<T, String>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{base}{path}");
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|error| format!("failed to fetch {url}: {error}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unable to read response body".to_string());
+            return Err(format!(
+                "control plane returned HTTP {status} for {url}: {body}"
+            ));
+        }
+        response
+            .json::<T>()
+            .await
+            .map_err(|error| format!("failed to decode control-plane payload from {url}: {error}"))
+    }
+}
+
+#[async_trait]
+impl ActiveConfigStore for ControlPlaneConfigStore {
+    async fn load(&self) -> Result<ActiveGatewayConfig, String> {
+        {
+            let cache = self.cache.lock().await;
+            if let Some(entry) = cache.as_ref()
+                && entry.fetched_at.elapsed() <= self.cache_ttl
+            {
+                return Ok(entry.config.clone());
+            }
+        }
+
+        let fetched = self.fetch_active_config().await?;
+        *self.cache.lock().await = Some(CachedActiveConfig {
+            config: fetched.clone(),
+            fetched_at: Instant::now(),
+        });
+        Ok(fetched)
+    }
+}
+
+fn api_key_for_provider(provider_id: &str) -> String {
+    match provider_id {
+        "openai" => std::env::var("GATEWAY_OPENAI_API_KEY")
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn upstream_model_for_provider(provider_id: &str) -> Option<String> {
+    match provider_id {
+        "openai" => Some(
+            std::env::var("GATEWAY_OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
+        ),
+        _ => None,
+    }
+}
+
+fn usd_per_1k_tokens_for_provider(provider_id: &str) -> f64 {
+    match provider_id {
+        "openai" => std::env::var("GATEWAY_OPENAI_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.01),
+        _ => 0.02,
+    }
+}
+
+fn static_latency_score_for_region(preferred_regions: &[String], region: &str) -> f32 {
+    if preferred_regions
+        .iter()
+        .any(|preferred| preferred == region)
+    {
+        0.95
+    } else {
+        0.8
+    }
+}
+
+const fn static_cost_score_for_scope(scope: DeploymentScope) -> f32 {
+    match scope {
+        DeploymentScope::Shared => 0.7,
+        DeploymentScope::TenantDedicated => 0.6,
+        DeploymentScope::ProjectDedicated => 0.5,
     }
 }
 
@@ -1261,13 +1391,16 @@ impl IntoResponse for GatewayError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveGatewayConfig, AppState, ChatCompletionRequest, ChatMessage, GatewayState,
-        ProviderTargetRuntime, StaticConfigStore, app_with_state, evaluate_route,
-        normalize_request,
+        ActiveConfigStore, ActiveGatewayConfig, AppState, ChatCompletionRequest, ChatMessage,
+        ControlPlaneConfigStore, GatewayState, ProviderTargetRuntime, StaticConfigStore,
+        app_with_state, evaluate_route, normalize_request,
     };
     use axum::{
+        Json, Router,
         body::{Body, to_bytes},
+        extract::State,
         http::{Request, StatusCode},
+        routing::get,
     };
     use core_domain::{
         AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
@@ -1275,12 +1408,21 @@ mod tests {
         ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
         RoutePolicy, RoutePolicyId, TenantId,
     };
+    use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
     use provider_traits::{
         AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
         ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
         ProviderUsage, StreamingSupport,
     };
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering as AtomicOrdering},
+        },
+        time::Duration,
+    };
+    use tokio::net::TcpListener;
     use tower::ServiceExt;
 
     fn valid_http_request() -> ChatCompletionRequest {
@@ -1418,6 +1560,20 @@ mod tests {
         outcomes: BTreeMap<String, Result<ProviderResponse, ProviderError>>,
     }
 
+    #[derive(Clone)]
+    struct ControlPlaneFixture {
+        config_snapshot: ConfigSnapshotResponse,
+        provider_resources: ProviderResourcesResponse,
+        route_policies: RoutePoliciesResponse,
+    }
+
+    #[derive(Clone)]
+    struct FixtureState {
+        fail: bool,
+        fixture: ControlPlaneFixture,
+        request_count: Arc<AtomicUsize>,
+    }
+
     #[async_trait::async_trait]
     impl ProviderAdapter for MockAdapter {
         fn manifest(&self) -> AdapterManifest {
@@ -1440,6 +1596,97 @@ mod tests {
                 .cloned()
                 .expect("test outcome should exist")
         }
+    }
+
+    fn control_plane_fixture() -> ControlPlaneFixture {
+        let config = build_config(vec![
+            build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            ),
+            build_target(
+                "prvrsrc_openai_backup",
+                "us-west-2",
+                0.85,
+                0.7,
+                HealthState::Healthy,
+            ),
+        ]);
+
+        ControlPlaneFixture {
+            config_snapshot: ConfigSnapshotResponse {
+                config_snapshot: config.config_snapshot,
+            },
+            provider_resources: ProviderResourcesResponse {
+                data: config
+                    .provider_targets
+                    .iter()
+                    .map(|target| target.resource.clone())
+                    .collect(),
+            },
+            route_policies: RoutePoliciesResponse {
+                data: vec![config.route_policy],
+            },
+        }
+    }
+
+    async fn control_plane_snapshot(
+        State(state): State<FixtureState>,
+    ) -> Result<Json<ConfigSnapshotResponse>, StatusCode> {
+        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
+        if state.fail {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        Ok(Json(state.fixture.config_snapshot))
+    }
+
+    async fn control_plane_route_policies(
+        State(state): State<FixtureState>,
+    ) -> Result<Json<RoutePoliciesResponse>, StatusCode> {
+        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
+        if state.fail {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        Ok(Json(state.fixture.route_policies))
+    }
+
+    async fn control_plane_provider_resources(
+        State(state): State<FixtureState>,
+    ) -> Result<Json<ProviderResourcesResponse>, StatusCode> {
+        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
+        if state.fail {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        Ok(Json(state.fixture.provider_resources))
+    }
+
+    async fn spawn_control_plane_server(
+        fail: bool,
+    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .route("/v1/config-snapshots/active", get(control_plane_snapshot))
+            .route("/v1/route-policies", get(control_plane_route_policies))
+            .route(
+                "/v1/provider-resources",
+                get(control_plane_provider_resources),
+            )
+            .with_state(FixtureState {
+                fail,
+                fixture: control_plane_fixture(),
+                request_count: request_count.clone(),
+            });
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (format!("http://{address}"), request_count, handle)
     }
 
     #[test]
@@ -1807,6 +2054,65 @@ mod tests {
             response.headers().get("x-debug-admission-result").unwrap(),
             "admitted"
         );
+    }
+
+    #[tokio::test]
+    async fn control_plane_config_store_fetches_and_maps_active_config() {
+        let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
+        let store = ControlPlaneConfigStore::new(
+            base_url,
+            "active",
+            Duration::from_secs(60),
+            reqwest::Client::new(),
+        );
+
+        let config = store.load().await.unwrap();
+
+        assert_eq!(
+            config.config_snapshot.config_snapshot_id.as_str(),
+            "cfgsnap_test"
+        );
+        assert_eq!(
+            config.route_policy.route_policy_id.as_str(),
+            "routepol_default"
+        );
+        assert_eq!(config.provider_targets.len(), 2);
+        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn control_plane_config_store_uses_ttl_cache() {
+        let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
+        let store = ControlPlaneConfigStore::new(
+            base_url,
+            "active",
+            Duration::from_secs(60),
+            reqwest::Client::new(),
+        );
+
+        let _ = store.load().await.unwrap();
+        let _ = store.load().await.unwrap();
+
+        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn control_plane_config_store_reports_unavailable_backend() {
+        let (base_url, _request_count, handle) = spawn_control_plane_server(true).await;
+        let store = ControlPlaneConfigStore::new(
+            base_url,
+            "active",
+            Duration::from_millis(1),
+            reqwest::Client::new(),
+        );
+
+        let error = store.load().await.unwrap_err();
+
+        assert!(error.contains("HTTP 503"));
+        handle.abort();
     }
 
     #[tokio::test]

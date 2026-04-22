@@ -1,12 +1,8 @@
-import { Badge, Card, Group, List, SimpleGrid, Stack, Table, Text } from '@mantine/core'
+import { Badge, Card, Group, Stack, Table, Text } from '@mantine/core'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { PageHeader } from '@huge-router/ui-kit'
-import { formatCurrency, formatPercent } from '../features/control-plane/format'
 import { loadRouteData } from '../features/control-plane/loaders'
-import {
-  RouteErrorState,
-  RouteLoadingState
-} from '../features/control-plane/route-state'
+import { RouteErrorState, RouteLoadingState } from '../features/control-plane/route-state'
 import { getConsoleDataService } from '../features/control-plane/service'
 
 export const Route = createFileRoute('/admin/tenants/$tenantId')({
@@ -23,7 +19,7 @@ function TenantDetailPage() {
     return (
       <Stack>
         <PageHeader
-          description="Inspect the selected tenant workspace, project coverage, provider access, and route policy health."
+          description="Inspect the selected tenant workspace, project coverage, provider access, and route policy state."
           title="Tenant detail"
         />
         <RouteErrorState
@@ -39,33 +35,29 @@ function TenantDetailPage() {
   return (
     <Stack>
       <PageHeader
-        description="Inspect the selected tenant workspace, project coverage, provider access, and route policy health."
+        description="Inspect the selected tenant workspace, project coverage, provider access, and route policy state."
         title={tenant.displayName}
         actions={
-          <Badge color={tenant.status === 'healthy' ? 'teal' : 'yellow'} size="lg" variant="light">
-            {tenant.status === 'healthy' ? 'Healthy' : 'Needs attention'}
-          </Badge>
+          tenant.activeConfigSnapshotId ? (
+            <Badge color="teal" size="lg" variant="light">
+              {tenant.activeConfigSnapshotId}
+            </Badge>
+          ) : (
+            <Badge color="gray" size="lg" variant="light">
+              No active snapshot
+            </Badge>
+          )
         }
       />
       <Text c="dimmed" component={Link} size="sm" to="/admin/tenants">
         Back to tenant list
       </Text>
-      <SimpleGrid cols={{ base: 1, md: 3 }}>
-        <SummaryCard label="Plan" value={tenant.plan} />
-        <SummaryCard label="Monthly spend" value={formatCurrency(tenant.monthlySpendUsd)} />
-        <SummaryCard label="Primary region" value={tenant.primaryRegion} />
-      </SimpleGrid>
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
-        <Card padding="lg" radius="md" shadow="sm">
-          <Text fw={700} mb="md">
-            Workspace notes
-          </Text>
-          <List spacing="sm">
-            <List.Item>{tenant.notes}</List.Item>
-            <List.Item>{tenant.projects.length} projects are currently configured in this workspace.</List.Item>
-            <List.Item>{tenant.providers.length} provider resources are visible to this tenant.</List.Item>
-          </List>
-        </Card>
+      <Group grow align="stretch">
+        <SummaryCard label="Version" value={String(tenant.version)} />
+        <SummaryCard label="Selected provider" value={tenant.selectedProvider} />
+        <SummaryCard label="Simulated cost" value={tenant.estimatedCostUsd ? `$${tenant.estimatedCostUsd}` : 'n/a'} />
+      </Group>
+      <Group grow align="stretch">
         <Card padding="lg" radius="md" shadow="sm">
           <Text fw={700} mb="md">
             Projects
@@ -76,7 +68,17 @@ function TenantDetailPage() {
             ))}
           </Stack>
         </Card>
-      </SimpleGrid>
+        <Card padding="lg" radius="md" shadow="sm">
+          <Text fw={700} mb="md">
+            Provider resources
+          </Text>
+          <Stack gap="xs">
+            {tenant.providers.map((provider) => (
+              <Text key={provider.provider_resource_id}>{provider.name}</Text>
+            ))}
+          </Stack>
+        </Card>
+      </Group>
       <Card padding="lg" radius="md" shadow="sm">
         <Group justify="space-between" mb="md">
           <Text fw={700}>Route policies</Text>
@@ -89,8 +91,8 @@ function TenantDetailPage() {
             <Table.Tr>
               <Table.Th>Name</Table.Th>
               <Table.Th>Model alias</Table.Th>
-              <Table.Th>Selected provider</Table.Th>
-              <Table.Th>Success rate</Table.Th>
+              <Table.Th>Selected providers</Table.Th>
+              <Table.Th>Preferred regions</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -98,8 +100,12 @@ function TenantDetailPage() {
               <Table.Tr key={policy.id}>
                 <Table.Td>{policy.name}</Table.Td>
                 <Table.Td>{policy.modelAlias}</Table.Td>
-                <Table.Td>{policy.selectedProvider}</Table.Td>
-                <Table.Td>{formatPercent(policy.successRate)}</Table.Td>
+                <Table.Td>
+                  {policy.selectedProviders.length > 0
+                    ? policy.selectedProviders.join(', ')
+                    : 'Inactive snapshot'}
+                </Table.Td>
+                <Table.Td>{policy.preferredRegions.join(', ') || 'Any region'}</Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -115,7 +121,7 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
       <Text c="dimmed" size="sm">
         {label}
       </Text>
-      <Text fw={700} mt="xs" size="lg" tt="capitalize">
+      <Text fw={700} mt="xs" size="lg">
         {value}
       </Text>
     </Card>

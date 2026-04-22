@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         "control-plane-api bootstrap HTTP server listening"
     );
 
-    axum::serve(listener, app()).await?;
+    axum::serve(listener, app().await?).await?;
 
     Ok(())
 }

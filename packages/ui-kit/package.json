@@ -10,7 +10,7 @@
     "build": "tsc --project tsconfig.json",
     "lint": "eslint . --config ../../eslint.config.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "node -e \"console.log('No tests for ui-kit yet')\"",
+    "test": "../../apps/console-web/node_modules/.bin/vitest run --environment jsdom --globals",
     "generate": "node -e \"console.log('No generated assets for ui-kit yet')\""
   },
   "dependencies": {
@@ -19,9 +19,12 @@
     "react": "19.2.5"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
     "@types/node": "25.6.0",
     "@types/react": "19.2.14",
+    "jsdom": "29.0.2",
+    "vitest": "4.1.4",
     "typescript": "6.0.3"
   }
 }
-

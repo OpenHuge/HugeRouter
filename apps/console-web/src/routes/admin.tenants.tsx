@@ -1,7 +1,6 @@
 import { Badge, Card, Group, Stack, Table, Text } from '@mantine/core'
 import { Link, Outlet, createFileRoute } from '@tanstack/react-router'
 import { PageHeader } from '@huge-router/ui-kit'
-import { formatCurrency } from '../features/control-plane/format'
 import { loadRouteData } from '../features/control-plane/loaders'
 import {
   EmptyCollectionState,
@@ -24,7 +23,7 @@ function AdminTenantsPage() {
     return (
       <Stack>
         <PageHeader
-          description="Review tenant tenancy, routed projects, and the first operational signals for each workspace."
+          description="Review tenant inventory, configured projects, provider coverage, and active snapshot status."
           title="Tenants"
         />
         <RouteErrorState
@@ -40,7 +39,7 @@ function AdminTenantsPage() {
   return (
     <Stack>
       <PageHeader
-        description="Review tenant tenancy, routed projects, and the first operational signals for each workspace."
+        description="Review tenant inventory, configured projects, provider coverage, and active snapshot status."
         title="Tenants"
       />
       <Card padding="lg" radius="md" shadow="sm">
@@ -60,11 +59,10 @@ function AdminTenantsPage() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Tenant</Table.Th>
-                <Table.Th>Plan</Table.Th>
                 <Table.Th>Projects</Table.Th>
-                <Table.Th>Active routes</Table.Th>
-                <Table.Th>Monthly spend</Table.Th>
-                <Table.Th>Status</Table.Th>
+                <Table.Th>Providers</Table.Th>
+                <Table.Th>Route policies</Table.Th>
+                <Table.Th>Active snapshot</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -80,14 +78,19 @@ function AdminTenantsPage() {
                       </Text>
                     </Stack>
                   </Table.Td>
-                  <Table.Td>{tenant.plan}</Table.Td>
                   <Table.Td>{tenant.projectCount}</Table.Td>
-                  <Table.Td>{tenant.activeRoutePolicies}</Table.Td>
-                  <Table.Td>{formatCurrency(tenant.monthlySpendUsd)}</Table.Td>
+                  <Table.Td>{tenant.providerCount}</Table.Td>
+                  <Table.Td>{tenant.routePolicyCount}</Table.Td>
                   <Table.Td>
-                    <Badge color={tenant.status === 'healthy' ? 'teal' : 'yellow'} variant="light">
-                      {tenant.status === 'healthy' ? 'Healthy' : 'Needs attention'}
-                    </Badge>
+                    {tenant.activeConfigSnapshotId ? (
+                      <Badge color="teal" variant="light">
+                        {tenant.activeConfigSnapshotId}
+                      </Badge>
+                    ) : (
+                      <Badge color="gray" variant="light">
+                        No active snapshot
+                      </Badge>
+                    )}
                   </Table.Td>
                 </Table.Tr>
               ))}
