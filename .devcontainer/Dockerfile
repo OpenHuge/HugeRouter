@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/javascript-node:24-bookworm
 
 ARG RUST_VERSION=1.94.1
-ARG USERNAME=vscode
+ARG USERNAME=node
 
 RUN apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \

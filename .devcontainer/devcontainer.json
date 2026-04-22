@@ -6,7 +6,7 @@
   ],
   "service": "workspace",
   "workspaceFolder": "/workspaces/HugeRouter",
-  "remoteUser": "vscode",
+  "remoteUser": "node",
   "overrideCommand": false,
   "shutdownAction": "stopCompose",
   "secrets": {
@@ -75,9 +75,9 @@
   },
   "containerEnv": {
     "CARGO_TERM_COLOR": "always",
-    "CODEX_HOME": "/home/vscode/.codex",
-    "NPM_CONFIG_PREFIX": "/home/vscode/.npm-global",
-    "PNPM_HOME": "/home/vscode/.local/share/pnpm"
+    "CODEX_HOME": "/home/node/.codex",
+    "NPM_CONFIG_PREFIX": "/home/node/.npm-global",
+    "PNPM_HOME": "/home/node/.local/share/pnpm"
   },
   "customizations": {
     "vscode": {

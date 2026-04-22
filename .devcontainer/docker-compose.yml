@@ -14,14 +14,14 @@ services:
       nats:
         condition: service_healthy
     environment:
-      CARGO_HOME: /home/vscode/.cargo
-      PNPM_HOME: /home/vscode/.local/share/pnpm
+      CARGO_HOME: /home/node/.cargo
+      PNPM_HOME: /home/node/.local/share/pnpm
       CARGO_TERM_COLOR: always
     volumes:
       - ../../:/workspaces/HugeRouter:cached
-      - cargo-git:/home/vscode/.cargo/git
-      - cargo-registry:/home/vscode/.cargo/registry
-      - pnpm-store:/home/vscode/.local/share/pnpm/store
+      - cargo-git:/home/node/.cargo/git
+      - cargo-registry:/home/node/.cargo/registry
+      - pnpm-store:/home/node/.local/share/pnpm/store
     working_dir: /workspaces/HugeRouter
 
 volumes:
