@@ -46,6 +46,7 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.150.1
+    profiles: ["observability"]
     command: ["--config=/etc/otelcol/config.yaml"]
     ports:
       - "${OTEL_GRPC_PORT:-4317}:4317"
@@ -62,6 +63,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.11.2
+    profiles: ["observability"]
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -81,6 +83,7 @@ services:
 
   grafana:
     image: grafana/grafana:13.0.1
+    profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -104,4 +107,3 @@ volumes:
   postgres-data:
   prometheus-data:
   redis-data:
-
