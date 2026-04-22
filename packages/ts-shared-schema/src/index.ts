@@ -255,6 +255,138 @@ export const gatewayChatResponseSchema = z.object({
   output_text: z.string()
 })
 
+export const gatewayAnthropicMessageContentBlockSchema = z.object({
+  type: z.literal('text'),
+  text: z.string().min(1)
+})
+
+export const gatewayAnthropicMessageContentSchema = z.union([
+  z.string().min(1),
+  z.array(gatewayAnthropicMessageContentBlockSchema)
+])
+
+export const gatewayAnthropicMessageSchema = z.object({
+  role: z.string().min(1),
+  content: gatewayAnthropicMessageContentSchema
+})
+
+export const gatewayAnthropicMessagesRequestSchema = z.object({
+  model: z.string().min(1),
+  messages: z.array(gatewayAnthropicMessageSchema),
+  max_tokens: z.number().int().nonnegative().optional(),
+  system: z.string().min(1).optional(),
+  stream: z.boolean().optional(),
+  temperature: z.number().nonnegative().optional(),
+  top_p: z.number().nonnegative().optional(),
+  top_k: z.number().int().nonnegative().optional()
+})
+
+export const gatewayAnthropicUsageSchema = z.object({
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative()
+})
+
+export const gatewayAnthropicMessagesResponseSchema = z.object({
+  id: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  content: z.array(
+    z.object({
+      type: z.string().min(1),
+      text: z.string().min(1)
+    })
+  ),
+  stop_reason: z.string().min(1).optional(),
+  usage: gatewayAnthropicUsageSchema.optional()
+})
+
+export const gatewayAnthropicMessagesErrorSchema = z.object({
+  error: normalizedErrorSchema
+})
+
+export const gatewayGeminiPartSchema = z.object({
+  text: z.string().min(1)
+})
+
+export const gatewayGeminiRoleSchema = z.enum(['user', 'assistant', 'model', 'system'])
+
+export const gatewayGeminiContentSchema = z.object({
+  role: gatewayGeminiRoleSchema,
+  parts: z.array(gatewayGeminiPartSchema)
+})
+
+export const gatewayGeminiSystemInstructionSchema = z.object({
+  parts: z.array(gatewayGeminiPartSchema)
+})
+
+export const gatewayGeminiGenerationConfigSchema = z.object({
+  maxOutputTokens: z.number().int().nonnegative().optional(),
+  temperature: z.number().optional()
+})
+
+export const gatewayGeminiGenerateContentRequestSchema = z.object({
+  model: z.string().min(1),
+  contents: z.array(gatewayGeminiContentSchema),
+  tools: z.array(z.unknown()),
+  stream: z.boolean().default(false),
+  systemInstruction: gatewayGeminiSystemInstructionSchema.optional(),
+  generationConfig: gatewayGeminiGenerationConfigSchema.optional()
+})
+
+export const gatewayGeminiCandidateSchema = z.object({
+  content: gatewayGeminiContentSchema.optional(),
+  finishReason: z.string().min(1).optional()
+})
+
+export const gatewayGeminiUsageMetadataSchema = z.object({
+  promptTokenCount: z.number().int().nonnegative(),
+  candidatesTokenCount: z.number().int().nonnegative(),
+  totalTokenCount: z.number().int().nonnegative(),
+  cachedContentTokenCount: z.number().int().nonnegative()
+})
+
+export const gatewayGeminiGenerateContentResponseSchema = z.object({
+  responseId: z.string().min(1).optional(),
+  candidates: z.array(gatewayGeminiCandidateSchema),
+  usageMetadata: gatewayGeminiUsageMetadataSchema.optional(),
+  modelVersion: z.string().min(1).optional()
+})
+
+export const gatewayGeminiGenerateContentErrorSchema = z.object({
+  error: normalizedErrorSchema
+})
+
+export const routeReceiptDecisionTraceStepSchema = z.object({
+  stage: z.string().min(1),
+  status: z.string().min(1),
+  message: z.string().min(1),
+  score: z.number().optional(),
+  notes: z.array(z.string().min(1))
+})
+
+export const routeReceiptPolicyCheckSchema = z.object({
+  policy_id: routePolicyIdSchema,
+  status: z.string().min(1),
+  reason: z.string().min(1).optional()
+})
+
+export const routeReceiptProviderAttemptSchema = z.object({
+  provider_resource_id: providerResourceIdSchema,
+  attempt: z.number().int().nonnegative(),
+  status: z.string().min(1),
+  started_at: dateTimeSchema,
+  finished_at: dateTimeSchema,
+  latency_ms: z.number().int().nonnegative(),
+  reason: z.string().min(1)
+})
+
+export const routeReceiptDiagnosticsResponseSchema = z.object({
+  route_receipt: routeReceiptSchema,
+  decision_timeline: z.array(routeReceiptDecisionTraceStepSchema),
+  policy_checks: z.array(routeReceiptPolicyCheckSchema),
+  provider_attempts: z.array(routeReceiptProviderAttemptSchema),
+  metadata: z.record(z.string(), z.string())
+})
+
 export const eligibleCandidateSchema = z.object({
   provider_resource_id: providerResourceIdSchema,
   score_breakdown: scoreBreakdownSchema
@@ -305,6 +437,10 @@ export const configSnapshotResponseSchema = z.object({
 
 export const routeReceiptResponseSchema = z.object({
   route_receipt: routeReceiptSchema
+})
+
+export const routeReceiptsResponseSchema = z.object({
+  data: z.array(routeReceiptSchema)
 })
 
 export const usageEventRecordedMessageSchema = z.object({
@@ -472,6 +608,44 @@ export type GatewayChatRequest = z.infer<typeof gatewayChatRequestSchema>
 export type GatewayChatResponse = z.infer<typeof gatewayChatResponseSchema>
 export type RouteSimulationRequest = z.infer<typeof routeSimulationRequestSchema>
 export type RouteSimulationResponse = z.infer<typeof routeSimulationResponseSchema>
+export type GatewayAnthropicMessageContentBlock = z.infer<
+  typeof gatewayAnthropicMessageContentBlockSchema
+>
+export type GatewayAnthropicMessageContent = z.infer<
+  typeof gatewayAnthropicMessageContentSchema
+>
+export type GatewayAnthropicMessage = z.infer<typeof gatewayAnthropicMessageSchema>
+export type GatewayAnthropicMessagesRequest = z.infer<
+  typeof gatewayAnthropicMessagesRequestSchema
+>
+export type GatewayAnthropicUsage = z.infer<typeof gatewayAnthropicUsageSchema>
+export type GatewayAnthropicMessagesResponse = z.infer<
+  typeof gatewayAnthropicMessagesResponseSchema
+>
+export type GatewayAnthropicMessagesError = z.infer<typeof gatewayAnthropicMessagesErrorSchema>
+export type GatewayGeminiPart = z.infer<typeof gatewayGeminiPartSchema>
+export type GatewayGeminiContent = z.infer<typeof gatewayGeminiContentSchema>
+export type GatewayGeminiSystemInstruction = z.infer<typeof gatewayGeminiSystemInstructionSchema>
+export type GatewayGeminiGenerationConfig = z.infer<typeof gatewayGeminiGenerationConfigSchema>
+export type GatewayGeminiCandidate = z.infer<typeof gatewayGeminiCandidateSchema>
+export type GatewayGeminiUsageMetadata = z.infer<typeof gatewayGeminiUsageMetadataSchema>
+export type GatewayGeminiGenerateContentRequest = z.infer<
+  typeof gatewayGeminiGenerateContentRequestSchema
+>
+export type GatewayGeminiGenerateContentResponse = z.infer<
+  typeof gatewayGeminiGenerateContentResponseSchema
+>
+export type GatewayGeminiGenerateContentError = z.infer<
+  typeof gatewayGeminiGenerateContentErrorSchema
+>
+export type GatewayGeminiRole = z.infer<typeof gatewayGeminiRoleSchema>
+export type RouteReceiptDecisionTraceStep = z.infer<typeof routeReceiptDecisionTraceStepSchema>
+export type RouteReceiptPolicyCheck = z.infer<typeof routeReceiptPolicyCheckSchema>
+export type RouteReceiptProviderAttempt = z.infer<typeof routeReceiptProviderAttemptSchema>
+export type RouteReceiptDiagnosticsResponse = z.infer<
+  typeof routeReceiptDiagnosticsResponseSchema
+>
+export type RouteReceiptsResponse = z.infer<typeof routeReceiptsResponseSchema>
 export type AuthProvider = z.infer<typeof authProviderSchema>
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>
 export type TenantSummary = z.infer<typeof tenantSummarySchema>

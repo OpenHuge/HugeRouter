@@ -1,4 +1,21 @@
-use anyhow::{Context, Result};
+#![allow(
+    clippy::assigning_clones,
+    clippy::branches_sharing_code,
+    clippy::cast_sign_loss,
+    clippy::collapsible_if,
+    clippy::items_after_test_module,
+    clippy::match_like_matches_macro,
+    clippy::needless_pass_by_value,
+    clippy::option_as_ref_deref,
+    clippy::or_fun_call,
+    clippy::redundant_closure,
+    clippy::significant_drop_tightening,
+    clippy::struct_field_names,
+    clippy::too_many_lines,
+    clippy::trivially_copy_pass_by_ref
+)]
+
+use anyhow::{Context, Result, anyhow};
 use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
     AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId, ConfigSnapshot,
@@ -14,9 +31,10 @@ use protocol_ir::{
     RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{Pool, Postgres, Row, postgres::PgPoolOptions, types::Json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -75,6 +93,93 @@ pub struct MemoryStore {
     sessions: HashMap<String, StoredSession>,
     login_flows: HashMap<String, LoginFlow>,
     route_receipts: HashMap<String, RouteReceipt>,
+    route_policy_disabled_ids: HashSet<String>,
+    api_keys: Vec<ApiKeyRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyRecord {
+    pub api_key_id: String,
+    pub provider_resource_id: ProviderResourceId,
+    pub display_name: String,
+    pub key_prefix: String,
+    pub hash: String,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiKey {
+    pub api_key_id: String,
+    pub provider_resource_id: ProviderResourceId,
+    pub display_name: String,
+    pub key_prefix: String,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiKeysResponse {
+    pub data: Vec<ApiKey>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RouteReceiptsResponse {
+    pub data: Vec<RouteReceipt>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedApiKey {
+    pub api_key_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: Option<ProjectId>,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigSnapshotsResponse {
+    pub data: Vec<ConfigSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConcurrencyResult<T> {
+    Applied(T),
+    NotFound,
+    VersionConflict,
+}
+
+impl ApiKeyRecord {
+    fn public_view(&self) -> ApiKey {
+        ApiKey {
+            api_key_id: self.api_key_id.clone(),
+            provider_resource_id: self.provider_resource_id.clone(),
+            display_name: self.display_name.clone(),
+            key_prefix: self.key_prefix.clone(),
+            is_active: self.is_active,
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+        }
+    }
+
+    fn to_resolved(&self, provider_resources: &[ProviderResource]) -> Option<ResolvedApiKey> {
+        if !self.is_active {
+            return None;
+        }
+        let provider_resource = provider_resources
+            .iter()
+            .find(|resource| resource.provider_resource_id == self.provider_resource_id)?;
+        Some(ResolvedApiKey {
+            api_key_id: self.api_key_id.clone(),
+            tenant_id: provider_resource.tenant_id.clone(),
+            project_id: provider_resource.project_id.clone(),
+            is_active: true,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -458,6 +563,8 @@ impl MemoryStore {
             sessions: HashMap::new(),
             login_flows: HashMap::new(),
             route_receipts: HashMap::new(),
+            route_policy_disabled_ids: HashSet::new(),
+            api_keys: Vec::new(),
         }
     }
 }
@@ -704,16 +811,259 @@ impl StoreMode {
         }
     }
 
+    pub async fn create_provider_resource(
+        &self,
+        mut provider_resource: ProviderResource,
+    ) -> Result<ProviderResource> {
+        provider_resource.version = 1;
+        provider_resource.created_at = now_rfc3339();
+        provider_resource.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .provider_resources
+                    .push(provider_resource.clone());
+                Ok(provider_resource)
+            }
+            Self::Postgres(store) => store.create_provider_resource(&provider_resource).await,
+        }
+    }
+
+    pub async fn update_provider_resource(
+        &self,
+        provider_resource: ProviderResource,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<ProviderResource>> {
+        let mut provider_resource = provider_resource;
+        provider_resource.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => Ok(update_memory_provider_resource(
+                &mut store.write().expect("memory store write lock"),
+                &provider_resource,
+                expected_version,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .update_provider_resource(&provider_resource, expected_version)
+                    .await
+            }
+        }
+    }
+
+    pub async fn disable_provider_resource(
+        &self,
+        provider_resource_id: &str,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<ProviderResource>> {
+        match self {
+            Self::Memory(store) => Ok(disable_memory_provider_resource(
+                &mut store.write().expect("memory store write lock"),
+                provider_resource_id,
+                expected_version,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .disable_provider_resource(provider_resource_id, expected_version)
+                    .await
+            }
+        }
+    }
+
     pub async fn list_route_policies(&self) -> Result<RoutePoliciesResponse> {
         match self {
-            Self::Memory(store) => Ok(RoutePoliciesResponse {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(RoutePoliciesResponse {
+                    data: store
+                        .route_policies
+                        .iter()
+                        .filter(|policy| {
+                            !store
+                                .route_policy_disabled_ids
+                                .contains(policy.route_policy_id.as_str())
+                        })
+                        .cloned()
+                        .collect(),
+                })
+            }
+            Self::Postgres(store) => store.list_route_policies().await,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_route_policy(&self, route_policy_id: &str) -> Result<Option<RoutePolicy>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .route_policies
+                .iter()
+                .find(|item| item.route_policy_id.as_str() == route_policy_id)
+                .cloned()),
+            Self::Postgres(store) => store.get_route_policy(route_policy_id).await,
+        }
+    }
+
+    pub async fn create_route_policy(&self, mut route_policy: RoutePolicy) -> Result<RoutePolicy> {
+        route_policy.version = 1;
+        route_policy.created_at = now_rfc3339();
+        route_policy.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .route_policies
+                    .push(route_policy.clone());
+                Ok(route_policy)
+            }
+            Self::Postgres(store) => store.create_route_policy(&route_policy).await,
+        }
+    }
+
+    pub async fn update_route_policy(
+        &self,
+        route_policy: RoutePolicy,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<RoutePolicy>> {
+        let mut route_policy = route_policy;
+        route_policy.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => Ok(update_memory_route_policy(
+                &mut store.write().expect("memory store write lock"),
+                &route_policy,
+                expected_version,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .update_route_policy(&route_policy, expected_version)
+                    .await
+            }
+        }
+    }
+
+    pub async fn disable_route_policy(
+        &self,
+        route_policy_id: &str,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<RoutePolicy>> {
+        match self {
+            Self::Memory(store) => Ok(disable_memory_route_policy(
+                &mut store.write().expect("memory store write lock"),
+                route_policy_id,
+                expected_version,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .disable_route_policy(route_policy_id, expected_version)
+                    .await
+            }
+        }
+    }
+
+    pub async fn list_config_snapshots(&self) -> Result<ConfigSnapshotsResponse> {
+        match self {
+            Self::Memory(store) => Ok(ConfigSnapshotsResponse {
                 data: store
                     .read()
                     .expect("memory store read lock")
-                    .route_policies
+                    .config_snapshots
                     .clone(),
             }),
-            Self::Postgres(store) => store.list_route_policies().await,
+            Self::Postgres(store) => store.list_config_snapshots().await,
+        }
+    }
+
+    pub async fn create_config_snapshot(
+        &self,
+        mut config_snapshot: ConfigSnapshot,
+    ) -> Result<ConfigSnapshot> {
+        config_snapshot.activated_at = None;
+        config_snapshot.status = ConfigSnapshotStatus::Draft;
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .config_snapshots
+                    .push(config_snapshot.clone());
+                Ok(config_snapshot)
+            }
+            Self::Postgres(store) => store.create_config_snapshot(&config_snapshot).await,
+        }
+    }
+
+    pub async fn create_api_key(
+        &self,
+        provider_resource_id: ProviderResourceId,
+        display_name: &str,
+        api_key: &str,
+    ) -> Result<ApiKey> {
+        let now = now_rfc3339();
+        let prefix = api_key_prefix(api_key);
+        let hash = hash_api_key(api_key);
+        match self {
+            Self::Memory(store) => Ok(insert_memory_api_key(
+                &mut store.write().expect("memory store write lock"),
+                provider_resource_id,
+                display_name,
+                &prefix,
+                hash,
+                now,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .create_api_key(provider_resource_id.as_str(), display_name, &prefix, &hash)
+                    .await
+            }
+        }
+    }
+
+    pub async fn list_api_keys(&self) -> Result<ApiKeysResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(ApiKeysResponse {
+                    data: store
+                        .api_keys
+                        .iter()
+                        .map(ApiKeyRecord::public_view)
+                        .collect(),
+                })
+            }
+            Self::Postgres(store) => store.list_api_keys().await,
+        }
+    }
+
+    pub async fn revoke_api_key(
+        &self,
+        api_key_id: &str,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<ApiKey>> {
+        match self {
+            Self::Memory(store) => Ok(revoke_memory_api_key(
+                &mut store.write().expect("memory store write lock"),
+                api_key_id,
+                expected_version,
+            )),
+            Self::Postgres(store) => store.revoke_api_key(api_key_id, expected_version).await,
+        }
+    }
+
+    pub async fn resolve_api_key(&self, api_key: &str) -> Result<Option<ResolvedApiKey>> {
+        let hash = hash_api_key(api_key);
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .api_keys
+                    .iter()
+                    .find(|item| item.hash == hash && item.is_active)
+                    .and_then(|item| item.to_resolved(&store.provider_resources)))
+            }
+            Self::Postgres(store) => store.resolve_api_key(&hash).await,
         }
     }
 
@@ -778,6 +1128,69 @@ impl StoreMode {
                 .cloned()
                 .map(|route_receipt| RouteReceiptResponse { route_receipt })),
             Self::Postgres(store) => store.get_route_receipt(route_receipt_id).await,
+        }
+    }
+
+    pub async fn list_route_receipts(
+        &self,
+        tenant_id: Option<String>,
+        project_id: Option<String>,
+        protocol_family: Option<String>,
+    ) -> Result<RouteReceiptsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(RouteReceiptsResponse {
+                    data: filter_and_order_route_receipts(
+                        store.route_receipts.values().cloned().collect::<Vec<_>>(),
+                        tenant_id,
+                        project_id,
+                        protocol_family,
+                    ),
+                })
+            }
+            Self::Postgres(store) => {
+                store
+                    .list_route_receipts(tenant_id, project_id, protocol_family)
+                    .await
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn insert_route_receipt_for_tests(&self, route_receipt: RouteReceipt) {
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .route_receipts
+                    .insert(
+                        route_receipt.route_receipt_id.as_str().to_string(),
+                        route_receipt,
+                    );
+            }
+            Self::Postgres(_) => panic!("test helper only supports memory store"),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set_provider_resource_provider_id_for_tests(
+        &self,
+        provider_resource_id: &str,
+        provider_id: &str,
+    ) {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let resource = store
+                    .provider_resources
+                    .iter_mut()
+                    .find(|resource| resource.provider_resource_id.as_str() == provider_resource_id)
+                    .expect("provider resource should exist in memory store");
+                resource.provider_id = provider_id.to_string();
+            }
+            Self::Postgres(_) => panic!("test helper only supports memory store"),
         }
     }
 }
@@ -1163,16 +1576,363 @@ impl PostgresStore {
         Ok(row.map(|row| row.get::<Json<ProviderResource>, _>("payload").0))
     }
 
-    async fn list_route_policies(&self) -> Result<RoutePoliciesResponse> {
-        let rows = sqlx::query("SELECT payload FROM route_policies ORDER BY route_policy_id")
-            .fetch_all(&self.pool)
+    async fn create_provider_resource(
+        &self,
+        provider_resource: &ProviderResource,
+    ) -> Result<ProviderResource> {
+        sqlx::query(
+            "INSERT INTO provider_resources (provider_resource_id, tenant_id, project_id, provider_id, payload)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(provider_resource.provider_resource_id.as_str())
+        .bind(provider_resource.tenant_id.as_str())
+        .bind(provider_resource.project_id.as_ref().map(ProjectId::as_str))
+        .bind(&provider_resource.provider_id)
+        .bind(Json(provider_resource))
+        .execute(&self.pool)
+        .await?;
+        Ok(provider_resource.clone())
+    }
+
+    async fn update_provider_resource(
+        &self,
+        provider_resource: &ProviderResource,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<ProviderResource>> {
+        let current = self
+            .get_provider_resource(provider_resource.provider_resource_id.as_str())
             .await?;
+        let Some(current) = current else {
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        if current.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let mut updated = provider_resource.clone();
+        updated.version = expected_version.saturating_add(1);
+        updated.created_at = current.created_at;
+        sqlx::query(
+            "UPDATE provider_resources
+              SET tenant_id = $2, project_id = $3, provider_id = $4, payload = $5
+              WHERE provider_resource_id = $1",
+        )
+        .bind(provider_resource.provider_resource_id.as_str())
+        .bind(provider_resource.tenant_id.as_str())
+        .bind(provider_resource.project_id.as_ref().map(ProjectId::as_str))
+        .bind(&provider_resource.provider_id)
+        .bind(Json(updated.clone()))
+        .execute(&self.pool)
+        .await?;
+        Ok(ConcurrencyResult::Applied(updated))
+    }
+
+    async fn disable_provider_resource(
+        &self,
+        provider_resource_id: &str,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<ProviderResource>> {
+        let current = self
+            .get_provider_resource(provider_resource_id)
+            .await?
+            .context("provider resource not found")?;
+        if current.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let mut disabled = current.clone();
+        disabled.version = expected_version.saturating_add(1);
+        disabled.status = ProviderResourceStatus::Disabled;
+        disabled.updated_at = now_rfc3339();
+        sqlx::query(
+            "UPDATE provider_resources
+             SET payload = $2
+             WHERE provider_resource_id = $1",
+        )
+        .bind(provider_resource_id)
+        .bind(Json(disabled.clone()))
+        .execute(&self.pool)
+        .await?;
+        Ok(ConcurrencyResult::Applied(disabled))
+    }
+
+    async fn list_route_policies(&self) -> Result<RoutePoliciesResponse> {
+        let rows = sqlx::query(
+            "SELECT rp.payload
+               FROM route_policies rp
+               LEFT JOIN disabled_route_policies d ON rp.route_policy_id = d.route_policy_id
+              WHERE d.route_policy_id IS NULL
+              ORDER BY rp.route_policy_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         Ok(RoutePoliciesResponse {
             data: rows
                 .into_iter()
                 .map(|row| row.get::<Json<RoutePolicy>, _>("payload").0)
                 .collect(),
         })
+    }
+
+    async fn get_route_policy(&self, route_policy_id: &str) -> Result<Option<RoutePolicy>> {
+        let row = sqlx::query("SELECT payload FROM route_policies WHERE route_policy_id = $1")
+            .bind(route_policy_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<Json<RoutePolicy>, _>("payload").0))
+    }
+
+    async fn create_route_policy(&self, route_policy: &RoutePolicy) -> Result<RoutePolicy> {
+        sqlx::query(
+            "INSERT INTO route_policies (route_policy_id, tenant_id, payload)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(route_policy.route_policy_id.as_str())
+        .bind(route_policy.tenant_id.as_str())
+        .bind(Json(route_policy))
+        .execute(&self.pool)
+        .await?;
+        Ok(route_policy.clone())
+    }
+
+    async fn update_route_policy(
+        &self,
+        route_policy: &RoutePolicy,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<RoutePolicy>> {
+        let current = self
+            .get_route_policy(route_policy.route_policy_id.as_str())
+            .await?;
+        let Some(current) = current else {
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        if current.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let mut updated = route_policy.clone();
+        updated.version = expected_version.saturating_add(1);
+        updated.created_at = current.created_at;
+        sqlx::query(
+            "UPDATE route_policies
+              SET tenant_id = $2, payload = $3
+              WHERE route_policy_id = $1",
+        )
+        .bind(route_policy.route_policy_id.as_str())
+        .bind(route_policy.tenant_id.as_str())
+        .bind(Json(updated.clone()))
+        .execute(&self.pool)
+        .await?;
+        Ok(ConcurrencyResult::Applied(updated))
+    }
+
+    async fn disable_route_policy(
+        &self,
+        route_policy_id: &str,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<RoutePolicy>> {
+        let current = self
+            .get_route_policy(route_policy_id)
+            .await?
+            .context("route policy not found")?;
+        if current.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let mut disabled = current.clone();
+        disabled.version = expected_version.saturating_add(1);
+        sqlx::query(
+            "INSERT INTO disabled_route_policies (route_policy_id, disabled_at)
+             VALUES ($1, $2)
+             ON CONFLICT (route_policy_id)
+             DO UPDATE SET disabled_at = EXCLUDED.disabled_at",
+        )
+        .bind(route_policy_id)
+        .bind(now_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("UPDATE route_policies SET payload = $2 WHERE route_policy_id = $1")
+            .bind(route_policy_id)
+            .bind(Json(disabled.clone()))
+            .execute(&self.pool)
+            .await?;
+        Ok(ConcurrencyResult::Applied(disabled))
+    }
+
+    async fn list_config_snapshots(&self) -> Result<ConfigSnapshotsResponse> {
+        let rows = sqlx::query("SELECT payload FROM config_snapshots ORDER BY config_snapshot_id")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(ConfigSnapshotsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| row.get::<Json<ConfigSnapshot>, _>("payload").0)
+                .collect(),
+        })
+    }
+
+    async fn create_config_snapshot(
+        &self,
+        config_snapshot: &ConfigSnapshot,
+    ) -> Result<ConfigSnapshot> {
+        sqlx::query(
+            "INSERT INTO config_snapshots (config_snapshot_id, tenant_id, project_id, status, payload)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(config_snapshot.config_snapshot_id.as_str())
+        .bind(config_snapshot.tenant_id.as_str())
+        .bind(config_snapshot.project_id.as_str())
+        .bind(config_snapshot_status_slug(config_snapshot.status))
+        .bind(Json(config_snapshot))
+        .execute(&self.pool)
+        .await?;
+        Ok(config_snapshot.clone())
+    }
+
+    async fn create_api_key(
+        &self,
+        provider_resource_id: &str,
+        display_name: &str,
+        key_prefix: &str,
+        hash: &str,
+    ) -> Result<ApiKey> {
+        let row = sqlx::query(
+            "SELECT tenant_id, project_id FROM provider_resources WHERE provider_resource_id = $1",
+        )
+        .bind(provider_resource_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let tenant_id = TenantId::parse(row.get::<String, _>("tenant_id"))
+            .context("invalid tenant id in provider resource record")?;
+        let project_id = row.get::<Option<String>, _>("project_id");
+
+        let now = now_rfc3339();
+        let api_key_id = format!("ak_{}", &hash[..16]);
+        sqlx::query(
+            "INSERT INTO api_keys
+                (api_key_id, provider_resource_id, tenant_id, project_id, display_name, key_prefix, hash, is_active, version, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, true, 1, $8, $8)",
+        )
+        .bind(&api_key_id)
+        .bind(provider_resource_id)
+        .bind(tenant_id.as_str())
+        .bind(project_id.as_ref().map(String::as_str))
+        .bind(display_name)
+        .bind(key_prefix)
+        .bind(hash)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(ApiKey {
+            api_key_id,
+            provider_resource_id: ProviderResourceId::parse(provider_resource_id.to_string())?,
+            display_name: display_name.to_string(),
+            key_prefix: key_prefix.to_string(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+            version: 1,
+        })
+    }
+
+    async fn list_api_keys(&self) -> Result<ApiKeysResponse> {
+        let rows = sqlx::query(
+            "SELECT api_key_id, provider_resource_id, display_name, key_prefix, is_active, created_at, updated_at, version
+               FROM api_keys
+              ORDER BY api_key_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(ApiKeysResponse {
+            data: rows
+                .into_iter()
+                .map(|row| ApiKey {
+                    api_key_id: row.get::<String, _>("api_key_id"),
+                    provider_resource_id: ProviderResourceId::parse(
+                        row.get::<String, _>("provider_resource_id"),
+                    )
+                    .expect("stored provider_resource_id should be valid"),
+                    display_name: row.get::<String, _>("display_name"),
+                    key_prefix: row.get::<String, _>("key_prefix"),
+                    is_active: row.get::<bool, _>("is_active"),
+                    created_at: row.get::<String, _>("created_at"),
+                    updated_at: row.get::<String, _>("updated_at"),
+                    version: row.get::<i64, _>("version") as u64,
+                })
+                .collect(),
+        })
+    }
+
+    async fn revoke_api_key(
+        &self,
+        api_key_id: &str,
+        expected_version: u64,
+    ) -> Result<ConcurrencyResult<ApiKey>> {
+        let row = sqlx::query(
+            "SELECT api_key_id, provider_resource_id, display_name, key_prefix, is_active, created_at, updated_at, version
+               FROM api_keys
+              WHERE api_key_id = $1",
+        )
+        .bind(api_key_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let current_version = row.get::<i64, _>("version") as u64;
+        if current_version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let provider_resource_id = row.get::<String, _>("provider_resource_id");
+        let new_version = current_version.saturating_add(1);
+        let now = now_rfc3339();
+        sqlx::query(
+            "UPDATE api_keys
+                SET is_active = false, updated_at = $2, version = $3
+              WHERE api_key_id = $1",
+        )
+        .bind(api_key_id)
+        .bind(&now)
+        .bind(i64::try_from(new_version).unwrap_or(i64::MAX))
+        .execute(&self.pool)
+        .await?;
+        Ok(ConcurrencyResult::Applied(ApiKey {
+            api_key_id: api_key_id.to_string(),
+            provider_resource_id: ProviderResourceId::parse(provider_resource_id)
+                .context("bad provider resource id in api key record")?,
+            display_name: row.get::<String, _>("display_name"),
+            key_prefix: row.get::<String, _>("key_prefix"),
+            is_active: false,
+            created_at: row.get::<String, _>("created_at"),
+            updated_at: now,
+            version: new_version,
+        }))
+    }
+
+    async fn resolve_api_key(&self, hash: &str) -> Result<Option<ResolvedApiKey>> {
+        let row = sqlx::query(
+            "SELECT ak.api_key_id, ak.provider_resource_id, ak.is_active, ak.version, ak.created_at, ak.updated_at,
+                    pr.tenant_id, pr.project_id
+               FROM api_keys ak
+               JOIN provider_resources pr ON pr.provider_resource_id = ak.provider_resource_id
+              WHERE ak.hash = $1
+              LIMIT 1",
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(ResolvedApiKey {
+            api_key_id: row.get::<String, _>("api_key_id"),
+            tenant_id: TenantId::parse(row.get::<String, _>("tenant_id"))
+                .context("invalid tenant id for api key")?,
+            project_id: row
+                .get::<Option<String>, _>("project_id")
+                .map(|project_id| ProjectId::parse(project_id))
+                .transpose()
+                .ok()
+                .flatten(),
+            is_active: row.get::<bool, _>("is_active"),
+        }))
     }
 
     async fn get_config_snapshot(
@@ -1258,6 +2018,27 @@ impl PostgresStore {
         Ok(row.map(|row| RouteReceiptResponse {
             route_receipt: row.get::<Json<RouteReceipt>, _>("payload").0,
         }))
+    }
+
+    async fn list_route_receipts(
+        &self,
+        tenant_id: Option<String>,
+        project_id: Option<String>,
+        protocol_family: Option<String>,
+    ) -> Result<RouteReceiptsResponse> {
+        let rows = sqlx::query("SELECT payload FROM route_receipts")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(RouteReceiptsResponse {
+            data: filter_and_order_route_receipts(
+                rows.into_iter()
+                    .map(|row| row.get::<Json<RouteReceipt>, _>("payload").0)
+                    .collect(),
+                tenant_id,
+                project_id,
+                protocol_family,
+            ),
+        })
     }
 
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
@@ -1404,6 +2185,186 @@ fn unlink_memory_provider(
     Some(UnlinkAuthProviderResponse { provider, removed })
 }
 
+fn update_memory_provider_resource(
+    store: &mut MemoryStore,
+    provider_resource: &ProviderResource,
+    expected_version: u64,
+) -> ConcurrencyResult<ProviderResource> {
+    let index = store
+        .provider_resources
+        .iter()
+        .position(|item| item.provider_resource_id == provider_resource.provider_resource_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .provider_resources
+        .get(index)
+        .expect("indexed provider resource should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    let mut updated = provider_resource.clone();
+    updated.version = expected_version.saturating_add(1);
+    updated.created_at = current.created_at.clone();
+    store.provider_resources[index] = updated.clone();
+    ConcurrencyResult::Applied(updated)
+}
+
+fn disable_memory_provider_resource(
+    store: &mut MemoryStore,
+    provider_resource_id: &str,
+    expected_version: u64,
+) -> ConcurrencyResult<ProviderResource> {
+    let index = store
+        .provider_resources
+        .iter()
+        .position(|item| item.provider_resource_id.as_str() == provider_resource_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .provider_resources
+        .get(index)
+        .expect("indexed provider resource should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    let mut disabled = current.clone();
+    disabled.version = expected_version.saturating_add(1);
+    disabled.status = ProviderResourceStatus::Disabled;
+    disabled.updated_at = now_rfc3339();
+    store.provider_resources[index] = disabled.clone();
+    ConcurrencyResult::Applied(disabled)
+}
+
+fn update_memory_route_policy(
+    store: &mut MemoryStore,
+    route_policy: &RoutePolicy,
+    expected_version: u64,
+) -> ConcurrencyResult<RoutePolicy> {
+    let index = store
+        .route_policies
+        .iter()
+        .position(|item| item.route_policy_id == route_policy.route_policy_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .route_policies
+        .get(index)
+        .expect("indexed route policy should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    let mut updated = route_policy.clone();
+    updated.version = expected_version.saturating_add(1);
+    updated.created_at = current.created_at.clone();
+    store.route_policies[index] = updated.clone();
+    ConcurrencyResult::Applied(updated)
+}
+
+fn disable_memory_route_policy(
+    store: &mut MemoryStore,
+    route_policy_id: &str,
+    expected_version: u64,
+) -> ConcurrencyResult<RoutePolicy> {
+    let index = store
+        .route_policies
+        .iter()
+        .position(|item| item.route_policy_id.as_str() == route_policy_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .route_policies
+        .get(index)
+        .expect("indexed route policy should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    let mut disabled = current.clone();
+    disabled.version = expected_version.saturating_add(1);
+    store.route_policies[index] = disabled.clone();
+    store
+        .route_policy_disabled_ids
+        .insert(route_policy_id.to_string());
+    ConcurrencyResult::Applied(disabled)
+}
+
+fn insert_memory_api_key(
+    store: &mut MemoryStore,
+    provider_resource_id: ProviderResourceId,
+    display_name: &str,
+    key_prefix: &str,
+    hash: String,
+    now: String,
+) -> ApiKey {
+    let api_key_id = format!("ak_{}", &hash[..16]);
+    let record = ApiKeyRecord {
+        api_key_id,
+        provider_resource_id,
+        display_name: display_name.to_string(),
+        key_prefix: key_prefix.to_string(),
+        hash,
+        is_active: true,
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    };
+    store.api_keys.push(record.clone());
+    record.public_view()
+}
+
+fn revoke_memory_api_key(
+    store: &mut MemoryStore,
+    api_key_id: &str,
+    expected_version: u64,
+) -> ConcurrencyResult<ApiKey> {
+    let index = store
+        .api_keys
+        .iter()
+        .position(|item| item.api_key_id == api_key_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .api_keys
+        .get(index)
+        .expect("indexed api key should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    if current.is_active {
+        let mut updated = current.clone();
+        updated.version = expected_version.saturating_add(1);
+        updated.is_active = false;
+        updated.updated_at = now_rfc3339();
+        store.api_keys[index] = updated.clone();
+        ConcurrencyResult::Applied(updated.public_view())
+    } else {
+        let mut updated = current.clone();
+        updated.version = expected_version.saturating_add(1);
+        updated.updated_at = now_rfc3339();
+        store.api_keys[index] = updated.clone();
+        ConcurrencyResult::Applied(updated.public_view())
+    }
+}
+
+fn api_key_prefix(api_key: &str) -> String {
+    if api_key.len() <= 6 {
+        api_key.to_string()
+    } else {
+        format!("{}...", &api_key[..6])
+    }
+}
+
+fn hash_api_key(api_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(api_key.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 fn activate_memory_config_snapshot(
     store: &mut MemoryStore,
     config_snapshot_id: &str,
@@ -1445,11 +2406,38 @@ fn build_route_simulation_response(
     active_snapshot: &ConfigSnapshot,
     request: &RouteSimulationRequest,
 ) -> Result<RouteSimulationResponse> {
+    let request_protocol_family = protocol_family_slug(&request.protocol_family);
+
     let route_policy = route_policies
         .iter()
         .find(|policy| policy.route_policy_id == active_snapshot.route_policy_id)
         .cloned()
         .context("route policy missing for snapshot")?;
+
+    if route_policy.protocol_family != request_protocol_family {
+        return Err(anyhow!(
+            "route policy protocol family `{}` does not match request protocol family `{}`",
+            route_policy.protocol_family,
+            request_protocol_family,
+        ));
+    }
+
+    if !route_policy
+        .required_capabilities
+        .iter()
+        .all(|capability| route_capability_supported_by_provider_capabilities(capability.as_str()))
+    {
+        return Err(anyhow!(
+            "route policy requires unsupported capability: {}",
+            route_policy
+                .required_capabilities
+                .iter()
+                .find(|capability| {
+                    !route_capability_supported_by_provider_capabilities(capability.as_str())
+                })
+                .unwrap_or(&"unknown".to_string())
+        ));
+    }
 
     let candidates = provider_resources
         .iter()
@@ -1473,11 +2461,18 @@ fn build_route_simulation_response(
             });
             continue;
         }
-        if !candidate.capabilities.supports_json_mode
-            && route_policy
-                .required_capabilities
-                .iter()
-                .any(|capability| capability == "json_mode")
+        if !resource_protocol_matches(&candidate.provider_id, &route_policy.protocol_family) {
+            excluded_candidates.push(ExcludedTarget {
+                provider_resource_id: candidate.provider_resource_id.clone(),
+                reason: "provider protocol is incompatible with route policy".to_string(),
+            });
+            continue;
+        }
+
+        if !route_policy
+            .required_capabilities
+            .iter()
+            .all(|capability| route_capability_supported(capability, &candidate.capabilities))
         {
             excluded_candidates.push(ExcludedTarget {
                 provider_resource_id: candidate.provider_resource_id.clone(),
@@ -1546,6 +2541,83 @@ fn build_route_simulation_response(
     })
 }
 
+const fn protocol_family_slug(protocol_family: &protocol_ir::ProtocolFamily) -> &'static str {
+    match protocol_family {
+        protocol_ir::ProtocolFamily::OpenAiChat => "openai_chat",
+        protocol_ir::ProtocolFamily::OpenAiResponses => "openai_responses",
+        protocol_ir::ProtocolFamily::McpStreamableHttp => "mcp_streamable_http",
+        protocol_ir::ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
+        protocol_ir::ProtocolFamily::AnthropicMessages => "anthropic_messages",
+        protocol_ir::ProtocolFamily::GeminiGenerateContent => "gemini_generate_content",
+    }
+}
+
+fn route_capability_supported_by_provider_capabilities(capability: &str) -> bool {
+    matches!(
+        capability,
+        "streaming" | "tool_calling" | "json_mode" | "chat_completions"
+    )
+}
+
+fn route_capability_supported(capability: &str, target: &ProviderCapabilities) -> bool {
+    match capability {
+        "streaming" => target.supports_streaming,
+        "tool_calling" => target.supports_tool_calling,
+        "json_mode" => target.supports_json_mode,
+        "chat_completions" => true,
+        _ => false,
+    }
+}
+
+fn resource_protocol_matches(provider_id: &str, protocol_family: &str) -> bool {
+    match (provider_id, protocol_family) {
+        ("openai", "openai_chat" | "openai_responses") => true,
+        _ => false,
+    }
+}
+
+fn route_receipt_created_at(route_receipt: &RouteReceipt) -> OffsetDateTime {
+    OffsetDateTime::parse(&route_receipt.created_at, &Rfc3339).unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
+
+fn filter_and_order_route_receipts(
+    mut route_receipts: Vec<RouteReceipt>,
+    tenant_id: Option<String>,
+    project_id: Option<String>,
+    protocol_family: Option<String>,
+) -> Vec<RouteReceipt> {
+    route_receipts.retain(|receipt| {
+        if let Some(tenant_id) = tenant_id.as_deref() {
+            if receipt.tenant_id.as_str() != tenant_id {
+                return false;
+            }
+        }
+        if let Some(project_id) = project_id.as_deref() {
+            if receipt.project_id.as_str() != project_id {
+                return false;
+            }
+        }
+        if let Some(protocol_family) = protocol_family.as_deref() {
+            if receipt.protocol_family != protocol_family {
+                return false;
+            }
+        }
+        true
+    });
+
+    route_receipts.sort_by(|left, right| {
+        route_receipt_created_at(right)
+            .cmp(&route_receipt_created_at(left))
+            .then_with(|| {
+                right
+                    .route_receipt_id
+                    .as_str()
+                    .cmp(left.route_receipt_id.as_str())
+            })
+    });
+    route_receipts
+}
+
 fn membership(
     membership_id: &str,
     tenant: &Tenant,
@@ -1586,6 +2658,241 @@ pub fn ensure_workspace_slug(workspace_slug: &str) -> bool {
         workspace_slug,
         "platform-admin" | "acme-retail" | "northstar-labs"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ExcludedTarget, ProjectId,
+        ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt,
+        ScoreBreakdown, StoreMode, TenantId,
+    };
+    use core_domain::RouteReceiptId;
+
+    fn sample_route_receipt(
+        route_receipt_id: &str,
+        tenant_id: &str,
+        project_id: &str,
+        protocol_family: &str,
+        created_at: &str,
+    ) -> RouteReceipt {
+        RouteReceipt {
+            route_receipt_id: RouteReceiptId::parse(route_receipt_id).unwrap(),
+            tenant_id: TenantId::parse(tenant_id).unwrap(),
+            project_id: ProjectId::parse(project_id).unwrap(),
+            request_id: format!("{route_receipt_id}_request"),
+            trace_id: format!("{route_receipt_id}_trace"),
+            protocol_family: protocol_family.to_string(),
+            model_alias: "reasoning-fast".to_string(),
+            config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_default").unwrap(),
+            admission_result: AdmissionResult::Admitted,
+            selected_target: Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap()),
+            excluded_targets: vec![ExcludedTarget {
+                provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_backup").unwrap(),
+                reason: "sample".to_string(),
+            }],
+            score_breakdown: ScoreBreakdown {
+                latency: 0.8,
+                cost: 0.6,
+                health: 1.0,
+                trust: 1.0,
+            },
+            fallback_transitions: Vec::new(),
+            normalized_error: None,
+            created_at: created_at.to_string(),
+        }
+    }
+
+    fn sample_provider_resource() -> ProviderResource {
+        ProviderResource {
+            provider_resource_id: ProviderResourceId::parse("prvrsrc_cp_test_store").unwrap(),
+            tenant_id: core_domain::TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(core_domain::ProjectId::parse("proj_core").unwrap()),
+            provider_id: "openai".to_string(),
+            name: "cp-store-provider".to_string(),
+            status: core_domain::ProviderResourceStatus::Active,
+            provenance_class: core_domain::ProvenanceClass::OfficialApi,
+            credential_owner_type: core_domain::CredentialOwnerType::Platform,
+            deployment_scope: core_domain::DeploymentScope::Shared,
+            region: "us-east-1".to_string(),
+            endpoint_base_url: "https://api.openai.com/v1".to_string(),
+            auth_kind: core_domain::AuthKind::ApiKey,
+            health_state: core_domain::HealthState::Healthy,
+            budget_policy_id: None,
+            capabilities: core_domain::ProviderCapabilities {
+                supports_streaming: true,
+                supports_tool_calling: true,
+                supports_json_mode: true,
+            },
+            version: 1,
+            created_at: "2026-04-22T00:00:00Z".to_string(),
+            updated_at: "2026-04-22T00:00:00Z".to_string(),
+        }
+    }
+
+    fn sample_route_policy() -> RoutePolicy {
+        RoutePolicy {
+            route_policy_id: RoutePolicyId::parse("routepol_cp_store".to_string()).unwrap(),
+            tenant_id: core_domain::TenantId::parse("tenant_acme").unwrap(),
+            display_name: "store-route-policy".to_string(),
+            protocol_family: "openai_chat".to_string(),
+            model_alias: "reasoning-fast".to_string(),
+            required_capabilities: vec!["json_mode".to_string()],
+            preferred_regions: vec!["us-east-1".to_string()],
+            version: 1,
+            created_at: "2026-04-22T00:00:00Z".to_string(),
+            updated_at: "2026-04-22T00:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_store_enforces_version_for_provider_resource_updates() {
+        let store = StoreMode::memory();
+        let created = store
+            .create_provider_resource(sample_provider_resource())
+            .await
+            .unwrap();
+        assert_eq!(created.version, 1);
+
+        let mut stale_update = created.clone();
+        stale_update.name = "stale-update".to_string();
+        let stale = store
+            .update_provider_resource(stale_update, 0)
+            .await
+            .unwrap();
+        assert!(matches!(stale, ConcurrencyResult::VersionConflict));
+
+        let mut update = created.clone();
+        update.name = "updated-name".to_string();
+        let applied = store.update_provider_resource(update, 1).await.unwrap();
+        match applied {
+            ConcurrencyResult::Applied(resource) => assert_eq!(resource.version, 2),
+            _ => panic!("expected applied update"),
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_store_route_policy_disable_is_filterable() {
+        let store = StoreMode::memory();
+        let created = store
+            .create_route_policy(sample_route_policy())
+            .await
+            .unwrap();
+        let before = store.list_route_policies().await.unwrap().data;
+        let before_len = before.len();
+        let applied = store
+            .disable_route_policy(&created.route_policy_id.to_string(), 1)
+            .await;
+        let applied = match applied.unwrap() {
+            ConcurrencyResult::Applied(route_policy) => route_policy,
+            other => panic!("expected applied route policy: {other:?}"),
+        };
+        assert_eq!(applied.version, 2);
+        let after = store.list_route_policies().await.unwrap().data;
+        assert_eq!(after.len(), before_len - 1);
+        assert!(
+            !after
+                .iter()
+                .any(|policy| policy.route_policy_id == created.route_policy_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_store_only_persists_api_key_hash() {
+        let store = StoreMode::memory();
+        let api_key = "akp_store_secret_value_123";
+        let created = store
+            .create_api_key(
+                ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
+                "store-api-key",
+                api_key,
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.key_prefix, "akp_st...");
+        assert_eq!(created.version, 1);
+
+        let keys = store.list_api_keys().await.unwrap().data;
+        assert_eq!(keys.len(), 1);
+
+        let store = &store;
+        if let StoreMode::Memory(memory) = store {
+            let (hash, api_key_id) = {
+                let memory = memory.read().unwrap();
+                let keys: Vec<_> = memory.api_keys.iter().collect();
+                assert_eq!(keys.len(), 1);
+                let stored = &keys[0];
+                assert_ne!(stored.hash, api_key);
+                assert_eq!(stored.hash.len(), 64);
+                assert_eq!(
+                    stored.provider_resource_id,
+                    ProviderResourceId::parse("prvrsrc_openai_primary").unwrap()
+                );
+                assert_eq!(stored.display_name, "store-api-key");
+                assert_eq!(stored.key_prefix, "akp_st...");
+                (stored.hash.clone(), stored.api_key_id.clone())
+            };
+            let revoked = store.revoke_api_key(&api_key_id, 1).await.unwrap();
+            assert!(matches!(revoked, ConcurrencyResult::Applied(_)));
+            assert_ne!(hash, api_key);
+        } else {
+            panic!("expected memory store");
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_store_list_route_receipts_supports_filters_and_recent_order() {
+        let store = StoreMode::memory();
+        store.insert_route_receipt_for_tests(sample_route_receipt(
+            "routercpt_store_a",
+            "tenant_acme",
+            "proj_core",
+            "openai_chat",
+            "2026-04-22T00:01:00Z",
+        ));
+        store.insert_route_receipt_for_tests(sample_route_receipt(
+            "routercpt_store_b",
+            "tenant_acme",
+            "proj_core",
+            "openai_chat",
+            "2026-04-22T00:03:00Z",
+        ));
+        store.insert_route_receipt_for_tests(sample_route_receipt(
+            "routercpt_store_c",
+            "tenant_platform",
+            "proj_core",
+            "openai_responses",
+            "2026-04-22T00:02:00Z",
+        ));
+
+        let all = store
+            .list_route_receipts(None, None, None)
+            .await
+            .unwrap()
+            .data;
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].route_receipt_id.as_str(), "routercpt_store_b");
+        assert_eq!(all[1].route_receipt_id.as_str(), "routercpt_store_c");
+        assert_eq!(all[2].route_receipt_id.as_str(), "routercpt_store_a");
+
+        let tenant_filtered = store
+            .list_route_receipts(Some("tenant_acme".to_string()), None, None)
+            .await
+            .unwrap()
+            .data;
+        assert_eq!(tenant_filtered.len(), 2);
+        assert_eq!(
+            tenant_filtered[0].route_receipt_id.as_str(),
+            "routercpt_store_b"
+        );
+
+        let protocol_filtered = store
+            .list_route_receipts(None, None, Some("openai_chat".to_string()))
+            .await
+            .unwrap()
+            .data;
+        assert_eq!(protocol_filtered.len(), 2);
+    }
 }
 
 pub fn now_rfc3339() -> String {
@@ -1655,6 +2962,23 @@ const MIGRATIONS: &[&str] = &[
         route_policy_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         payload JSONB NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS disabled_route_policies (
+        route_policy_id TEXT PRIMARY KEY,
+        disabled_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS api_keys (
+        api_key_id TEXT PRIMARY KEY,
+        provider_resource_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NULL,
+        display_name TEXT NOT NULL,
+        key_prefix TEXT NOT NULL,
+        hash TEXT NOT NULL UNIQUE,
+        is_active BOOLEAN NOT NULL,
+        version BIGINT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
     )",
     r"CREATE TABLE IF NOT EXISTS config_snapshots (
         config_snapshot_id TEXT PRIMARY KEY,

@@ -1,0 +1,21 @@
+[package]
+name = "provider-gemini"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1.89"
+protocol-gemini = { path = "../protocol-gemini" }
+provider-traits = { path = "../provider-traits" }
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

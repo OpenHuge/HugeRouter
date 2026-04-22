@@ -69,6 +69,60 @@ describe('console data service', () => {
     expect(policies).toHaveLength(3)
   })
 
+  it('loads recent route receipts with mapped provider labels', async () => {
+    signIn({
+      email: 'tenant@acme.dev',
+      workspace: 'acme-retail'
+    })
+
+    const receipts = await getConsoleDataService().listRouteReceipts()
+
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]?.routeReceiptId).toBe('routercpt_openai_primary_recent')
+    expect(receipts[0]?.selectedTargetLabel).toBe('OpenAI Primary')
+    expect(receipts[0]?.excludedTargets[0]?.providerLabel).toBe('OpenAI Backup')
+    expect(receipts[0]?.fallbackTransitions[0]?.fromProviderLabel).toBe('OpenAI Backup')
+    expect(receipts[0]?.fallbackTransitions[0]?.toProviderLabel).toBe('OpenAI Primary')
+  })
+
+  it('loads config snapshots from control-plane endpoint', async () => {
+    signIn({
+      email: 'tenant@acme.dev',
+      workspace: 'acme-retail'
+    })
+
+    const snapshots = await getConsoleDataService().listConfigSnapshots()
+
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[0]?.configSnapshotId).toBe('cfgsnap_gateway_v2')
+    expect(snapshots[0]?.status).toBe('draft')
+    expect(snapshots[1]?.tenantId).toBe('tenant_acme')
+  })
+
+  it('loads api keys for the active tenant session', async () => {
+    signIn({
+      email: 'tenant@acme.dev',
+      workspace: 'acme-retail'
+    })
+
+    const keys = await getConsoleDataService().listApiKeys()
+
+    expect(keys).toHaveLength(2)
+    expect(keys[0]?.apiKeyId).toBe('key_acme_primary')
+    expect(keys.every((key) => key.isActive)).toBe(true)
+  })
+
+  it('revokes an API key without throwing', async () => {
+    signIn({
+      email: 'admin@huge-router.dev',
+      workspace: 'platform-admin'
+    })
+
+    await expect(
+      getConsoleDataService().revokeApiKey('key_acme_primary', 1)
+    ).resolves.toBeUndefined()
+  })
+
   it('loads tenant detail with tenant-specific providers and policies', async () => {
     const detail = await getConsoleDataService().getTenantDetail('tenant_acme')
 
@@ -110,8 +164,32 @@ describe('console data service', () => {
       listRoutePolicies() {
         return Promise.resolve([])
       },
+      listRouteReceipts() {
+        return Promise.resolve([])
+      },
       listTenants() {
         return Promise.resolve([])
+      },
+      listConfigSnapshots() {
+        return Promise.resolve([])
+      },
+      activateConfigSnapshot() {
+        return Promise.resolve({
+          budgetPolicyId: 'budgetpol_default',
+          configSnapshotId: 'cfgsnap_override',
+          providerResourceIds: [],
+          routePolicyId: 'route_policy_override',
+          revision: 1,
+          projectId: 'proj_core',
+          status: 'active',
+          tenantId: 'tenant_acme'
+        })
+      },
+      listApiKeys() {
+        return Promise.resolve([])
+      },
+      revokeApiKey() {
+        return Promise.resolve()
       }
     }
 
@@ -131,6 +209,19 @@ describe('console data service', () => {
 })
 
 describe('loadRouteData', () => {
+  function createRequestError(
+    status: number,
+    code: string,
+    message = `Request error ${status}`
+  ) {
+    const error = new Error(message)
+
+    ;(error as unknown as { code: string }).code = code
+    ;(error as unknown as { status: number }).status = status
+
+    return error
+  }
+
   it('returns success state when the loader resolves', async () => {
     await expect(loadRouteData(() => Promise.resolve('ok'))).resolves.toEqual({
       data: 'ok',
@@ -141,7 +232,36 @@ describe('loadRouteData', () => {
   it('returns error state when the loader throws', async () => {
     await expect(
       loadRouteData(() => Promise.reject(new Error('failed')))
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
+      kind: 'unknown',
+      message: 'failed',
+      state: 'error'
+    })
+  })
+
+  it('classifies session-expired errors', async () => {
+    await expect(
+      loadRouteData(() => Promise.reject(createRequestError(401, 'session_expired')))
+    ).resolves.toMatchObject({
+      kind: 'session-expired',
+      state: 'error'
+    })
+  })
+
+  it('classifies access-denied errors', async () => {
+    await expect(
+      loadRouteData(() => Promise.reject(createRequestError(403, 'tenant_access_denied')))
+    ).resolves.toMatchObject({
+      kind: 'access-denied',
+      state: 'error'
+    })
+  })
+
+  it('classifies not-found errors', async () => {
+    await expect(
+      loadRouteData(() => Promise.reject(createRequestError(404, 'not_found')))
+    ).resolves.toMatchObject({
+      kind: 'not-found',
       state: 'error'
     })
   })

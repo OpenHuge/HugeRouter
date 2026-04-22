@@ -223,6 +223,36 @@
         }
       }
     },
+    "/v1/route-receipts": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "list_route_receipts",
+        "responses": {
+          "200": {
+            "description": "List route receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceiptsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/route-receipts/{route_receipt_id}": {
       "get": {
         "tags": [
@@ -247,6 +277,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RouteReceiptResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/route-receipts/{route_receipt_id}/diagnostics": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_route_receipt_diagnostics",
+        "parameters": [
+          {
+            "name": "route_receipt_id",
+            "in": "path",
+            "description": "HugeRouter route receipt id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get route receipt diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceiptDiagnosticsResponse"
                 }
               }
             }
@@ -648,7 +719,9 @@
           "openai_chat",
           "openai_responses",
           "mcp_streamable_http",
-          "realtime_webrtc"
+          "realtime_webrtc",
+          "anthropic_messages",
+          "gemini_generate_content"
         ]
       },
       "ProvenanceClass": {
@@ -989,8 +1062,142 @@
           }
         }
       },
+      "RouteReceiptDecisionTraceStep": {
+        "type": "object",
+        "required": [
+          "stage",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteReceiptDiagnosticsResponse": {
+        "type": "object",
+        "required": [
+          "route_receipt",
+          "decision_timeline",
+          "policy_checks",
+          "provider_attempts",
+          "metadata"
+        ],
+        "properties": {
+          "decision_timeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptDecisionTraceStep"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "policy_checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptPolicyCheck"
+            }
+          },
+          "provider_attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptProviderAttempt"
+            }
+          },
+          "route_receipt": {
+            "$ref": "#/components/schemas/RouteReceipt"
+          }
+        }
+      },
       "RouteReceiptId": {
         "type": "string"
+      },
+      "RouteReceiptPolicyCheck": {
+        "type": "object",
+        "required": [
+          "policy_id",
+          "status"
+        ],
+        "properties": {
+          "policy_id": {
+            "$ref": "#/components/schemas/RoutePolicyId"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteReceiptProviderAttempt": {
+        "type": "object",
+        "required": [
+          "provider_resource_id",
+          "attempt",
+          "status",
+          "started_at",
+          "finished_at",
+          "latency_ms",
+          "reason"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "provider_resource_id": {
+            "$ref": "#/components/schemas/ProviderResourceId"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
       },
       "RouteReceiptResponse": {
         "type": "object",
@@ -1000,6 +1207,20 @@
         "properties": {
           "route_receipt": {
             "$ref": "#/components/schemas/RouteReceipt"
+          }
+        }
+      },
+      "RouteReceiptsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceipt"
+            }
           }
         }
       },

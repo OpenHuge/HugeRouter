@@ -66,7 +66,9 @@
         "openai_chat",
         "openai_responses",
         "mcp_streamable_http",
-        "realtime_webrtc"
+        "realtime_webrtc",
+        "anthropic_messages",
+        "gemini_generate_content"
       ]
     },
     "TenantId": {

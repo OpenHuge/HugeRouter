@@ -27,6 +27,8 @@ function ProvidersPage() {
           title="Providers"
         />
         <RouteErrorState
+          kind={result?.kind}
+          message={result?.state === 'error' ? result?.message : undefined}
           description="Provider inventory could not be loaded from the control-plane service."
           title="Providers unavailable"
         />
