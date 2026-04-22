@@ -1,0 +1,27 @@
+{
+  "simulation_id": "routesim_123",
+  "config_snapshot_id": "cfgsnap_default",
+  "admission_result": "admitted",
+  "eligible_candidates": [
+    {
+      "provider_resource_id": "prvrsrc_openai_primary",
+      "score_breakdown": {
+        "latency": 0.82,
+        "cost": 0.66,
+        "health": 0.97,
+        "trust": 1.0
+      }
+    }
+  ],
+  "excluded_candidates": [
+    {
+      "provider_resource_id": "prvrsrc_backup",
+      "reason": "rejected_provenance_class"
+    }
+  ],
+  "selected_target": "prvrsrc_openai_primary",
+  "estimated_cost": {
+    "currency": "USD",
+    "amount": "0.1420"
+  }
+}

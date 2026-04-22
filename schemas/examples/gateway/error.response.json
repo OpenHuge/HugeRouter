@@ -1,0 +1,17 @@
+{
+  "error": {
+    "code": "validation_failed",
+    "message": "Route policy requires at least one capability.",
+    "request_id": "req_123",
+    "retryable": false,
+    "validation_issues": [
+      {
+        "field": "required_capabilities",
+        "message": "expected at least one value"
+      }
+    ],
+    "details": {
+      "resource": "route_policy"
+    }
+  }
+}

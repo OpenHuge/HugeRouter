@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runtime_composition::{announce_startup, ServiceRuntime};
+use runtime_composition::{ServiceRuntime, announce_startup};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -15,4 +15,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

@@ -3,23 +3,23 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".output/**", "storybook-static/**", "dist-types/**"]
+      "outputs": []
     },
     "lint": {
       "dependsOn": ["^lint"],
-      "outputs": [".eslintcache"]
+      "outputs": []
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
-      "outputs": ["tsconfig.tsbuildinfo", ".tsbuildinfo", "dist-types/**"]
+      "outputs": []
     },
     "test": {
       "dependsOn": ["^test"],
-      "outputs": ["coverage/**", ".vitest-reports/**"]
+      "outputs": []
     },
     "generate": {
       "dependsOn": ["^generate"],
-      "outputs": ["generated/**", "src/generated/**"]
+      "outputs": []
     },
     "dev": {
       "cache": false,
@@ -31,4 +31,3 @@
     }
   }
 }
-

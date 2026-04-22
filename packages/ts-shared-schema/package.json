@@ -10,8 +10,8 @@
     "build": "tsc --project tsconfig.json",
     "lint": "eslint . --config ../../eslint.config.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "node -e \"console.log('No tests for ts-shared-schema yet')\"",
-    "generate": "node -e \"console.log('Schema generation is reserved for FND-006')\""
+    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test src/index.test.ts",
+    "generate": "node -e \"console.log('Use pnpm generate from the workspace root to refresh contract artifacts')\""
   },
   "dependencies": {
     "zod": "4.3.6"
@@ -21,4 +21,3 @@
     "typescript": "6.0.3"
   }
 }
-

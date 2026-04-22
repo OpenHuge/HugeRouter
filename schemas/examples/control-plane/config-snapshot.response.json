@@ -1,0 +1,15 @@
+{
+  "config_snapshot": {
+    "config_snapshot_id": "cfgsnap_default",
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core",
+    "revision": 12,
+    "status": "active",
+    "activated_at": "2026-04-21T12:15:00Z",
+    "provider_resource_ids": [
+      "prvrsrc_openai_primary"
+    ],
+    "route_policy_id": "routepol_default",
+    "budget_policy_id": "budgetpol_default"
+  }
+}

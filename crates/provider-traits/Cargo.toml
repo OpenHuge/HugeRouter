@@ -9,9 +9,8 @@ version.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-anyhow.workspace = true
-protocol-ir = { path = "../protocol-ir" }
+async-trait = "0.1.89"
+thiserror.workspace = true
 
 [lints]
 workspace = true
-

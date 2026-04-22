@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConfigSnapshotActivatedMessage",
+  "type": "object",
+  "required": [
+    "idempotency_key",
+    "message_id",
+    "message_type",
+    "occurred_at",
+    "payload",
+    "producer",
+    "schema_version"
+  ],
+  "properties": {
+    "idempotency_key": {
+      "type": "string"
+    },
+    "message_id": {
+      "type": "string"
+    },
+    "message_type": {
+      "$ref": "#/definitions/MessageType"
+    },
+    "occurred_at": {
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/definitions/ConfigSnapshotActivated"
+    },
+    "producer": {
+      "$ref": "#/definitions/ServiceName"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "trace_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "BudgetPolicyId": {
+      "type": "string"
+    },
+    "ConfigSnapshot": {
+      "type": "object",
+      "required": [
+        "budget_policy_id",
+        "config_snapshot_id",
+        "project_id",
+        "provider_resource_ids",
+        "revision",
+        "route_policy_id",
+        "status",
+        "tenant_id"
+      ],
+      "properties": {
+        "activated_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "budget_policy_id": {
+          "$ref": "#/definitions/BudgetPolicyId"
+        },
+        "config_snapshot_id": {
+          "$ref": "#/definitions/ConfigSnapshotId"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider_resource_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProviderResourceId"
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "route_policy_id": {
+          "$ref": "#/definitions/RoutePolicyId"
+        },
+        "status": {
+          "$ref": "#/definitions/ConfigSnapshotStatus"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        }
+      }
+    },
+    "ConfigSnapshotActivated": {
+      "type": "object",
+      "required": [
+        "config_snapshot"
+      ],
+      "properties": {
+        "config_snapshot": {
+          "$ref": "#/definitions/ConfigSnapshot"
+        }
+      }
+    },
+    "ConfigSnapshotId": {
+      "type": "string"
+    },
+    "ConfigSnapshotStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "superseded"
+      ]
+    },
+    "MessageType": {
+      "type": "string",
+      "enum": [
+        "usage_event.recorded",
+        "ledger_entry.created",
+        "budget_threshold.exceeded",
+        "provider_resource.quarantined",
+        "provider_resource.degraded",
+        "audit_event.created",
+        "config_snapshot.activated",
+        "replay_capsule.build_requested"
+      ]
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProviderResourceId": {
+      "type": "string"
+    },
+    "RoutePolicyId": {
+      "type": "string"
+    },
+    "ServiceName": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

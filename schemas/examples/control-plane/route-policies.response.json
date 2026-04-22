@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "route_policy_id": "routepol_default",
+      "tenant_id": "tenant_acme",
+      "display_name": "Default Interactive Route",
+      "protocol_family": "openai_chat",
+      "model_alias": "reasoning-fast",
+      "required_capabilities": [
+        "tool_calling",
+        "json_mode"
+      ],
+      "preferred_regions": [
+        "us-east-1",
+        "us-west-2"
+      ],
+      "version": 4,
+      "created_at": "2026-04-20T00:00:00Z",
+      "updated_at": "2026-04-21T12:00:00Z"
+    }
+  ]
+}

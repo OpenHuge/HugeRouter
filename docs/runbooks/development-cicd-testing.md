@@ -38,20 +38,29 @@ The repo should operate with:
 
 Recommended JavaScript runtime baseline:
 
-- Node.js `24.x` LTS in local development and CI
-- Corepack-enabled `pnpm`
+- Node.js `24.15.0` in local development, devcontainer, and CI
+- Corepack-enabled `pnpm 10.33.0`
 - React `19.2+` because Mantine 9 requires it
 - TanStack Start pinned to an exact RC version until 1.0 stable is available
+
+Recommended Rust runtime baseline:
+
+- Rust `1.94.1` via `rust-toolchain.toml`
+- `rustfmt` and `clippy` installed in local development, devcontainer, and CI
 
 ### 29.4 Day-0 Bootstrap Flow
 
 Once the repository scaffolding exists, the expected bootstrap sequence is:
 
 ```text
-pnpm install
-cargo check --workspace
-pnpm turbo run typecheck
-pnpm turbo run build
+corepack enable
+corepack prepare pnpm@10.33.0 --activate
+pnpm doctor
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
 just dev-frontend
 just dev-backend
 ```
@@ -70,10 +79,13 @@ Suggested `just` tasks:
 
 ```text
 just bootstrap
+just doctor
+just build
 just dev-backend
 just dev-frontend
 just dev-ui
 just dev-all
+just typecheck
 just test
 just lint
 just fmt
@@ -87,24 +99,29 @@ Suggested command mapping behind those tasks:
 ```text
 just dev-frontend   -> pnpm turbo run dev --filter=console-web
 just dev-ui         -> pnpm turbo run storybook --filter=storybook
-just lint           -> cargo clippy --workspace && pnpm turbo run lint
-just test           -> cargo test --workspace && pnpm turbo run test
-just generate       -> pnpm turbo run generate && cargo test --workspace
+just doctor         -> pnpm verify:toolchain
+just lint           -> pnpm lint
+just typecheck      -> pnpm typecheck
+just test           -> pnpm test
+just build          -> pnpm build
+just generate       -> pnpm generate
 ```
 
 The exact command names can evolve, but the repository should preserve the principle that developers can discover one canonical entry point per workflow.
+
+`pnpm js:test` and `pnpm test` must run `scripts/verify-workspace-tests.mjs` before package tests. Placeholder packages remain listed in `scripts/workspace-test-policy.json` and are reported as explicitly not counted as coverage.
 
 ### 29.6 Turbo Configuration Requirements
 
 The initial `turbo.json` should define:
 
-- explicit `outputs` for every cacheable task
+- explicit `outputs`, or explicit empty arrays when a task intentionally emits no stable restorable artifacts yet
 - persistent non-cacheable configuration for `dev` and `storybook`
 - `dependsOn` edges for buildable internal package relationships
 - package-specific overrides only through per-package `turbo.json` files when necessary
 - package tags and boundary rules for the first shared frontend workspaces
 
-Do not treat a root `turbo.json` with bare task names as sufficient. Without `outputs`, Turbo will not restore built artifacts from cache, which weakens both local DX and CI speedups.
+Do not treat a root `turbo.json` with bare task names as sufficient. Tasks should either declare the artifacts they restore from cache or use `outputs: []` intentionally so Turbo does not warn on every run.
 
 ---
 
@@ -140,8 +157,8 @@ Use monorepo-aware caching and selective execution to keep CI efficient.
 
 Recommended baseline:
 
-- Turbo cache for JavaScript package pipelines
-- Cargo registry and target caching for Rust jobs
+- `actions/setup-node` `pnpm` cache plus `.turbo` cache for JavaScript jobs
+- Cargo registry, Cargo git, and target caching for Rust jobs via `Swatinem/rust-cache`
 - filtered execution for `apps/console-web`, `apps/storybook`, and changed shared packages
 - remote caching enabled for CI and shared team workflows once the baseline pipeline is green
 - advisory repository-boundary validation before hard enforcement
@@ -158,6 +175,13 @@ For the frontend workspace, CI should distinguish at least:
 - `boundaries` or an equivalent dependency-governance check
 
 This keeps shell regressions, theme breakage, and shared component issues visible before feature branches merge.
+
+Shipped baseline:
+
+- `.github/workflows/quality.yml` runs JavaScript `lint`, `typecheck`, `test`, and `build` as separate jobs on pull requests and pushes to `main`
+- the same workflow runs Rust `fmt --check`, `clippy`, `check`, and `test` as separate jobs
+- JavaScript jobs use `pnpm verify:toolchain` plus the root `js:*` scripts so CI exercises the same command surface used locally
+- `pnpm js:test` and `pnpm test` run `scripts/verify-workspace-tests.mjs` before package tests and report the temporary placeholder allowlist from `scripts/workspace-test-policy.json`
 
 ### 30.5 Release Channel Policy
 

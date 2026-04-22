@@ -1,0 +1,15 @@
+{
+  "tenant_id": "tenant_acme",
+  "project_id": "proj_core",
+  "credential_scope": "cred_primary",
+  "protocol_family": "openai_chat",
+  "model_alias": "reasoning-fast",
+  "required_capabilities": [
+    "tool_calling",
+    "json_mode"
+  ],
+  "region": "us-east-1",
+  "expected_prompt_tokens": 12000,
+  "expected_max_output_tokens": 4000,
+  "traffic_class": "interactive"
+}
