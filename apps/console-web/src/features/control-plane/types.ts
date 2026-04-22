@@ -47,10 +47,33 @@ export type RouteReceiptDiagnosticView = {
   admissionResult: string
   configSnapshotId: string
   createdAt: string
+  decisionTimeline: {
+    message: string
+    notes: string[]
+    score?: number
+    stage: string
+    status: string
+  }[]
   excludedTargets: RouteReceiptDiagnosticExcludedTargetView[]
   fallbackTransitions: RouteReceiptDiagnosticFallbackView[]
+  metadata: Record<string, string>
   modelAlias: string
   normalizedError?: NormalizedRouteError
+  policyChecks: {
+    policyId: string
+    reason?: string
+    status: string
+  }[]
+  providerAttempts: {
+    attempt: number
+    finishedAt: string
+    latencyMs: number
+    providerLabel: string
+    providerResourceId: string
+    reason: string
+    startedAt: string
+    status: string
+  }[]
   protocolFamily: string
   routeReceiptId: string
   requestId: string

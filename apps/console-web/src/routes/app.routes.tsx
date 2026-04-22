@@ -14,6 +14,8 @@ import type {
 import { getConsoleDataService } from '../features/control-plane/service'
 
 const protocolLabelByFamily: Record<string, string> = {
+  anthropic_messages: 'Anthropic Messages',
+  gemini_generate_content: 'Gemini Generate Content',
   mcp_streamable_http: 'MCP Streamable HTTP',
   openai_chat: 'OpenAI Chat',
   openai_responses: 'OpenAI Responses',
@@ -21,6 +23,8 @@ const protocolLabelByFamily: Record<string, string> = {
 }
 
 const protocolColorByFamily: Record<string, string> = {
+  anthropic_messages: 'orange',
+  gemini_generate_content: 'lime',
   mcp_streamable_http: 'indigo',
   openai_chat: 'blue',
   openai_responses: 'violet',
@@ -29,6 +33,8 @@ const protocolColorByFamily: Record<string, string> = {
 
 const protocolOrder = [
   'openai_chat',
+  'anthropic_messages',
+  'gemini_generate_content',
   'openai_responses',
   'mcp_streamable_http',
   'realtime_webrtc'
@@ -195,16 +201,17 @@ function RoutePoliciesPage() {
         ) : (
           <Table striped withTableBorder>
             <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Receipt ID</Table.Th>
-                <Table.Th>Protocol</Table.Th>
-                <Table.Th>Model alias</Table.Th>
-                <Table.Th>Selected target</Table.Th>
-                <Table.Th>Excluded targets</Table.Th>
-                <Table.Th>Fallback transitions</Table.Th>
-                <Table.Th>Normalized error</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Receipt ID</Table.Th>
+                  <Table.Th>Protocol</Table.Th>
+                  <Table.Th>Model alias</Table.Th>
+                  <Table.Th>Selected target</Table.Th>
+                  <Table.Th>Excluded targets</Table.Th>
+                  <Table.Th>Fallback transitions</Table.Th>
+                  <Table.Th>Diagnostics</Table.Th>
+                  <Table.Th>Normalized error</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
             <Table.Tbody>
               {routeReceipts.map((receipt) => (
                 <Table.Tr key={receipt.routeReceiptId}>
@@ -245,6 +252,50 @@ function RoutePoliciesPage() {
                           </List.Item>
                         ))}
                       </List>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    {receipt.decisionTimeline.length === 0 &&
+                    receipt.providerAttempts.length === 0 &&
+                    receipt.policyChecks.length === 0 ? (
+                      <Text c="dimmed" size="sm">
+                        No detailed diagnostics
+                      </Text>
+                    ) : (
+                      <Stack gap={6}>
+                        {receipt.decisionTimeline.length > 0 ? (
+                          <List size="sm" withPadding>
+                            {receipt.decisionTimeline.map((item) => (
+                              <List.Item key={`${receipt.routeReceiptId}-${item.stage}`}>
+                                {item.stage}: {item.message}
+                              </List.Item>
+                            ))}
+                          </List>
+                        ) : null}
+                        {receipt.providerAttempts.length > 0 ? (
+                          <List size="sm" withPadding>
+                            {receipt.providerAttempts.map((attempt) => (
+                              <List.Item
+                                key={`${receipt.routeReceiptId}-${attempt.providerResourceId}-${attempt.attempt}`}
+                              >
+                                {attempt.providerLabel} attempt {attempt.attempt} ({attempt.latencyMs}
+                                ms, {attempt.status})
+                              </List.Item>
+                            ))}
+                          </List>
+                        ) : null}
+                        {receipt.policyChecks.length > 0 ? (
+                          <List size="sm" withPadding>
+                            {receipt.policyChecks.map((policyCheck) => (
+                              <List.Item
+                                key={`${receipt.routeReceiptId}-${policyCheck.policyId}`}
+                              >
+                                {policyCheck.policyId}: {policyCheck.status}
+                              </List.Item>
+                            ))}
+                          </List>
+                        ) : null}
+                      </Stack>
                     )}
                   </Table.Td>
                   <Table.Td>

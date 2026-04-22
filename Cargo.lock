@@ -137,6 +137,7 @@ dependencies = [
  "anyhow",
  "runtime-composition",
  "serde_json",
+ "sqlx",
  "tokio",
  "tracing",
 ]
@@ -521,9 +522,14 @@ name = "edge-probe"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats 0.38.0",
+ "chrono",
+ "reqwest",
  "runtime-composition",
+ "serde",
+ "serde_json",
  "tokio",
- "tracing-subscriber",
+ "tracing",
 ]
 
 [[package]]
@@ -1271,8 +1277,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "runtime-composition",
+ "serde_json",
+ "sqlx",
  "tokio",
- "tracing-subscriber",
+ "tracing",
 ]
 
 [[package]]
@@ -1828,9 +1836,15 @@ name = "routing-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats 0.38.0",
+ "chrono",
+ "core-domain",
  "runtime-composition",
+ "serde",
+ "serde_json",
+ "sqlx",
  "tokio",
- "tracing-subscriber",
+ "tracing",
 ]
 
 [[package]]

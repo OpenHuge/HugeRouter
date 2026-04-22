@@ -309,6 +309,50 @@ const routeReceiptsResponse = {
   ]
 }
 
+const routeReceiptDiagnosticsById: Record<string, unknown> = {
+  routercpt_openai_primary_recent: {
+    route_receipt: routeReceiptsResponse.data[0].route_receipt,
+    decision_timeline: [
+      {
+        stage: 'admission',
+        status: 'passed',
+        message: 'Tenant policy accepted request',
+        score: 1,
+        notes: ['all constraints satisfied']
+      },
+      {
+        stage: 'candidate_selection',
+        status: 'passed',
+        message: 'Selected OpenAI Primary',
+        score: 0.91,
+        notes: []
+      }
+    ],
+    policy_checks: [
+      {
+        policy_id: 'routepol_openai_chat_default',
+        status: 'passed',
+        reason: 'policy satisfied'
+      }
+    ],
+    provider_attempts: [
+      {
+        provider_resource_id: 'prvrsrc_openai_primary',
+        attempt: 1,
+        status: 'succeeded',
+        started_at: '2026-04-22T13:00:01Z',
+        finished_at: '2026-04-22T13:00:02Z',
+        latency_ms: 1100,
+        reason: 'succeeded with output'
+      }
+    ],
+    metadata: {
+      candidate_pool_size: '2',
+      policy_cache_hit: 'true'
+    }
+  }
+}
+
 const configSnapshotById: Record<string, (typeof configSnapshotsResponse)['data'][number]> = {
   cfgsnap_gateway_v1: configSnapshotsResponse.data[1],
   cfgsnap_gateway_v2: configSnapshotsResponse.data[0]
@@ -484,6 +528,28 @@ export function createControlPlaneFetchMock() {
 
     if (path === '/v1/route-receipts') {
       return Promise.resolve(jsonResponse(200, routeReceiptsResponse))
+    }
+
+    if (path.startsWith('/v1/route-receipts/') && path.endsWith('/diagnostics')) {
+      const routeReceiptId = decodeURIComponent(
+        path.replace('/v1/route-receipts/', '').replace('/diagnostics', '')
+      )
+      const diagnostics = routeReceiptDiagnosticsById[routeReceiptId]
+
+      if (diagnostics) {
+        return Promise.resolve(jsonResponse(200, diagnostics))
+      }
+
+      return Promise.resolve(
+        jsonResponse(404, {
+          error: {
+            code: 'not_found',
+            message: `No diagnostics for ${routeReceiptId}`,
+            request_id: 'req_test',
+            retryable: false
+          }
+        })
+      )
     }
 
     return Promise.resolve(

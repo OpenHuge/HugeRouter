@@ -191,6 +191,7 @@ This keeps shell regressions, theme breakage, and shared component issues visibl
 Shipped baseline:
 
 - `.github/workflows/quality.yml` runs JavaScript `lint`, `typecheck`, `test`, and `build` as separate jobs on pull requests and pushes to `main`
+- `.github/workflows/release.yml` runs on version tags that match `v*`, reruns repository quality gates, generates release notes with `pnpm release:notes`, and publishes a GitHub release
 - the same workflow runs Rust `fmt --check`, `clippy`, `check`, and `test` as separate jobs
 - JavaScript jobs use `pnpm verify:toolchain` plus the root `js:*` scripts so CI exercises the same command surface used locally
 - `pnpm js:test` and `pnpm test` run `scripts/verify-workspace-tests.mjs` before package tests and report the temporary placeholder allowlist from `scripts/workspace-test-policy.json`

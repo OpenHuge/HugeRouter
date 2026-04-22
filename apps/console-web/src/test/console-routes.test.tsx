@@ -479,6 +479,9 @@ describe('console routes', () => {
     expect(screen.getByText('OpenAI Primary')).toBeInTheDocument()
     expect(screen.getByText('OpenAI Backup (provider_region_mismatch)')).toBeInTheDocument()
     expect(screen.getByText('OpenAI Backup → OpenAI Primary (replayed_after_transient_timeout)')).toBeInTheDocument()
+    expect(screen.getByText('admission: Tenant policy accepted request')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI Primary attempt 1 (1100ms, succeeded)')).toBeInTheDocument()
+    expect(screen.getByText('routepol_openai_chat_default: passed')).toBeInTheDocument()
   })
 
   it('renders route diagnostics empty state when no route receipts are available', async () => {

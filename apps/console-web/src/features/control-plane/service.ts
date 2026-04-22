@@ -9,7 +9,9 @@ import {
   type Project,
   type ProviderResource,
   type RoutePolicy,
+  routeReceiptDiagnosticsResponseSchema,
   routeReceiptSchema,
+  type RouteReceiptDiagnosticsResponse,
   type RouteReceipt,
   type RouteSimulationResponse
 } from '@huge-router/ts-shared-schema'
@@ -323,7 +325,15 @@ function parseRouteReceiptList(payload: unknown) {
   return receipts.map(parseSingleRouteReceipt)
 }
 
-function toRouteReceiptDiagnostic(receipt: RouteReceipt, providerById: Map<string, string>): RouteReceiptDiagnosticView {
+function parseRouteReceiptDiagnostics(payload: unknown) {
+  return routeReceiptDiagnosticsResponseSchema.parse(payload)
+}
+
+function toRouteReceiptDiagnostic(
+  receipt: RouteReceipt,
+  providerById: Map<string, string>,
+  diagnostics?: RouteReceiptDiagnosticsResponse | null
+): RouteReceiptDiagnosticView {
   const selectedTargetLabel = receipt.selected_target
     ? mapProviderLabel(receipt.selected_target, providerById)
     : 'No selected target'
@@ -346,10 +356,36 @@ function toRouteReceiptDiagnostic(receipt: RouteReceipt, providerById: Map<strin
     admissionResult: receipt.admission_result,
     configSnapshotId: receipt.config_snapshot_id,
     createdAt: receipt.created_at,
+    decisionTimeline:
+      diagnostics?.decision_timeline.map((item) => ({
+        message: item.message,
+        notes: item.notes,
+        score: item.score,
+        stage: item.stage,
+        status: item.status
+      })) ?? [],
     excludedTargets,
     fallbackTransitions,
+    metadata: diagnostics?.metadata ?? {},
     modelAlias: receipt.model_alias,
     normalizedError: receipt.normalized_error,
+    policyChecks:
+      diagnostics?.policy_checks.map((item) => ({
+        policyId: item.policy_id,
+        reason: item.reason,
+        status: item.status
+      })) ?? [],
+    providerAttempts:
+      diagnostics?.provider_attempts.map((item) => ({
+        attempt: item.attempt,
+        finishedAt: item.finished_at,
+        latencyMs: item.latency_ms,
+        providerLabel: mapProviderLabel(item.provider_resource_id, providerById),
+        providerResourceId: item.provider_resource_id,
+        reason: item.reason,
+        startedAt: item.started_at,
+        status: item.status
+      })) ?? [],
     protocolFamily: receipt.protocol_family,
     routeReceiptId: receipt.route_receipt_id,
     requestId: receipt.request_id,
@@ -573,6 +609,22 @@ async function listRouteReceiptsFromControlPlane() {
   }
 }
 
+async function getRouteReceiptDiagnosticsFromControlPlane(routeReceiptId: string) {
+  try {
+    return await client.getRouteReceiptDiagnostics(routeReceiptId)
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      return null
+    }
+
+    if (error instanceof ControlPlaneClientError && isNotFoundErrorStatus(error.status)) {
+      return null
+    }
+
+    throw error
+  }
+}
+
 async function revokeApiKeyFromControlPlane(apiKeyId: string, version: number) {
   const endpoint = `/v1/api-keys/${encodeURIComponent(apiKeyId)}/revoke`
   const body = JSON.stringify({ version })
@@ -769,11 +821,21 @@ const defaultConsoleDataService: ConsoleDataService = {
     ])
     const filteredReceipts = filterByTenant(routeReceipts)
     const providerById = providerLabelById(filterByTenant(providerResources))
-
-    return filteredReceipts
-      .map((receipt) => toRouteReceiptDiagnostic(receipt, providerById))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    const recentReceipts = filteredReceipts
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
       .slice(0, 10)
+    const diagnosticsByReceiptId = new Map(
+      await Promise.all(
+        recentReceipts.map(async (receipt) => [
+          receipt.route_receipt_id,
+          await getRouteReceiptDiagnosticsFromControlPlane(receipt.route_receipt_id)
+        ] as const)
+      )
+    )
+
+    return recentReceipts.map((receipt) =>
+      toRouteReceiptDiagnostic(receipt, providerById, diagnosticsByReceiptId.get(receipt.route_receipt_id))
+    )
   },
 
   async listTenants() {
