@@ -12,8 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as LoginCallbackRouteImport } from './routes/login.callback'
+import { Route as AppRoutesRouteImport } from './routes/app.routes'
+import { Route as AppProvidersRouteImport } from './routes/app.providers'
 import { Route as AppOverviewRouteImport } from './routes/app.overview'
 import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
+import { Route as AdminTenantsTenantIdRouteImport } from './routes/admin.tenants.$tenantId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -30,6 +34,21 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginCallbackRoute = LoginCallbackRouteImport.update({
+  id: '/callback',
+  path: '/callback',
+  getParentRoute: () => LoginRoute,
+} as any)
+const AppRoutesRoute = AppRoutesRouteImport.update({
+  id: '/routes',
+  path: '/routes',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProvidersRoute = AppProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOverviewRoute = AppOverviewRouteImport.update({
   id: '/overview',
   path: '/overview',
@@ -40,34 +59,69 @@ const AdminTenantsRoute = AdminTenantsRouteImport.update({
   path: '/tenants',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminTenantsTenantIdRoute = AdminTenantsTenantIdRouteImport.update({
+  id: '/$tenantId',
+  path: '/$tenantId',
+  getParentRoute: () => AdminTenantsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
-  '/login': typeof LoginRoute
-  '/admin/tenants': typeof AdminTenantsRoute
+  '/login': typeof LoginRouteWithChildren
+  '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/overview': typeof AppOverviewRoute
+  '/app/providers': typeof AppProvidersRoute
+  '/app/routes': typeof AppRoutesRoute
+  '/login/callback': typeof LoginCallbackRoute
+  '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
 }
 export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
-  '/login': typeof LoginRoute
-  '/admin/tenants': typeof AdminTenantsRoute
+  '/login': typeof LoginRouteWithChildren
+  '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/overview': typeof AppOverviewRoute
+  '/app/providers': typeof AppProvidersRoute
+  '/app/routes': typeof AppRoutesRoute
+  '/login/callback': typeof LoginCallbackRoute
+  '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
-  '/login': typeof LoginRoute
-  '/admin/tenants': typeof AdminTenantsRoute
+  '/login': typeof LoginRouteWithChildren
+  '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/overview': typeof AppOverviewRoute
+  '/app/providers': typeof AppProvidersRoute
+  '/app/routes': typeof AppRoutesRoute
+  '/login/callback': typeof LoginCallbackRoute
+  '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/admin' | '/app' | '/login' | '/admin/tenants' | '/app/overview'
+  fullPaths:
+    | '/admin'
+    | '/app'
+    | '/login'
+    | '/admin/tenants'
+    | '/app/overview'
+    | '/app/providers'
+    | '/app/routes'
+    | '/login/callback'
+    | '/admin/tenants/$tenantId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/admin' | '/app' | '/login' | '/admin/tenants' | '/app/overview'
+  to:
+    | '/admin'
+    | '/app'
+    | '/login'
+    | '/admin/tenants'
+    | '/app/overview'
+    | '/app/providers'
+    | '/app/routes'
+    | '/login/callback'
+    | '/admin/tenants/$tenantId'
   id:
     | '__root__'
     | '/admin'
@@ -75,12 +129,16 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin/tenants'
     | '/app/overview'
+    | '/app/providers'
+    | '/app/routes'
+    | '/login/callback'
+    | '/admin/tenants/$tenantId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
-  LoginRoute: typeof LoginRoute
+  LoginRoute: typeof LoginRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -106,6 +164,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login/callback': {
+      id: '/login/callback'
+      path: '/callback'
+      fullPath: '/login/callback'
+      preLoaderRoute: typeof LoginCallbackRouteImport
+      parentRoute: typeof LoginRoute
+    }
+    '/app/routes': {
+      id: '/app/routes'
+      path: '/routes'
+      fullPath: '/app/routes'
+      preLoaderRoute: typeof AppRoutesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/providers': {
+      id: '/app/providers'
+      path: '/providers'
+      fullPath: '/app/providers'
+      preLoaderRoute: typeof AppProvidersRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/overview': {
       id: '/app/overview'
       path: '/overview'
@@ -120,33 +199,66 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminTenantsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/tenants/$tenantId': {
+      id: '/admin/tenants/$tenantId'
+      path: '/$tenantId'
+      fullPath: '/admin/tenants/$tenantId'
+      preLoaderRoute: typeof AdminTenantsTenantIdRouteImport
+      parentRoute: typeof AdminTenantsRoute
+    }
   }
 }
 
+interface AdminTenantsRouteChildren {
+  AdminTenantsTenantIdRoute: typeof AdminTenantsTenantIdRoute
+}
+
+const AdminTenantsRouteChildren: AdminTenantsRouteChildren = {
+  AdminTenantsTenantIdRoute: AdminTenantsTenantIdRoute,
+}
+
+const AdminTenantsRouteWithChildren = AdminTenantsRoute._addFileChildren(
+  AdminTenantsRouteChildren,
+)
+
 interface AdminRouteChildren {
-  AdminTenantsRoute: typeof AdminTenantsRoute
+  AdminTenantsRoute: typeof AdminTenantsRouteWithChildren
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
-  AdminTenantsRoute: AdminTenantsRoute,
+  AdminTenantsRoute: AdminTenantsRouteWithChildren,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppRouteChildren {
   AppOverviewRoute: typeof AppOverviewRoute
+  AppProvidersRoute: typeof AppProvidersRoute
+  AppRoutesRoute: typeof AppRoutesRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppOverviewRoute: AppOverviewRoute,
+  AppProvidersRoute: AppProvidersRoute,
+  AppRoutesRoute: AppRoutesRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
+interface LoginRouteChildren {
+  LoginCallbackRoute: typeof LoginCallbackRoute
+}
+
+const LoginRouteChildren: LoginRouteChildren = {
+  LoginCallbackRoute: LoginCallbackRoute,
+}
+
+const LoginRouteWithChildren = LoginRoute._addFileChildren(LoginRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
-  LoginRoute: LoginRoute,
+  LoginRoute: LoginRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

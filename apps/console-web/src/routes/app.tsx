@@ -1,8 +1,27 @@
-import { Outlet, createFileRoute, useLocation } from '@tanstack/react-router'
+import { Outlet, createFileRoute, redirect, useLocation } from '@tanstack/react-router'
 import { AppShellFrame } from '@huge-router/ui-kit'
+import { AuthenticatedShellContent } from '../features/auth/AuthenticatedShellContent'
+import { ensureAuthenticatedSession } from '../features/auth/auth-routing'
 import { tenantNav } from '../lib/navigation'
 
+function throwRedirect(options: Parameters<typeof redirect>[0]): never {
+  throw redirect(options) as unknown as Error
+}
+
 export const Route = createFileRoute('/app')({
+  beforeLoad: async ({ location }) => {
+    const envelope = await ensureAuthenticatedSession(location.href)
+
+    if (
+      envelope.state.kind === 'authenticated' &&
+      !envelope.state.session.activeTenant &&
+      envelope.state.session.user.isPlatformAdmin
+    ) {
+      throwRedirect({
+        to: '/admin/tenants'
+      })
+    }
+  },
   component: AppLayout
 })
 
@@ -15,11 +34,12 @@ function AppLayout() {
         ...item,
         active: location.pathname.startsWith(item.href)
       }))}
-      subtitle="Tenant-facing console shell with shared providers and route-aware navigation."
+      subtitle="Tenant-facing control-plane views with route-aware navigation and data-backed states."
       title="Tenant Workspace"
     >
-      <Outlet />
+      <AuthenticatedShellContent>
+        <Outlet />
+      </AuthenticatedShellContent>
     </AppShellFrame>
   )
 }
-

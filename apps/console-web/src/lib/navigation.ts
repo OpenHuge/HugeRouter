@@ -2,17 +2,17 @@ export const tenantNav = [
   {
     href: '/app/overview',
     label: 'Overview',
-    description: 'Platform KPIs and recent gateway activity'
+    description: 'Workspace summary, projects, and routed traffic signals'
   },
   {
     href: '/app/routes',
     label: 'Routes',
-    description: 'Upcoming route policy management surface'
+    description: 'Route policy coverage and selected provider targets'
   },
   {
     href: '/app/providers',
     label: 'Providers',
-    description: 'Upstream provider inventory placeholder'
+    description: 'Provider inventory, health, and routing scope'
   }
 ]
 
@@ -20,7 +20,7 @@ export const adminNav = [
   {
     href: '/admin/tenants',
     label: 'Tenants',
-    description: 'Tenant administration baseline'
+    description: 'Tenant inventory with plan, route, and spend context'
   },
   {
     href: '/admin/system-health',
@@ -33,4 +33,3 @@ export const adminNav = [
     description: 'Reserved for future control-plane actions'
   }
 ]
-

@@ -1,0 +1,40 @@
+{
+  "session": {
+    "sessionId": "sess_123",
+    "state": "active",
+    "user": {
+      "userId": "user_123",
+      "primaryEmail": "dev@example.com",
+      "displayName": "Dev Operator",
+      "createdAt": "2026-04-20T09:00:00Z",
+      "lastLoginAt": "2026-04-22T09:30:00Z"
+    },
+    "activeTenantId": "tenant_123",
+    "memberships": [
+      {
+        "membershipId": "tmemb_123",
+        "tenant": {
+          "id": "tenant_123",
+          "slug": "acme",
+          "displayName": "Acme"
+        },
+        "role": "admin",
+        "status": "active"
+      }
+    ],
+    "authenticatedBy": "email",
+    "createdAt": "2026-04-22T09:30:00Z",
+    "expiresAt": "2026-04-29T09:30:00Z",
+    "lastAuthenticatedAt": "2026-04-22T09:30:00Z"
+  },
+  "links": [
+    {
+      "linkId": "authlink_123",
+      "provider": "email",
+      "providerSubject": "dev@example.com",
+      "email": "dev@example.com",
+      "linkedAt": "2026-04-22T09:30:00Z",
+      "canUnlink": false
+    }
+  ]
+}

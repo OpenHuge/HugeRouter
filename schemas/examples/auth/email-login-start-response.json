@@ -1,0 +1,5 @@
+{
+  "flowId": "authflow_123",
+  "verificationMode": "magic_link",
+  "expiresAt": "2026-04-22T10:00:00Z"
+}

@@ -1,8 +1,14 @@
 import { Outlet, createFileRoute, useLocation } from '@tanstack/react-router'
 import { AppShellFrame } from '@huge-router/ui-kit'
+import { AuthenticatedShellContent } from '../features/auth/AuthenticatedShellContent'
+import { ensureAuthenticatedSession, requireAdminSession } from '../features/auth/auth-routing'
 import { adminNav } from '../lib/navigation'
 
 export const Route = createFileRoute('/admin')({
+  beforeLoad: async ({ location }) => {
+    const envelope = await ensureAuthenticatedSession(location.href)
+    requireAdminSession(envelope)
+  },
   component: AdminLayout
 })
 
@@ -15,11 +21,12 @@ function AdminLayout() {
         ...item,
         active: location.pathname.startsWith(item.href)
       }))}
-      subtitle="Platform administration shell aligned with the future control-plane surface."
+      subtitle="Platform administration surfaces aligned with the first control-plane slice."
       title="Admin Console"
     >
-      <Outlet />
+      <AuthenticatedShellContent>
+        <Outlet />
+      </AuthenticatedShellContent>
     </AppShellFrame>
   )
 }
-
