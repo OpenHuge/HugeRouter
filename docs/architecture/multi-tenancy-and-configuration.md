@@ -109,7 +109,7 @@ The data plane should expose whether it is serving:
 Snapshot activation should check compatibility across at least:
 
 - config snapshot schema version
-- route resource and provider resource schema versions
+- current route-policy and provider-resource contract versions, with future extension to typed route-resource versions once those contracts exist
 - adapter manifest compatibility range
 - runtime binary compatibility version
 

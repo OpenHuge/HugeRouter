@@ -147,6 +147,7 @@ No one resource type should absorb the responsibilities of the others.
 Current contract reminder:
 
 - the published protocol-family contracts currently enumerate `openai_chat`, `openai_responses`, `mcp_streamable_http`, and `realtime_webrtc`
+- the current control-plane contract surface publishes `RoutePolicy`, not a richer typed `RouteResource`
 - A2A remains planned in the architecture, but it is not yet part of the generated protocol-family enum or typed route-resource contracts in this repository
 
 ---

@@ -255,7 +255,9 @@ Allow operators to test how a hypothetical request would route without sending t
 - model alias
 - required capabilities
 - region
-- expected traffic class
+- expected prompt tokens
+- expected max output tokens
+- traffic class
 
 ### 37.3 Outputs
 

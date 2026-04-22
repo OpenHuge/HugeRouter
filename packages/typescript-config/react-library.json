@@ -5,8 +5,8 @@
     "lib": ["DOM", "DOM.Iterable", "ES2023"],
     "declaration": true,
     "emitDeclarationOnly": true,
-    "outDir": "dist-types",
+    "outDir": "${configDir}/dist-types",
+    "tsBuildInfoFile": "${configDir}/tsconfig.tsbuildinfo",
     "types": ["node"]
   }
 }
-
