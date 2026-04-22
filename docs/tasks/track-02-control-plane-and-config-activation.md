@@ -10,6 +10,7 @@ Turn `control-plane-api` from a startup placeholder into the authoritative sourc
 - Domain types for tenants, projects, provider resources, route policies, budget policies, and config snapshots already exist in `crates/core-domain`.
 - Infrastructure for PostgreSQL, Redis, and NATS exists in `infra/docker/compose.yaml`, but no storage layer or migrations are implemented in this service yet.
 - The frontend currently uses placeholder tenancy and project data because there is no real API surface to call.
+- Human login is required at the architecture level, but there is no backend support yet for email login, GitHub OAuth, Google OAuth, WeChat OAuth, user identity linking, or HugeRouter-managed sessions.
 
 ## Owned Paths
 
@@ -38,6 +39,7 @@ If Track `02` needs contract changes, request them through Track `01` instead of
 3. Persistence primitives and migrations for the first administrative data model.
 4. CRUD or read/write flows for tenants, projects, provider resources, route policies, and config snapshots.
 5. An activation path that publishes or records the currently active configuration snapshot.
+6. Auth backend flows for email, GitHub, Google, and WeChat console sign-in.
 
 ## Ordered Plan
 
@@ -47,16 +49,24 @@ If Track `02` needs contract changes, request them through Track `01` instead of
 2. Add storage boundaries.
    - Introduce repositories and migrations for the minimum viable administrative model.
    - Keep repository traits small enough for unit testing without a full database in every case.
+   - Add storage for users, tenant memberships, linked auth providers, session state, and login/audit records without coupling auth to bootstrap-only tables.
 3. Implement the first control-plane resources.
    - Start with tenants and projects.
    - Add provider resources and route policies next because the gateway cannot stop using bootstrap constants until these exist.
-4. Implement config snapshot activation.
+4. Implement auth provider and session flows.
+   - Add email login initiation and completion endpoints.
+   - Add OAuth start and callback handlers for GitHub, Google, and WeChat.
+   - Mint HugeRouter-managed sessions after successful login instead of exposing upstream provider tokens as the console session model.
+   - Resolve tenant membership and role context consistently regardless of login provider.
+   - Support account linking and unlinking where the verified identity or tenant policy allows it.
+5. Implement config snapshot activation.
    - Persist snapshot revisions.
    - Expose an activation endpoint or command path that makes the active snapshot discoverable.
    - Ensure the gateway can later consume this without coupling to ad hoc storage details.
-5. Seed and demo support.
+6. Seed and demo support.
    - Add a deterministic bootstrap seed path suitable for local development and integration tests.
    - Keep fixtures aligned with Track `01` schemas so frontend and gateway tests can reuse them.
+   - Include demo auth-provider configuration and at least one seeded tenant/user membership path suitable for end-to-end UI verification.
 
 ## Required Tests
 
@@ -65,12 +75,15 @@ If Track `02` needs contract changes, request them through Track `01` instead of
 - Database integration tests covering migrations and the first CRUD flows.
 - Tests for config snapshot activation semantics, including revision handling and idempotency expectations.
 - Contract tests that verify responses conform to the schemas published by Track `01`.
+- Auth handler tests for email login, OAuth callback success/failure, session lookup, logout, account linking, and tenant membership resolution.
+- Persistence tests for user, provider-link, and session lifecycle behavior.
 
 ## Definition Of Done
 
 - `control-plane-api` serves more than a startup log and exposes a real administrative surface.
 - The gateway no longer has to depend on hard-coded bootstrap entities as the only source of config.
 - The first data model is persisted through migrations rather than in-memory placeholders.
+- Console auth works against backend-owned identity and session flows rather than frontend placeholders.
 - Failure cases are normalized and documented by tests.
 - Local seeded data is deterministic enough for frontend and gateway integration work.
 
@@ -80,5 +93,6 @@ If Track `02` needs contract changes, request them through Track `01` instead of
 - PR title: `[Track 02] Implement control plane and config activation`
 - Required PR notes:
   - the exact resources implemented
+  - which auth flows and providers were implemented
   - migration strategy and rollback notes
   - the seeded demo data or fixtures included

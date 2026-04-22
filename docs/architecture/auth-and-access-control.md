@@ -12,6 +12,30 @@ Supported mechanisms:
 - mTLS for enterprise/private ingress
 - agent identity tokens (for non-human agentic callers via A2A or MCP)
 
+Human console authentication should be modeled separately from programmatic northbound credentials.
+
+The admin and tenant console should support these sign-in methods:
+
+- email login
+- GitHub OAuth login
+- Google OAuth login
+- WeChat OAuth login
+
+Recommended policy:
+
+- link all interactive login methods to one internal user identity record
+- require verified email before account activation when the provider exposes it
+- allow tenant administrators to restrict which providers may be used in their workspace
+- support provider binding and unbinding without breaking audit history
+- create the same RBAC and tenant membership context regardless of which login provider was used
+
+Recommended default UX:
+
+- email login should prefer passwordless verification such as magic links or one-time codes
+- GitHub and Google should be first-class global OAuth providers for developer and enterprise teams
+- WeChat should be first-class for China-facing tenants that need a familiar local identity provider
+- every successful console login should mint a HugeRouter-managed session rather than treating upstream OAuth tokens as the product session model
+
 ### 13.2 Credential Scope
 
 Credentials may be scoped to:
@@ -133,5 +157,25 @@ MCP and A2A boundary rule:
 - MCP auth should prove who may use a tool or capability surface
 - A2A auth should prove who may delegate, accept, or continue a task
 - do not assume one credential can safely imply both permissions without an explicit binding policy
+
+### 13.9 Human Identity Lifecycle
+
+Interactive human identities should support:
+
+- first-login account creation with tenant invitation checks
+- account linking across email, GitHub, Google, and WeChat when the verified email or admin policy allows it
+- explicit tenant membership review before granting console access
+- session revocation on role change, provider unlink, or security events
+- step-up verification for security-sensitive actions such as credential rotation or billing changes
+
+Minimum audit fields for human authentication events:
+
+- internal user id
+- tenant id
+- provider (`email`, `github`, `google`, `wechat`)
+- provider subject id
+- login result and failure reason
+- session id
+- source IP, user agent, and timestamp
 
 ---

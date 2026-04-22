@@ -29,6 +29,13 @@ At minimum, `apps/console-web` should provide:
 - audit explorer
 - request diagnostics view
 
+The login surface should support four interactive methods from the first production-ready auth milestone:
+
+- email
+- GitHub
+- Google
+- WeChat
+
 ### 23.2 Route Structure
 
 Suggested route groupings:
@@ -75,6 +82,18 @@ Recommended shell policy:
 - use standard fixed `AppShell` layout for the authenticated admin and tenant console
 - use Mantine 9 `AppShell` static mode for auth pages, setup flows, embedded documentation, or low-chrome pages where fixed positioning would be awkward
 - centralize shell mode decisions in `packages/ui-kit/shell` instead of scattering them across route files
+
+### 23.3.1 Login Experience
+
+The `/login` route should act as the shared entry point for both platform-admin and tenant users.
+
+Requirements:
+
+- show email sign-in as a first-party HugeRouter flow
+- provide dedicated buttons for GitHub, Google, and WeChat sign-in
+- keep provider selection separate from workspace and post-login tenant resolution
+- explain that third-party login still results in a HugeRouter-managed session
+- allow tenant policy to hide or disable specific providers without rebuilding the page
 
 ### 23.4 Frontend Data Access
 

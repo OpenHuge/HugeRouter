@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { LoginPage } from '../features/auth/LoginPage'
 
 describe('LoginPage', () => {
-  it('renders the placeholder authentication shell', () => {
+  it('renders the login options for email and social providers', () => {
     renderWithProviders(<LoginPage />)
 
     expect(
@@ -18,7 +18,22 @@ describe('LoginPage', () => {
     )
     expect(
       screen.getByRole('button', {
-        name: 'Placeholder authentication'
+        name: 'Continue with Email'
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Continue with GitHub'
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Continue with Google'
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Continue with WeChat'
       })
     ).toBeInTheDocument()
   })

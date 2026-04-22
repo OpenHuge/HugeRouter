@@ -8,6 +8,7 @@ This directory is the execution-ready version of the project plan. The existing 
 - The Rust workspace has meaningful domain and protocol scaffolding in `crates/core-domain` and `crates/protocol-ir`, plus a bootstrap `gateway-api` flow that returns an OpenAI-shaped placeholder response. Most other Rust services are startup placeholders only.
 - The workspace now targets Rust `1.94.1`, matching the current local toolchain and avoiding the previous bootstrap failure caused by a higher pinned version.
 - Test coverage is not yet representative. Several packages still use no-op test scripts, and there are no backend integration tests yet.
+- Auth work is only partially represented in the backlog today. The architecture now expects human console sign-in via email, GitHub, Google, and WeChat, so the active task docs must treat identity, session, and provider-login work as first-class scope rather than a future placeholder.
 
 ## Global Rules For Every Agent
 
@@ -25,6 +26,13 @@ This directory is the execution-ready version of the project plan. The existing 
 - PRs must not weaken existing checks. If local verification is blocked, document the exact blocker in the PR body and keep the unresolved surface narrow.
 - New behavior must be discoverable from docs, tests, or typed interfaces without requiring tribal knowledge.
 
+## Auth Work Split
+
+- Track `01` owns shared identity, session, membership, and auth-provider contracts consumed by backend and frontend code.
+- Track `02` owns control-plane auth APIs, provider configuration, session issuance, account linking, membership resolution, and auth audit events.
+- Track `05` owns the `/login` experience, callback and failure handling, route guards, and tenant-aware session UX in `apps/console-web`.
+- If a change mixes contract, backend, and UI auth work, land it as multiple PRs in that order instead of inventing private stopgap models.
+
 ## Branch And PR Convention
 
 - Branch name: `codex/track-XX-short-scope`
@@ -41,11 +49,11 @@ This directory is the execution-ready version of the project plan. The existing 
 | Track | Focus | Primary Ownership | Depends On |
 |---|---|---|---|
 | `00` | Foundation, toolchain, CI, and quality gates | root configs, `turbo.json`, `justfile`, `.devcontainer`, `.github`, `infra/*` | none |
-| `01` | Domain contracts and schema pipeline | `crates/core-domain`, `crates/protocol-ir`, `schemas/*`, `packages/ts-api-client`, `packages/ts-shared-schema` | `00` recommended |
-| `02` | Control plane and config activation | `services/control-plane-api`, new backend support crates owned by this track | `01` |
+| `01` | Domain contracts, schema pipeline, and shared auth contracts | `crates/core-domain`, `crates/protocol-ir`, `schemas/*`, `packages/ts-api-client`, `packages/ts-shared-schema` | `00` recommended |
+| `02` | Control plane, config activation, and auth backend flows | `services/control-plane-api`, new backend support crates owned by this track | `01` |
 | `03` | Gateway, routing, and provider adapters | `services/gateway-api`, `crates/provider-traits`, new gateway/provider crates | `01`, `02` partially |
 | `04` | Metering, ledger, and operational workers | `services/ledger-worker`, `services/audit-worker`, `services/notification-worker`, `services/routing-worker`, `crates/runtime-composition` | `01`, `03` |
-| `05` | Console app experience | `apps/console-web` | `01`, `02`, `06` partially |
+| `05` | Console app experience and auth UX | `apps/console-web` | `01`, `02`, `06` partially |
 | `06` | UI system, Storybook, and frontend quality | `packages/ui-kit`, `packages/test-utils`, `apps/storybook` | none |
 
 ## Recommended Merge Order
