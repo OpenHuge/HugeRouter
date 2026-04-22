@@ -1799,7 +1799,10 @@ mod tests {
             response.headers().get("x-debug-route-policy-id").unwrap(),
             "routepol_default"
         );
-        assert_eq!(response.headers().get("x-debug-fallback-count").unwrap(), "1");
+        assert_eq!(
+            response.headers().get("x-debug-fallback-count").unwrap(),
+            "1"
+        );
         assert_eq!(
             response.headers().get("x-debug-admission-result").unwrap(),
             "admitted"
