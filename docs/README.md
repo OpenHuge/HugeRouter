@@ -3,6 +3,7 @@
 ## Architecture
 
 - [Overview](architecture/overview.md)
+- [Foundation Risk and Trend Analysis](architecture/foundation-risk-and-trend-analysis.md)
 - [Implementation Contracts](architecture/implementation-contracts.md)
 - [Event and Message Contracts](architecture/event-and-message-contracts.md)
 - [Persistence Guidance](architecture/persistence-guidance.md)

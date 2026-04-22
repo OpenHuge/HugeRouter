@@ -6,6 +6,7 @@ Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway
 
 - [Docs Index](docs/README.md)
 - [Architecture Overview](docs/architecture/overview.md)
+- [Foundation Risk and Trend Analysis](docs/architecture/foundation-risk-and-trend-analysis.md)
 - [Implementation Contracts](docs/architecture/implementation-contracts.md)
 - [Event and Message Contracts](docs/architecture/event-and-message-contracts.md)
 - [Persistence Guidance](docs/architecture/persistence-guidance.md)

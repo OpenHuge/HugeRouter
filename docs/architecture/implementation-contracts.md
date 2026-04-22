@@ -8,6 +8,7 @@ It is intentionally narrower than the broader architecture docs. When an agent n
 
 Companion documents:
 
+- [Foundation Risk and Trend Analysis](foundation-risk-and-trend-analysis.md)
 - [Event and Message Contracts](event-and-message-contracts.md)
 - [Persistence Guidance](persistence-guidance.md)
 

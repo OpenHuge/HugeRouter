@@ -25,6 +25,8 @@ This specification defines a **monorepo architecture** where:
 
 The result should be a platform that can evolve from a developer-first gateway into a full AI traffic operating system with policy, billing, compliance, and ecosystem extensibility built in from the start.
 
+For the cross-cutting analysis that connects product characteristics, open source lessons, operator pain points, future trends, and bottom-layer design checks, see [Foundation Risk and Trend Analysis](foundation-risk-and-trend-analysis.md).
+
 
 ---
 
