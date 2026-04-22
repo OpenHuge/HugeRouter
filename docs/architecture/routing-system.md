@@ -169,7 +169,7 @@ The system should support:
 - pre-admission reserve accounting for estimated request cost
 - hard-stop and soft-throttle modes with explicit policy control
 
-Admission should converge on a stable terminal vocabulary:
+The current repository contract vocabulary should remain:
 
 - `admitted`
 - `rejected_no_candidate`
