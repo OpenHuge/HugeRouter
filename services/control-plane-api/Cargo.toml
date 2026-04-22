@@ -8,6 +8,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+chrono.workspace = true
 core-domain = { path = "../../crates/core-domain" }
 runtime-composition = { path = "../../crates/runtime-composition" }
 serde.workspace = true

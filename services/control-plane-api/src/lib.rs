@@ -1,13 +1,14 @@
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::{
-        header::{COOKIE, SET_COOKIE},
         HeaderMap, StatusCode,
+        header::{COOKIE, SET_COOKIE},
     },
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
+use chrono::{SecondsFormat, Utc};
 use core_domain::{
     AuthFlowId, AuthLoginResult, AuthProvider, AuthProviderAvailability, AuthProviderLink,
     AuthProviderLinkId, AuthProviderLinksResponse, AuthSession, AuthSessionId, AuthSessionResponse,
@@ -21,8 +22,8 @@ use serde::Serialize;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -108,15 +109,43 @@ impl MemoryStore {
                 last_login_at: None,
             },
             links: vec![
-                build_link(AuthProvider::Email, "ops@huge-router.dev", Some("ops@huge-router.dev"), false),
-                build_link(AuthProvider::Github, "github_ops", Some("ops@huge-router.dev"), true),
-                build_link(AuthProvider::Google, "google_ops", Some("ops@huge-router.dev"), true),
-                build_link(AuthProvider::Wechat, "wechat_ops", Some("ops@huge-router.dev"), true),
+                build_link(
+                    AuthProvider::Email,
+                    "ops@huge-router.dev",
+                    Some("ops@huge-router.dev"),
+                    false,
+                ),
+                build_link(
+                    AuthProvider::Github,
+                    "github_ops",
+                    Some("ops@huge-router.dev"),
+                    true,
+                ),
+                build_link(
+                    AuthProvider::Google,
+                    "google_ops",
+                    Some("ops@huge-router.dev"),
+                    true,
+                ),
+                build_link(
+                    AuthProvider::Wechat,
+                    "wechat_ops",
+                    Some("ops@huge-router.dev"),
+                    true,
+                ),
             ],
             memberships: vec![
-                build_membership("tmemb_platform", platform_tenant, TenantMembershipRole::Admin),
+                build_membership(
+                    "tmemb_platform",
+                    platform_tenant,
+                    TenantMembershipRole::Admin,
+                ),
                 build_membership("tmemb_acme", acme_tenant, TenantMembershipRole::Admin),
-                build_membership("tmemb_northstar", northstar_tenant, TenantMembershipRole::Member),
+                build_membership(
+                    "tmemb_northstar",
+                    northstar_tenant,
+                    TenantMembershipRole::Member,
+                ),
             ],
         };
 
@@ -130,10 +159,26 @@ impl MemoryStore {
             email_flows: HashMap::new(),
             oauth_flows: HashMap::new(),
             provider_catalog: vec![
-                provider_availability(AuthProvider::Email, "Continue with Email", "/api/control-plane/auth/email/start"),
-                provider_availability(AuthProvider::Github, "Continue with GitHub", "/api/control-plane/auth/oauth/github/start"),
-                provider_availability(AuthProvider::Google, "Continue with Google", "/api/control-plane/auth/oauth/google/start"),
-                provider_availability(AuthProvider::Wechat, "Continue with WeChat", "/api/control-plane/auth/oauth/wechat/start"),
+                provider_availability(
+                    AuthProvider::Email,
+                    "Continue with Email",
+                    "/api/control-plane/auth/email/start",
+                ),
+                provider_availability(
+                    AuthProvider::Github,
+                    "Continue with GitHub",
+                    "/api/control-plane/auth/oauth/github/start",
+                ),
+                provider_availability(
+                    AuthProvider::Google,
+                    "Continue with Google",
+                    "/api/control-plane/auth/oauth/google/start",
+                ),
+                provider_availability(
+                    AuthProvider::Wechat,
+                    "Continue with WeChat",
+                    "/api/control-plane/auth/oauth/wechat/start",
+                ),
             ],
             sessions: HashMap::new(),
             users,
@@ -182,13 +227,31 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route("/healthz", get(health))
         .route("/api/control-plane/auth/providers", get(get_auth_providers))
         .route("/api/control-plane/auth/session", get(get_current_session))
-        .route("/api/control-plane/auth/email/start", post(start_email_login))
-        .route("/api/control-plane/auth/email/complete", post(complete_email_login))
-        .route("/api/control-plane/auth/oauth/{provider}/start", post(start_oauth_login))
-        .route("/api/control-plane/auth/oauth/{provider}/callback", post(complete_oauth_login))
+        .route(
+            "/api/control-plane/auth/email/start",
+            post(start_email_login),
+        )
+        .route(
+            "/api/control-plane/auth/email/complete",
+            post(complete_email_login),
+        )
+        .route(
+            "/api/control-plane/auth/oauth/{provider}/start",
+            post(start_oauth_login),
+        )
+        .route(
+            "/api/control-plane/auth/oauth/{provider}/callback",
+            post(complete_oauth_login),
+        )
         .route("/api/control-plane/auth/logout", post(logout))
-        .route("/api/control-plane/auth/links", get(list_auth_provider_links))
-        .route("/api/control-plane/auth/links/{provider}", post(unlink_auth_provider).delete(unlink_auth_provider))
+        .route(
+            "/api/control-plane/auth/links",
+            get(list_auth_provider_links),
+        )
+        .route(
+            "/api/control-plane/auth/links/{provider}",
+            post(unlink_auth_provider).delete(unlink_auth_provider),
+        )
         .with_state(state)
 }
 
@@ -247,7 +310,9 @@ async fn start_email_login(
         );
 
     Ok(Json(EmailLoginStartResponse {
-        code_hint: Some(format!("Use local bootstrap verification code {EMAIL_BOOTSTRAP_CODE}.")),
+        code_hint: Some(format!(
+            "Use local bootstrap verification code {EMAIL_BOOTSTRAP_CODE}."
+        )),
         expires_at: iso_timestamp(now_unix_seconds() + 600),
         flow_id: AuthFlowId::parse(flow_id).expect("valid flow id"),
         verification_mode: EmailLoginVerificationMode::OneTimeCode,
@@ -378,7 +443,11 @@ async fn complete_oauth_login(
 
     let login_result = issue_login_result(
         &state,
-        &format!("{}:{}_ops", provider_slug(provider), provider_slug(provider)),
+        &format!(
+            "{}:{}_ops",
+            provider_slug(provider),
+            provider_slug(provider)
+        ),
         AuthProvider::from(provider),
         &pending.workspace_slug,
         &context,
@@ -443,7 +512,10 @@ async fn unlink_auth_provider(
         )
     })?;
     let provider = parse_auth_provider(&provider, &context)?;
-    let mut store = state.store.write().expect("store write lock should succeed");
+    let mut store = state
+        .store
+        .write()
+        .expect("store write lock should succeed");
     let session = store.sessions.get_mut(&session_id).ok_or_else(|| {
         ApiError::unauthorized(
             "auth_invalid",
@@ -471,7 +543,10 @@ fn issue_login_result(
     workspace_slug: &str,
     context: &RequestContext,
 ) -> Result<AuthLoginResult, ApiError> {
-    let mut store = state.store.write().expect("store write lock should succeed");
+    let mut store = state
+        .store
+        .write()
+        .expect("store write lock should succeed");
     let user = store.users.get(user_key).cloned().ok_or_else(|| {
         ApiError::unauthorized(
             "auth_user_not_found",
@@ -495,7 +570,11 @@ fn issue_login_result(
         })?;
 
     let session = AuthSession {
-        active_tenant_id: Some(active_tenant.tenant.id.clone()),
+        active_tenant_id: if workspace_slug == "platform-admin" {
+            None
+        } else {
+            Some(active_tenant.tenant.id.clone())
+        },
         authenticated_by: provider,
         created_at: iso_timestamp(now_unix_seconds()),
         expires_at: iso_timestamp(now_unix_seconds() + SESSION_TTL_SECONDS),
@@ -597,10 +676,7 @@ fn parse_oauth_provider(
     }
 }
 
-fn parse_auth_provider(
-    provider: &str,
-    context: &RequestContext,
-) -> Result<AuthProvider, ApiError> {
+fn parse_auth_provider(provider: &str, context: &RequestContext) -> Result<AuthProvider, ApiError> {
     match provider {
         "email" => Ok(AuthProvider::Email),
         "github" => Ok(AuthProvider::Github),
@@ -629,11 +705,7 @@ fn with_session_cookie<T>(session_id: &str, body: Json<T>) -> Response
 where
     T: Serialize,
 {
-    (
-        [(SET_COOKIE, build_session_cookie(session_id))],
-        body,
-    )
-        .into_response()
+    ([(SET_COOKIE, build_session_cookie(session_id))], body).into_response()
 }
 
 fn clear_session_cookie<T>(body: Json<T>) -> Response
@@ -641,7 +713,10 @@ where
     T: Serialize,
 {
     (
-        [(SET_COOKIE, format!("{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"))],
+        [(
+            SET_COOKIE,
+            format!("{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"),
+        )],
         body,
     )
         .into_response()
@@ -691,7 +766,8 @@ fn build_membership(
     role: TenantMembershipRole,
 ) -> TenantMembership {
     TenantMembership {
-        membership_id: TenantMembershipId::parse(membership_id.to_string()).expect("valid membership id"),
+        membership_id: TenantMembershipId::parse(membership_id.to_string())
+            .expect("valid membership id"),
         role,
         status: TenantMembershipStatus::Active,
         tenant,
@@ -723,7 +799,9 @@ fn now_unix_seconds() -> u64 {
 }
 
 fn iso_timestamp(unix_seconds: u64) -> String {
-    format!("{unix_seconds}Z")
+    chrono::DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0)
+        .expect("valid unix timestamp")
+        .to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 fn next_request_context() -> RequestContext {
@@ -793,8 +871,8 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::app;
     use axum::{
-        body::{to_bytes, Body},
-        http::{header::SET_COOKIE, Request, StatusCode},
+        body::{Body, to_bytes},
+        http::{Request, StatusCode, header::SET_COOKIE},
     };
     use serde_json::Value;
     use tower::ServiceExt;
@@ -802,7 +880,12 @@ mod tests {
     #[tokio::test]
     async fn health_endpoint_returns_ok() {
         let response = app()
-            .oneshot(Request::builder().uri("/healthz").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -832,9 +915,12 @@ mod tests {
             .await
             .unwrap();
 
-        let start_body: Value =
-            serde_json::from_slice(&to_bytes(start_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let start_body: Value = serde_json::from_slice(
+            &to_bytes(start_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
 
         let flow_id = start_body["flowId"].as_str().unwrap();
         assert_eq!(start_body["verificationMode"], "one_time_code");
@@ -868,10 +954,22 @@ mod tests {
             .to_string();
         assert!(set_cookie.contains("huge_router_session=sess_"));
 
-        let body: Value =
-            serde_json::from_slice(&to_bytes(complete_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let body: Value = serde_json::from_slice(
+            &to_bytes(complete_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(body["session"]["authenticatedBy"], "email");
+        assert!(body["session"]["activeTenantId"].is_null());
+        assert_eq!(
+            body["session"]["createdAt"]
+                .as_str()
+                .unwrap()
+                .matches('T')
+                .count(),
+            1
+        );
         assert_eq!(body["links"][0]["provider"], "email");
     }
 
@@ -898,13 +996,18 @@ mod tests {
             .await
             .unwrap();
 
-        let start_body: Value =
-            serde_json::from_slice(&to_bytes(start_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
-        assert!(start_body["authorizationUrl"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://127.0.0.1:3000/login/callback"));
+        let start_body: Value = serde_json::from_slice(
+            &to_bytes(start_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            start_body["authorizationUrl"]
+                .as_str()
+                .unwrap()
+                .starts_with("http://127.0.0.1:3000/login/callback")
+        );
 
         let callback_response = app
             .clone()
@@ -925,9 +1028,12 @@ mod tests {
             .await
             .unwrap();
 
-        let body: Value =
-            serde_json::from_slice(&to_bytes(callback_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let body: Value = serde_json::from_slice(
+            &to_bytes(callback_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(body["session"]["authenticatedBy"], "github");
     }
 
@@ -953,9 +1059,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let start_body: Value =
-            serde_json::from_slice(&to_bytes(start_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let start_body: Value = serde_json::from_slice(
+            &to_bytes(start_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
 
         let complete_response = app
             .clone()
@@ -999,9 +1108,12 @@ mod tests {
             .await
             .unwrap();
 
-        let session_body: Value =
-            serde_json::from_slice(&to_bytes(session_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let session_body: Value = serde_json::from_slice(
+            &to_bytes(session_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(session_body["session"]["activeTenantId"], "tenant_acme");
 
         let logout_response = app
@@ -1019,7 +1131,12 @@ mod tests {
 
         assert_eq!(logout_response.status(), StatusCode::OK);
         assert_eq!(
-            logout_response.headers().get(SET_COOKIE).unwrap().to_str().unwrap(),
+            logout_response
+                .headers()
+                .get(SET_COOKIE)
+                .unwrap()
+                .to_str()
+                .unwrap(),
             "huge_router_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
         );
     }
