@@ -97,6 +97,7 @@ The repository includes a compose-based devcontainer in [`.devcontainer/devconta
 - `postCreate` and `postStart` persist Codex config in `.devcontainer/local/codex/config.toml` and GitHub CLI config in `.devcontainer/local/gh`.
 - In GitHub Codespaces, `gh` can use the built-in `GITHUB_TOKEN`; an optional recommended `GH_TOKEN` secret is declared for contributors who need fine-grained access to additional repositories. Locally, run `gh auth login` once and the stored auth will persist across rebuilds.
 - In GitHub Codespaces, the devcontainer starts the workspace plus PostgreSQL, Redis, and NATS by default so observability sidecars cannot block container creation. Use `just stack-up` when you want the full local stack, including OpenTelemetry Collector, Prometheus, and Grafana.
+- The PostgreSQL service is pinned to `postgres:18.3-bookworm`. This is a Debian-based image, not Alpine, and PostgreSQL 18+ expects the persistent volume to target `/var/lib/postgresql` rather than `/var/lib/postgresql/data`.
 
 Recommended entry documents before starting implementation:
 
