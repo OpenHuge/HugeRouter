@@ -49,6 +49,7 @@ pub type GatewayState = Arc<AppState>;
 pub struct AppState {
     config_store: Arc<dyn ActiveConfigStore>,
     adapter_registry: ProviderAdapterRegistry,
+    debug_headers_enabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -109,6 +110,7 @@ pub struct GatewaySuccess {
     pub route_receipt: RouteReceipt,
     pub usage_event: UsageEvent,
     pub response: ChatCompletionResponse,
+    pub debug_headers: Option<GatewayDebugHeaders>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,15 @@ pub struct GatewayError {
     pub route_receipt_id: Option<RouteReceiptId>,
     pub config_snapshot_id: Option<ConfigSnapshotId>,
     pub envelope: ErrorEnvelope,
+    pub debug_headers: Option<GatewayDebugHeaders>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GatewayDebugHeaders {
+    pub selected_target: Option<String>,
+    pub route_policy_id: String,
+    pub fallback_count: usize,
+    pub admission_result: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -190,6 +201,7 @@ fn default_state() -> GatewayState {
     Arc::new(AppState {
         config_store,
         adapter_registry,
+        debug_headers_enabled: debug_headers_enabled_from_env(),
     })
 }
 
@@ -258,6 +270,13 @@ async fn process_chat_completion(
             normalized,
             &context,
             Some(active_config.config_snapshot.config_snapshot_id.clone()),
+            maybe_debug_headers(
+                state.debug_headers_enabled,
+                &active_config.route_policy.route_policy_id,
+                None,
+                AdmissionResult::RejectedNoCandidate,
+                0,
+            ),
         ));
     }
 
@@ -336,6 +355,7 @@ async fn execute_route(
             .await
         {
             Ok(provider_response) => {
+                let fallback_count = fallback_transitions.len();
                 let route_receipt = build_route_receipt(
                     &route,
                     &context,
@@ -362,6 +382,13 @@ async fn execute_route(
                     route_receipt,
                     usage_event,
                     response: map_provider_response(&context, &request, &provider_response),
+                    debug_headers: maybe_debug_headers(
+                        state.debug_headers_enabled,
+                        &route.config_snapshot.route_policy_id,
+                        Some(target.resource.provider_resource_id.as_str()),
+                        AdmissionResult::Admitted,
+                        fallback_count,
+                    ),
                 });
             }
             Err(error) => {
@@ -392,6 +419,7 @@ async fn execute_route(
                 let has_more_candidates = index + 1 < route.ranked_targets.len();
                 if !error.retryable || !has_more_candidates {
                     let normalized = map_provider_error(&error, &context);
+                    let fallback_count = fallback_transitions.len();
                     let route_receipt = build_route_receipt(
                         &route,
                         &context,
@@ -407,6 +435,13 @@ async fn execute_route(
                         normalized.error,
                         &context,
                         Some(route.config_snapshot.config_snapshot_id.clone()),
+                        maybe_debug_headers(
+                            state.debug_headers_enabled,
+                            &route.config_snapshot.route_policy_id,
+                            Some(ranked_target.target.resource.provider_resource_id.as_str()),
+                            route.admission_result,
+                            fallback_count,
+                        ),
                     ));
                 }
             }
@@ -415,6 +450,7 @@ async fn execute_route(
 
     let (ranked_target, provider_error) = last_error.expect("at least one target was evaluated");
     let normalized = map_provider_error(&provider_error, &context);
+    let fallback_count = fallback_transitions.len();
     let route_receipt = build_route_receipt(
         &route,
         &context,
@@ -430,6 +466,13 @@ async fn execute_route(
         normalized.error,
         &context,
         Some(route.config_snapshot.config_snapshot_id.clone()),
+        maybe_debug_headers(
+            state.debug_headers_enabled,
+            &route.config_snapshot.route_policy_id,
+            Some(ranked_target.target.resource.provider_resource_id.as_str()),
+            route.admission_result,
+            fallback_count,
+        ),
     ))
 }
 
@@ -927,6 +970,42 @@ fn status_for_error_code(code: &str) -> StatusCode {
     }
 }
 
+fn debug_headers_enabled_from_env() -> bool {
+    std::env::var("GATEWAY_ENABLE_DEBUG_HEADERS")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+}
+
+const fn admission_result_header_value(admission_result: AdmissionResult) -> &'static str {
+    match admission_result {
+        AdmissionResult::Admitted => "admitted",
+        AdmissionResult::RejectedBudget => "rejected_budget",
+        AdmissionResult::RejectedRateLimit => "rejected_rate_limit",
+        AdmissionResult::RejectedConcurrency => "rejected_concurrency",
+        AdmissionResult::RejectedPolicy => "rejected_policy",
+        AdmissionResult::RejectedNoCandidate => "rejected_no_candidate",
+    }
+}
+
+fn maybe_debug_headers(
+    enabled: bool,
+    route_policy_id: &RoutePolicyId,
+    selected_target: Option<&str>,
+    admission_result: AdmissionResult,
+    fallback_count: usize,
+) -> Option<GatewayDebugHeaders> {
+    if !enabled {
+        return None;
+    }
+
+    Some(GatewayDebugHeaders {
+        selected_target: selected_target.map(ToString::to_string),
+        route_policy_id: route_policy_id.as_str().to_string(),
+        fallback_count,
+        admission_result: admission_result_header_value(admission_result),
+    })
+}
+
 trait ActiveConfigStore: Send + Sync {
     fn load(&self) -> Result<ActiveGatewayConfig, String>;
 }
@@ -1035,6 +1114,7 @@ impl GatewayError {
             route_receipt_id: None,
             config_snapshot_id: None,
             envelope,
+            debug_headers: None,
         }
     }
 
@@ -1044,6 +1124,7 @@ impl GatewayError {
         error: NormalizedError,
         context: &RequestContext,
         config_snapshot_id: Option<ConfigSnapshotId>,
+        debug_headers: Option<GatewayDebugHeaders>,
     ) -> Self {
         Self {
             status,
@@ -1052,6 +1133,7 @@ impl GatewayError {
             route_receipt_id: Some(route_receipt.route_receipt_id),
             config_snapshot_id,
             envelope: ErrorEnvelope { error },
+            debug_headers,
         }
     }
 }
@@ -1083,6 +1165,31 @@ impl IntoResponse for GatewaySuccess {
             HeaderValue::from_str(self.config_snapshot_id.as_str())
                 .expect("config snapshot id should be valid header"),
         );
+
+        if let Some(debug_headers) = self.debug_headers {
+            if let Some(selected_target) = debug_headers.selected_target {
+                headers.insert(
+                    "x-debug-selected-target",
+                    HeaderValue::from_str(&selected_target)
+                        .expect("selected target should be a valid header"),
+                );
+            }
+            headers.insert(
+                "x-debug-route-policy-id",
+                HeaderValue::from_str(&debug_headers.route_policy_id)
+                    .expect("route policy id should be a valid header"),
+            );
+            headers.insert(
+                "x-debug-fallback-count",
+                HeaderValue::from_str(&debug_headers.fallback_count.to_string())
+                    .expect("fallback count should be a valid header"),
+            );
+            headers.insert(
+                "x-debug-admission-result",
+                HeaderValue::from_str(debug_headers.admission_result)
+                    .expect("admission result should be a valid header"),
+            );
+        }
 
         response
     }
@@ -1119,6 +1226,31 @@ impl IntoResponse for GatewayError {
                 "x-config-snapshot-id",
                 HeaderValue::from_str(config_snapshot_id.as_str())
                     .expect("config snapshot id should be valid header"),
+            );
+        }
+
+        if let Some(debug_headers) = self.debug_headers {
+            if let Some(selected_target) = debug_headers.selected_target {
+                headers.insert(
+                    "x-debug-selected-target",
+                    HeaderValue::from_str(&selected_target)
+                        .expect("selected target should be a valid header"),
+                );
+            }
+            headers.insert(
+                "x-debug-route-policy-id",
+                HeaderValue::from_str(&debug_headers.route_policy_id)
+                    .expect("route policy id should be a valid header"),
+            );
+            headers.insert(
+                "x-debug-fallback-count",
+                HeaderValue::from_str(&debug_headers.fallback_count.to_string())
+                    .expect("fallback count should be a valid header"),
+            );
+            headers.insert(
+                "x-debug-admission-result",
+                HeaderValue::from_str(debug_headers.admission_result)
+                    .expect("admission result should be a valid header"),
             );
         }
 
@@ -1264,12 +1396,21 @@ mod tests {
         adapter: Arc<dyn ProviderAdapter>,
         targets: Vec<ProviderTargetRuntime>,
     ) -> GatewayState {
+        test_state_with_debug(adapter, targets, false)
+    }
+
+    fn test_state_with_debug(
+        adapter: Arc<dyn ProviderAdapter>,
+        targets: Vec<ProviderTargetRuntime>,
+        debug_headers_enabled: bool,
+    ) -> GatewayState {
         let mut registry = ProviderAdapterRegistry::new();
         registry.register(adapter).unwrap();
 
         Arc::new(AppState {
             config_store: Arc::new(StaticConfigStore::new(build_config(targets))),
             adapter_registry: registry,
+            debug_headers_enabled,
         })
     }
 
@@ -1582,6 +1723,86 @@ mod tests {
         assert_eq!(
             payload["choices"][0]["message"]["content"],
             "adapter fallback success"
+        );
+    }
+
+    #[tokio::test]
+    async fn emits_documented_debug_headers_when_enabled() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([
+                (
+                    "prvrsrc_openai_primary".to_string(),
+                    Err(ProviderError::new(
+                        ProviderErrorKind::Unavailable,
+                        "primary is degraded",
+                        true,
+                    )),
+                ),
+                (
+                    "prvrsrc_openai_backup".to_string(),
+                    Ok(ProviderResponse {
+                        response_id: Some("chatcmpl_789".to_string()),
+                        model: "gpt-4.1-mini".to_string(),
+                        output_text: "debug headers success".to_string(),
+                        finish_reason: "stop".to_string(),
+                        usage: ProviderUsage {
+                            input_tokens: 12,
+                            output_tokens: 8,
+                            cached_input_tokens: 0,
+                        },
+                    }),
+                ),
+            ]),
+        });
+        let app = app_with_state(test_state_with_debug(
+            adapter,
+            vec![
+                build_target(
+                    "prvrsrc_openai_primary",
+                    "us-east-1",
+                    0.95,
+                    0.8,
+                    HealthState::Healthy,
+                ),
+                build_target(
+                    "prvrsrc_openai_backup",
+                    "us-east-1",
+                    0.85,
+                    0.75,
+                    HealthState::Healthy,
+                ),
+            ],
+            true,
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("x-debug-selected-target").unwrap(),
+            "prvrsrc_openai_backup"
+        );
+        assert_eq!(
+            response.headers().get("x-debug-route-policy-id").unwrap(),
+            "routepol_default"
+        );
+        assert_eq!(response.headers().get("x-debug-fallback-count").unwrap(), "1");
+        assert_eq!(
+            response.headers().get("x-debug-admission-result").unwrap(),
+            "admitted"
         );
     }
 
