@@ -512,27 +512,35 @@ async fn unlink_auth_provider(
         )
     })?;
     let provider = parse_auth_provider(&provider, &context)?;
-    let mut store = state
-        .store
-        .write()
-        .expect("store write lock should succeed");
-    let session = store.sessions.get_mut(&session_id).ok_or_else(|| {
-        ApiError::unauthorized(
-            "auth_invalid",
-            "HugeRouter session was not found".to_string(),
-            &context,
-        )
-    })?;
+    let removed = {
+        let mut store = state
+            .store
+            .write()
+            .expect("store write lock should succeed");
+        let removed = {
+            let session = store.sessions.get_mut(&session_id).ok_or_else(|| {
+                ApiError::unauthorized(
+                    "auth_invalid",
+                    "HugeRouter session was not found".to_string(),
+                    &context,
+                )
+            })?;
 
-    let removable = provider != AuthProvider::Email;
-    let original_len = session.links.len();
-    if removable {
-        session.links.retain(|link| link.provider != provider);
-    }
+            let removable = provider != AuthProvider::Email;
+            let original_len = session.links.len();
+            if removable {
+                session.links.retain(|link| link.provider != provider);
+            }
+
+            removable && session.links.len() != original_len
+        };
+        drop(store);
+        removed
+    };
 
     Ok(Json(UnlinkAuthProviderResponse {
         provider,
-        removed: removable && session.links.len() != original_len,
+        removed,
     }))
 }
 
@@ -573,7 +581,7 @@ fn issue_login_result(
         active_tenant_id: if workspace_slug == "platform-admin" {
             None
         } else {
-            Some(active_tenant.tenant.id.clone())
+            Some(active_tenant.tenant.id)
         },
         authenticated_by: provider,
         created_at: iso_timestamp(now_unix_seconds()),
@@ -603,6 +611,7 @@ fn issue_login_result(
     store
         .sessions
         .insert(session.session_id.as_str().to_string(), result.clone());
+    drop(store);
 
     Ok(result)
 }
@@ -752,7 +761,7 @@ fn build_link(
         can_unlink,
         email: email.map(std::string::ToString::to_string),
         last_used_at: None,
-        link_id: AuthProviderLinkId::parse(format!("authlink_{}", provider_subject))
+        link_id: AuthProviderLinkId::parse(format!("authlink_{provider_subject}"))
             .expect("valid auth link id"),
         linked_at: "2026-04-22T00:00:00Z".to_string(),
         provider,
@@ -774,7 +783,7 @@ fn build_membership(
     }
 }
 
-fn provider_slug(provider: OAuthProvider) -> &'static str {
+const fn provider_slug(provider: OAuthProvider) -> &'static str {
     match provider {
         OAuthProvider::Github => "github",
         OAuthProvider::Google => "google",
@@ -782,7 +791,7 @@ fn provider_slug(provider: OAuthProvider) -> &'static str {
     }
 }
 
-fn auth_provider_slug(provider: AuthProvider) -> &'static str {
+const fn auth_provider_slug(provider: AuthProvider) -> &'static str {
     match provider {
         AuthProvider::Email => "email",
         AuthProvider::Github => "github",
@@ -799,7 +808,8 @@ fn now_unix_seconds() -> u64 {
 }
 
 fn iso_timestamp(unix_seconds: u64) -> String {
-    chrono::DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0)
+    let unix_seconds = i64::try_from(unix_seconds).expect("unix timestamp should fit in i64");
+    chrono::DateTime::<Utc>::from_timestamp(unix_seconds, 0)
         .expect("valid unix timestamp")
         .to_rfc3339_opts(SecondsFormat::Secs, true)
 }

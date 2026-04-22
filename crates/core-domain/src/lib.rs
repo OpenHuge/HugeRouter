@@ -1242,6 +1242,6 @@ mod tests {
             AuthSessionId::parse("sess_123").unwrap()
         );
         assert_eq!(parsed.links[0].provider, AuthProvider::Email);
-        assert_eq!(parsed.links[0].can_unlink, false);
+        assert!(!parsed.links[0].can_unlink);
     }
 }
