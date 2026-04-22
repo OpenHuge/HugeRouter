@@ -51,7 +51,7 @@ fn infer_severity(message_type: &str, payload: &Value) -> IncidentSeverity {
     if let Some(explicit) = payload
         .get("severity")
         .and_then(Value::as_str)
-        .map(|value| value.to_ascii_lowercase())
+        .map(str::to_ascii_lowercase)
     {
         return match explicit.as_str() {
             "critical" | "high" => IncidentSeverity::Critical,
@@ -117,7 +117,7 @@ pub fn parse_notification_envelope(payload: &[u8]) -> Result<NotificationEnvelop
     let nested_payload = raw_payload
         .get("payload")
         .cloned()
-        .unwrap_or_else(|| Value::Object(Default::default()));
+        .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
     let provider_resource_id = payload_string(&nested_payload, "provider_resource_id");
     let severity = infer_severity(&message_type, &nested_payload);
     let incident_key = format!(
@@ -145,7 +145,7 @@ pub fn parse_notification_envelope(payload: &[u8]) -> Result<NotificationEnvelop
 
 pub async fn ensure_notification_tables(pool: &PgPool) -> Result<()> {
     sqlx::query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS notification_events (
             message_id TEXT PRIMARY KEY,
             incident_key TEXT NOT NULL,
@@ -159,7 +159,7 @@ pub async fn ensure_notification_tables(pool: &PgPool) -> Result<()> {
             raw_payload JSONB NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-        "#,
+        ",
     )
     .execute(pool)
     .await
@@ -176,13 +176,13 @@ async fn recently_notified(
     let rate_limit_seconds =
         i64::try_from(rate_limit_seconds).context("rate limit seconds exceeds i64")?;
     let count: i64 = sqlx::query_scalar(
-        r#"
+        r"
         SELECT COUNT(*)
         FROM notification_events
         WHERE incident_key = $1
           AND suppressed = FALSE
           AND created_at >= NOW() - make_interval(secs => $2)
-        "#,
+        ",
     )
     .bind(incident_key)
     .bind(rate_limit_seconds)
@@ -199,7 +199,7 @@ pub async fn persist_notification_event(
     suppressed: bool,
 ) -> Result<bool> {
     let result = sqlx::query(
-        r#"
+        r"
         INSERT INTO notification_events (
             message_id,
             incident_key,
@@ -214,7 +214,7 @@ pub async fn persist_notification_event(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, NOW()), $9, $10)
         ON CONFLICT (message_id) DO NOTHING
-        "#,
+        ",
     )
     .bind(&envelope.message_id)
     .bind(&envelope.incident_key)

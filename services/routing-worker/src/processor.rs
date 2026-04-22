@@ -59,7 +59,7 @@ pub enum RouteHealthUpdate {
 
 pub async fn ensure_probe_tables(pool: &PgPool) -> Result<()> {
     sqlx::query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS provider_probe_events (
             message_id TEXT PRIMARY KEY,
             provider_resource_id TEXT NOT NULL,
@@ -74,7 +74,7 @@ pub async fn ensure_probe_tables(pool: &PgPool) -> Result<()> {
             raw_payload JSONB NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-        "#,
+        ",
     )
     .execute(pool)
     .await
@@ -95,7 +95,7 @@ pub fn parse_probe_observation(payload: &[u8]) -> Result<ProbeObservationEnvelop
 
 async fn persist_probe_event(pool: &PgPool, envelope: &ProbeObservationEnvelope) -> Result<bool> {
     let result = sqlx::query(
-        r#"
+        r"
         INSERT INTO provider_probe_events (
             message_id,
             provider_resource_id,
@@ -111,7 +111,7 @@ async fn persist_probe_event(pool: &PgPool, envelope: &ProbeObservationEnvelope)
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), $11)
         ON CONFLICT (message_id) DO NOTHING
-        "#,
+        ",
     )
     .bind(&envelope.message_id)
     .bind(&envelope.payload.provider_resource_id)
@@ -131,7 +131,7 @@ async fn persist_probe_event(pool: &PgPool, envelope: &ProbeObservationEnvelope)
     Ok(result.rows_affected() > 0)
 }
 
-fn observed_status_slug(status: ObservedProbeStatus) -> &'static str {
+const fn observed_status_slug(status: ObservedProbeStatus) -> &'static str {
     match status {
         ObservedProbeStatus::Healthy => "healthy",
         ObservedProbeStatus::Degraded => "degraded",
@@ -141,13 +141,13 @@ fn observed_status_slug(status: ObservedProbeStatus) -> &'static str {
 
 async fn recent_unhealthy_streak(pool: &PgPool, provider_resource_id: &str) -> Result<u32> {
     let rows = sqlx::query(
-        r#"
+        r"
         SELECT observed_status
         FROM provider_probe_events
         WHERE provider_resource_id = $1
         ORDER BY occurred_at DESC, created_at DESC
         LIMIT 10
-        "#,
+        ",
     )
     .bind(provider_resource_id)
     .fetch_all(pool)
@@ -185,11 +185,12 @@ fn resolve_next_states(
 
     let next_health_state = match observed_status {
         ObservedProbeStatus::Healthy => HealthState::Healthy,
-        ObservedProbeStatus::Degraded => HealthState::Degraded,
         ObservedProbeStatus::Unhealthy if unhealthy_streak >= quarantine_threshold => {
             HealthState::Quarantined
         }
-        ObservedProbeStatus::Unhealthy => HealthState::Degraded,
+        ObservedProbeStatus::Degraded | ObservedProbeStatus::Unhealthy => {
+            HealthState::Degraded
+        }
     };
 
     let next_status = match next_health_state {

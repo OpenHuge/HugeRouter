@@ -65,7 +65,7 @@ pub fn parse_audit_envelope(payload: &[u8]) -> Result<AuditMessageEnvelope> {
 
 pub async fn ensure_audit_table(pool: &PgPool) -> Result<()> {
     sqlx::query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS audit_events (
             message_id TEXT PRIMARY KEY,
             message_type TEXT NOT NULL,
@@ -76,7 +76,7 @@ pub async fn ensure_audit_table(pool: &PgPool) -> Result<()> {
             raw_payload JSONB NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-        "#,
+        ",
     )
     .execute(pool)
     .await
@@ -88,10 +88,10 @@ pub async fn ensure_audit_table(pool: &PgPool) -> Result<()> {
 pub async fn prune_audit_events(pool: &PgPool, retention_days: u64) -> Result<u64> {
     let retention_days = i32::try_from(retention_days).context("retention days exceeds i32")?;
     let result = sqlx::query(
-        r#"
+        r"
         DELETE FROM audit_events
         WHERE occurred_at < NOW() - make_interval(days => $1)
-        "#,
+        ",
     )
     .bind(retention_days)
     .execute(pool)
@@ -106,7 +106,7 @@ pub async fn persist_audit_envelope(
     envelope: &AuditMessageEnvelope,
 ) -> Result<bool> {
     let result = sqlx::query(
-        r#"
+        r"
         INSERT INTO audit_events (
             message_id,
             message_type,
@@ -118,7 +118,7 @@ pub async fn persist_audit_envelope(
         )
         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7)
         ON CONFLICT (message_id) DO NOTHING
-        "#,
+        ",
     )
     .bind(&envelope.message_id)
     .bind(&envelope.message_type)

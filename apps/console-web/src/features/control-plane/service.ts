@@ -9,7 +9,6 @@ import {
   type Project,
   type ProviderResource,
   type RoutePolicy,
-  routeReceiptDiagnosticsResponseSchema,
   routeReceiptSchema,
   type RouteReceiptDiagnosticsResponse,
   type RouteReceipt,
@@ -372,10 +371,6 @@ function parseRouteReceiptList(payload: unknown) {
   ]);
 
   return receipts.map(parseSingleRouteReceipt);
-}
-
-function parseRouteReceiptDiagnostics(payload: unknown) {
-  return routeReceiptDiagnosticsResponseSchema.parse(payload);
 }
 
 function toRouteReceiptDiagnostic(

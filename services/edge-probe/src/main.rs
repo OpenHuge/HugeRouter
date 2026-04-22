@@ -79,8 +79,8 @@ async fn main() -> Result<()> {
 
     loop {
         tokio::select! {
-            _ = shutdown.wait() => break,
-            _ = tokio::time::sleep(Duration::from_millis(interval_ms)) => {
+            () = shutdown.wait() => break,
+            () = tokio::time::sleep(Duration::from_millis(interval_ms)) => {
                 if let Err(error) = run_probe_iteration(
                     &http,
                     &publisher,
