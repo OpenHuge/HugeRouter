@@ -538,10 +538,7 @@ async fn unlink_auth_provider(
         removed
     };
 
-    Ok(Json(UnlinkAuthProviderResponse {
-        provider,
-        removed,
-    }))
+    Ok(Json(UnlinkAuthProviderResponse { provider, removed }))
 }
 
 fn issue_login_result(
