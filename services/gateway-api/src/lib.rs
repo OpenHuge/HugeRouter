@@ -290,7 +290,26 @@ async fn execute_route(
                 target.resource.provider_resource_id.as_str(),
             );
 
+            if let Some(next_target) = route.ranked_targets.get(index + 1) {
+                fallback_transitions.push(FallbackTransition {
+                    from_provider_resource_id: target.resource.provider_resource_id.clone(),
+                    to_provider_resource_id: next_target
+                        .target
+                        .resource
+                        .provider_resource_id
+                        .clone(),
+                    reason: format!(
+                        "no provider adapter registered for `{}`; retrying next ranked candidate",
+                        target.resource.provider_id
+                    ),
+                });
+            }
+
             last_error = Some((ranked_target.clone(), provider_error));
+            if index + 1 < route.ranked_targets.len() {
+                continue;
+            }
+
             break;
         };
 
@@ -1228,6 +1247,19 @@ mod tests {
         }
     }
 
+    fn build_target_with_provider(
+        provider_resource_id: &str,
+        provider_id: &str,
+        region: &str,
+        latency: f32,
+        cost: f32,
+        health_state: HealthState,
+    ) -> ProviderTargetRuntime {
+        let mut target = build_target(provider_resource_id, region, latency, cost, health_state);
+        target.resource.provider_id = provider_id.to_string();
+        target
+    }
+
     fn test_state(
         adapter: Arc<dyn ProviderAdapter>,
         targets: Vec<ProviderTargetRuntime>,
@@ -1487,6 +1519,69 @@ mod tests {
         assert_eq!(
             payload["choices"][0]["message"]["content"],
             "fallback success"
+        );
+    }
+
+    #[tokio::test]
+    async fn falls_back_when_first_target_has_no_registered_adapter() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_backup".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_456".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "adapter fallback success".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 11,
+                        output_tokens: 7,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let app = app_with_state(test_state(
+            adapter,
+            vec![
+                build_target_with_provider(
+                    "prvrsrc_anthropic_primary",
+                    "anthropic",
+                    "us-east-1",
+                    0.95,
+                    0.8,
+                    HealthState::Healthy,
+                ),
+                build_target(
+                    "prvrsrc_openai_backup",
+                    "us-east-1",
+                    0.85,
+                    0.75,
+                    HealthState::Healthy,
+                ),
+            ],
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["choices"][0]["message"]["content"],
+            "adapter fallback success"
         );
     }
 
