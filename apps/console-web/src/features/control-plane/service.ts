@@ -1,203 +1,313 @@
-import { createControlPlaneClient } from '@huge-router/ts-api-client'
-import { getSessionSnapshot } from '../auth/session'
 import {
-  overviewDataSchema,
-  providerResourceSchema,
-  routePolicySchema,
-  tenantDetailSchema,
-  tenantSummarySchema,
-  type OverviewData,
-  type ProviderResource,
-  type RoutePolicy,
-  type TenantDetail,
-  type TenantSummary
+  createControlPlaneClient,
+  type ControlPlaneClient
+} from '@huge-router/ts-api-client'
+import type {
+  ConfigSnapshot,
+  Project,
+  ProviderResource,
+  RoutePolicy,
+  RouteSimulationResponse,
+  Tenant
+} from '@huge-router/ts-shared-schema'
+import type { AuthSessionEnvelope } from '../auth/auth-contract'
+import { authSessionQueryKey } from '../auth/auth-queries'
+import { getQueryClient } from '../../lib/query-client'
+import type {
+  OverviewData,
+  ProjectSummary,
+  RoutePolicyView,
+  TenantDetail,
+  TenantSummary
 } from './types'
 
 export type ConsoleDataService = {
   getOverview: () => Promise<OverviewData>
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>
   listProviderResources: () => Promise<ProviderResource[]>
-  listRoutePolicies: () => Promise<RoutePolicy[]>
+  listRoutePolicies: () => Promise<RoutePolicyView[]>
   listTenants: () => Promise<TenantSummary[]>
 }
 
-const client = createControlPlaneClient()
+const CONTROL_PLANE_BASE_URL = import.meta.env.VITE_CONTROL_PLANE_BASE_URL
+  ? String(import.meta.env.VITE_CONTROL_PLANE_BASE_URL)
+  : ''
 
-const tenantSummaries = tenantSummarySchema.array().parse([
-  {
-    activeRoutePolicies: 2,
-    displayName: 'Acme Retail',
-    id: 'tenant_acme',
-    monthlySpendUsd: 18420,
-    plan: 'enterprise',
-    projectCount: 3,
-    slug: 'acme-retail',
-    status: 'healthy'
-  },
-  {
-    activeRoutePolicies: 1,
-    displayName: 'Northstar Labs',
-    id: 'tenant_northstar',
-    monthlySpendUsd: 6420,
-    plan: 'growth',
-    projectCount: 2,
-    slug: 'northstar-labs',
-    status: 'needs_attention'
-  }
-])
+const client = createControlPlaneClient({
+  baseUrl: CONTROL_PLANE_BASE_URL,
+  fetch: (input, init) => globalThis.fetch(input, init)
+})
 
-const providerResources = providerResourceSchema.array().parse([
-  {
-    health: 'healthy',
-    id: 'provider_openai_us_east',
-    name: 'OpenAI US East Primary',
-    provider: 'OpenAI',
-    region: 'us-east-1',
-    scope: 'shared',
-    status: 'active'
-  },
-  {
-    health: 'warning',
-    id: 'provider_anthropic_us_west',
-    name: 'Anthropic US West Burst',
-    provider: 'Anthropic',
-    region: 'us-west-2',
-    scope: 'tenant',
-    status: 'active'
-  },
-  {
-    health: 'degraded',
-    id: 'provider_google_eu',
-    name: 'Google EU Reserved',
-    provider: 'Google',
-    region: 'europe-west4',
-    scope: 'shared',
-    status: 'quarantined'
-  }
-])
-
-const routePolicies = routePolicySchema.array().parse([
-  {
-    id: 'routepol_acme_chat',
-    modelAlias: 'reasoning-fast',
-    name: 'Acme Interactive Chat',
-    selectedProvider: 'OpenAI US East Primary',
-    status: 'active',
-    successRate: 0.992,
-    tenantId: 'tenant_acme'
-  },
-  {
-    id: 'routepol_acme_tools',
-    modelAlias: 'tool-call-balanced',
-    name: 'Acme Tooling Workflows',
-    selectedProvider: 'Anthropic US West Burst',
-    status: 'draft',
-    successRate: 0.964,
-    tenantId: 'tenant_acme'
-  },
-  {
-    id: 'routepol_northstar_support',
-    modelAlias: 'support-safe',
-    name: 'Northstar Support Agent',
-    selectedProvider: 'OpenAI US East Primary',
-    status: 'active',
-    successRate: 0.978,
-    tenantId: 'tenant_northstar'
-  }
-])
-
-const projectDirectory = {
-  tenant_acme: [
-    { id: 'proj_acme_ops', name: 'Retail Operations Control' },
-    { id: 'proj_acme_routing', name: 'Checkout Routing' },
-    { id: 'proj_acme_support', name: 'Store Support Agent' }
-  ],
-  tenant_northstar: [
-    { id: 'proj_ns_qa', name: 'Research QA' },
-    { id: 'proj_ns_lab', name: 'Experiment Triage' }
-  ]
-} as const
-
-function normalizeClientProjectName(projectName: string, fallbackName: string) {
-  if (projectName === 'Bootstrap Placeholder') {
-    return fallbackName
-  }
-
-  return projectName
+function getAuthEnvelope() {
+  return getQueryClient().getQueryData<AuthSessionEnvelope>(authSessionQueryKey)
 }
 
-async function getProjectsForTenant(tenantId: keyof typeof projectDirectory) {
-  const projects = await client.listProjects()
+function getActiveTenantId() {
+  const envelope = getAuthEnvelope()
 
-  return projectDirectory[tenantId].map((project, index) => ({
-    id: project.id,
-    name: normalizeClientProjectName(
-      projects[index]?.display_name ?? project.name,
-      project.name
-    )
+  if (envelope?.state.kind !== 'authenticated') {
+    return null
+  }
+
+  return envelope.state.session.activeTenant?.tenantId ?? null
+}
+
+function isPlatformAdmin() {
+  const envelope = getAuthEnvelope()
+
+  return envelope?.state.kind === 'authenticated'
+    ? envelope.state.session.user.isPlatformAdmin
+    : false
+}
+
+function filterByTenant<T extends { tenant_id: string }>(items: T[]) {
+  const tenantId = getActiveTenantId()
+
+  if (!tenantId || isPlatformAdmin()) {
+    return items
+  }
+
+  return items.filter((item) => item.tenant_id === tenantId)
+}
+
+function toProjectSummary(project: Project): ProjectSummary {
+  return {
+    id: project.project_id,
+    name: project.display_name,
+    slug: project.slug
+  }
+}
+
+function mapRoutePolicies(
+  routePolicies: RoutePolicy[],
+  providerResources: ProviderResource[],
+  activeSnapshot: ConfigSnapshot | null
+): RoutePolicyView[] {
+  const providerNames = new Map(
+    providerResources.map((provider) => [provider.provider_resource_id, provider.name])
+  )
+
+  return routePolicies.map((policy) => ({
+    id: policy.route_policy_id,
+    modelAlias: policy.model_alias,
+    name: policy.display_name,
+    preferredRegions: policy.preferred_regions,
+    protocolFamily: policy.protocol_family,
+    requiredCapabilities: policy.required_capabilities,
+    selectedProviders:
+      activeSnapshot?.route_policy_id === policy.route_policy_id
+        ? activeSnapshot.provider_resource_ids
+            .map((providerId) => providerNames.get(providerId) ?? providerId)
+        : []
   }))
+}
+
+async function getActiveSnapshotOrNull(apiClient: ControlPlaneClient) {
+  try {
+    return await apiClient.getConfigSnapshot('active')
+  } catch {
+    return null
+  }
+}
+
+async function getRouteSimulationOrNull(
+  apiClient: ControlPlaneClient,
+  snapshot: ConfigSnapshot | null,
+  routePolicies: RoutePolicy[],
+  providerResources: ProviderResource[]
+) {
+  if (!snapshot) {
+    return null
+  }
+
+  const routePolicy = routePolicies.find(
+    (policy) => policy.route_policy_id === snapshot.route_policy_id
+  )
+
+  if (!routePolicy) {
+    return null
+  }
+
+  const region =
+    providerResources.find(
+      (provider) => provider.provider_resource_id === snapshot.provider_resource_ids[0]
+    )?.region ?? routePolicy.preferred_regions[0] ?? 'us-east-1'
+
+  try {
+    return await apiClient.simulateRoute({
+      credential_scope: 'cred_console',
+      expected_max_output_tokens: 256,
+      expected_prompt_tokens: 64,
+      model_alias: routePolicy.model_alias,
+      project_id: snapshot.project_id,
+      protocol_family: routePolicy.protocol_family,
+      region,
+      required_capabilities: routePolicy.required_capabilities,
+      tenant_id: snapshot.tenant_id,
+      traffic_class: 'console_preview'
+    })
+  } catch {
+    return null
+  }
+}
+
+function selectedProviderLabel(
+  simulation: RouteSimulationResponse | null,
+  providerResources: ProviderResource[]
+) {
+  if (!simulation?.selected_target) {
+    return 'No eligible provider'
+  }
+
+  return (
+    providerResources.find(
+      (provider) => provider.provider_resource_id === simulation.selected_target
+    )?.name ?? simulation.selected_target
+  )
+}
+
+async function loadControlPlaneData() {
+  const [tenants, projects, providerResources, routePolicies, activeSnapshot] = await Promise.all([
+    client.listTenants(),
+    client.listProjects(),
+    client.listProviderResources(),
+    client.listRoutePolicies(),
+    getActiveSnapshotOrNull(client)
+  ])
+
+  return {
+    activeSnapshot,
+    projects,
+    providerResources,
+    routePolicies,
+    tenants
+  }
 }
 
 const defaultConsoleDataService: ConsoleDataService = {
   async getOverview() {
-    const session = getSessionSnapshot()
-    const tenantId =
-      session.authState === 'authenticated' && session.tenantId
-        ? session.tenantId
-        : 'tenant_acme'
-    const tenant = tenantSummaries.find((candidate) => candidate.id === tenantId) ?? tenantSummaries[0]
-    const projects = await getProjectsForTenant(tenant.id as keyof typeof projectDirectory)
-    const activeRoutes = routePolicies.filter((policy) => policy.tenantId === tenant.id).length
-    const activeProviders = providerResources.filter((provider) => provider.status === 'active').length
-
-    return overviewDataSchema.parse({
-      activeProviders,
-      activeRoutes,
-      monthlySpendUsd: tenant.monthlySpendUsd,
-      projects,
-      tenantLabel: tenant.displayName,
-      workspace: tenant.slug
-    })
-  },
-  async getTenantDetail(tenantId) {
-    const tenant = tenantSummaries.find((candidate) => candidate.id === tenantId)
+    const { activeSnapshot, projects, providerResources, routePolicies, tenants } =
+      await loadControlPlaneData()
+    const tenantId = getActiveTenantId() ?? activeSnapshot?.tenant_id ?? tenants[0]?.tenant_id
+    const tenant = tenants.find((candidate) => candidate.tenant_id === tenantId) ?? tenants[0]
 
     if (!tenant) {
       throw new Error('tenant_not_found')
     }
 
-    const projects = await getProjectsForTenant(tenant.id as keyof typeof projectDirectory)
-    const tenantProviders =
-      tenant.id === 'tenant_acme'
-        ? providerResources.filter((provider) => provider.id !== 'provider_google_eu')
-        : providerResources.filter((provider) => provider.provider !== 'Anthropic')
+    const tenantProjects = projects
+      .filter((project) => project.tenant_id === tenant.tenant_id)
+      .map(toProjectSummary)
+    const tenantProviders = providerResources.filter(
+      (provider) => provider.tenant_id === tenant.tenant_id
+    )
+    const tenantRoutePolicies = routePolicies.filter(
+      (policy) => policy.tenant_id === tenant.tenant_id
+    )
+    const simulation = await getRouteSimulationOrNull(
+      client,
+      activeSnapshot?.tenant_id === tenant.tenant_id ? activeSnapshot : null,
+      tenantRoutePolicies,
+      tenantProviders
+    )
 
-    return tenantDetailSchema.parse({
-      ...tenant,
-      notes:
-        tenant.id === 'tenant_acme'
-          ? 'Primary checkout and support traffic with aggressive latency SLOs.'
-          : 'Research tenant using smaller daily volumes with stricter provider quarantine review.',
-      primaryRegion: tenant.id === 'tenant_acme' ? 'us-east-1' : 'us-west-2',
-      projects,
-      providers: tenantProviders,
-      routePolicies: routePolicies.filter((policy) => policy.tenantId === tenant.id)
-    })
+    return {
+      activeProviders: tenantProviders.filter((provider) => provider.status === 'active').length,
+      activeRoutes: tenantRoutePolicies.length,
+      activeSnapshotId:
+        activeSnapshot?.tenant_id === tenant.tenant_id
+          ? activeSnapshot.config_snapshot_id
+          : 'No active snapshot',
+      estimatedCostUsd: simulation?.estimated_cost.amount ?? '0.000000',
+      projects: tenantProjects,
+      selectedProvider: selectedProviderLabel(simulation, tenantProviders),
+      tenantLabel: tenant.display_name,
+      workspace: tenant.slug
+    }
   },
-  listProviderResources() {
-    return Promise.resolve(providerResources)
-  },
-  listRoutePolicies() {
-    const session = getSessionSnapshot()
 
-    if (session.authState === 'authenticated' && session.tenantId) {
-      return Promise.resolve(routePolicies.filter((policy) => policy.tenantId === session.tenantId))
+  async getTenantDetail(tenantId) {
+    const { activeSnapshot, projects, providerResources, routePolicies, tenants } =
+      await loadControlPlaneData()
+    const tenant = tenants.find((candidate) => candidate.tenant_id === tenantId)
+
+    if (!tenant) {
+      throw new Error('tenant_not_found')
     }
 
-    return Promise.resolve(routePolicies)
+    const tenantProjects = projects
+      .filter((project) => project.tenant_id === tenantId)
+      .map(toProjectSummary)
+    const tenantProviders = providerResources.filter(
+      (provider) => provider.tenant_id === tenantId
+    )
+    const tenantRoutePolicies = routePolicies.filter(
+      (policy) => policy.tenant_id === tenantId
+    )
+    const simulation = await getRouteSimulationOrNull(
+      client,
+      activeSnapshot?.tenant_id === tenantId ? activeSnapshot : null,
+      tenantRoutePolicies,
+      tenantProviders
+    )
+
+    return {
+      activeConfigSnapshotId:
+        activeSnapshot?.tenant_id === tenantId
+          ? activeSnapshot.config_snapshot_id
+          : undefined,
+      displayName: tenant.display_name,
+      estimatedCostUsd: simulation?.estimated_cost.amount,
+      id: tenant.tenant_id,
+      projects: tenantProjects,
+      providers: tenantProviders,
+      routePolicies: mapRoutePolicies(tenantRoutePolicies, tenantProviders, activeSnapshot),
+      selectedProvider: selectedProviderLabel(simulation, tenantProviders),
+      slug: tenant.slug,
+      updatedAt: tenant.updated_at,
+      version: tenant.version
+    }
   },
-  listTenants() {
-    return Promise.resolve(tenantSummaries)
+
+  async listProviderResources() {
+    const providerResources = await client.listProviderResources()
+
+    return filterByTenant(providerResources)
+  },
+
+  async listRoutePolicies() {
+    const [providerResources, routePolicies, activeSnapshot] = await Promise.all([
+      client.listProviderResources(),
+      client.listRoutePolicies(),
+      getActiveSnapshotOrNull(client)
+    ])
+    const filteredProviders = filterByTenant(providerResources)
+    const filteredPolicies = filterByTenant(routePolicies)
+
+    return mapRoutePolicies(filteredPolicies, filteredProviders, activeSnapshot)
+  },
+
+  async listTenants() {
+    const { activeSnapshot, projects, providerResources, routePolicies, tenants } =
+      await loadControlPlaneData()
+
+    return tenants.map((tenant) => ({
+      activeConfigSnapshotId:
+        activeSnapshot?.tenant_id === tenant.tenant_id
+          ? activeSnapshot.config_snapshot_id
+          : undefined,
+      displayName: tenant.display_name,
+      id: tenant.tenant_id,
+      projectCount: projects.filter((project) => project.tenant_id === tenant.tenant_id).length,
+      providerCount: providerResources.filter(
+        (provider) => provider.tenant_id === tenant.tenant_id
+      ).length,
+      routePolicyCount: routePolicies.filter(
+        (policy) => policy.tenant_id === tenant.tenant_id
+      ).length,
+      slug: tenant.slug,
+      updatedAt: tenant.updated_at
+    }))
   }
 }
 

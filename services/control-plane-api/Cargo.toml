@@ -10,11 +10,14 @@ anyhow.workspace = true
 axum.workspace = true
 chrono.workspace = true
 core-domain = { path = "../../crates/core-domain" }
+protocol-ir = { path = "../../crates/protocol-ir" }
 runtime-composition = { path = "../../crates/runtime-composition" }
 serde.workspace = true
 serde_json.workspace = true
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio-rustls", "json"] }
+time = { version = "0.3.44", features = ["formatting"] }
 tokio.workspace = true
-tower-http.workspace = true
+tower-http = { workspace = true, features = ["cors"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

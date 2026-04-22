@@ -1,18 +1,12 @@
-import {
-  Badge,
-  Card,
-  Group,
-  List,
-  SimpleGrid,
-  Stack,
-  Table,
-  Text
-} from '@mantine/core'
+import { Badge, Card, Group, Stack, Table, Text } from '@mantine/core'
 import { createFileRoute } from '@tanstack/react-router'
 import { PageHeader } from '@huge-router/ui-kit'
-import { formatCurrency } from '../features/control-plane/format'
 import { loadRouteData } from '../features/control-plane/loaders'
-import { EmptyCollectionState, RouteErrorState, RouteLoadingState } from '../features/control-plane/route-state'
+import {
+  EmptyCollectionState,
+  RouteErrorState,
+  RouteLoadingState
+} from '../features/control-plane/route-state'
 import { getConsoleDataService } from '../features/control-plane/service'
 
 export const Route = createFileRoute('/app/overview')({
@@ -29,7 +23,7 @@ function OverviewPage() {
     return (
       <Stack>
         <PageHeader
-          description="Monitor the current tenant workspace, active routes, and recent project coverage."
+          description="Monitor the current tenant workspace, active routing state, and control-plane configuration freshness."
           title="Overview"
         />
         <RouteErrorState
@@ -45,15 +39,15 @@ function OverviewPage() {
   return (
     <Stack>
       <PageHeader
-        description="Monitor the current tenant workspace, active routes, and recent project coverage."
+        description="Monitor the current tenant workspace, active routing state, and control-plane configuration freshness."
         title="Overview"
       />
-      <SimpleGrid cols={{ base: 1, md: 3 }}>
+      <Group grow align="stretch">
         <MetricCard label="Active providers" value={String(data.activeProviders)} />
         <MetricCard label="Active routes" value={String(data.activeRoutes)} />
-        <MetricCard label="Monthly spend" value={formatCurrency(data.monthlySpendUsd)} />
-      </SimpleGrid>
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
+        <MetricCard label="Active snapshot" value={data.activeSnapshotId} />
+      </Group>
+      <Group grow align="stretch">
         <Card padding="lg" radius="md" shadow="sm">
           <Group justify="space-between" mb="md">
             <Text fw={700}>Workspace summary</Text>
@@ -61,11 +55,15 @@ function OverviewPage() {
               {data.workspace}
             </Badge>
           </Group>
-          <List spacing="sm">
-            <List.Item>{data.tenantLabel} is using the current seeded control-plane slice.</List.Item>
-            <List.Item>Route policy health and provider inventory are now loaded through route loaders.</List.Item>
-            <List.Item>Projects are resolved through the published typed client surface where it exists today.</List.Item>
-          </List>
+          <Stack gap="xs">
+            <Text>{data.tenantLabel} is using the control-plane-backed MVP slice.</Text>
+            <Text c="dimmed" size="sm">
+              Selected provider: {data.selectedProvider}
+            </Text>
+            <Text c="dimmed" size="sm">
+              Simulated request cost: ${data.estimatedCostUsd}
+            </Text>
+          </Stack>
         </Card>
         <Card padding="lg" radius="md" shadow="sm">
           <Group justify="space-between" mb="md">
@@ -98,7 +96,7 @@ function OverviewPage() {
             </Table>
           )}
         </Card>
-      </SimpleGrid>
+      </Group>
     </Stack>
   )
 }
@@ -109,7 +107,7 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <Text c="dimmed" size="sm">
         {label}
       </Text>
-      <Text fw={700} mt="xs" size="xl">
+      <Text fw={700} mt="xs" size="lg">
         {value}
       </Text>
     </Card>
