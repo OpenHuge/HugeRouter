@@ -301,3 +301,15 @@ export const createGatewayClient = (
     }
   }
 }
+
+const expectType = <Expected>(value: Expected) => value
+
+void expectType<Project[]>([] as Awaited<ReturnType<ControlPlaneClient['listProjects']>>)
+void expectType<Tenant[]>([] as Awaited<ReturnType<ControlPlaneClient['listTenants']>>)
+void expectType<ProviderResource[]>(
+  [] as Awaited<ReturnType<ControlPlaneClient['listProviderResources']>>
+)
+void expectType<RoutePolicy[]>(
+  [] as Awaited<ReturnType<ControlPlaneClient['listRoutePolicies']>>
+)
+void expectType<GatewayChatRequest>({} as Parameters<GatewayClient['createChatCompletion']>[0])
