@@ -117,12 +117,12 @@ Protocol support should be expressed as typed resources rather than handler-loca
 
 The architecture should distinguish at least these resource types:
 
-- `NorthboundProtocolSurface`: one ingress compatibility surface such as Chat Completions, Responses, MCP, or A2A
+- `NorthboundProtocolSurface`: one ingress compatibility surface such as Chat Completions, Responses, MCP, or another future protocol family
 - `RouteResource`: one declarative route object that maps intent and policy to candidate target classes
 - `ProviderResource`: one concrete upstream execution target or account-backed endpoint
 - `AdapterManifest`: one runtime-declared execution capability and lifecycle contract
 - `McpResource`: one governed MCP server or MCP capability endpoint
-- `A2aResource`: one governed A2A agent target or discovery result
+- planned extensions such as `A2aResource` should become first-class only after the published protocol/resource contracts add them explicitly
 
 Minimum typed metadata expected on every resource:
 
@@ -143,6 +143,11 @@ Boundary rule:
 - manifests describe what runtime code can actually execute
 
 No one resource type should absorb the responsibilities of the others.
+
+Current contract reminder:
+
+- the published protocol-family contracts currently enumerate `openai_chat`, `openai_responses`, `mcp_streamable_http`, and `realtime_webrtc`
+- A2A remains planned in the architecture, but it is not yet part of the generated protocol-family enum or typed route-resource contracts in this repository
 
 ---
 

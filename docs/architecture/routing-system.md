@@ -169,56 +169,55 @@ The system should support:
 - pre-admission reserve accounting for estimated request cost
 - hard-stop and soft-throttle modes with explicit policy control
 
-Admission should converge on a stable terminal vocabulary:
+The current repository contract vocabulary should remain:
 
 - `admitted`
 - `rejected_no_candidate`
 - `rejected_budget`
-- `rejected_quota`
+- `rejected_rate_limit`
 - `rejected_concurrency`
 - `rejected_policy`
-- `rejected_trust_class`
+
+Future contract revisions may split `rejected_policy` into more specific outcomes such as quota- or trust-class-specific rejections, but the docs should not imply those distinctions are already part of the published schema.
 
 When a request is rejected before execution, the rejection should still emit a route decision record and policy reason so that customers can distinguish "policy denied" from "provider failed".
 
 ### 11.8 Route Receipt and Explainability
 
-Every routed request should emit a compact route receipt containing:
+Every routed request should emit a compact route receipt containing at least the current canonical fields:
 
 - receipt identifier
 - request identifier and trace identifier
-- protocol family and requested model alias
-- effective tenant, project, credential, and config snapshot identifiers
-- request classification inputs used by the routing engine
-- route strategy family
-- candidate list with exclusion reasons
-- score contributions by dimension such as latency, cost, health, trust, and residency
-- selected target and policy version
+- effective tenant, project, protocol family, requested model alias, and config snapshot identifiers
+- selected target when one exists
+- candidate exclusion reasons
+- score contributions for the selected target
 - admission terminal state
-- normalized policy decision summary or reason code set
-- quota or budget reservation outcome
+- normalized error details when execution fails
 - fallback chain traversal, if any
-- final execution outcome category
 
-Minimal route receipt shape:
+Current canonical route receipt shape:
 
 ```text
 RouteReceipt
 - route_receipt_id
+- tenant_id
+- project_id
 - request_id
 - trace_id
-- snapshot_id
+- config_snapshot_id
 - protocol_family
-- requested_model_alias
-- strategy_family
-- candidates[]
+- model_alias
 - selected_target
+- excluded_targets[]
+- score_breakdown
 - admission_result
-- policy_summary
-- budget_reservation
+- normalized_error?
 - fallback_transitions[]
-- terminal_outcome
+- created_at
 ```
+
+Planned extensions such as explicit strategy family, richer candidate ranking detail, policy summaries, and reservation outcomes should be added only when the machine-readable contracts adopt them.
 
 This receipt is the canonical artifact for support tooling, customer spend explanations, route simulation parity, and incident review.
 
@@ -260,14 +259,20 @@ Allow operators to test how a hypothetical request would route without sending t
 
 ### 37.3 Outputs
 
+Current contract outputs:
+
 - eligible candidates
 - filtered-out candidates with reasons
-- final ranked order
 - selected target
-- estimated cost and latency bands
+- estimated cost
 - simulated admission result
-- predicted fallback chain
 - effective snapshot identifier used by the simulation
+
+Planned parity improvements:
+
+- final ranked order
+- latency bands
+- predicted fallback chain
 
 ### 37.4 Simulation Status Rule
 
