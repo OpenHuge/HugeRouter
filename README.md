@@ -65,7 +65,8 @@ The repository now includes a working bootstrap baseline:
 
 Local development:
 
-- `pnpm install`
+- `pnpm doctor`
+- `pnpm install --frozen-lockfile`
 - `pnpm build`
 - `pnpm test`
 - `pnpm typecheck`
@@ -74,21 +75,28 @@ Local development:
 Convenience commands:
 
 - `just bootstrap`
+- `just doctor`
 - `just dev-frontend`
 - `just dev-ui`
 - `just stack-up`
 - `just stack-down`
 
+Quality notes:
+
+- `pnpm test` runs a workspace test-policy audit before package tests so placeholder scripts are called out explicitly instead of looking like real coverage.
+- Temporary placeholder packages are tracked in [`scripts/workspace-test-policy.json`](scripts/workspace-test-policy.json) until their owning tracks replace them with real tests.
+- GitHub Actions quality gates live in [`.github/workflows/quality.yml`](.github/workflows/quality.yml) and run JavaScript lint, typecheck, test, and build jobs plus Rust format, clippy, check, and test jobs on pull requests and `main`.
+
 ## Dev Container
 
 The repository includes a compose-based devcontainer in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json).
 
-- The workspace container installs Node `24.11.1`, `pnpm 10.33.0`, Rust `1.94.1`, and uses the official `ghcr.io/devcontainers/features/github-cli:1` feature so `gh` is available the same way it is in GitHub Codespaces.
+- The workspace container follows the `OpenHuge/HugeCode` direction of pinning the JavaScript toolchain inside the devcontainer itself, using the official `javascript-node` Bookworm image for Node/npm and installing Rust `1.94.1` plus `gh` in the Dockerfile; `corepack` activates `pnpm 10.33.0` during content updates.
 - `onCreate` installs `@openai/codex` into a user-owned npm global prefix.
-- `updateContent` installs workspace dependencies.
+- `updateContent` runs `pnpm verify:toolchain`, installs workspace dependencies with `--frozen-lockfile`, and warms Cargo dependencies.
 - `postCreate` and `postStart` persist Codex config in `.devcontainer/local/codex/config.toml` and GitHub CLI config in `.devcontainer/local/gh`.
 - In GitHub Codespaces, `gh` can use the built-in `GITHUB_TOKEN`; an optional recommended `GH_TOKEN` secret is declared for contributors who need fine-grained access to additional repositories. Locally, run `gh auth login` once and the stored auth will persist across rebuilds.
-- The devcontainer composes with the local infra stack for PostgreSQL, Redis, NATS, OpenTelemetry Collector, Prometheus, and Grafana.
+- In GitHub Codespaces, the devcontainer starts the workspace plus PostgreSQL, Redis, and NATS by default so observability sidecars cannot block container creation. Use `just stack-up` when you want the full local stack, including OpenTelemetry Collector, Prometheus, and Grafana.
 
 Recommended entry documents before starting implementation:
 

@@ -5,7 +5,8 @@ cd /workspaces/HugeRouter
 
 corepack enable
 corepack prepare pnpm@10.33.0 --activate
-pnpm install
+pnpm verify:toolchain
+pnpm install --frozen-lockfile
 cargo fetch
 
 if ! command -v just >/dev/null 2>&1; then

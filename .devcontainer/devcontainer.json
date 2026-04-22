@@ -15,17 +15,11 @@
       "documentationUrl": "https://docs.github.com/en/codespaces/troubleshooting/troubleshooting-authentication-to-a-repository"
     }
   },
-  "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
-  },
   "runServices": [
     "workspace",
     "postgres",
     "redis",
-    "nats",
-    "otel-collector",
-    "prometheus",
-    "grafana"
+    "nats"
   ],
   "onCreateCommand": "bash .devcontainer/on-create.sh",
   "updateContentCommand": "bash .devcontainer/update-content.sh",
