@@ -134,3 +134,126 @@ void test('gateway client validates requests and normalizes contract errors', as
     }
   )
 })
+
+void test('startEmailLogin posts the expected auth path and payload', async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const client = createControlPlaneClient({
+    baseUrl: 'https://control-plane.example.com',
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init })
+
+      return Response.json({
+        flowId: 'authflow_123',
+        verificationMode: 'magic_link',
+        expiresAt: '2026-04-22T10:00:00Z'
+      })
+    }
+  })
+
+  const response = await client.startEmailLogin({
+    email: 'dev@example.com',
+    workspaceSlug: 'platform-admin',
+    redirectTo: '/login/check-email'
+  })
+
+  assert.equal(
+    requests[0]?.url,
+    'https://control-plane.example.com/api/control-plane/auth/email/start'
+  )
+  assert.equal(requests[0]?.init?.method, 'POST')
+  assert.equal(
+    requests[0]?.init?.body,
+    JSON.stringify({
+      email: 'dev@example.com',
+      workspaceSlug: 'platform-admin',
+      redirectTo: '/login/check-email'
+    })
+  )
+  assert.equal(response.flowId, 'authflow_123')
+})
+
+void test('startOAuthLogin uses provider-specific start endpoints', async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const client = createControlPlaneClient({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init })
+
+      return Response.json({
+        provider: 'github',
+        authorizationUrl: 'https://github.com/login/oauth/authorize?client_id=demo',
+        state: 'oauth_state_123',
+        expiresAt: '2026-04-22T10:00:00Z'
+      })
+    }
+  })
+
+  const response = await client.startOAuthLogin('github', {
+    workspaceSlug: 'platform-admin',
+    redirectTo: '/login/callback'
+  })
+
+  assert.equal(requests[0]?.url, '/api/control-plane/auth/oauth/github/start')
+  assert.equal(requests[0]?.init?.method, 'POST')
+  assert.equal(response.provider, 'github')
+})
+
+void test('completeOAuthLogin validates the response payload as a shared auth result', async () => {
+  const client = createControlPlaneClient({
+    fetch: async () =>
+      Response.json({
+        session: {
+          sessionId: 'sess_123',
+          state: 'active',
+          user: {
+            userId: 'user_123',
+            primaryEmail: 'dev@example.com',
+            displayName: 'Dev Operator',
+            createdAt: '2026-04-20T09:00:00Z'
+          },
+          memberships: [],
+          authenticatedBy: 'github',
+          createdAt: '2026-04-22T09:30:00Z',
+          expiresAt: '2026-04-29T09:30:00Z',
+          lastAuthenticatedAt: '2026-04-22T09:30:00Z'
+        },
+        links: [
+          {
+            linkId: 'authlink_123',
+            provider: 'github',
+            providerSubject: 'github-user-42',
+            linkedAt: '2026-04-22T09:30:00Z',
+            canUnlink: true
+          }
+        ]
+      })
+  })
+
+  const result = await client.completeOAuthLogin('github', {
+    state: 'oauth_state_123',
+    code: 'oauth_code_123',
+    redirectUri: 'https://console.example.com/login/callback'
+  })
+
+  assert.equal(result.session.sessionId, 'sess_123')
+  assert.equal(result.links[0]?.provider, 'github')
+})
+
+void test('unlinkAuthProvider hits the provider-specific delete endpoint', async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const client = createControlPlaneClient({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init })
+
+      return Response.json({
+        provider: 'email',
+        removed: false
+      })
+    }
+  })
+
+  const response = await client.unlinkAuthProvider('email')
+
+  assert.equal(requests[0]?.url, '/api/control-plane/auth/links/email')
+  assert.equal(requests[0]?.init?.method, 'DELETE')
+  assert.equal(response.removed, false)
+})

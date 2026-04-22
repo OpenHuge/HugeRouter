@@ -1,0 +1,21 @@
+{
+  "links": [
+    {
+      "linkId": "authlink_123",
+      "provider": "email",
+      "providerSubject": "dev@example.com",
+      "email": "dev@example.com",
+      "linkedAt": "2026-04-22T09:30:00Z",
+      "canUnlink": false
+    },
+    {
+      "linkId": "authlink_456",
+      "provider": "github",
+      "providerSubject": "github-user-42",
+      "email": "dev@example.com",
+      "linkedAt": "2026-04-22T09:31:00Z",
+      "lastUsedAt": "2026-04-22T09:31:00Z",
+      "canUnlink": true
+    }
+  ]
+}

@@ -156,8 +156,15 @@ name = "control-plane-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
+ "core-domain",
  "runtime-composition",
+ "serde",
+ "serde_json",
  "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
  "tracing-subscriber",
 ]
 
@@ -1411,6 +1418,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

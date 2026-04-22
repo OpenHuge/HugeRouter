@@ -1,8 +1,21 @@
 import {
+  authLoginResultSchema,
+  authProviderLinksResponseSchema,
+  authProvidersResponseSchema,
+  authSessionResponseSchema,
   configSnapshotResponseSchema,
   errorEnvelopeSchema,
+  emailLoginCompleteRequestSchema,
+  emailLoginStartRequestSchema,
+  emailLoginStartResponseSchema,
   gatewayChatRequestSchema,
   gatewayChatResponseSchema,
+  logoutResponseSchema,
+  oauthCallbackRequestSchema,
+  oauthLoginStartRequestSchema,
+  oauthLoginStartResponseSchema,
+  oauthProviderSchema,
+  projectSchema,
   projectsResponseSchema,
   providerResourceSchema,
   providerResourcesResponseSchema,
@@ -11,9 +24,22 @@ import {
   routeSimulationRequestSchema,
   routeSimulationResponseSchema,
   tenantsResponseSchema,
+  unlinkAuthProviderResponseSchema,
+  type AuthLoginResult,
+  type AuthProviderLinksResponse,
+  type AuthProvidersResponse,
+  type AuthSessionResponse,
+  type EmailLoginCompleteRequest,
+  type EmailLoginStartRequest,
+  type EmailLoginStartResponse,
   type ErrorEnvelope,
   type GatewayChatRequest,
   type GatewayChatResponse,
+  type LogoutResponse,
+  type OAuthCallbackRequest,
+  type OAuthLoginStartRequest,
+  type OAuthLoginStartResponse,
+  type OAuthProvider,
   type Project,
   type ProviderResource,
   type RoutePolicy,
@@ -44,6 +70,33 @@ export class ContractApiError extends Error {
   }
 }
 
+export class ControlPlaneClientError extends Error {
+  readonly code?: string
+  readonly meta: {
+    requestId?: string
+    traceId?: string
+  }
+  readonly status: number
+
+  constructor(
+    message: string,
+    status: number,
+    options: {
+      code?: string
+      meta?: {
+        requestId?: string
+        traceId?: string
+      }
+    } = {}
+  ) {
+    super(message)
+    this.code = options.code
+    this.meta = options.meta ?? {}
+    this.name = 'ControlPlaneClientError'
+    this.status = status
+  }
+}
+
 export type ClientOptions = {
   baseUrl: string
   fetch?: FetchLike
@@ -55,6 +108,23 @@ export type ControlPlaneClient = {
   readonly contractDigest: typeof CONTRACT_DIGEST
   listTenants: () => Promise<Tenant[]>
   listProjects: () => Promise<Project[]>
+  getAuthProviders: () => Promise<AuthProvidersResponse>
+  startEmailLogin: (input: EmailLoginStartRequest) => Promise<EmailLoginStartResponse>
+  completeEmailLogin: (input: EmailLoginCompleteRequest) => Promise<AuthLoginResult>
+  startOAuthLogin: (
+    provider: OAuthProvider,
+    input: OAuthLoginStartRequest
+  ) => Promise<OAuthLoginStartResponse>
+  completeOAuthLogin: (
+    provider: OAuthProvider,
+    input: OAuthCallbackRequest
+  ) => Promise<AuthLoginResult>
+  getCurrentSession: () => Promise<AuthSessionResponse>
+  logout: () => Promise<LogoutResponse>
+  listAuthProviderLinks: () => Promise<AuthProviderLinksResponse>
+  unlinkAuthProvider: (
+    provider: OAuthProvider | 'email'
+  ) => Promise<ReturnType<typeof unlinkAuthProviderResponseSchema.parse>>
   listProviderResources: () => Promise<ProviderResource[]>
   getProviderResource: (providerResourceId: string) => Promise<ProviderResource>
   listRoutePolicies: () => Promise<RoutePolicy[]>
@@ -104,6 +174,10 @@ const buildUrl = (
       currentPath.replace(`{${key}}`, encodeURIComponent(value)),
     pathTemplate
   )
+
+  if (!baseUrl) {
+    return path
+  }
 
   return new URL(path, ensureTrailingSlash(baseUrl)).toString()
 }
@@ -157,6 +231,70 @@ const requestJson = async <T>({
   return parse(payload)
 }
 
+const requestAuthJson = async <T>({
+  baseUrl,
+  fetchImpl,
+  headers,
+  method,
+  path,
+  body,
+  parse
+}: {
+  baseUrl: string
+  fetchImpl: FetchLike
+  headers?: HeadersInit
+  method: string
+  path: string
+  body?: unknown
+  parse: (payload: unknown) => T
+}) => {
+  const response = await fetchImpl(buildUrl(baseUrl, path), {
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: 'include',
+    method,
+    headers: {
+      Accept: 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers ?? {})
+    }
+  })
+
+  const payload: unknown = await response.json()
+
+  if (!response.ok) {
+    const errorPayload = payload as
+      | {
+          code?: string
+          error?: {
+            code?: string
+            message?: string
+            requestId?: string
+            traceId?: string
+          }
+          message?: string
+          requestId?: string
+          traceId?: string
+        }
+      | undefined
+
+    throw new ControlPlaneClientError(
+      errorPayload?.error?.message ??
+        errorPayload?.message ??
+        `Control plane auth request failed with status ${response.status}`,
+      response.status,
+      {
+        code: errorPayload?.error?.code ?? errorPayload?.code,
+        meta: {
+          requestId: errorPayload?.error?.requestId ?? errorPayload?.requestId,
+          traceId: errorPayload?.error?.traceId ?? errorPayload?.traceId
+        }
+      }
+    )
+  }
+
+  return parse(payload)
+}
+
 export const createControlPlaneClient = (
   options: ClientOptions = {
     baseUrl: ''
@@ -179,6 +317,20 @@ export const createControlPlaneClient = (
       })
     },
     async listProjects() {
+      if (!options.baseUrl) {
+        return [
+          {
+            project_id: 'proj_placeholder',
+            tenant_id: 'tenant_placeholder',
+            slug: 'bootstrap-placeholder',
+            display_name: 'Bootstrap Placeholder',
+            version: 0,
+            created_at: '2026-04-22T00:00:00Z',
+            updated_at: '2026-04-22T00:00:00Z'
+          }
+        ].map((project) => projectSchema.parse(project))
+      }
+
       const operation = resolveOperation('listProjects')
       return requestJson({
         baseUrl: options.baseUrl,
@@ -187,6 +339,103 @@ export const createControlPlaneClient = (
         method: operation.method,
         path: operation.path,
         parse: (payload) => projectsResponseSchema.parse(payload).data
+      })
+    },
+    async getAuthProviders() {
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'GET',
+        path: '/api/control-plane/auth/providers',
+        parse: (payload) => authProvidersResponseSchema.parse(payload)
+      })
+    },
+    async startEmailLogin(input) {
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'POST',
+        path: '/api/control-plane/auth/email/start',
+        body: emailLoginStartRequestSchema.parse(input),
+        parse: (payload) => emailLoginStartResponseSchema.parse(payload)
+      })
+    },
+    async completeEmailLogin(input) {
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'POST',
+        path: '/api/control-plane/auth/email/complete',
+        body: emailLoginCompleteRequestSchema.parse(input),
+        parse: (payload) => authLoginResultSchema.parse(payload)
+      })
+    },
+    async startOAuthLogin(provider, input) {
+      const parsedProvider = oauthProviderSchema.parse(provider)
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'POST',
+        path: `/api/control-plane/auth/oauth/${parsedProvider}/start`,
+        body: oauthLoginStartRequestSchema.parse(input),
+        parse: (payload) => oauthLoginStartResponseSchema.parse(payload)
+      })
+    },
+    async completeOAuthLogin(provider, input) {
+      const parsedProvider = oauthProviderSchema.parse(provider)
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'POST',
+        path: `/api/control-plane/auth/oauth/${parsedProvider}/callback`,
+        body: oauthCallbackRequestSchema.parse(input),
+        parse: (payload) => authLoginResultSchema.parse(payload)
+      })
+    },
+    async getCurrentSession() {
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'GET',
+        path: '/api/control-plane/auth/session',
+        parse: (payload) => authSessionResponseSchema.parse(payload)
+      })
+    },
+    async logout() {
+      return requestAuthJson({
+        baseUrl: options.baseUrl ?? '',
+        fetchImpl,
+        headers: options.headers,
+        method: 'POST',
+        path: '/api/control-plane/auth/logout',
+        parse: (payload) => logoutResponseSchema.parse(payload)
+      })
+    },
+    async listAuthProviderLinks() {
+      return requestAuthJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: 'GET',
+        path: '/api/control-plane/auth/links',
+        parse: (payload) => authProviderLinksResponseSchema.parse(payload)
+      })
+    },
+    async unlinkAuthProvider(provider) {
+      const pathProvider = provider === 'email' ? 'email' : oauthProviderSchema.parse(provider)
+      return requestAuthJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: 'DELETE',
+        path: `/api/control-plane/auth/links/${pathProvider}`,
+        parse: (payload) => unlinkAuthProviderResponseSchema.parse(payload)
       })
     },
     async listProviderResources() {

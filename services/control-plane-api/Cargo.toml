@@ -7,10 +7,18 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+axum.workspace = true
+core-domain = { path = "../../crates/core-domain" }
 runtime-composition = { path = "../../crates/runtime-composition" }
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tower = "0.5.2"
 
 [lints]
 workspace = true
-

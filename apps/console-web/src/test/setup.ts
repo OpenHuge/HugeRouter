@@ -13,3 +13,8 @@ Object.defineProperty(window, 'matchMedia', {
   }),
   writable: true
 })
+
+Object.defineProperty(window, 'scrollTo', {
+  value: () => undefined,
+  writable: true
+})

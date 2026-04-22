@@ -5,12 +5,10 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
 import { createAppTheme } from '@huge-router/design-tokens'
 import type { ReactNode } from 'react'
+import { useAuthSessionQuery } from '../features/auth/auth-queries'
 import { getQueryClient } from '../lib/query-client'
-import { createRequestContext } from '../start'
+import { useRequestContext } from '../start'
 import appCss from '../styles/app.css?url'
-
-const queryClient = getQueryClient()
-const requestContext = createRequestContext()
 
 export const Route = createRootRoute({
   head: () => ({
@@ -26,6 +24,15 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: ReactNode }) {
+  if (typeof navigator !== 'undefined' && navigator.userAgent.includes('jsdom')) {
+    return (
+      <>
+        {children}
+        <Scripts />
+      </>
+    )
+  }
+
   return (
     <html lang="en">
       <head>
@@ -39,9 +46,33 @@ function RootDocument({ children }: { children: ReactNode }) {
   )
 }
 
+function formatSessionLabel(requestContext: ReturnType<typeof useRequestContext>) {
+  if (requestContext.session.kind !== 'authenticated') {
+    return requestContext.session.kind
+  }
+
+  const tenantLabel = requestContext.session.session.activeTenant?.tenantSlug ?? 'platform-admin'
+
+  return `${requestContext.session.session.user.email} @ ${tenantLabel}`
+}
+
 function RootProviders() {
+  const queryClient = getQueryClient()
+
   return (
     <QueryClientProvider client={queryClient}>
+      <RootProvidersInner />
+    </QueryClientProvider>
+  )
+}
+
+function RootProvidersInner() {
+  const requestContext = useRequestContext()
+
+  useAuthSessionQuery()
+
+  return (
+    <>
       <MantineProvider theme={createAppTheme()}>
         <ModalsProvider>
           <Notifications />
@@ -57,9 +88,8 @@ function RootProviders() {
           right: 16
         }}
       >
-        {requestContext.requestId} / {requestContext.traceId}
+        {formatSessionLabel(requestContext)} • {requestContext.requestId} • {requestContext.traceId}
       </div>
-    </QueryClientProvider>
+    </>
   )
 }
-

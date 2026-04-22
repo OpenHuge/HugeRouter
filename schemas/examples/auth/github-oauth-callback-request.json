@@ -1,0 +1,5 @@
+{
+  "state": "oauth_state_123",
+  "code": "oauth_code_123",
+  "redirectUri": "https://console.example.com/login/callback"
+}

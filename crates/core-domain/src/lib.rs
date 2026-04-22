@@ -213,6 +213,11 @@ prefixed_id!(RouteReceiptId, "routercpt_");
 prefixed_id!(UsageEventId, "usageevt_");
 prefixed_id!(LedgerEntryId, "ledger_");
 prefixed_id!(ReplayCapsuleId, "replay_");
+prefixed_id!(UserId, "user_");
+prefixed_id!(TenantMembershipId, "tmemb_");
+prefixed_id!(AuthSessionId, "sess_");
+prefixed_id!(AuthProviderLinkId, "authlink_");
+prefixed_id!(AuthFlowId, "authflow_");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -324,6 +329,227 @@ pub enum ConfigSnapshotStatus {
     Draft,
     Active,
     Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthProvider {
+    Email,
+    Github,
+    Google,
+    Wechat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthProvider {
+    Github,
+    Google,
+    Wechat,
+}
+
+impl From<OAuthProvider> for AuthProvider {
+    fn from(value: OAuthProvider) -> Self {
+        match value {
+            OAuthProvider::Github => Self::Github,
+            OAuthProvider::Google => Self::Google,
+            OAuthProvider::Wechat => Self::Wechat,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TenantMembershipRole {
+    Owner,
+    Admin,
+    Member,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TenantMembershipStatus {
+    Active,
+    Invited,
+    Suspended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthSessionState {
+    Active,
+    Revoked,
+    Expired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailLoginVerificationMode {
+    MagicLink,
+    OneTimeCode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TenantSummary {
+    pub id: TenantId,
+    pub slug: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserIdentity {
+    pub user_id: UserId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_email: Option<String>,
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_login_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TenantMembership {
+    pub membership_id: TenantMembershipId,
+    pub tenant: TenantSummary,
+    pub role: TenantMembershipRole,
+    pub status: TenantMembershipStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthProviderLink {
+    pub link_id: AuthProviderLinkId,
+    pub provider: AuthProvider,
+    pub provider_subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    pub linked_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    pub can_unlink: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthSession {
+    pub session_id: AuthSessionId,
+    pub state: AuthSessionState,
+    pub user: UserIdentity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_tenant_id: Option<TenantId>,
+    pub memberships: Vec<TenantMembership>,
+    pub authenticated_by: AuthProvider,
+    pub created_at: String,
+    pub expires_at: String,
+    pub last_authenticated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthProviderAvailability {
+    pub provider: AuthProvider,
+    pub display_name: String,
+    pub enabled: bool,
+    pub start_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailLoginStartRequest {
+    pub email: String,
+    pub workspace_slug: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_to: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailLoginStartResponse {
+    pub flow_id: AuthFlowId,
+    pub verification_mode: EmailLoginVerificationMode,
+    pub expires_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailLoginCompleteRequest {
+    pub flow_id: AuthFlowId,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthLoginStartRequest {
+    pub workspace_slug: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_to: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthLoginStartResponse {
+    pub provider: OAuthProvider,
+    pub authorization_url: String,
+    pub state: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthCallbackRequest {
+    pub state: String,
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthLoginResult {
+    pub session: AuthSession,
+    pub links: Vec<AuthProviderLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthSessionResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<AuthSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthProviderLinksResponse {
+    pub links: Vec<AuthProviderLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthProvidersResponse {
+    pub providers: Vec<AuthProviderAvailability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogoutResponse {
+    pub session_id: AuthSessionId,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnlinkAuthProviderResponse {
+    pub provider: AuthProvider,
+    pub removed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -674,11 +900,15 @@ pub struct ReplayCapsule {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdmissionResult, AuthKind, ConfigSnapshotId, CredentialOwnerType, DeploymentScope,
-        DomainError, ErrorEnvelope, HealthState, MonetaryAmount, NormalizedError, ProjectId,
-        ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
+        AdmissionResult, AuthFlowId, AuthKind, AuthLoginResult, AuthProvider, AuthProviderLink,
+        AuthProviderLinkId, AuthSession, AuthSessionId, AuthSessionState, ConfigSnapshotId,
+        CredentialOwnerType, DeploymentScope, DomainError, EmailLoginCompleteRequest,
+        ErrorEnvelope, HealthState, MonetaryAmount, NormalizedError, OAuthCallbackRequest,
+        ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
         ProviderResourceStatus, RoutePolicy, RouteReceipt, RouteReceiptId, ScoreBreakdown, Tenant,
-        TenantId, UsageEvent, UsageEventId, UsageMetrics, UsagePhase,
+        TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
+        TenantMembershipStatus, TenantSummary, UsageEvent, UsageEventId, UsageMetrics, UsagePhase,
+        UserId, UserIdentity,
     };
     use serde_json::{Value, json};
 
@@ -889,5 +1119,129 @@ mod tests {
 
         let invalid = serde_json::from_value::<TenantId>(json!("tenant_"));
         assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn auth_provider_link_serializes_with_camel_case_keys() {
+        let link = AuthProviderLink {
+            link_id: AuthProviderLinkId::parse("authlink_123").unwrap(),
+            provider: AuthProvider::Github,
+            provider_subject: "github-user-42".to_string(),
+            email: Some("dev@example.com".to_string()),
+            linked_at: "2026-04-22T09:00:00Z".to_string(),
+            last_used_at: Some("2026-04-22T10:00:00Z".to_string()),
+            can_unlink: true,
+        };
+
+        let json = serde_json::to_value(&link).unwrap();
+
+        assert_eq!(json["linkId"], "authlink_123");
+        assert_eq!(json["provider"], "github");
+        assert_eq!(json["providerSubject"], "github-user-42");
+        assert_eq!(json["canUnlink"], true);
+    }
+
+    #[test]
+    fn auth_session_payload_captures_membership_and_provider() {
+        let session = AuthSession {
+            session_id: AuthSessionId::parse("sess_123").unwrap(),
+            state: AuthSessionState::Active,
+            user: UserIdentity {
+                user_id: UserId::parse("user_123").unwrap(),
+                primary_email: Some("dev@example.com".to_string()),
+                display_name: "Dev Operator".to_string(),
+                avatar_url: Some("https://example.com/avatar.png".to_string()),
+                created_at: "2026-04-20T09:00:00Z".to_string(),
+                last_login_at: Some("2026-04-22T09:30:00Z".to_string()),
+            },
+            active_tenant_id: Some(TenantId::parse("tenant_123").unwrap()),
+            memberships: vec![TenantMembership {
+                membership_id: TenantMembershipId::parse("tmemb_123").unwrap(),
+                tenant: TenantSummary {
+                    id: TenantId::parse("tenant_123").unwrap(),
+                    slug: "acme".to_string(),
+                    display_name: "Acme".to_string(),
+                },
+                role: TenantMembershipRole::Admin,
+                status: TenantMembershipStatus::Active,
+            }],
+            authenticated_by: AuthProvider::Google,
+            created_at: "2026-04-22T09:30:00Z".to_string(),
+            expires_at: "2026-04-29T09:30:00Z".to_string(),
+            last_authenticated_at: "2026-04-22T09:30:00Z".to_string(),
+        };
+
+        let json = serde_json::to_value(&session).unwrap();
+
+        assert_eq!(json["sessionId"], "sess_123");
+        assert_eq!(json["state"], "active");
+        assert_eq!(json["user"]["userId"], "user_123");
+        assert_eq!(json["activeTenantId"], "tenant_123");
+        assert_eq!(json["memberships"][0]["tenant"]["displayName"], "Acme");
+        assert_eq!(json["authenticatedBy"], "google");
+    }
+
+    #[test]
+    fn email_login_complete_request_differs_from_oauth_callback_shape() {
+        let email_request = EmailLoginCompleteRequest {
+            flow_id: AuthFlowId::parse("authflow_123").unwrap(),
+            code: "123456".to_string(),
+        };
+        let oauth_request = OAuthCallbackRequest {
+            state: "oauth_state_123".to_string(),
+            code: "oauth_code_123".to_string(),
+            redirect_uri: Some("https://console.example.com/login/callback".to_string()),
+        };
+
+        let email_json = serde_json::to_value(&email_request).unwrap();
+        let oauth_json = serde_json::to_value(&oauth_request).unwrap();
+
+        assert_eq!(email_json["flowId"], "authflow_123");
+        assert!(email_json.get("state").is_none());
+        assert_eq!(oauth_json["state"], "oauth_state_123");
+        assert!(oauth_json.get("flowId").is_none());
+    }
+
+    #[test]
+    fn auth_login_result_round_trips_without_losing_linked_providers() {
+        let result = AuthLoginResult {
+            session: AuthSession {
+                session_id: AuthSessionId::parse("sess_123").unwrap(),
+                state: AuthSessionState::Active,
+                user: UserIdentity {
+                    user_id: UserId::parse("user_123").unwrap(),
+                    primary_email: Some("ops@example.com".to_string()),
+                    display_name: "Ops".to_string(),
+                    avatar_url: None,
+                    created_at: "2026-04-20T09:00:00Z".to_string(),
+                    last_login_at: None,
+                },
+                active_tenant_id: None,
+                memberships: Vec::new(),
+                authenticated_by: AuthProvider::Email,
+                created_at: "2026-04-22T09:30:00Z".to_string(),
+                expires_at: "2026-04-29T09:30:00Z".to_string(),
+                last_authenticated_at: "2026-04-22T09:30:00Z".to_string(),
+            },
+            links: vec![AuthProviderLink {
+                link_id: AuthProviderLinkId::parse("authlink_456").unwrap(),
+                provider: AuthProvider::Email,
+                provider_subject: "ops@example.com".to_string(),
+                email: Some("ops@example.com".to_string()),
+                linked_at: "2026-04-22T09:30:00Z".to_string(),
+                last_used_at: None,
+                can_unlink: false,
+            }],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: AuthLoginResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            parsed.session.session_id,
+            AuthSessionId::parse("sess_123").unwrap()
+        );
+        assert_eq!(parsed.links[0].provider, AuthProvider::Email);
+        assert_eq!(parsed.links[0].can_unlink, false);
     }
 }
