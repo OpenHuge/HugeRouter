@@ -1,0 +1,27 @@
+{
+  "name": "@huge-router/ui-kit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "lint": "eslint . --config ../../eslint.config.mjs",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "node -e \"console.log('No tests for ui-kit yet')\"",
+    "generate": "node -e \"console.log('No generated assets for ui-kit yet')\""
+  },
+  "dependencies": {
+    "@mantine/core": "9.0.2",
+    "@mantine/hooks": "9.0.2",
+    "react": "19.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "typescript": "6.0.3"
+  }
+}
+

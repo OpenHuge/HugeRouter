@@ -1,0 +1,31 @@
+{
+  "name": "huge-router",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": "24.11.1"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build && node ./scripts/run-cargo.mjs check --workspace",
+    "lint": "turbo run lint && node ./scripts/run-cargo.mjs clippy --workspace --all-targets",
+    "typecheck": "turbo run typecheck && node ./scripts/run-cargo.mjs check --workspace",
+    "test": "turbo run test && node ./scripts/run-cargo.mjs test --workspace",
+    "generate": "turbo run generate",
+    "storybook": "turbo run storybook --filter=storybook",
+    "fmt": "prettier --write . && node ./scripts/run-cargo.mjs fmt --all"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "eslint": "10.2.1",
+    "globals": "16.4.0",
+    "prettier": "3.8.3",
+    "turbo": "2.9.6",
+    "typescript-eslint": "8.58.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+services:
+  workspace:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        NODE_VERSION: "24.15.0"
+        PNPM_VERSION: "10.33.0"
+        RUST_VERSION: "1.95.0"
+    command: /bin/sh -c "while sleep 1000; do :; done"
+    depends_on:
+      grafana:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      CARGO_HOME: /home/vscode/.cargo
+      PNPM_HOME: /home/vscode/.local/share/pnpm
+    volumes:
+      - ../../:/workspaces/HugeRouter:cached
+      - cargo-git:/home/vscode/.cargo/git
+      - cargo-registry:/home/vscode/.cargo/registry
+      - pnpm-store:/home/vscode/.local/share/pnpm/store
+    working_dir: /workspaces/HugeRouter
+
+volumes:
+  cargo-git:
+  cargo-registry:
+  pnpm-store:

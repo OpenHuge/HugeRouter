@@ -1,0 +1,16 @@
+[package]
+name = "routing-worker"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+runtime-composition = { path = "../../crates/runtime-composition" }
+tokio.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
+

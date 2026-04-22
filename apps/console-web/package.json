@@ -1,0 +1,51 @@
+{
+  "name": "console-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --config ../../eslint.config.mjs",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --config vite.config.ts",
+    "test:watch": "vitest --config vite.config.ts",
+    "test:coverage": "vitest run --config vite.config.ts --coverage",
+    "generate": "node -e \"console.log('Route and schema generation are reserved for later foundation tasks')\""
+  },
+  "dependencies": {
+    "@huge-router/design-tokens": "workspace:*",
+    "@huge-router/ts-api-client": "workspace:*",
+    "@huge-router/ts-shared-schema": "workspace:*",
+    "@huge-router/test-utils": "workspace:*",
+    "@huge-router/ui-kit": "workspace:*",
+    "@mantine/core": "9.0.2",
+    "@mantine/hooks": "9.0.2",
+    "@mantine/modals": "9.0.2",
+    "@mantine/notifications": "9.0.2",
+    "@tanstack/react-form": "1.29.0",
+    "@tanstack/react-query": "5.99.2",
+    "@tanstack/react-router": "1.168.23",
+    "@tanstack/react-router-devtools": "1.166.13",
+    "@tanstack/react-start": "1.167.42",
+    "@tanstack/react-table": "8.21.3",
+    "@tanstack/router-plugin": "1.167.22",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/jest-dom": "6.9.1",
+    "@vitejs/plugin-react": "6.0.1",
+    "@vitest/coverage-v8": "4.1.4",
+    "jsdom": "29.0.2",
+    "typescript": "6.0.3",
+    "vite": "8.0.9",
+    "vitest": "4.1.4"
+  }
+}

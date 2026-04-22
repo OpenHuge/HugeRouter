@@ -1,0 +1,7 @@
+{
+  "extends": "../../packages/typescript-config/react-app.json",
+  "compilerOptions": {
+    "composite": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", ".storybook/**/*.ts", ".storybook/**/*.tsx"]
+}

@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./apps/console-web" },
+    { "path": "./apps/storybook" },
+    { "path": "./packages/design-tokens" },
+    { "path": "./packages/ui-kit" },
+    { "path": "./packages/ts-api-client" },
+    { "path": "./packages/ts-shared-schema" },
+    { "path": "./packages/test-utils" }
+  ]
+}
+

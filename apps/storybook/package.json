@@ -1,0 +1,34 @@
+{
+  "name": "storybook",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "storybook dev -p 6006 --ci --host 0.0.0.0",
+    "build": "storybook build",
+    "storybook": "storybook dev -p 6006 --ci --host 0.0.0.0",
+    "lint": "eslint . --config ../../eslint.config.mjs",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "node -e \"console.log('Storybook visual checks are reserved for CI')\"",
+    "generate": "node -e \"console.log('No generated assets for storybook yet')\""
+  },
+  "dependencies": {
+    "@huge-router/design-tokens": "workspace:*",
+    "@huge-router/ui-kit": "workspace:*",
+    "@mantine/core": "9.0.2",
+    "@mantine/modals": "9.0.2",
+    "@mantine/notifications": "9.0.2",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
+  },
+  "devDependencies": {
+    "@storybook/react-vite": "10.3.5",
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.1",
+    "storybook": "10.3.5",
+    "typescript": "6.0.3",
+    "vite": "8.0.9"
+  }
+}
