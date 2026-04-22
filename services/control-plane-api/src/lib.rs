@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{
         HeaderMap, HeaderValue, Method,
-        header::{COOKIE, SET_COOKIE},
+        header::{AUTHORIZATION, COOKIE, SET_COOKIE},
     },
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -107,7 +107,8 @@ struct GatewayApiKeyResolveRequest {
 struct GatewayApiKeyResolveResponse {
     pub credential_id: String,
     pub tenant_id: String,
-    pub project_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub status: String,
 }
 
@@ -937,13 +938,16 @@ async fn create_config_snapshot(
 
 async fn list_api_keys(
     State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
 ) -> Result<Json<ApiKeysResponse>, ApiError> {
+    let context = next_request_context();
+    let _session = require_platform_admin_session(&state, &headers, &context).await?;
     Ok(Json(state.store.list_api_keys().await.map_err(
         |error| {
             ApiError::internal(
                 "storage_unavailable",
                 format!("failed to list API keys: {error}"),
-                &next_request_context(),
+                &context,
             )
         },
     )?))
@@ -951,9 +955,11 @@ async fn list_api_keys(
 
 async fn create_api_key(
     State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
     Json(request): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKey>, ApiError> {
     let context = next_request_context();
+    let _session = require_platform_admin_session(&state, &headers, &context).await?;
     let provider_resource_id =
         ProviderResourceId::parse(&request.provider_resource_id).map_err(|_| {
             ApiError::bad_request(
@@ -984,10 +990,12 @@ async fn create_api_key(
 
 async fn revoke_api_key(
     State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
     Path(api_key_id): Path<String>,
     Json(request): Json<ConcurrencyRequest>,
 ) -> Result<Json<ApiKey>, ApiError> {
     let context = next_request_context();
+    let _session = require_platform_admin_session(&state, &headers, &context).await?;
     let response = state
         .store
         .revoke_api_key(&api_key_id, request.expected_version)
@@ -1017,9 +1025,11 @@ async fn revoke_api_key(
 
 async fn resolve_api_key_for_gateway(
     State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
     Json(request): Json<GatewayApiKeyResolveRequest>,
 ) -> Result<Json<GatewayApiKeyResolveResponse>, ApiError> {
     let context = next_request_context();
+    require_internal_gateway_auth(&headers, &context)?;
     let resolved = state
         .store
         .resolve_api_key(&request.api_key)
@@ -1050,9 +1060,7 @@ async fn resolve_api_key_for_gateway(
     Ok(Json(GatewayApiKeyResolveResponse {
         credential_id: resolved.api_key_id,
         tenant_id: resolved.tenant_id.to_string(),
-        project_id: resolved
-            .project_id
-            .map_or_else(String::new, |project_id| project_id.to_string()),
+        project_id: resolved.project_id.map(|project_id| project_id.to_string()),
         status: "active".to_string(),
     }))
 }
@@ -1218,6 +1226,74 @@ async fn require_session(
             context,
         )
     })
+}
+
+async fn require_platform_admin_session(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<core_domain::AuthLoginResult, ApiError> {
+    let session = require_session(state, headers, context).await?;
+    let is_platform_admin = session.session.memberships.iter().any(|membership| {
+        membership.tenant.slug == "platform-admin"
+            && matches!(
+                membership.role,
+                core_domain::TenantMembershipRole::Owner
+                    | core_domain::TenantMembershipRole::Admin
+            )
+    });
+
+    if !is_platform_admin {
+        return Err(ApiError::forbidden(
+            "forbidden",
+            "platform-admin membership is required for API key management".to_string(),
+            context,
+        ));
+    }
+
+    Ok(session)
+}
+
+#[allow(clippy::result_large_err)]
+fn require_internal_gateway_auth(
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    let configured_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "dev-internal-token".to_string());
+    let Some(value) = headers.get(AUTHORIZATION) else {
+        return Err(ApiError::unauthorized(
+            "auth_invalid",
+            "missing Authorization header for internal gateway call".to_string(),
+            context,
+        ));
+    };
+    let header = value.to_str().map_err(|_| {
+        ApiError::unauthorized(
+            "auth_invalid",
+            "Authorization header must be valid UTF-8".to_string(),
+            context,
+        )
+    })?;
+    let Some(token) = header.strip_prefix("Bearer ") else {
+        return Err(ApiError::unauthorized(
+            "auth_invalid",
+            "Authorization header must use Bearer credentials".to_string(),
+            context,
+        ));
+    };
+
+    if token != configured_token {
+        return Err(ApiError::forbidden(
+            "forbidden",
+            "internal gateway token is invalid".to_string(),
+            context,
+        ));
+    }
+
+    Ok(())
 }
 
 async fn resolve_session(
@@ -1402,13 +1478,31 @@ mod tests {
     use super::{ControlPlaneState, app_with_state};
     use axum::{
         body::{Body, to_bytes},
-        http::{Request, StatusCode, header::SET_COOKIE},
+        http::{Request, StatusCode, header::{AUTHORIZATION, COOKIE, SET_COOKIE}},
     };
     use core_domain::{
-        AdmissionResult, ConfigSnapshotId, ExcludedTarget, ProjectId, ProviderResourceId,
+        AdmissionResult, AuthProvider, ConfigSnapshotId, ExcludedTarget, ProjectId, ProviderResourceId,
         RouteReceipt, ScoreBreakdown, TenantId,
     };
     use serde_json::Value;
+    use crate::store::IdentityLookup;
+
+    async fn platform_admin_cookie(state: &ControlPlaneState) -> String {
+        let session_id = "sess_platform_admin_test";
+        state
+            .store
+            .issue_session(
+                session_id,
+                AuthProvider::Email,
+                &IdentityLookup::Email("ops@huge-router.dev".to_string()),
+                "platform-admin",
+                "2026-04-22T00:00:00Z",
+                "2026-04-22T08:00:00Z",
+            )
+            .await
+            .expect("platform admin session should issue");
+        format!("huge_router_session={session_id}")
+    }
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -2296,7 +2390,9 @@ mod tests {
 
     #[tokio::test]
     async fn api_keys_support_create_list_revoke_with_version() {
-        let app = app_with_state(ControlPlaneState::memory());
+        let state = ControlPlaneState::memory();
+        let admin_cookie = platform_admin_cookie(&state).await;
+        let app = app_with_state(state);
 
         let create = app
             .clone()
@@ -2304,6 +2400,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/v1/api-keys")
+                    .header(COOKIE, &admin_cookie)
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2332,6 +2429,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/v1/api-keys")
+                    .header(COOKIE, &admin_cookie)
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2351,6 +2449,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!("/v1/api-keys/{}/revoke", api_key_id))
+                    .header(COOKIE, &admin_cookie)
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2369,6 +2468,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!("/v1/api-keys/{}/revoke", api_key_id))
+                    .header(COOKIE, &admin_cookie)
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2389,7 +2489,9 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_api_key_resolve_returns_scope_or_404() {
-        let app = app_with_state(ControlPlaneState::memory());
+        let state = ControlPlaneState::memory();
+        let admin_cookie = platform_admin_cookie(&state).await;
+        let app = app_with_state(state);
 
         let create = app
             .clone()
@@ -2397,6 +2499,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/v1/api-keys")
+                    .header(COOKIE, &admin_cookie)
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2422,6 +2525,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer dev-internal-token")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2443,10 +2547,12 @@ mod tests {
         assert_eq!(resolved["status"], "active");
 
         let missing = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer dev-internal-token")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
@@ -2459,5 +2565,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        let unauthorized = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/api-keys/resolve")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "api_key":"akp_live_gateway_lookup"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -185,7 +185,7 @@ struct ActiveGatewayConfig {
 struct GatewayApiKeyScope {
     credential_id: String,
     tenant_id: String,
-    project_id: String,
+    project_id: Option<String>,
     status: String,
 }
 
@@ -733,14 +733,28 @@ fn ensure_scope_matches_config(
         ));
     }
 
-    if api_key_scope.tenant_id != active_config.config_snapshot.tenant_id.as_str()
-        || api_key_scope.project_id != active_config.config_snapshot.project_id.as_str()
+    if api_key_scope.tenant_id != active_config.config_snapshot.tenant_id.as_str() {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key tenant scope does not match the active gateway configuration".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    if let Some(project_id) = api_key_scope.project_id.as_deref()
+        && project_id != active_config.config_snapshot.project_id.as_str()
     {
         return Err(GatewayError::new(
             StatusCode::FORBIDDEN,
             normalized_error(
                 "auth_forbidden",
-                "API key scope does not match the active gateway configuration".to_string(),
+                "API key project scope does not match the active gateway configuration"
+                    .to_string(),
                 context,
                 false,
             ),
@@ -1531,6 +1545,7 @@ struct ControlPlaneApiKeyStore {
     cache: Arc<Mutex<HashMap<String, CachedApiKeyScope>>>,
     cache_ttl: Duration,
     client: reqwest::Client,
+    internal_token: String,
     resolve_path: String,
 }
 
@@ -1687,15 +1702,26 @@ impl ControlPlaneApiKeyStore {
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .map_or_else(|| Duration::from_secs(5), Duration::from_millis);
+        let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "dev-internal-token".to_string());
         let resolve_path = std::env::var("GATEWAY_API_KEY_RESOLVE_PATH")
             .unwrap_or_else(|_| "/internal/gateway/api-keys/resolve".to_string());
 
-        Self::new(base_url, resolve_path, cache_ttl, reqwest::Client::new())
+        Self::new(
+            base_url,
+            resolve_path,
+            internal_token,
+            cache_ttl,
+            reqwest::Client::new(),
+        )
     }
 
     fn new(
         base_url: impl Into<String>,
         resolve_path: impl Into<String>,
+        internal_token: impl Into<String>,
         cache_ttl: Duration,
         client: reqwest::Client,
     ) -> Self {
@@ -1704,6 +1730,7 @@ impl ControlPlaneApiKeyStore {
             cache: Arc::new(Mutex::new(HashMap::new())),
             cache_ttl,
             client,
+            internal_token: internal_token.into(),
             resolve_path: resolve_path.into(),
         }
     }
@@ -1719,6 +1746,10 @@ impl ControlPlaneApiKeyStore {
         let response = self
             .client
             .post(&url)
+            .header(
+                AUTHORIZATION,
+                format!("Bearer {}", self.internal_token),
+            )
             .json(&GatewayApiKeyResolveRequest {
                 api_key: api_key.to_string(),
             })
@@ -2198,7 +2229,7 @@ mod tests {
                 scope: GatewayApiKeyScope {
                     credential_id: "cred_gateway_test".to_string(),
                     tenant_id: "tenant_acme".to_string(),
-                    project_id: "proj_core".to_string(),
+                    project_id: Some("proj_core".to_string()),
                     status: "active".to_string(),
                 },
             }
@@ -2295,7 +2326,7 @@ mod tests {
             api_key: GatewayApiKeyScope {
                 credential_id: "cred_gateway_test".to_string(),
                 tenant_id: "tenant_acme".to_string(),
-                project_id: "proj_core".to_string(),
+                project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
             },
         }))
@@ -2876,6 +2907,7 @@ mod tests {
         let store = ControlPlaneApiKeyStore::new(
             base_url,
             "/internal/gateway/api-keys/resolve",
+            "dev-internal-token",
             Duration::from_secs(60),
             reqwest::Client::new(),
         );
@@ -2884,7 +2916,7 @@ mod tests {
         let second = store.resolve("test").await.unwrap();
 
         assert_eq!(first.credential_id, "cred_gateway_test");
-        assert_eq!(second.project_id, "proj_core");
+        assert_eq!(second.project_id.as_deref(), Some("proj_core"));
         assert_eq!(request_count.load(AtomicOrdering::Relaxed), 1);
 
         handle.abort();
@@ -2910,7 +2942,7 @@ mod tests {
                 scope: GatewayApiKeyScope {
                     credential_id: "cred_other".to_string(),
                     tenant_id: "tenant_platform".to_string(),
-                    project_id: "proj_core".to_string(),
+                    project_id: Some("proj_core".to_string()),
                     status: "active".to_string(),
                 },
             }),

@@ -239,6 +239,7 @@ GATEWAY_PORT="${GATEWAY_API_ADDR#*:}"
 export CONTROL_PLANE_BASE_URL="http://${CONTROL_PLANE_HOST}:${CONTROL_PLANE_PORT}"
 export GATEWAY_BASE_URL="http://${GATEWAY_HOST}:${GATEWAY_PORT}"
 export NATS_URL="nats://127.0.0.1:${NATS_CLIENT_PORT}"
+export CONTROL_PLANE_INTERNAL_TOKEN="${CONTROL_PLANE_INTERNAL_TOKEN:-dev-internal-token}"
 
 export CONTROL_PLANE_DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 export LEDGER_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
@@ -295,6 +296,7 @@ cargo build -p control-plane-api -p gateway-api -p ledger-worker
   cd "${REPO_ROOT}"
   export CONTROL_PLANE_API_ADDR
   export CONTROL_PLANE_DATABASE_URL
+  export CONTROL_PLANE_INTERNAL_TOKEN
   cargo run -p control-plane-api
 ) >"${LOG_ROOT}/control-plane-api.log" 2>&1 &
 SERVICE_PIDS+=("$!")
@@ -307,6 +309,7 @@ log "control-plane started (pid ${CONTROL_PLANE_PID})"
   export CONTROL_PLANE_BASE_URL
   export GATEWAY_NATS_URL
   export GATEWAY_OPENAI_API_KEY
+  export CONTROL_PLANE_INTERNAL_TOKEN
   export OPENAI_API_KEY
   cargo run -p gateway-api
 ) >"${LOG_ROOT}/gateway-api.log" 2>&1 &
