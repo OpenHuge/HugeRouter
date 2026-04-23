@@ -2052,7 +2052,7 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlPlaneState, app_with_state};
+    use super::{ControlPlaneState, app_with_state, resolve_oidc_membership};
     use crate::store::IdentityLookup;
     use axum::{
         body::{Body, to_bytes},
@@ -2420,6 +2420,14 @@ mod tests {
         assert_eq!(body["line_items"][0]["dimension"], "input_tokens");
     }
 
+    #[test]
+    fn oidc_group_mapping_promotes_platform_admin_workspace() {
+        let (workspace_slug, role) =
+            resolve_oidc_membership(&["platform-admins".to_string()], "acme-retail");
+
+        assert_eq!(workspace_slug, "platform-admin");
+        assert_eq!(role, core_domain::TenantMembershipRole::Admin);
+    }
     #[tokio::test]
     async fn billing_exports_can_be_created_and_listed() {
         let app = app_with_state(ControlPlaneState::memory());
