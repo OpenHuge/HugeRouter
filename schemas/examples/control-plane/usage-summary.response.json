@@ -1,0 +1,21 @@
+{
+  "data": {
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core",
+    "window_start": "2026-04-21T00:00:00Z",
+    "window_end": "2026-04-21T23:59:59Z",
+    "currency": "USD",
+    "event_count": 14,
+    "input_tokens": 18420,
+    "output_tokens": 6245,
+    "cached_input_tokens": 1220,
+    "provider_cost": {
+      "currency": "USD",
+      "amount": "0.124500"
+    },
+    "billable_price": {
+      "currency": "USD",
+      "amount": "0.152025"
+    }
+  }
+}

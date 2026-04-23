@@ -1,0 +1,12 @@
+{
+  "provider_id": "openai",
+  "model_alias": "reasoning-fast",
+  "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 320,
+    "cached_input_tokens": 64
+  },
+  "region": "us-east-1",
+  "image_generation_units": 1,
+  "audio_seconds": 8
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BillingExportRequest",
+  "type": "object",
+  "required": [
+    "format",
+    "window_end",
+    "window_start"
+  ],
+  "properties": {
+    "format": {
+      "type": "string"
+    },
+    "project_id": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ProjectId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tenant_id": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TenantId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "window_end": {
+      "type": "string"
+    },
+    "window_start": {
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

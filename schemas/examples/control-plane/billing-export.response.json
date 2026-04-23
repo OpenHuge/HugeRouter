@@ -1,0 +1,10 @@
+{
+  "data": {
+    "export_job_id": "export_123",
+    "status": "queued",
+    "format": "csv",
+    "requested_at": "2026-04-21T12:25:00Z",
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core"
+  }
+}

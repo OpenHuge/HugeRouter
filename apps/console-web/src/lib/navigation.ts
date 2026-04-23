@@ -23,6 +23,16 @@ export const tenantNav = [
     href: '/app/providers',
     label: 'Providers',
     description: 'Provider inventory, health, and routing scope'
+  },
+  {
+    href: '/app/usage',
+    label: 'Usage',
+    description: 'Usage summaries, token breakdowns, and recent spend signals'
+  },
+  {
+    href: '/app/billing',
+    label: 'Billing',
+    description: 'Balance projections, budget thresholds, and export status'
   }
 ]
 

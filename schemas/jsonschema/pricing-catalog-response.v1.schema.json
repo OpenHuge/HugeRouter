@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PricingCatalogResponse",
+  "type": "object",
+  "required": [
+    "catalog_id",
+    "catalog_version",
+    "currency",
+    "entries"
+  ],
+  "properties": {
+    "catalog_id": {
+      "type": "string"
+    },
+    "catalog_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "currency": {
+      "type": "string"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PricingCatalogEntry"
+      }
+    }
+  },
+  "definitions": {
+    "PricingCatalogEntry": {
+      "type": "object",
+      "required": [
+        "dimension",
+        "micros_per_unit",
+        "provider_id",
+        "source",
+        "unit_denominator"
+      ],
+      "properties": {
+        "dimension": {
+          "type": "string"
+        },
+        "micros_per_unit": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "model_alias": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "unit_denominator": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

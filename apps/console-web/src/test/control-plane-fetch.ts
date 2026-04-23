@@ -312,6 +312,103 @@ const routeReceiptsResponse = {
   ],
 };
 
+const usageSummaryResponse = {
+  data: {
+    tenant_id: "tenant_acme",
+    project_id: "proj_core",
+    window_start: "2026-04-01T00:00:00Z",
+    window_end: "2026-04-30T23:59:59Z",
+    currency: "USD",
+    event_count: 14,
+    input_tokens: 18420,
+    output_tokens: 6245,
+    cached_input_tokens: 1220,
+    provider_cost: {
+      currency: "USD",
+      amount: "0.124500",
+    },
+    billable_price: {
+      currency: "USD",
+      amount: "0.152025",
+    },
+  },
+};
+
+const usageBreakdownResponse = {
+  data: [
+    {
+      bucket: "openai",
+      provider_id: "openai",
+      input_tokens: 10000,
+      output_tokens: 4000,
+      cached_input_tokens: 500,
+      provider_cost: {
+        currency: "USD",
+        amount: "0.082000",
+      },
+      billable_price: {
+        currency: "USD",
+        amount: "0.098400",
+      },
+    },
+    {
+      bucket: "reasoning-fast",
+      model_alias: "reasoning-fast",
+      input_tokens: 8420,
+      output_tokens: 2245,
+      cached_input_tokens: 720,
+      provider_cost: {
+        currency: "USD",
+        amount: "0.042500",
+      },
+      billable_price: {
+        currency: "USD",
+        amount: "0.053625",
+      },
+    },
+  ],
+  next_cursor: "2",
+};
+
+const balanceProjectionResponse = {
+  data: {
+    tenant_id: "tenant_acme",
+    project_id: "proj_core",
+    currency: "USD",
+    provider_cost_total: {
+      currency: "USD",
+      amount: "1.244000",
+    },
+    billable_total: {
+      currency: "USD",
+      amount: "1.540000",
+    },
+    configured_budget: {
+      currency: "USD",
+      amount: "75.000000",
+    },
+    remaining_budget: {
+      currency: "USD",
+      amount: "73.460000",
+    },
+    threshold_status: "ok",
+    last_projected_at: "2026-04-22T13:00:00Z",
+    projection_lag_seconds: 18,
+  },
+};
+
+const billingExportResponse = {
+  data: {
+    export_job_id: "export_123",
+    status: "queued",
+    format: "csv",
+    requested_at: "2026-04-22T13:00:10Z",
+    completed_at: "2026-04-22T13:00:20Z",
+    tenant_id: "tenant_acme",
+    project_id: "proj_core",
+  },
+};
+
 const routeReceiptDiagnosticsById: Record<string, unknown> = {
   routercpt_openai_primary_recent: {
     route_receipt: routeReceiptsResponse.data[0].route_receipt,
@@ -447,7 +544,7 @@ function jsonResponse(status: number, payload: unknown) {
 
 function resolvePath(input: RequestInfo | URL) {
   if (typeof input === "string") {
-    return input;
+    return new URL(input, "http://127.0.0.1").pathname;
   }
 
   if (input instanceof URL) {
@@ -538,6 +635,49 @@ export function createControlPlaneFetchMock() {
       return Promise.resolve(jsonResponse(200, routeReceiptsResponse));
     }
 
+    if (path === "/v1/usage/summary") {
+      return Promise.resolve(jsonResponse(200, usageSummaryResponse));
+    }
+
+    if (path === "/v1/usage/breakdown") {
+      return Promise.resolve(jsonResponse(200, usageBreakdownResponse));
+    }
+
+    if (path === "/v1/billing/projection") {
+      return Promise.resolve(jsonResponse(200, balanceProjectionResponse));
+    }
+
+    if (
+      path === "/v1/billing/exports" &&
+      (!init?.method || init.method === "GET")
+    ) {
+      return Promise.resolve(
+        jsonResponse(200, { data: [billingExportResponse.data] }),
+      );
+    }
+
+    if (path === "/v1/pricing/simulations" && init?.method === "POST") {
+      return Promise.resolve(
+        jsonResponse(200, {
+          catalog_id: "pricing_catalog_default",
+          catalog_version: 1,
+          currency: "USD",
+          provider_cost: {
+            currency: "USD",
+            amount: "0.005188",
+          },
+          billable_price: {
+            currency: "USD",
+            amount: "0.006225",
+          },
+          line_items: [],
+        }),
+      );
+    }
+
+    if (path === "/v1/billing/exports" && init?.method === "POST") {
+      return Promise.resolve(jsonResponse(202, billingExportResponse));
+    }
     if (
       path.startsWith("/v1/route-receipts/") &&
       path.endsWith("/diagnostics")

@@ -338,6 +338,7 @@ pub enum AuthProvider {
     Github,
     Google,
     Wechat,
+    Oidc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -346,6 +347,7 @@ pub enum OAuthProvider {
     Github,
     Google,
     Wechat,
+    Oidc,
 }
 
 impl From<OAuthProvider> for AuthProvider {
@@ -354,6 +356,7 @@ impl From<OAuthProvider> for AuthProvider {
             OAuthProvider::Github => Self::Github,
             OAuthProvider::Google => Self::Google,
             OAuthProvider::Wechat => Self::Wechat,
+            OAuthProvider::Oidc => Self::Oidc,
         }
     }
 }

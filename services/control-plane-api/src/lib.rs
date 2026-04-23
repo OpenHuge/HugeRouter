@@ -2,7 +2,7 @@
 
 mod store;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -20,10 +20,15 @@ use core_domain::{
     ProviderResourceId, RoutePolicy, RoutePolicyId, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
-    ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
+    BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
+    BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse, PricingSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
     RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
+    UsageBreakdownResponse, UsageSummaryResponse,
 };
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
     ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, EMAIL_BOOTSTRAP_CODE,
@@ -122,6 +127,45 @@ struct RouteReceiptsQuery {
     pub tenant_id: Option<String>,
     pub project_id: Option<String>,
     pub protocol_family: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UsageQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UsageBreakdownQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub group_by: Option<String>,
+    pub cursor: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BalanceProjectionQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BillingExportsQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OidcIdentity {
+    pub subject: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub groups: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -235,6 +279,23 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/api-keys/resolve",
             post(resolve_api_key_for_gateway),
+        )
+        .route("/v1/usage/summary", get(get_usage_summary))
+        .route("/v1/usage/breakdown", get(get_usage_breakdown))
+        .route("/v1/billing/projection", get(get_balance_projection))
+        .route("/v1/pricing/catalog", get(get_pricing_catalog))
+        .route("/v1/pricing/simulations", post(create_pricing_simulation))
+        .route(
+            "/v1/billing/exports",
+            get(list_billing_exports).post(create_billing_export),
+        )
+        .route(
+            "/v1/billing/exports/{export_job_id}",
+            get(get_billing_export),
+        )
+        .route(
+            "/v1/billing/exports/{export_job_id}/download",
+            get(download_billing_export),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
         .route("/v1/route-receipts", get(list_route_receipts))
@@ -412,6 +473,13 @@ async fn start_oauth_login(
 ) -> Result<Json<OAuthLoginStartResponse>, ApiError> {
     let context = next_request_context();
     let provider = parse_oauth_provider(&provider, &context)?;
+    if provider == core_domain::OAuthProvider::Oidc && !store::oidc_enabled() {
+        return Err(ApiError::forbidden(
+            "provider_disabled",
+            "OIDC login is not configured in this environment".to_string(),
+            &context,
+        ));
+    }
     if !ensure_workspace_slug(&request.workspace_slug) {
         return Err(ApiError::bad_request(
             "workspace_unknown",
@@ -449,13 +517,11 @@ async fn start_oauth_login(
 
     Ok(Json(OAuthLoginStartResponse {
         provider,
-        authorization_url: format!(
-            "{}/login/callback?provider={}&state={}&code=mock-{}-code{}",
-            state.frontend_base_url,
-            oauth_provider_slug(provider),
-            state_token,
-            oauth_provider_slug(provider),
-            redirect_query,
+        authorization_url: oauth_authorization_url(
+            &state.frontend_base_url,
+            provider,
+            &state_token,
+            &redirect_query,
         ),
         state: state_token,
         expires_at: expires_at(600),
@@ -470,7 +536,8 @@ async fn complete_oauth_login(
     let context = next_request_context();
     let provider = parse_oauth_provider(&provider, &context)?;
 
-    if !request.code.starts_with("mock-") {
+    let is_mock_code = request.code.starts_with("mock-");
+    if provider != core_domain::OAuthProvider::Oidc && !is_mock_code {
         return Err(ApiError::unauthorized(
             "auth_invalid_code",
             "oauth callback code is invalid".to_string(),
@@ -505,14 +572,62 @@ async fn complete_oauth_login(
         ));
     }
 
-    let subject = format!("{}_ops", oauth_provider_slug(provider));
+    let (subject, workspace_slug) = if provider == core_domain::OAuthProvider::Oidc {
+        let identity = if is_mock_code {
+            OidcIdentity {
+                subject: oauth_subject(provider),
+                email: std::env::var("CONTROL_PLANE_OIDC_EMAIL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty()),
+                display_name: std::env::var("CONTROL_PLANE_OIDC_DISPLAY_NAME")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty()),
+                groups: oidc_groups_from_env(),
+            }
+        } else {
+            exchange_oidc_identity(&request.code)
+                .await
+                .map_err(|error| {
+                    ApiError::unauthorized(
+                        "auth_invalid_code",
+                        format!("oidc callback exchange failed: {error}"),
+                        &context,
+                    )
+                })?
+        };
+
+        let (resolved_workspace_slug, resolved_role) =
+            resolve_oidc_membership(identity.groups.as_slice(), &pending.workspace_slug);
+        state
+            .store
+            .upsert_oidc_user(
+                &identity.subject,
+                identity.email.as_deref(),
+                identity.display_name.as_deref(),
+                &resolved_workspace_slug,
+                resolved_role,
+                &now_rfc3339(),
+            )
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to upsert oidc user: {error}"),
+                    &context,
+                )
+            })?;
+
+        (identity.subject, resolved_workspace_slug)
+    } else {
+        (oauth_subject(provider), pending.workspace_slug.clone())
+    };
     let login_result = state
         .store
         .issue_session(
             &format!("sess_{}", context.sequence),
             AuthProvider::from(provider),
             &IdentityLookup::ProviderSubject(AuthProvider::from(provider), subject),
-            &pending.workspace_slug,
+            &workspace_slug,
             &now_rfc3339(),
             &expires_at(SESSION_TTL_SECONDS),
         )
@@ -1122,6 +1237,243 @@ async fn activate_config_snapshot(
     Ok(Json(snapshot))
 }
 
+async fn get_usage_summary(
+    State(state): State<ControlPlaneState>,
+    Query(query): Query<UsageQuery>,
+) -> Result<Json<UsageSummaryResponse>, ApiError> {
+    let context = next_request_context();
+    let tenant_id = query.tenant_id.ok_or_else(|| {
+        ApiError::bad_request(
+            "tenant_id_required",
+            "tenant_id is required for usage summary queries".to_string(),
+            &context,
+        )
+    })?;
+
+    let response = state
+        .store
+        .get_usage_summary(
+            &tenant_id,
+            query.project_id,
+            query.window_start,
+            query.window_end,
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load usage summary: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn get_usage_breakdown(
+    State(state): State<ControlPlaneState>,
+    Query(query): Query<UsageBreakdownQuery>,
+) -> Result<Json<UsageBreakdownResponse>, ApiError> {
+    let context = next_request_context();
+    let tenant_id = query.tenant_id.ok_or_else(|| {
+        ApiError::bad_request(
+            "tenant_id_required",
+            "tenant_id is required for usage breakdown queries".to_string(),
+            &context,
+        )
+    })?;
+    let group_by = parse_usage_breakdown_group_by(query.group_by.as_deref(), &context)?;
+
+    let response = state
+        .store
+        .get_usage_breakdown(
+            &tenant_id,
+            query.project_id,
+            query.window_start,
+            query.window_end,
+            group_by,
+            query.cursor,
+            query.limit,
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load usage breakdown: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn get_balance_projection(
+    State(state): State<ControlPlaneState>,
+    Query(query): Query<BalanceProjectionQuery>,
+) -> Result<Json<BalanceProjectionResponse>, ApiError> {
+    let context = next_request_context();
+    let tenant_id = query.tenant_id.ok_or_else(|| {
+        ApiError::bad_request(
+            "tenant_id_required",
+            "tenant_id is required for balance projection queries".to_string(),
+            &context,
+        )
+    })?;
+
+    let response = state
+        .store
+        .get_balance_projection(&tenant_id, query.project_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load balance projection: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn get_pricing_catalog(
+    State(state): State<ControlPlaneState>,
+) -> Result<Json<PricingCatalogResponse>, ApiError> {
+    let context = next_request_context();
+    let response = state.store.get_pricing_catalog().await.map_err(|error| {
+        ApiError::internal(
+            "storage_unavailable",
+            format!("failed to load pricing catalog: {error}"),
+            &context,
+        )
+    })?;
+
+    Ok(Json(response))
+}
+
+async fn create_pricing_simulation(
+    State(state): State<ControlPlaneState>,
+    Json(request): Json<PricingSimulationRequest>,
+) -> Result<Json<PricingSimulationResponse>, ApiError> {
+    let context = next_request_context();
+    let response = state
+        .store
+        .create_pricing_simulation(request)
+        .await
+        .map_err(|error| {
+            ApiError::bad_request(
+                "pricing_simulation_failed",
+                format!("pricing simulation could not be completed: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn create_billing_export(
+    State(state): State<ControlPlaneState>,
+    Json(request): Json<BillingExportRequest>,
+) -> Result<(axum::http::StatusCode, Json<BillingExportJobResponse>), ApiError> {
+    let context = next_request_context();
+    let response = state
+        .store
+        .create_billing_export(request)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "billing_export_failed",
+                format!("billing export job could not be queued: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok((axum::http::StatusCode::ACCEPTED, Json(response)))
+}
+
+async fn list_billing_exports(
+    State(state): State<ControlPlaneState>,
+    Query(query): Query<BillingExportsQuery>,
+) -> Result<Json<BillingExportJobsResponse>, ApiError> {
+    let context = next_request_context();
+    let response = state
+        .store
+        .list_billing_exports(query.tenant_id, query.project_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "billing_exports_unavailable",
+                format!("failed to list billing exports: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn get_billing_export(
+    State(state): State<ControlPlaneState>,
+    Path(export_job_id): Path<String>,
+) -> Result<Json<BillingExportJobResponse>, ApiError> {
+    let context = next_request_context();
+    let response = state
+        .store
+        .get_billing_export(&export_job_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "billing_export_unavailable",
+                format!("failed to load billing export: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "billing_export_not_found",
+                format!("billing export job `{export_job_id}` was not found"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn download_billing_export(
+    State(state): State<ControlPlaneState>,
+    Path(export_job_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let context = next_request_context();
+    let response = state
+        .store
+        .download_billing_export(&export_job_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "billing_export_unavailable",
+                format!("failed to download billing export: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "billing_export_not_found",
+                format!("billing export job `{export_job_id}` was not found"),
+                &context,
+            )
+        })?;
+
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, response.0),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{export_job_id}.csv\""),
+            ),
+        ],
+        response.1,
+    )
+        .into_response())
+}
+
 async fn create_route_simulation(
     State(state): State<ControlPlaneState>,
     Json(request): Json<RouteSimulationRequest>,
@@ -1321,6 +1673,204 @@ async fn resolve_session(
     })
 }
 
+fn oauth_authorization_url(
+    frontend_base_url: &str,
+    provider: core_domain::OAuthProvider,
+    state_token: &str,
+    redirect_query: &str,
+) -> String {
+    if provider == core_domain::OAuthProvider::Oidc
+        && let Ok(base) = std::env::var("CONTROL_PLANE_OIDC_AUTHORIZATION_URL")
+        && !base.trim().is_empty()
+    {
+        let redirect_uri = std::env::var("CONTROL_PLANE_OIDC_REDIRECT_URI")
+            .unwrap_or_else(|_| format!("{frontend_base_url}/login/callback?provider=oidc"));
+        return format!(
+            "{base}?response_type=code&client_id={}&scope=openid%20profile%20email%20groups&state={state_token}&redirect_uri={}",
+            std::env::var("CONTROL_PLANE_OIDC_CLIENT_ID")
+                .unwrap_or_else(|_| "huge-router-console".to_string()),
+            urlencoding::encode(&redirect_uri),
+        );
+    }
+
+    format!(
+        "{frontend_base_url}/login/callback?provider={}&state={state_token}&code=mock-{}-code{redirect_query}",
+        oauth_provider_slug(provider),
+        oauth_provider_slug(provider),
+    )
+}
+
+fn oauth_subject(provider: core_domain::OAuthProvider) -> String {
+    if provider == core_domain::OAuthProvider::Oidc {
+        return std::env::var("CONTROL_PLANE_OIDC_SUBJECT")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "oidc_ops".to_string());
+    }
+
+    format!("{}_ops", oauth_provider_slug(provider))
+}
+
+fn oidc_groups_from_env() -> Vec<String> {
+    std::env::var("CONTROL_PLANE_OIDC_TEST_GROUPS")
+        .ok()
+        .map_or_else(Vec::new, |value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+}
+
+fn resolve_oidc_membership(
+    groups: &[String],
+    requested_workspace_slug: &str,
+) -> (String, core_domain::TenantMembershipRole) {
+    if let Ok(mapping) = std::env::var("CONTROL_PLANE_OIDC_GROUP_ROLE_MAP") {
+        for mapping_entry in mapping
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+        {
+            let Some((group_name, assignment)) = mapping_entry.split_once('=') else {
+                continue;
+            };
+            let Some((workspace_slug, role_slug)) = assignment.split_once(':') else {
+                continue;
+            };
+            if groups.iter().any(|group| group == group_name) {
+                let role = match role_slug {
+                    "owner" => core_domain::TenantMembershipRole::Owner,
+                    "admin" => core_domain::TenantMembershipRole::Admin,
+                    _ => core_domain::TenantMembershipRole::Member,
+                };
+                return (workspace_slug.to_string(), role);
+            }
+        }
+    }
+
+    let admin_groups = std::env::var("CONTROL_PLANE_OIDC_PLATFORM_ADMIN_GROUPS")
+        .ok()
+        .map_or_else(
+            || vec!["platform-admins".to_string()],
+            |value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            },
+        );
+
+    if groups.iter().any(|group| admin_groups.contains(group)) {
+        (
+            "platform-admin".to_string(),
+            core_domain::TenantMembershipRole::Admin,
+        )
+    } else {
+        (
+            requested_workspace_slug.to_string(),
+            core_domain::TenantMembershipRole::Member,
+        )
+    }
+}
+
+async fn exchange_oidc_identity(code: &str) -> Result<OidcIdentity> {
+    let token_url = std::env::var("CONTROL_PLANE_OIDC_TOKEN_URL")
+        .context("CONTROL_PLANE_OIDC_TOKEN_URL is required for real OIDC exchange")?;
+    let redirect_uri = std::env::var("CONTROL_PLANE_OIDC_REDIRECT_URI")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let client_id = std::env::var("CONTROL_PLANE_OIDC_CLIENT_ID")
+        .unwrap_or_else(|_| "huge-router-console".to_string());
+    let client_secret = std::env::var("CONTROL_PLANE_OIDC_CLIENT_SECRET").ok();
+    let http = HttpClient::new();
+    let mut form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code.to_string()),
+        ("client_id", client_id),
+    ];
+    if let Some(redirect_uri) = redirect_uri {
+        form.push(("redirect_uri", redirect_uri));
+    }
+    if let Some(client_secret) = client_secret {
+        form.push(("client_secret", client_secret));
+    }
+
+    let token_response = http
+        .post(token_url)
+        .form(&form)
+        .send()
+        .await
+        .context("oidc token request failed")?
+        .error_for_status()
+        .context("oidc token endpoint returned error status")?;
+    let token_payload: Value = token_response
+        .json::<Value>()
+        .await
+        .context("oidc token payload was not valid json")?;
+    let access_token = token_payload
+        .get("access_token")
+        .and_then(Value::as_str)
+        .context("oidc token payload missing access_token")?;
+
+    let claims_payload = if let Ok(userinfo_url) = std::env::var("CONTROL_PLANE_OIDC_USERINFO_URL")
+    {
+        if userinfo_url.trim().is_empty() {
+            token_payload
+        } else {
+            http.get(userinfo_url)
+                .bearer_auth(access_token)
+                .send()
+                .await
+                .context("oidc userinfo request failed")?
+                .error_for_status()
+                .context("oidc userinfo endpoint returned error status")?
+                .json::<Value>()
+                .await
+                .context("oidc userinfo payload was not valid json")?
+        }
+    } else {
+        token_payload
+    };
+
+    let subject = claims_payload
+        .get("sub")
+        .and_then(Value::as_str)
+        .context("oidc claims missing sub")?
+        .to_string();
+    let email = claims_payload
+        .get("email")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let display_name = claims_payload
+        .get("name")
+        .or_else(|| claims_payload.get("preferred_username"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let groups = claims_payload
+        .get("groups")
+        .and_then(Value::as_array)
+        .map(|values: &Vec<Value>| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(OidcIdentity {
+        subject,
+        email,
+        display_name,
+        groups,
+    })
+}
+
 fn parse_oauth_provider(
     provider: &str,
     context: &RequestContext,
@@ -1329,6 +1879,7 @@ fn parse_oauth_provider(
         "github" => Ok(core_domain::OAuthProvider::Github),
         "google" => Ok(core_domain::OAuthProvider::Google),
         "wechat" => Ok(core_domain::OAuthProvider::Wechat),
+        "oidc" => Ok(core_domain::OAuthProvider::Oidc),
         _ => Err(ApiError::bad_request(
             "provider_invalid",
             format!("unsupported OAuth provider `{provider}`"),
@@ -1343,9 +1894,26 @@ fn parse_auth_provider(provider: &str, context: &RequestContext) -> Result<AuthP
         "github" => Ok(AuthProvider::Github),
         "google" => Ok(AuthProvider::Google),
         "wechat" => Ok(AuthProvider::Wechat),
+        "oidc" => Ok(AuthProvider::Oidc),
         _ => Err(ApiError::bad_request(
             "provider_invalid",
             format!("unsupported auth provider `{provider}`"),
+            context,
+        )),
+    }
+}
+
+fn parse_usage_breakdown_group_by(
+    group_by: Option<&str>,
+    context: &RequestContext,
+) -> Result<store::UsageBreakdownGroupBy, ApiError> {
+    match group_by.unwrap_or("provider") {
+        "provider" => Ok(store::UsageBreakdownGroupBy::Provider),
+        "model" => Ok(store::UsageBreakdownGroupBy::Model),
+        "day" => Ok(store::UsageBreakdownGroupBy::Day),
+        other => Err(ApiError::bad_request(
+            "usage_group_by_invalid",
+            format!("unsupported usage breakdown group_by `{other}`"),
             context,
         )),
     }
@@ -1797,6 +2365,130 @@ mod tests {
             .map(|entry| entry["route_receipt_id"].as_str().unwrap())
             .collect();
         assert_eq!(filtered_ids, vec!["routercpt_cp_a"]);
+    }
+
+    #[tokio::test]
+    async fn usage_summary_endpoint_returns_projection_payload() {
+        let response = app_with_state(ControlPlaneState::memory())
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/usage/summary?tenant_id=tenant_acme")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["data"]["tenant_id"], "tenant_acme");
+        assert_eq!(body["data"]["event_count"], 14);
+    }
+
+    #[tokio::test]
+    async fn pricing_simulation_endpoint_returns_billable_quote() {
+        let response = app_with_state(ControlPlaneState::memory())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/pricing/simulations")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "provider_id": "openai",
+                            "model_alias": "reasoning-fast",
+                            "usage": {
+                                "input_tokens": 1200,
+                                "output_tokens": 320,
+                                "cached_input_tokens": 64
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["catalog_id"], "pricing_catalog_default");
+        assert_eq!(body["line_items"][0]["dimension"], "input_tokens");
+    }
+
+    #[tokio::test]
+    async fn billing_exports_can_be_created_and_listed() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/billing/exports")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "tenant_id": "tenant_acme",
+                            "project_id": "proj_core",
+                            "window_start": "2026-04-01T00:00:00Z",
+                            "window_end": "2026-04-30T23:59:59Z",
+                            "format": "csv"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::ACCEPTED);
+        let created_body: Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let export_job_id = created_body["data"]["export_job_id"].as_str().unwrap();
+
+        let listed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/billing/exports?tenant_id=tenant_acme")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_body: Value =
+            serde_json::from_slice(&to_bytes(listed.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(listed_body["data"][0]["export_job_id"], export_job_id);
+
+        let fetched = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/billing/exports/{export_job_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fetched.status(), StatusCode::OK);
+
+        let downloaded = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/billing/exports/{export_job_id}/download"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(downloaded.status(), StatusCode::OK);
     }
 
     #[tokio::test]

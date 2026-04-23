@@ -1,0 +1,13 @@
+[package]
+name = "metering"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+core-domain = { path = "../core-domain" }
+serde.workspace = true
+
+[lints]
+workspace = true

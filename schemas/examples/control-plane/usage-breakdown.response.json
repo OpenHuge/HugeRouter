@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "bucket": "openai",
+      "provider_id": "openai",
+      "input_tokens": 10000,
+      "output_tokens": 4000,
+      "cached_input_tokens": 500,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.082000"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.098400"
+      }
+    },
+    {
+      "bucket": "reasoning-fast",
+      "model_alias": "reasoning-fast",
+      "input_tokens": 8420,
+      "output_tokens": 2245,
+      "cached_input_tokens": 720,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.042500"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.053625"
+      }
+    }
+  ],
+  "next_cursor": "2"
+}

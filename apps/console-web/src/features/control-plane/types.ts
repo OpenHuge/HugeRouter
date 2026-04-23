@@ -135,3 +135,56 @@ export type ApiKeyView = {
   updatedAt: string;
   version: number;
 };
+
+export type UsageBreakdownView = {
+  billablePriceUsd: string;
+  bucket: string;
+  cachedInputTokens: number;
+  inputTokens: number;
+  modelAlias?: string;
+  outputTokens: number;
+  providerCostUsd: string;
+  providerId?: string;
+};
+
+export type UsageDashboardData = {
+  activeProjectId?: string;
+  availableProjects: ProjectSummary[];
+  breakdown: UsageBreakdownView[];
+  eventCount: number;
+  groupBy: "provider" | "model" | "day";
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  nextCursor?: string;
+  providerCostUsd: string;
+  billablePriceUsd: string;
+  rangeLabel: string;
+  windowStart: string;
+  windowEnd: string;
+};
+
+export type BillingExportJobView = {
+  completedAt?: string;
+  errorMessage?: string;
+  exportJobId: string;
+  format: string;
+  projectId?: string;
+  requestedAt: string;
+  status: string;
+  tenantId?: string;
+};
+
+export type BillingDashboardData = {
+  activeProjectId?: string;
+  availableProjects: ProjectSummary[];
+  billableTotalUsd: string;
+  configuredBudgetUsd: string;
+  exportJobs: BillingExportJobView[];
+  lastProjectedAt: string;
+  projectionLagSeconds: number;
+  providerCostTotalUsd: string;
+  rangeLabel: string;
+  remainingBudgetUsd: string;
+  thresholdStatus: string;
+};
