@@ -556,7 +556,10 @@ impl SeedData {
 
 impl MemoryStore {
     pub fn bootstrap() -> Self {
-        let seed = SeedData::bootstrap();
+        Self::from_seed(SeedData::bootstrap())
+    }
+
+    pub(crate) fn from_seed(seed: SeedData) -> Self {
         let mut users = HashMap::new();
         let mut memberships_by_user = HashMap::new();
         let mut provider_links_by_user = HashMap::new();
@@ -602,6 +605,14 @@ impl MemoryStore {
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_route_receipt(&mut self, route_receipt: RouteReceipt) {
+        self.route_receipts.insert(
+            route_receipt.route_receipt_id.as_str().to_string(),
+            route_receipt,
+        );
     }
 }
 
@@ -862,6 +873,19 @@ impl StoreMode {
                     .clone(),
             }),
             Self::Postgres(store) => store.list_projects().await,
+        }
+    }
+
+    pub async fn get_project(&self, project_id: &str) -> Result<Option<Project>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .projects
+                .iter()
+                .find(|item| item.project_id.as_str() == project_id)
+                .cloned()),
+            Self::Postgres(store) => store.get_project(project_id).await,
         }
     }
 
@@ -1940,6 +1964,14 @@ impl PostgresStore {
         })
     }
 
+    async fn get_project(&self, project_id: &str) -> Result<Option<Project>> {
+        let row = sqlx::query("SELECT payload FROM projects WHERE project_id = $1")
+            .bind(project_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<Json<Project>, _>("payload").0))
+    }
+
     async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
         let rows =
             sqlx::query("SELECT payload FROM provider_resources ORDER BY provider_resource_id")
@@ -2360,6 +2392,37 @@ impl PostgresStore {
             return Ok(None);
         };
         let mut snapshot = row.get::<Json<ConfigSnapshot>, _>("payload").0;
+        let mut tx = self.pool.begin().await?;
+        let sibling_rows = sqlx::query(
+            "SELECT config_snapshot_id, payload
+             FROM config_snapshots
+             WHERE tenant_id = $1 AND project_id = $2",
+        )
+        .bind(snapshot.tenant_id.as_str())
+        .bind(snapshot.project_id.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for row in sibling_rows {
+            let sibling_id = row.get::<String, _>("config_snapshot_id");
+            if sibling_id == config_snapshot_id {
+                continue;
+            }
+            let mut sibling = row.get::<Json<ConfigSnapshot>, _>("payload").0;
+            if sibling.status == ConfigSnapshotStatus::Active {
+                sibling.status = ConfigSnapshotStatus::Superseded;
+                sqlx::query(
+                    "UPDATE config_snapshots
+                     SET status = 'superseded', payload = $2
+                     WHERE config_snapshot_id = $1",
+                )
+                .bind(&sibling_id)
+                .bind(Json(sibling))
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
         snapshot.status = ConfigSnapshotStatus::Active;
         snapshot.activated_at = Some(now_rfc3339());
         sqlx::query(
@@ -2367,7 +2430,7 @@ impl PostgresStore {
         )
         .bind(config_snapshot_id)
         .bind(Json(snapshot.clone()))
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
         sqlx::query(
             "INSERT INTO active_config_pointers (pointer_key, config_snapshot_id)
@@ -2375,8 +2438,9 @@ impl PostgresStore {
              ON CONFLICT (pointer_key) DO UPDATE SET config_snapshot_id = EXCLUDED.config_snapshot_id",
         )
         .bind(config_snapshot_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(Some(ConfigSnapshotResponse {
             config_snapshot: snapshot,
         }))
@@ -2386,14 +2450,25 @@ impl PostgresStore {
         &self,
         request: RouteSimulationRequest,
     ) -> Result<RouteSimulationResponse> {
-        let tenants = self.list_provider_resources().await?.data;
-        let policies = self.list_route_policies().await?.data;
-        let active_snapshot = self
-            .get_config_snapshot(ACTIVE_CONFIG_ALIAS)
+        let provider_resources = self
+            .list_provider_resources()
             .await?
-            .context("active config snapshot missing")?
-            .config_snapshot;
-        build_route_simulation_response(&tenants, &policies, &active_snapshot, &request)
+            .data
+            .into_iter()
+            .filter(|resource| resource.tenant_id == request.tenant_id)
+            .collect::<Vec<_>>();
+        let policies = self
+            .list_route_policies()
+            .await?
+            .data
+            .into_iter()
+            .filter(|policy| policy.tenant_id == request.tenant_id)
+            .collect::<Vec<_>>();
+        let active_snapshot = self
+            .get_active_project_snapshot(&request.tenant_id, &request.project_id)
+            .await?
+            .context("active config snapshot missing for project")?;
+        build_route_simulation_response(&provider_resources, &policies, &active_snapshot, &request)
     }
 
     async fn get_route_receipt(
@@ -2886,6 +2961,25 @@ impl PostgresStore {
             .map(|row| row.get::<Json<AuthProviderLink>, _>("payload").0)
             .collect())
     }
+
+    async fn get_active_project_snapshot(
+        &self,
+        tenant_id: &TenantId,
+        project_id: &ProjectId,
+    ) -> Result<Option<ConfigSnapshot>> {
+        let row = sqlx::query(
+            "SELECT payload
+             FROM config_snapshots
+             WHERE tenant_id = $1 AND project_id = $2 AND status = 'active'
+             ORDER BY activated_at DESC NULLS LAST, config_snapshot_id DESC
+             LIMIT 1",
+        )
+        .bind(tenant_id.as_str())
+        .bind(project_id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get::<Json<ConfigSnapshot>, _>("payload").0))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3264,6 +3358,17 @@ fn activate_memory_config_snapshot(
         .config_snapshots
         .iter()
         .position(|item| item.config_snapshot_id.as_str() == config_snapshot_id)?;
+    let tenant_id = store.config_snapshots[index].tenant_id.clone();
+    let project_id = store.config_snapshots[index].project_id.clone();
+    for (candidate_index, snapshot) in store.config_snapshots.iter_mut().enumerate() {
+        if candidate_index != index
+            && snapshot.tenant_id == tenant_id
+            && snapshot.project_id == project_id
+            && snapshot.status == ConfigSnapshotStatus::Active
+        {
+            snapshot.status = ConfigSnapshotStatus::Superseded;
+        }
+    }
     let snapshot = &mut store.config_snapshots[index];
     snapshot.status = ConfigSnapshotStatus::Active;
     snapshot.activated_at = Some(now_rfc3339());
@@ -3280,12 +3385,33 @@ fn simulate_memory_route(
     let active_snapshot = store
         .config_snapshots
         .iter()
-        .find(|snapshot| snapshot.config_snapshot_id.as_str() == store.active_config_snapshot_id)
+        .filter(|snapshot| {
+            snapshot.status == ConfigSnapshotStatus::Active
+                && snapshot.tenant_id == request.tenant_id
+                && snapshot.project_id == request.project_id
+        })
+        .max_by(|left, right| {
+            left.activated_at
+                .cmp(&right.activated_at)
+                .then_with(|| left.config_snapshot_id.cmp(&right.config_snapshot_id))
+        })
         .cloned()
-        .context("active config snapshot missing")?;
+        .context("active config snapshot missing for project")?;
+    let provider_resources = store
+        .provider_resources
+        .iter()
+        .filter(|resource| resource.tenant_id == request.tenant_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let route_policies = store
+        .route_policies
+        .iter()
+        .filter(|policy| policy.tenant_id == request.tenant_id)
+        .cloned()
+        .collect::<Vec<_>>();
     build_route_simulation_response(
-        &store.provider_resources,
-        &store.route_policies,
+        &provider_resources,
+        &route_policies,
         &active_snapshot,
         request,
     )
@@ -4145,6 +4271,51 @@ mod tests {
             .unwrap()
             .data;
         assert_eq!(protocol_filtered.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn memory_store_activation_supersedes_previous_project_snapshot() {
+        let store = StoreMode::memory();
+        let newer = core_domain::ConfigSnapshot {
+            config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_gateway_v2").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            revision: 2,
+            status: core_domain::ConfigSnapshotStatus::Draft,
+            activated_at: None,
+            provider_resource_ids: vec![
+                ProviderResourceId::parse("prvrsrc_openai_backup").unwrap(),
+            ],
+            route_policy_id: RoutePolicyId::parse("routepol_acme_support").unwrap(),
+            budget_policy_id: core_domain::BudgetPolicyId::parse("budgetpol_default").unwrap(),
+        };
+        let created = store.create_config_snapshot(newer).await.unwrap();
+        assert_eq!(created.config_snapshot_id.as_str(), "cfgsnap_gateway_v2");
+
+        let activated = store
+            .activate_config_snapshot("cfgsnap_gateway_v2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            activated.config_snapshot.config_snapshot_id.as_str(),
+            "cfgsnap_gateway_v2"
+        );
+
+        let snapshots = store.list_config_snapshots().await.unwrap().data;
+        let gateway_v1 = snapshots
+            .iter()
+            .find(|snapshot| snapshot.config_snapshot_id.as_str() == "cfgsnap_gateway_v1")
+            .unwrap();
+        let gateway_v2 = snapshots
+            .iter()
+            .find(|snapshot| snapshot.config_snapshot_id.as_str() == "cfgsnap_gateway_v2")
+            .unwrap();
+        assert_eq!(
+            gateway_v1.status,
+            core_domain::ConfigSnapshotStatus::Superseded
+        );
+        assert_eq!(gateway_v2.status, core_domain::ConfigSnapshotStatus::Active);
     }
 }
 
