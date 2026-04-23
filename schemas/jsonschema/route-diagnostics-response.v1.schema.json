@@ -1,0 +1,494 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RouteDiagnosticsResponse",
+  "type": "object",
+  "required": [
+    "active_snapshot_matches_route_policy",
+    "recent_receipts",
+    "route_policy",
+    "targets"
+  ],
+  "properties": {
+    "active_snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "active_snapshot_matches_route_policy": {
+      "type": "boolean"
+    },
+    "last_route_receipt": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RouteReceiptSummary"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "recent_receipts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RouteReceiptSummary"
+      }
+    },
+    "route_policy": {
+      "$ref": "#/definitions/RoutePolicy"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RouteDiagnosticTarget"
+      }
+    }
+  },
+  "definitions": {
+    "AdmissionResult": {
+      "type": "string",
+      "enum": [
+        "admitted",
+        "rejected_budget",
+        "rejected_rate_limit",
+        "rejected_concurrency",
+        "rejected_policy",
+        "rejected_no_candidate"
+      ]
+    },
+    "AuthKind": {
+      "type": "string",
+      "enum": [
+        "api_key",
+        "o_auth_client_credentials",
+        "session_broker"
+      ]
+    },
+    "BudgetPolicyId": {
+      "type": "string"
+    },
+    "ConfigSnapshot": {
+      "type": "object",
+      "required": [
+        "budget_policy_id",
+        "config_snapshot_id",
+        "project_id",
+        "provider_resource_ids",
+        "revision",
+        "route_policy_id",
+        "status",
+        "tenant_id"
+      ],
+      "properties": {
+        "activated_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "budget_policy_id": {
+          "$ref": "#/definitions/BudgetPolicyId"
+        },
+        "config_snapshot_id": {
+          "$ref": "#/definitions/ConfigSnapshotId"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider_resource_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProviderResourceId"
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "route_policy_id": {
+          "$ref": "#/definitions/RoutePolicyId"
+        },
+        "status": {
+          "$ref": "#/definitions/ConfigSnapshotStatus"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        }
+      }
+    },
+    "ConfigSnapshotId": {
+      "type": "string"
+    },
+    "ConfigSnapshotStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "superseded"
+      ]
+    },
+    "CredentialOwnerType": {
+      "type": "string",
+      "enum": [
+        "platform",
+        "tenant",
+        "project",
+        "partner"
+      ]
+    },
+    "DeploymentScope": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "tenant_dedicated",
+        "project_dedicated"
+      ]
+    },
+    "HealthState": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "degraded",
+        "quarantined",
+        "draining",
+        "disabled"
+      ]
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProvenanceClass": {
+      "type": "string",
+      "enum": [
+        "official_api",
+        "official_gateway",
+        "byo_customer_credential",
+        "dedicated_managed_account",
+        "shared_brokered_pool",
+        "unofficial_client_channel"
+      ]
+    },
+    "ProviderCapabilities": {
+      "type": "object",
+      "required": [
+        "supports_json_mode",
+        "supports_realtime",
+        "supports_response_model_metadata",
+        "supports_streaming",
+        "supports_tool_calling"
+      ],
+      "properties": {
+        "supports_json_mode": {
+          "type": "boolean"
+        },
+        "supports_realtime": {
+          "type": "boolean"
+        },
+        "supports_response_model_metadata": {
+          "type": "boolean"
+        },
+        "supports_streaming": {
+          "type": "boolean"
+        },
+        "supports_tool_calling": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProviderResource": {
+      "type": "object",
+      "required": [
+        "auth_kind",
+        "capabilities",
+        "created_at",
+        "credential_owner_type",
+        "deployment_scope",
+        "endpoint_base_url",
+        "health_state",
+        "is_transit_gateway",
+        "name",
+        "provenance_class",
+        "provider_id",
+        "provider_resource_id",
+        "region",
+        "status",
+        "supported_protocol_families",
+        "tenant_id",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "auth_kind": {
+          "$ref": "#/definitions/AuthKind"
+        },
+        "budget_policy_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BudgetPolicyId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilities": {
+          "$ref": "#/definitions/ProviderCapabilities"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "credential_owner_type": {
+          "$ref": "#/definitions/CredentialOwnerType"
+        },
+        "deployment_scope": {
+          "$ref": "#/definitions/DeploymentScope"
+        },
+        "endpoint_base_url": {
+          "type": "string"
+        },
+        "health_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health_state": {
+          "$ref": "#/definitions/HealthState"
+        },
+        "is_transit_gateway": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance_class": {
+          "$ref": "#/definitions/ProvenanceClass"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "provider_resource_id": {
+          "$ref": "#/definitions/ProviderResourceId"
+        },
+        "quarantine_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "region": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ProviderResourceStatus"
+        },
+        "supported_protocol_families": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ProviderResourceId": {
+      "type": "string"
+    },
+    "ProviderResourceStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "disabled",
+        "draining",
+        "quarantined",
+        "deleted"
+      ]
+    },
+    "RouteDiagnosticDecision": {
+      "type": "string",
+      "enum": [
+        "selected",
+        "eligible",
+        "excluded"
+      ]
+    },
+    "RouteDiagnosticTarget": {
+      "type": "object",
+      "required": [
+        "capability_gaps",
+        "decision",
+        "in_active_snapshot",
+        "provider_resource",
+        "reason",
+        "reason_code",
+        "supports_protocol_family"
+      ],
+      "properties": {
+        "capability_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision": {
+          "$ref": "#/definitions/RouteDiagnosticDecision"
+        },
+        "in_active_snapshot": {
+          "type": "boolean"
+        },
+        "provider_resource": {
+          "$ref": "#/definitions/ProviderResource"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "recent_receipt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RouteReceiptId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recent_receipt_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supports_protocol_family": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RoutePolicy": {
+      "type": "object",
+      "required": [
+        "created_at",
+        "display_name",
+        "model_alias",
+        "preferred_regions",
+        "protocol_family",
+        "required_capabilities",
+        "route_policy_id",
+        "tenant_id",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "model_alias": {
+          "type": "string"
+        },
+        "preferred_regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "protocol_family": {
+          "type": "string"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "route_policy_id": {
+          "$ref": "#/definitions/RoutePolicyId"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "RoutePolicyId": {
+      "type": "string"
+    },
+    "RouteReceiptId": {
+      "type": "string"
+    },
+    "RouteReceiptSummary": {
+      "type": "object",
+      "required": [
+        "admission_result",
+        "created_at",
+        "route_receipt_id"
+      ],
+      "properties": {
+        "admission_result": {
+          "$ref": "#/definitions/AdmissionResult"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "failure_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "route_receipt_id": {
+          "$ref": "#/definitions/RouteReceiptId"
+        },
+        "selected_target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderResourceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

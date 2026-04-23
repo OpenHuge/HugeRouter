@@ -25,7 +25,11 @@ import {
   getControlPlaneActionErrorMessage,
   type ProviderResourceMutationInput,
 } from "../features/control-plane/service";
-import { type ProjectSummary } from "../features/control-plane/types";
+import type {
+  ProjectSummary,
+  RoutePolicyView,
+  RouteReceiptView,
+} from "../features/control-plane/types";
 import {
   ActionStatusNotice,
   FieldErrorText,
@@ -34,6 +38,8 @@ import {
 type ProvidersPageData = {
   projects: ProjectSummary[];
   providers: ProviderResource[];
+  routePolicies: RoutePolicyView[];
+  routeReceipts: RouteReceiptView[];
 };
 
 type ProviderFormState = {
@@ -189,14 +195,18 @@ function validateProviderForm(form: ProviderFormState) {
 export const Route = createFileRoute("/app/providers")({
   loader: () =>
     loadRouteData(async () => {
-      const [providers, projects] = await Promise.all([
+      const [providers, projects, routePolicies, routeReceipts] = await Promise.all([
         getConsoleDataService().listProviderResources(),
         getConsoleDataService().listProjects(),
+        getConsoleDataService().listRoutePolicies(),
+        getConsoleDataService().listRouteReceipts(),
       ]);
 
       return {
         projects,
         providers,
+        routePolicies,
+        routeReceipts,
       } satisfies ProvidersPageData;
     }),
   pendingComponent: () => <RouteLoadingState label="Loading providers" />,
@@ -239,7 +249,10 @@ function ProvidersPage() {
     );
   }
 
-  const { projects, providers } = result.data;
+  const { projects, providers, routePolicies, routeReceipts } = result.data;
+  const routePolicyNames = new Map(
+    routePolicies.map((policy) => [policy.id, policy.name]),
+  );
   const projectOptions = [
     { label: "No project scope", value: "" },
     ...projects.map((project) => ({
@@ -615,8 +628,11 @@ function ProvidersPage() {
                 <Table.Th>Project</Table.Th>
                 <Table.Th>Region</Table.Th>
                 <Table.Th>Scope</Table.Th>
+                <Table.Th>Protocols</Table.Th>
+                <Table.Th>Capabilities</Table.Th>
                 <Table.Th>Health</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th>Latest route signal</Table.Th>
                 <Table.Th>Version</Table.Th>
                 <Table.Th>Actions</Table.Th>
               </Table.Tr>
@@ -632,6 +648,16 @@ function ProvidersPage() {
                   </Table.Td>
                   <Table.Td>{provider.region}</Table.Td>
                   <Table.Td>{provider.deployment_scope}</Table.Td>
+                  <Table.Td>
+                    <Text size="sm">
+                      {provider.supported_protocol_families.join(", ") || "None"}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm">
+                      {providerCapabilityLabels(provider).join(", ") || "None"}
+                    </Text>
+                  </Table.Td>
                   <Table.Td>
                     <Badge
                       color={
@@ -653,6 +679,15 @@ function ProvidersPage() {
                     >
                       {provider.status}
                     </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text c="dimmed" size="sm">
+                      {latestSignalForProvider(
+                        provider,
+                        routeReceipts,
+                        routePolicyNames,
+                      ) ?? "No recent receipt"}
+                    </Text>
                   </Table.Td>
                   <Table.Td>{provider.version}</Table.Td>
                   <Table.Td>
@@ -689,4 +724,40 @@ function ProvidersPage() {
       </Card>
     </Stack>
   );
+}
+
+function providerCapabilityLabels(provider: ProviderResource) {
+  return [
+    provider.capabilities.supports_streaming ? "streaming" : null,
+    provider.capabilities.supports_tool_calling ? "tool_calling" : null,
+    provider.capabilities.supports_json_mode ? "json_mode" : null,
+    provider.capabilities.supports_realtime ? "realtime" : null,
+    provider.capabilities.supports_response_model_metadata
+      ? "response_model_metadata"
+      : null,
+  ].filter(Boolean) as string[];
+}
+
+function latestSignalForProvider(
+  provider: ProviderResource,
+  routeReceipts: RouteReceiptView[],
+  routePolicyNames: Map<string, string>,
+) {
+  const receipt = routeReceipts.find(
+    (candidate) =>
+      candidate.selectedTargetId === provider.provider_resource_id ||
+      candidate.excludedTargets.some(
+        (target) => target.provider_resource_id === provider.provider_resource_id,
+      ),
+  );
+
+  if (!receipt) {
+    return null;
+  }
+
+  if (receipt.selectedTargetId === provider.provider_resource_id) {
+    return `${routePolicyNames.get(receipt.routePolicyId) ?? receipt.routeName}: selected`;
+  }
+
+  return `${routePolicyNames.get(receipt.routePolicyId) ?? receipt.routeName}: ${receipt.excludedTargets[0]?.reason_code ?? "excluded"}`;
 }

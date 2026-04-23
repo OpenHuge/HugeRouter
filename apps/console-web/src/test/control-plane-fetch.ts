@@ -86,11 +86,17 @@ const providerResourcesResponse = {
       endpoint_base_url: "https://api.openai.com/v1",
       auth_kind: "api_key",
       health_state: "healthy",
+      health_message: "probe latency within SLO",
+      quarantine_reason: undefined,
       capabilities: {
         supports_streaming: true,
         supports_tool_calling: true,
         supports_json_mode: true,
+        supports_realtime: false,
+        supports_response_model_metadata: true,
       },
+      supported_protocol_families: ["openai_chat", "openai_responses"],
+      is_transit_gateway: false,
       version: 1,
       created_at: "2026-04-22T00:00:00Z",
       updated_at: "2026-04-22T00:00:00Z",
@@ -109,11 +115,17 @@ const providerResourcesResponse = {
       endpoint_base_url: "https://api.openai.com/v1",
       auth_kind: "api_key",
       health_state: "healthy",
+      health_message: "backup target healthy",
+      quarantine_reason: undefined,
       capabilities: {
         supports_streaming: true,
         supports_tool_calling: true,
         supports_json_mode: true,
+        supports_realtime: false,
+        supports_response_model_metadata: true,
       },
+      supported_protocol_families: ["openai_chat", "openai_responses"],
+      is_transit_gateway: false,
       version: 1,
       created_at: "2026-04-22T00:00:00Z",
       updated_at: "2026-04-22T00:00:00Z",
@@ -132,11 +144,17 @@ const providerResourcesResponse = {
       endpoint_base_url: "https://api.openai.com/v1",
       auth_kind: "api_key",
       health_state: "degraded",
+      health_message: "research endpoint latency elevated",
+      quarantine_reason: undefined,
       capabilities: {
         supports_streaming: true,
         supports_tool_calling: false,
         supports_json_mode: true,
+        supports_realtime: false,
+        supports_response_model_metadata: true,
       },
+      supported_protocol_families: ["openai_chat"],
+      is_transit_gateway: false,
       version: 1,
       created_at: "2026-04-22T00:00:00Z",
       updated_at: "2026-04-22T00:00:00Z",
@@ -242,6 +260,7 @@ const routeReceiptsResponse = {
         route_receipt_id: "routercpt_openai_primary_recent",
         tenant_id: "tenant_acme",
         project_id: "proj_core",
+        route_policy_id: "routepol_openai_chat_default",
         request_id: "req_openai_primary",
         trace_id: "trace_openai_primary",
         protocol_family: "openai_chat",
@@ -252,6 +271,7 @@ const routeReceiptsResponse = {
         excluded_targets: [
           {
             provider_resource_id: "prvrsrc_openai_backup",
+            reason_code: "provider_region_mismatch",
             reason: "provider_region_mismatch",
           },
         ],
@@ -268,6 +288,7 @@ const routeReceiptsResponse = {
             reason: "replayed_after_transient_timeout",
           },
         ],
+        failure_reason: undefined,
         created_at: "2026-04-22T13:00:00Z",
       },
     },
@@ -276,6 +297,7 @@ const routeReceiptsResponse = {
         route_receipt_id: "routercpt_openai_rejection",
         tenant_id: "tenant_northstar",
         project_id: "proj_ns_research",
+        route_policy_id: "routepol_northstar_research",
         request_id: "req_openai_rejection",
         trace_id: "trace_openai_rejection",
         protocol_family: "openai_chat",
@@ -285,6 +307,7 @@ const routeReceiptsResponse = {
         excluded_targets: [
           {
             provider_resource_id: "prvrsrc_openai_research",
+            reason_code: "provider_quarantined",
             reason: "provider_quarantined",
           },
         ],
@@ -295,6 +318,7 @@ const routeReceiptsResponse = {
           trust: 0,
         },
         fallback_transitions: [],
+        failure_reason: "No policy match for requested capabilities.",
         normalized_error: {
           code: "routing_rejected",
           message: "No policy match for requested capabilities.",
@@ -470,6 +494,51 @@ const routeReceiptDiagnosticsById: Record<string, unknown> = {
       candidate_pool_size: "2",
       policy_cache_hit: "true",
     },
+  },
+};
+
+const routeDiagnosticsByPolicyId: Record<string, unknown> = {
+  routepol_openai_chat_default: {
+    route_policy: routePoliciesResponse.data[0],
+    active_snapshot: configSnapshotResponse.config_snapshot,
+    active_snapshot_matches_route_policy: true,
+    last_route_receipt: {
+      route_receipt_id: "routercpt_openai_primary_recent",
+      admission_result: "admitted",
+      selected_target: "prvrsrc_openai_primary",
+      created_at: "2026-04-22T13:00:00Z",
+    },
+    recent_receipts: [
+      {
+        route_receipt_id: "routercpt_openai_primary_recent",
+        admission_result: "admitted",
+        selected_target: "prvrsrc_openai_primary",
+        created_at: "2026-04-22T13:00:00Z",
+      },
+    ],
+    targets: [
+      {
+        provider_resource: providerResourcesResponse.data[0],
+        decision: "selected",
+        in_active_snapshot: true,
+        supports_protocol_family: true,
+        capability_gaps: [],
+        reason_code: "selected_recent_receipt",
+        reason: "Selected by the most recent route receipt.",
+        recent_receipt_id: "routercpt_openai_primary_recent",
+      },
+      {
+        provider_resource: providerResourcesResponse.data[1],
+        decision: "excluded",
+        in_active_snapshot: true,
+        supports_protocol_family: true,
+        capability_gaps: [],
+        reason_code: "provider_region_mismatch",
+        reason: "provider_region_mismatch",
+        recent_receipt_id: "routercpt_openai_primary_recent",
+        recent_receipt_reason: "provider_region_mismatch",
+      },
+    ],
   },
 };
 
@@ -716,7 +785,15 @@ export function createControlPlaneFetchMock() {
         : [];
       const unsupportedCapabilities = capabilities.filter(
         (capability) =>
-          !["streaming", "tool_calling", "json_mode", "chat_completions"].includes(
+          ![
+            "streaming",
+            "tool_calling",
+            "tool_related",
+            "json_mode",
+            "chat_completions",
+            "realtime",
+            "response_model_metadata",
+          ].includes(
             String(capability),
           ),
       );
@@ -751,7 +828,15 @@ export function createControlPlaneFetchMock() {
         : [];
       const unsupportedCapabilities = capabilities.filter(
         (capability) =>
-          !["streaming", "tool_calling", "json_mode", "chat_completions"].includes(
+          ![
+            "streaming",
+            "tool_calling",
+            "tool_related",
+            "json_mode",
+            "chat_completions",
+            "realtime",
+            "response_model_metadata",
+          ].includes(
             String(capability),
           ),
       );
@@ -972,6 +1057,26 @@ export function createControlPlaneFetchMock() {
 
     if (path === "/v1/route-receipts") {
       return Promise.resolve(jsonResponse(200, routeReceiptsResponse));
+    }
+
+    if (path.startsWith("/v1/route-diagnostics/")) {
+      const routePolicyId = decodeURIComponent(path.split("/")[3] ?? "");
+      const diagnostics = routeDiagnosticsByPolicyId[routePolicyId];
+
+      if (diagnostics) {
+        return Promise.resolve(jsonResponse(200, diagnostics));
+      }
+
+      return Promise.resolve(
+        jsonResponse(404, {
+          error: {
+            code: "not_found",
+            message: `No diagnostics for ${routePolicyId}`,
+            request_id: "req_test",
+            retryable: false,
+          },
+        }),
+      );
     }
 
     if (path === "/v1/usage/summary") {

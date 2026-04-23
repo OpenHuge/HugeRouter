@@ -1,6 +1,8 @@
 import type {
   NormalizedError,
   ProviderResource,
+  RouteDiagnosticsResponse,
+  RouteReceipt,
 } from "@huge-router/ts-shared-schema";
 
 type NormalizedRouteError = NormalizedError;
@@ -25,6 +27,9 @@ export type OverviewData = {
 export type RoutePolicyView = {
   createdAt: string;
   id: string;
+  lastFailureReason?: string;
+  lastReceiptId?: string;
+  lastReceiptOutcome?: string;
   modelAlias: string;
   name: string;
   preferredRegions: string[];
@@ -88,6 +93,29 @@ export type RouteReceiptDiagnosticView = {
   selectedTargetResourceId: string;
   selectedTargetReason: string | null;
   traceId: string;
+};
+
+export type RouteReceiptView = {
+  receiptId: string;
+  routePolicyId: string;
+  routeName: string;
+  modelAlias: string;
+  protocolFamily: string;
+  createdAt: string;
+  admissionResult: string;
+  selectedTargetId?: string;
+  selectedTargetName?: string;
+  failureReason?: string;
+  excludedTargets: RouteReceipt["excluded_targets"];
+  normalizedError?: RouteReceipt["normalized_error"];
+  fallbackTransitions: RouteReceipt["fallback_transitions"];
+  scoreBreakdown: RouteReceipt["score_breakdown"];
+};
+
+export type RouteDiagnosticsView = {
+  activeSnapshotId?: string;
+  activeSnapshotMatchesRoutePolicy: boolean;
+  diagnostics: RouteDiagnosticsResponse;
 };
 
 export type TenantSummary = {

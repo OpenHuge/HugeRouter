@@ -29,6 +29,7 @@ import {
   projectsResponseSchema,
   providerResourceSchema,
   providerResourcesResponseSchema,
+  routeDiagnosticsResponseSchema,
   routePoliciesResponseSchema,
   routeReceiptDiagnosticsResponseSchema,
   routeReceiptsResponseSchema,
@@ -67,6 +68,7 @@ import {
   type PricingCatalogResponse,
   type Project,
   type ProviderResource,
+  type RouteDiagnosticsResponse,
   type RoutePolicy,
   type RouteReceipt,
   type RouteReceiptDiagnosticsResponse,
@@ -168,6 +170,7 @@ export type ControlPlaneClient = {
   ) => Promise<RouteSimulationResponse>
   listRouteReceipts: () => Promise<RouteReceiptsResponse['data']>
   getRouteReceipt: (routeReceiptId: string) => Promise<RouteReceipt>
+  getRouteDiagnostics: (routePolicyId: string) => Promise<RouteDiagnosticsResponse>
   getRouteReceiptDiagnostics: (
     routeReceiptId: string
   ) => Promise<RouteReceiptDiagnosticsResponse>
@@ -603,6 +606,18 @@ export const createControlPlaneClient = (
         parse: (payload) => routeReceiptResponseSchema.parse(payload)
       })
       return parsed.route_receipt
+    },
+    async getRouteDiagnostics(routePolicyId) {
+      const operation = resolveOperation('getRouteDiagnostics')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        params: { route_policy_id: routePolicyId },
+        parse: (payload) => routeDiagnosticsResponseSchema.parse(payload)
+      })
     },
     async getRouteReceiptDiagnostics(routeReceiptId) {
       const operation = resolveOperation('getRouteReceiptDiagnostics')

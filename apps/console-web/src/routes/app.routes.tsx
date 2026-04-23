@@ -3,7 +3,6 @@ import {
   Button,
   Card,
   Group,
-  List,
   Select,
   Stack,
   Table,
@@ -19,10 +18,7 @@ import {
   RouteErrorState,
   RouteLoadingState,
 } from "../features/control-plane/route-state";
-import type {
-  RouteReceiptDiagnosticView,
-  RoutePolicyView,
-} from "../features/control-plane/types";
+import type { RoutePolicyView } from "../features/control-plane/types";
 import {
   getConsoleDataService,
   getControlPlaneActionErrorMessage,
@@ -65,7 +61,6 @@ const protocolOrder = [
 
 type RoutePoliciesPageData = {
   routePolicies: RoutePolicyView[];
-  routeReceipts: RouteReceiptDiagnosticView[];
 };
 
 type RoutePolicyFormState = {
@@ -179,14 +174,8 @@ function validateRoutePolicyForm(form: RoutePolicyFormState) {
 export const Route = createFileRoute("/app/routes")({
   loader: () =>
     loadRouteData(async () => {
-      const [routePolicies, routeReceipts] = await Promise.all([
-        getConsoleDataService().listRoutePolicies(),
-        getConsoleDataService().listRouteReceipts(),
-      ]);
-
       return {
-        routePolicies,
-        routeReceipts,
+        routePolicies: await getConsoleDataService().listRoutePolicies(),
       } as RoutePoliciesPageData;
     }),
   pendingComponent: () => <RouteLoadingState label="Loading routes" />,
@@ -233,7 +222,7 @@ function RoutePoliciesPage() {
     );
   }
 
-  const { routePolicies, routeReceipts } = result.data;
+  const { routePolicies } = result.data;
   const effectiveRoutePolicies = routePolicies
     .filter((policy) => !disabledPolicyIds.includes(policy.id))
     .map((policy) => policyOverrides[policy.id] ?? policy);
@@ -506,6 +495,7 @@ function RoutePoliciesPage() {
                     <Table.Th>Protocol</Table.Th>
                     <Table.Th>Model alias</Table.Th>
                     <Table.Th>Selected providers</Table.Th>
+                    <Table.Th>Latest receipt</Table.Th>
                     <Table.Th>Preferred regions</Table.Th>
                     <Table.Th>Required capabilities</Table.Th>
                     <Table.Th>Version</Table.Th>
@@ -524,6 +514,26 @@ function RoutePoliciesPage() {
                           : "Inactive snapshot"}
                       </Table.Td>
                       <Table.Td>
+                        <Stack gap={2}>
+                          <Badge
+                            color={
+                              policy.lastReceiptOutcome === "admitted"
+                                ? "teal"
+                                : policy.lastReceiptOutcome
+                                  ? "orange"
+                                  : "gray"
+                            }
+                            variant="light"
+                          >
+                            {policy.lastReceiptOutcome ?? "No receipt"}
+                          </Badge>
+                          <Text c="dimmed" size="sm">
+                            {policy.lastFailureReason ??
+                              "No recent routing failure recorded."}
+                          </Text>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
                         {policy.preferredRegions.join(", ") || "Any region"}
                       </Table.Td>
                       <Table.Td>
@@ -532,6 +542,14 @@ function RoutePoliciesPage() {
                       <Table.Td>{policy.version}</Table.Td>
                       <Table.Td>
                         <Group gap="xs">
+                          <Button
+                            component="a"
+                            href={`/app/route-diagnostics/${policy.id}`}
+                            size="xs"
+                            variant="subtle"
+                          >
+                            Inspect
+                          </Button>
                           <Button
                             onClick={() => openEditForm(policy)}
                             size="xs"
@@ -559,113 +577,19 @@ function RoutePoliciesPage() {
         )}
       </Card>
       <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Recent route receipts</Text>
-          <Badge color="blue" variant="light">
-            {routeReceipts.length}
-          </Badge>
+        <Text fw={700} mb="xs">
+          Operator diagnostics
+        </Text>
+        <Text c="dimmed" size="sm">
+          Use the inspect action to review protocol support, capability gaps,
+          health blockers, and the recent receipt history for a specific route
+          policy.
+        </Text>
+        <Group mt="md">
+          <Button component="a" href="/app/receipts" size="sm" variant="light">
+            Open route receipts
+          </Button>
         </Group>
-        {routeReceipts.length === 0 ? (
-          <EmptyCollectionState
-            description="No recent route receipts are available yet."
-            title="No route receipts"
-          />
-        ) : (
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Receipt ID</Table.Th>
-                <Table.Th>Protocol</Table.Th>
-                <Table.Th>Model alias</Table.Th>
-                <Table.Th>Selected target</Table.Th>
-                <Table.Th>Excluded targets</Table.Th>
-                <Table.Th>Fallback transitions</Table.Th>
-                <Table.Th>Diagnostics</Table.Th>
-                <Table.Th>Normalized error</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {routeReceipts.map((receipt) => (
-                <Table.Tr key={receipt.routeReceiptId}>
-                  <Table.Td>{receipt.routeReceiptId}</Table.Td>
-                  <Table.Td>{protocolDisplay(receipt.protocolFamily)}</Table.Td>
-                  <Table.Td>{receipt.modelAlias}</Table.Td>
-                  <Table.Td>{receipt.selectedTargetLabel}</Table.Td>
-                  <Table.Td>
-                    {receipt.excludedTargets.length === 0 ? (
-                      <Text c="dimmed" size="sm">
-                        None
-                      </Text>
-                    ) : (
-                      <List size="sm" withPadding>
-                        {receipt.excludedTargets.map((target) => (
-                          <List.Item key={target.providerResourceId}>
-                            {target.providerLabel} ({target.reason})
-                          </List.Item>
-                        ))}
-                      </List>
-                    )}
-                  </Table.Td>
-                  <Table.Td>
-                    {receipt.fallbackTransitions.length === 0 ? (
-                      <Text c="dimmed" size="sm">
-                        None
-                      </Text>
-                    ) : (
-                      <List size="sm" withPadding>
-                        {receipt.fallbackTransitions.map((transition) => (
-                          <List.Item
-                            key={`${transition.fromProviderResourceId}-${transition.toProviderResourceId}-${transition.reason}`}
-                          >
-                            {transition.fromProviderLabel} &rarr;{" "}
-                            {transition.toProviderLabel} ({transition.reason})
-                          </List.Item>
-                        ))}
-                      </List>
-                    )}
-                  </Table.Td>
-                  <Table.Td>
-                    <Stack gap={2}>
-                      {receipt.decisionTimeline.map((step) => (
-                        <Text key={`${step.stage}-${step.message}`} size="sm">
-                          {step.stage}: {step.message}
-                        </Text>
-                      ))}
-                      {receipt.providerAttempts.map((attempt) => (
-                        <Text
-                          key={`${attempt.providerResourceId}-${attempt.attempt}`}
-                          size="sm"
-                        >
-                          {attempt.providerLabel} attempt {attempt.attempt} (
-                          {attempt.latencyMs}ms, {attempt.status})
-                        </Text>
-                      ))}
-                      {receipt.policyChecks.map((check) => (
-                        <Text key={check.policyId} size="sm">
-                          {check.policyId}: {check.status}
-                        </Text>
-                      ))}
-                    </Stack>
-                  </Table.Td>
-                  <Table.Td>
-                    {receipt.normalizedError ? (
-                      <Stack gap={2}>
-                        <Text size="sm">{receipt.normalizedError.code}</Text>
-                        <Text c="dimmed" size="sm">
-                          {receipt.normalizedError.message}
-                        </Text>
-                      </Stack>
-                    ) : (
-                      <Text c="dimmed" size="sm">
-                        None
-                      </Text>
-                    )}
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
       </Card>
     </Stack>
   );

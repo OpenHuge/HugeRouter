@@ -253,6 +253,7 @@
         "type": "object",
         "required": [
           "provider_resource_id",
+          "reason_code",
           "reason"
         ],
         "properties": {
@@ -260,6 +261,9 @@
             "$ref": "#/components/schemas/ProviderResourceId"
           },
           "reason": {
+            "type": "string"
+          },
+          "reason_code": {
             "type": "string"
           }
         }
@@ -858,6 +862,7 @@
           "route_receipt_id",
           "tenant_id",
           "project_id",
+          "route_policy_id",
           "request_id",
           "trace_id",
           "protocol_family",
@@ -884,6 +889,12 @@
             "items": {
               "$ref": "#/components/schemas/ExcludedTarget"
             }
+          },
+          "failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "fallback_transitions": {
             "type": "array",
@@ -912,6 +923,9 @@
           },
           "request_id": {
             "type": "string"
+          },
+          "route_policy_id": {
+            "$ref": "#/components/schemas/RoutePolicyId"
           },
           "route_receipt_id": {
             "$ref": "#/components/schemas/RouteReceiptId"
