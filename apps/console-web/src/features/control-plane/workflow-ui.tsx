@@ -3,8 +3,11 @@ import { Alert, Button, Group, Text } from "@mantine/core";
 export const SUPPORTED_ROUTE_CAPABILITIES = [
   "streaming",
   "tool_calling",
+  "tool_related",
   "json_mode",
   "chat_completions",
+  "realtime",
+  "response_model_metadata",
 ] as const;
 
 export const PROTOCOL_FAMILY_OPTIONS = [

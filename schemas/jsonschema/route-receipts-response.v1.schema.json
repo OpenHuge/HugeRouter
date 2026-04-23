@@ -1,41 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "RouteReceiptDiagnosticsResponse",
+  "title": "RouteReceiptsResponse",
   "type": "object",
   "required": [
-    "decision_timeline",
-    "metadata",
-    "policy_checks",
-    "provider_attempts",
-    "route_receipt"
+    "data"
   ],
   "properties": {
-    "decision_timeline": {
+    "data": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/RouteReceiptDecisionTraceStep"
+        "$ref": "#/definitions/RouteReceipt"
       }
-    },
-    "metadata": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "policy_checks": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/RouteReceiptPolicyCheck"
-      }
-    },
-    "provider_attempts": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/RouteReceiptProviderAttempt"
-      }
-    },
-    "route_receipt": {
-      "$ref": "#/definitions/RouteReceipt"
     }
   },
   "definitions": {
@@ -244,101 +219,8 @@
         }
       }
     },
-    "RouteReceiptDecisionTraceStep": {
-      "type": "object",
-      "required": [
-        "message",
-        "stage",
-        "status"
-      ],
-      "properties": {
-        "message": {
-          "type": "string"
-        },
-        "notes": {
-          "default": [],
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "score": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "float"
-        },
-        "stage": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        }
-      }
-    },
     "RouteReceiptId": {
       "type": "string"
-    },
-    "RouteReceiptPolicyCheck": {
-      "type": "object",
-      "required": [
-        "policy_id",
-        "status"
-      ],
-      "properties": {
-        "policy_id": {
-          "$ref": "#/definitions/RoutePolicyId"
-        },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "type": "string"
-        }
-      }
-    },
-    "RouteReceiptProviderAttempt": {
-      "type": "object",
-      "required": [
-        "attempt",
-        "finished_at",
-        "latency_ms",
-        "provider_resource_id",
-        "reason",
-        "started_at",
-        "status"
-      ],
-      "properties": {
-        "attempt": {
-          "type": "integer",
-          "format": "uint8",
-          "minimum": 0.0
-        },
-        "finished_at": {
-          "type": "string"
-        },
-        "latency_ms": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "provider_resource_id": {
-          "$ref": "#/definitions/ProviderResourceId"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "started_at": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        }
-      }
     },
     "ScoreBreakdown": {
       "type": "object",

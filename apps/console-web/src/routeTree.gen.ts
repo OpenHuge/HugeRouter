@@ -16,11 +16,13 @@ import { Route as LoginCallbackRouteImport } from './routes/login.callback'
 import { Route as AppUsageRouteImport } from './routes/app.usage'
 import { Route as AppSnapshotsRouteImport } from './routes/app.snapshots'
 import { Route as AppRoutesRouteImport } from './routes/app.routes'
+import { Route as AppReceiptsRouteImport } from './routes/app.receipts'
 import { Route as AppProvidersRouteImport } from './routes/app.providers'
 import { Route as AppOverviewRouteImport } from './routes/app.overview'
 import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppApiKeysRouteImport } from './routes/app.api-keys'
 import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
+import { Route as AppRouteDiagnosticsRoutePolicyIdRouteImport } from './routes/app.route-diagnostics.$routePolicyId'
 import { Route as AdminTenantsTenantIdRouteImport } from './routes/admin.tenants.$tenantId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -58,6 +60,11 @@ const AppRoutesRoute = AppRoutesRouteImport.update({
   path: '/routes',
   getParentRoute: () => AppRoute,
 } as any)
+const AppReceiptsRoute = AppReceiptsRouteImport.update({
+  id: '/receipts',
+  path: '/receipts',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProvidersRoute = AppProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
@@ -83,6 +90,12 @@ const AdminTenantsRoute = AdminTenantsRouteImport.update({
   path: '/tenants',
   getParentRoute: () => AdminRoute,
 } as any)
+const AppRouteDiagnosticsRoutePolicyIdRoute =
+  AppRouteDiagnosticsRoutePolicyIdRouteImport.update({
+    id: '/route-diagnostics/$routePolicyId',
+    path: '/route-diagnostics/$routePolicyId',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AdminTenantsTenantIdRoute = AdminTenantsTenantIdRouteImport.update({
   id: '/$tenantId',
   path: '/$tenantId',
@@ -98,11 +111,13 @@ export interface FileRoutesByFullPath {
   '/app/billing': typeof AppBillingRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
+  '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
   '/app/snapshots': typeof AppSnapshotsRoute
   '/app/usage': typeof AppUsageRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
+  '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
@@ -113,11 +128,13 @@ export interface FileRoutesByTo {
   '/app/billing': typeof AppBillingRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
+  '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
   '/app/snapshots': typeof AppSnapshotsRoute
   '/app/usage': typeof AppUsageRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
+  '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -129,11 +146,13 @@ export interface FileRoutesById {
   '/app/billing': typeof AppBillingRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
+  '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
   '/app/snapshots': typeof AppSnapshotsRoute
   '/app/usage': typeof AppUsageRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
+  '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -146,11 +165,13 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/overview'
     | '/app/providers'
+    | '/app/receipts'
     | '/app/routes'
     | '/app/snapshots'
     | '/app/usage'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
+    | '/app/route-diagnostics/$routePolicyId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/admin'
@@ -161,11 +182,13 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/overview'
     | '/app/providers'
+    | '/app/receipts'
     | '/app/routes'
     | '/app/snapshots'
     | '/app/usage'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
+    | '/app/route-diagnostics/$routePolicyId'
   id:
     | '__root__'
     | '/admin'
@@ -176,11 +199,13 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/overview'
     | '/app/providers'
+    | '/app/receipts'
     | '/app/routes'
     | '/app/snapshots'
     | '/app/usage'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
+    | '/app/route-diagnostics/$routePolicyId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -240,6 +265,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRoutesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/receipts': {
+      id: '/app/receipts'
+      path: '/receipts'
+      fullPath: '/app/receipts'
+      preLoaderRoute: typeof AppReceiptsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/providers': {
       id: '/app/providers'
       path: '/providers'
@@ -274,6 +306,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/tenants'
       preLoaderRoute: typeof AdminTenantsRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/app/route-diagnostics/$routePolicyId': {
+      id: '/app/route-diagnostics/$routePolicyId'
+      path: '/route-diagnostics/$routePolicyId'
+      fullPath: '/app/route-diagnostics/$routePolicyId'
+      preLoaderRoute: typeof AppRouteDiagnosticsRoutePolicyIdRouteImport
+      parentRoute: typeof AppRoute
     }
     '/admin/tenants/$tenantId': {
       id: '/admin/tenants/$tenantId'
@@ -312,9 +351,11 @@ interface AppRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
   AppOverviewRoute: typeof AppOverviewRoute
   AppProvidersRoute: typeof AppProvidersRoute
+  AppReceiptsRoute: typeof AppReceiptsRoute
   AppRoutesRoute: typeof AppRoutesRoute
   AppSnapshotsRoute: typeof AppSnapshotsRoute
   AppUsageRoute: typeof AppUsageRoute
+  AppRouteDiagnosticsRoutePolicyIdRoute: typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -322,9 +363,11 @@ const AppRouteChildren: AppRouteChildren = {
   AppBillingRoute: AppBillingRoute,
   AppOverviewRoute: AppOverviewRoute,
   AppProvidersRoute: AppProvidersRoute,
+  AppReceiptsRoute: AppReceiptsRoute,
   AppRoutesRoute: AppRoutesRoute,
   AppSnapshotsRoute: AppSnapshotsRoute,
   AppUsageRoute: AppUsageRoute,
+  AppRouteDiagnosticsRoutePolicyIdRoute: AppRouteDiagnosticsRoutePolicyIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

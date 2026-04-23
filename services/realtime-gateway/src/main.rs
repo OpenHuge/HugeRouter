@@ -1,17 +1,32 @@
 use anyhow::Result;
-use runtime_composition::{ServiceRuntime, announce_startup};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use realtime_gateway::{RealtimeGatewayConfig, serve};
+use runtime_composition::{
+    ServiceRuntime, announce_startup, init_tracing, install_shutdown_listener,
+};
+use tokio::net::TcpListener;
+use tracing::warn;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_target(false))
-        .init();
-
-    announce_startup(ServiceRuntime {
+    let runtime = ServiceRuntime {
         service_name: "realtime-gateway",
         role: "bidirectional-ingress",
-    });
+    };
+    init_tracing(&runtime);
 
-    Ok(())
+    let config = RealtimeGatewayConfig::from_env()?;
+    if config.uses_insecure_default_secret {
+        warn!("REALTIME_GATEWAY_SIGNING_SECRET is not set; using the built-in development secret");
+    }
+
+    let listener = TcpListener::bind(config.bind_addr).await?;
+    announce_startup(runtime);
+
+    let shutdown = install_shutdown_listener();
+    let server = serve(listener, config);
+
+    tokio::select! {
+        result = server => result,
+        () = shutdown.wait() => Ok(()),
+    }
 }

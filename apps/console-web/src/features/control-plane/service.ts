@@ -12,7 +12,6 @@ import {
   type ProviderResource,
   providerResourceSchema,
   type RoutePolicy,
-  type RouteReceiptDiagnosticsResponse,
   type RouteReceipt,
   routePolicySchema,
   routeReceiptSchema,
@@ -29,8 +28,9 @@ import type {
   ConfigSnapshotView,
   OverviewData,
   ProjectSummary,
-  RouteReceiptDiagnosticView,
+  RouteDiagnosticsView,
   RoutePolicyView,
+  RouteReceiptView,
   TenantDetail,
   TenantSummary,
   UsageBreakdownView,
@@ -54,10 +54,11 @@ export type ConsoleDataService = {
     range: "7d" | "30d" | "90d",
     projectId?: string,
   ) => Promise<BillingExportJobView>;
+  getRouteDiagnostics: (routePolicyId: string) => Promise<RouteDiagnosticsView>;
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>;
   listProviderResources: () => Promise<ProviderResource[]>;
   listRoutePolicies: () => Promise<RoutePolicyView[]>;
-  listRouteReceipts: () => Promise<RouteReceiptDiagnosticView[]>;
+  listRouteReceipts: () => Promise<RouteReceiptView[]>;
   listTenants: () => Promise<TenantSummary[]>;
   listConfigSnapshots: () => Promise<ConfigSnapshotView[]>;
   createConfigSnapshot: (
@@ -497,6 +498,7 @@ function mapRoutePolicies(
   routePolicies: RoutePolicy[],
   providerResources: ProviderResource[],
   activeSnapshot: ConfigSnapshot | null,
+  routeReceipts: RouteReceipt[] = [],
 ): RoutePolicyView[] {
   const providerNames = new Map(
     providerResources.map((provider) => [
@@ -506,6 +508,18 @@ function mapRoutePolicies(
   );
 
   return routePolicies.map((policy) => ({
+    lastFailureReason: latestRouteReceiptForPolicy(
+      routeReceipts,
+      policy.route_policy_id,
+    )?.failure_reason,
+    lastReceiptId: latestRouteReceiptForPolicy(
+      routeReceipts,
+      policy.route_policy_id,
+    )?.route_receipt_id,
+    lastReceiptOutcome: latestRouteReceiptForPolicy(
+      routeReceipts,
+      policy.route_policy_id,
+    )?.admission_result,
     createdAt: policy.created_at,
     id: policy.route_policy_id,
     modelAlias: policy.model_alias,
@@ -525,6 +539,12 @@ function mapRoutePolicies(
   }));
 }
 
+function routePolicyLabelById(routePolicies: RoutePolicy[]) {
+  return new Map(
+    routePolicies.map((policy) => [policy.route_policy_id, policy.display_name]),
+  );
+}
+
 function providerLabelById(providerResources: ProviderResource[]) {
   return new Map(
     providerResources.map((provider) => [
@@ -539,6 +559,15 @@ function mapProviderLabel(
   providersById: Map<string, string>,
 ) {
   return providersById.get(providerResourceId) ?? providerResourceId;
+}
+
+function latestRouteReceiptForPolicy(
+  routeReceipts: RouteReceipt[],
+  routePolicyId: string,
+) {
+  return routeReceipts
+    .filter((receipt) => receipt.route_policy_id === routePolicyId)
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
 }
 
 function parseSingleRouteReceipt(payload: unknown): RouteReceipt {
@@ -564,82 +593,46 @@ function parseRouteReceiptList(payload: unknown) {
   return receipts.map(parseSingleRouteReceipt);
 }
 
-function toRouteReceiptDiagnostic(
+function toRouteReceiptView(
   receipt: RouteReceipt,
   providerById: Map<string, string>,
-  diagnostics?: RouteReceiptDiagnosticsResponse | null,
-): RouteReceiptDiagnosticView {
-  const selectedTargetLabel = receipt.selected_target
-    ? mapProviderLabel(receipt.selected_target, providerById)
-    : "No selected target";
-
-  const excludedTargets = receipt.excluded_targets.map((target) => ({
-    providerLabel: mapProviderLabel(target.provider_resource_id, providerById),
-    providerResourceId: target.provider_resource_id,
-    reason: target.reason,
-  }));
-
-  const fallbackTransitions = receipt.fallback_transitions.map(
-    (transition) => ({
-      fromProviderLabel: mapProviderLabel(
-        transition.from_provider_resource_id,
-        providerById,
-      ),
-      fromProviderResourceId: transition.from_provider_resource_id,
-      reason: transition.reason,
-      toProviderLabel: mapProviderLabel(
-        transition.to_provider_resource_id,
-        providerById,
-      ),
-      toProviderResourceId: transition.to_provider_resource_id,
-    }),
-  );
-
+  routePoliciesById: Map<string, string>,
+): RouteReceiptView {
   return {
     admissionResult: receipt.admission_result,
-    configSnapshotId: receipt.config_snapshot_id,
     createdAt: receipt.created_at,
-    decisionTimeline:
-      diagnostics?.decision_timeline.map((item) => ({
-        message: item.message,
-        notes: item.notes,
-        score: item.score,
-        stage: item.stage,
-        status: item.status,
-      })) ?? [],
-    excludedTargets,
-    fallbackTransitions,
-    metadata: diagnostics?.metadata ?? {},
+    excludedTargets: receipt.excluded_targets,
+    failureReason: receipt.failure_reason,
+    fallbackTransitions: receipt.fallback_transitions,
     modelAlias: receipt.model_alias,
     normalizedError: receipt.normalized_error,
-    policyChecks:
-      diagnostics?.policy_checks.map((item) => ({
-        policyId: item.policy_id,
-        reason: item.reason,
-        status: item.status,
-      })) ?? [],
-    providerAttempts:
-      diagnostics?.provider_attempts.map((item) => ({
-        attempt: item.attempt,
-        finishedAt: item.finished_at,
-        latencyMs: item.latency_ms,
-        providerLabel: mapProviderLabel(
-          item.provider_resource_id,
-          providerById,
-        ),
-        providerResourceId: item.provider_resource_id,
-        reason: item.reason,
-        startedAt: item.started_at,
-        status: item.status,
-      })) ?? [],
     protocolFamily: receipt.protocol_family,
-    routeReceiptId: receipt.route_receipt_id,
-    requestId: receipt.request_id,
-    selectedTargetLabel,
-    selectedTargetReason: receipt.selected_target ? null : "No target selected",
-    selectedTargetResourceId: receipt.selected_target ?? "none",
-    traceId: receipt.trace_id,
+    receiptId: receipt.route_receipt_id,
+    routeName:
+      routePoliciesById.get(receipt.route_policy_id) ?? receipt.route_policy_id,
+    routePolicyId: receipt.route_policy_id,
+    scoreBreakdown: receipt.score_breakdown,
+    selectedTargetId: receipt.selected_target ?? undefined,
+    selectedTargetName: receipt.selected_target
+      ? mapProviderLabel(receipt.selected_target, providerById)
+      : undefined,
   };
+}
+
+function mapRouteReceipts(
+  routeReceipts: RouteReceipt[],
+  providerResources: ProviderResource[],
+  routePolicies: RoutePolicy[],
+): RouteReceiptView[] {
+  const providerById = providerLabelById(providerResources);
+  const routePoliciesById = routePolicyLabelById(routePolicies);
+
+  return routeReceipts
+    .slice()
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))
+    .map((receipt) =>
+      toRouteReceiptView(receipt, providerById, routePoliciesById),
+    );
 }
 
 function toConfigSnapshotView(snapshot: ConfigSnapshot): ConfigSnapshotView {
@@ -1145,11 +1138,9 @@ async function listRouteReceiptsFromControlPlane() {
   }
 }
 
-async function getRouteReceiptDiagnosticsFromControlPlane(
-  routeReceiptId: string,
-) {
+async function getRouteDiagnosticsFromControlPlane(routePolicyId: string) {
   try {
-    return await client.getRouteReceiptDiagnostics(routeReceiptId);
+    return await client.getRouteDiagnostics(routePolicyId);
   } catch (error) {
     if (isRecoverableMissingEndpoint(error)) {
       return null;
@@ -1263,6 +1254,8 @@ function toProviderResourcePayload(
     budget_policy_id: input.budgetPolicyId,
     capabilities: {
       supports_json_mode: input.capabilities.supportsJsonMode,
+      supports_realtime: false,
+      supports_response_model_metadata: true,
       supports_streaming: input.capabilities.supportsStreaming,
       supports_tool_calling: input.capabilities.supportsToolCalling,
     },
@@ -1271,6 +1264,7 @@ function toProviderResourcePayload(
     deployment_scope: input.deploymentScope,
     endpoint_base_url: input.endpointBaseUrl,
     health_state: input.healthState,
+    is_transit_gateway: false,
     name: input.name,
     project_id: input.projectId,
     provider_id: input.providerId,
@@ -1278,6 +1272,7 @@ function toProviderResourcePayload(
     provenance_class: input.provenanceClass,
     region: input.region,
     status: input.status,
+    supported_protocol_families: ["openai_chat"],
     tenant_id: requireActiveTenantId(),
     updated_at: currentTimestamp(),
     version: input.version ?? 1,
@@ -1501,6 +1496,22 @@ const defaultConsoleDataService: ConsoleDataService = {
     return toBillingExportJobView(exportJob.data);
   },
 
+  async getRouteDiagnostics(routePolicyId) {
+    const diagnostics =
+      await getRouteDiagnosticsFromControlPlane(routePolicyId);
+
+    if (!diagnostics) {
+      throw new Error("route_policy_not_found");
+    }
+
+    return {
+      activeSnapshotId: diagnostics.active_snapshot?.config_snapshot_id,
+      activeSnapshotMatchesRoutePolicy:
+        diagnostics.active_snapshot_matches_route_policy,
+      diagnostics,
+    };
+  },
+
   async getTenantDetail(tenantId) {
     const {
       activeSnapshot,
@@ -1526,6 +1537,9 @@ const defaultConsoleDataService: ConsoleDataService = {
     const tenantRoutePolicies = routePolicies.filter(
       (policy) => policy.tenant_id === tenantId,
     );
+    const tenantRouteReceipts = filterByTenant(await listRouteReceiptsFromControlPlane()).filter(
+      (receipt) => receipt.tenant_id === tenantId,
+    );
     const simulation = await getRouteSimulationOrNull(
       client,
       activeSnapshot?.tenant_id === tenantId ? activeSnapshot : null,
@@ -1547,6 +1561,7 @@ const defaultConsoleDataService: ConsoleDataService = {
         tenantRoutePolicies,
         tenantProviders,
         activeSnapshot,
+        tenantRouteReceipts,
       ),
       selectedProvider: selectedProviderLabel(simulation, tenantProviders),
       slug: tenant.slug,
@@ -1562,52 +1577,37 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async listRoutePolicies() {
-    const [providerResources, routePolicies, activeSnapshot] =
+    const [providerResources, routePolicies, activeSnapshot, routeReceipts] =
       await Promise.all([
         client.listProviderResources(),
         client.listRoutePolicies(),
         getActiveSnapshotOrNull(client),
+        listRouteReceiptsFromControlPlane(),
       ]);
     const filteredProviders = filterByTenant(providerResources);
     const filteredPolicies = filterByTenant(routePolicies);
+    const filteredReceipts = filterByTenant(routeReceipts);
 
     return mapRoutePolicies(
       filteredPolicies,
       filteredProviders,
       activeSnapshot,
+      filteredReceipts,
     );
   },
 
   async listRouteReceipts() {
-    const [routeReceipts, providerResources] = await Promise.all([
+    const [routeReceipts, providerResources, routePolicies] = await Promise.all([
       listRouteReceiptsFromControlPlane(),
       client.listProviderResources(),
+      client.listRoutePolicies(),
     ]);
-    const filteredReceipts = filterByTenant(routeReceipts);
-    const providerById = providerLabelById(filterByTenant(providerResources));
-    const recentReceipts = filteredReceipts
-      .sort((left, right) => right.created_at.localeCompare(left.created_at))
-      .slice(0, 10);
-    const diagnosticsByReceiptId = new Map(
-      await Promise.all(
-        recentReceipts.map(
-          async (receipt) =>
-            [
-              receipt.route_receipt_id,
-              await getRouteReceiptDiagnosticsFromControlPlane(
-                receipt.route_receipt_id,
-              ),
-            ] as const,
-        ),
-      ),
-    );
+    const filteredReceipts = filterByTenant(routeReceipts).slice(0, 20);
 
-    return recentReceipts.map((receipt) =>
-      toRouteReceiptDiagnostic(
-        receipt,
-        providerById,
-        diagnosticsByReceiptId.get(receipt.route_receipt_id),
-      ),
+    return mapRouteReceipts(
+      filteredReceipts,
+      filterByTenant(providerResources),
+      filterByTenant(routePolicies),
     );
   },
 

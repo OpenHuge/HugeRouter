@@ -723,6 +723,52 @@ pub struct RouteReceiptsResponse {
     pub data: Vec<RouteReceipt>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteDiagnosticDecision {
+    Selected,
+    Eligible,
+    Excluded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptSummary {
+    pub route_receipt_id: RouteReceiptId,
+    pub admission_result: AdmissionResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_target: Option<ProviderResourceId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteDiagnosticTarget {
+    pub provider_resource: ProviderResource,
+    pub decision: RouteDiagnosticDecision,
+    pub in_active_snapshot: bool,
+    pub supports_protocol_family: bool,
+    pub capability_gaps: Vec<String>,
+    pub reason_code: String,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent_receipt_id: Option<RouteReceiptId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent_receipt_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteDiagnosticsResponse {
+    pub route_policy: RoutePolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_snapshot: Option<ConfigSnapshot>,
+    pub active_snapshot_matches_route_policy: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_route_receipt: Option<RouteReceiptSummary>,
+    pub recent_receipts: Vec<RouteReceiptSummary>,
+    pub targets: Vec<RouteDiagnosticTarget>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ArtifactFile {
     pub relative_path: &'static str,
@@ -770,6 +816,7 @@ pub struct ContractManifest {
         create_route_simulation,
         list_route_receipts,
         get_route_receipt,
+        get_route_diagnostics,
         get_route_receipt_diagnostics,
     ),
     components(
@@ -798,9 +845,13 @@ pub struct ContractManifest {
             RoutePoliciesResponse,
             RouteReceipt,
             RouteReceiptsResponse,
+            RouteDiagnosticDecision,
+            RouteDiagnosticTarget,
+            RouteDiagnosticsResponse,
             RouteReceiptId,
             RouteReceiptResponse,
             RouteReceiptDiagnosticsResponse,
+            RouteReceiptSummary,
             RouteSimulationRequest,
             RouteSimulationResponse,
             Tenant,
@@ -1136,6 +1187,21 @@ const fn get_route_receipt() {}
 
 #[utoipa::path(
     get,
+    path = "/v1/route-diagnostics/{route_policy_id}",
+    tag = "routing",
+    params(
+        ("route_policy_id" = String, Path, description = "HugeRouter route policy id")
+    ),
+    responses(
+        (status = 200, description = "Operator-focused route diagnostics", body = RouteDiagnosticsResponse),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_route_diagnostics() {}
+
+#[utoipa::path(
+    get,
     path = "/v1/route-receipts/{route_receipt_id}/diagnostics",
     tag = "routing",
     params(
@@ -1199,6 +1265,12 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         schema_artifact::<RoutePolicy>("schemas/jsonschema/route-policy.v1.schema.json")?,
         schema_artifact::<ConfigSnapshot>("schemas/jsonschema/config-snapshot.v1.schema.json")?,
         schema_artifact::<RouteReceipt>("schemas/jsonschema/route-receipt.v1.schema.json")?,
+        schema_artifact::<RouteReceiptsResponse>(
+            "schemas/jsonschema/route-receipts-response.v1.schema.json",
+        )?,
+        schema_artifact::<RouteDiagnosticsResponse>(
+            "schemas/jsonschema/route-diagnostics-response.v1.schema.json",
+        )?,
         schema_artifact::<UsageEvent>("schemas/jsonschema/usage-event.v1.schema.json")?,
         schema_artifact::<core_domain::NormalizedError>(
             "schemas/jsonschema/normalized-error.v1.schema.json",
@@ -1305,6 +1377,7 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let route_receipts = RouteReceiptsResponse {
         data: vec![route_receipt.clone()],
     };
+    let route_diagnostics = sample_route_diagnostics_response();
     let usage_event = sample_usage_event();
     let simulation_request = sample_route_simulation_request();
     let simulation_response = sample_route_simulation_response();
@@ -1374,6 +1447,10 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         example_artifact(
             "schemas/examples/control-plane/route-receipts.response.json",
             &route_receipts,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/route-diagnostics.response.json",
+            &route_diagnostics,
         )?,
         example_artifact(
             "schemas/examples/gateway/chat.request.json",
@@ -1504,6 +1581,7 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'simulateRoute', method: 'POST', path: '/v1/route-simulations' }},\n\
   {{ id: 'listRouteReceipts', method: 'GET', path: '/v1/route-receipts' }},\n\
   {{ id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}' }},\n\
+  {{ id: 'getRouteDiagnostics', method: 'GET', path: '/v1/route-diagnostics/{{route_policy_id}}' }},\n\
   {{ id: 'getRouteReceiptDiagnostics', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}/diagnostics' }},\n\
 ] as const;\n\
 export const GATEWAY_OPERATIONS = [\n\
@@ -1713,12 +1791,21 @@ fn sample_provider_resource() -> ProviderResource {
         endpoint_base_url: "https://api.openai.com/v1".to_string(),
         auth_kind: core_domain::AuthKind::ApiKey,
         health_state: core_domain::HealthState::Healthy,
+        health_message: Some("probe latency within SLO".to_string()),
+        quarantine_reason: None,
         budget_policy_id: Some(core_domain::BudgetPolicyId::parse("budgetpol_default").unwrap()),
         capabilities: core_domain::ProviderCapabilities {
             supports_streaming: true,
             supports_tool_calling: true,
             supports_json_mode: true,
+            supports_realtime: false,
+            supports_response_model_metadata: true,
         },
+        supported_protocol_families: vec![
+            "openai_chat".to_string(),
+            "openai_responses".to_string(),
+        ],
+        is_transit_gateway: false,
         version: 7,
         created_at: "2026-04-20T00:00:00Z".to_string(),
         updated_at: "2026-04-21T11:15:00Z".to_string(),
@@ -1761,6 +1848,7 @@ fn sample_route_receipt() -> RouteReceipt {
         project_id: ProjectId::parse("proj_core").unwrap(),
         request_id: "req_123".to_string(),
         trace_id: "trace_123".to_string(),
+        route_policy_id: RoutePolicyId::parse("routepol_default").unwrap(),
         protocol_family: "openai_chat".to_string(),
         model_alias: "reasoning-fast".to_string(),
         config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_default").unwrap(),
@@ -1768,8 +1856,10 @@ fn sample_route_receipt() -> RouteReceipt {
         selected_target: Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap()),
         excluded_targets: vec![core_domain::ExcludedTarget {
             provider_resource_id: ProviderResourceId::parse("prvrsrc_backup").unwrap(),
+            reason_code: "rejected_provenance_class".to_string(),
             reason: "rejected_provenance_class".to_string(),
         }],
+        failure_reason: None,
         score_breakdown: core_domain::ScoreBreakdown {
             latency: 0.82,
             cost: 0.66,
@@ -1857,6 +1947,7 @@ fn sample_route_simulation_response() -> RouteSimulationResponse {
         }],
         excluded_candidates: vec![core_domain::ExcludedTarget {
             provider_resource_id: ProviderResourceId::parse("prvrsrc_backup").unwrap(),
+            reason_code: "rejected_provenance_class".to_string(),
             reason: "rejected_provenance_class".to_string(),
         }],
         selected_target: Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap()),
@@ -2042,6 +2133,43 @@ fn sample_route_receipt_diagnostics() -> RouteReceiptDiagnosticsResponse {
             ("policy_cache_hit".to_string(), "true".to_string()),
             ("candidate_pool_size".to_string(), "3".to_string()),
         ]),
+    }
+}
+
+fn sample_route_diagnostics_response() -> RouteDiagnosticsResponse {
+    let provider_resource = sample_provider_resource();
+    let route_policy = sample_route_policy();
+    let route_receipt = sample_route_receipt();
+
+    RouteDiagnosticsResponse {
+        route_policy,
+        active_snapshot: Some(sample_config_snapshot()),
+        active_snapshot_matches_route_policy: true,
+        last_route_receipt: Some(RouteReceiptSummary {
+            route_receipt_id: route_receipt.route_receipt_id.clone(),
+            admission_result: route_receipt.admission_result,
+            selected_target: route_receipt.selected_target.clone(),
+            failure_reason: route_receipt.failure_reason.clone(),
+            created_at: route_receipt.created_at.clone(),
+        }),
+        recent_receipts: vec![RouteReceiptSummary {
+            route_receipt_id: route_receipt.route_receipt_id.clone(),
+            admission_result: route_receipt.admission_result,
+            selected_target: route_receipt.selected_target.clone(),
+            failure_reason: route_receipt.failure_reason.clone(),
+            created_at: route_receipt.created_at.clone(),
+        }],
+        targets: vec![RouteDiagnosticTarget {
+            provider_resource,
+            decision: RouteDiagnosticDecision::Selected,
+            in_active_snapshot: true,
+            supports_protocol_family: true,
+            capability_gaps: Vec::new(),
+            reason_code: "selected_recent_receipt".to_string(),
+            reason: "Selected by the most recent route receipt.".to_string(),
+            recent_receipt_id: Some(route_receipt.route_receipt_id),
+            recent_receipt_reason: None,
+        }],
     }
 }
 

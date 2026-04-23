@@ -601,7 +601,7 @@ describe("console routes", () => {
     expect(await screen.findByText("Routes unavailable")).toBeInTheDocument();
   });
 
-  it("renders protocol-aware route policy groups and route receipts diagnostics", async () => {
+  it("renders protocol-aware route policy groups and diagnostics actions", async () => {
     signIn({
       email: "tenant@acme.dev",
       workspace: "acme-retail",
@@ -615,31 +615,15 @@ describe("console routes", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("OpenAI Chat").length).toBeGreaterThan(0);
-    expect(screen.getByText("Recent route receipts")).toBeInTheDocument();
+    expect(screen.getByText("Operator diagnostics")).toBeInTheDocument();
     expect(
-      screen.getByText("routercpt_openai_primary_recent"),
+      screen.getByRole("link", { name: "Open route receipts" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("OpenAI Primary")).toBeInTheDocument();
-    expect(
-      screen.getByText("OpenAI Backup (provider_region_mismatch)"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "OpenAI Backup → OpenAI Primary (replayed_after_transient_timeout)",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("admission: Tenant policy accepted request"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("OpenAI Primary attempt 1 (1100ms, succeeded)"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("routepol_openai_chat_default: passed"),
-    ).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Inspect" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("admitted")).toBeInTheDocument();
   });
 
-  it("renders route diagnostics empty state when no route receipts are available", async () => {
+  it("renders route receipts empty state when no route receipts are available", async () => {
     signIn({
       email: "tenant@acme.dev",
       workspace: "acme-retail",
@@ -652,7 +636,7 @@ describe("console routes", () => {
       listRouteReceipts: () => Promise.resolve([]),
     });
 
-    await renderRoute("/app/routes");
+    await renderRoute("/app/receipts");
 
     expect(await screen.findByText("No route receipts")).toBeInTheDocument();
   });

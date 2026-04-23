@@ -25,6 +25,11 @@ export const tenantNav = [
     description: 'Provider inventory, health, and routing scope'
   },
   {
+    href: '/app/receipts',
+    label: 'Receipts',
+    description: 'Recent route receipts, failures, and exclusion reasons'
+  },
+  {
     href: '/app/usage',
     label: 'Usage',
     description: 'Usage summaries, token breakdowns, and recent spend signals'

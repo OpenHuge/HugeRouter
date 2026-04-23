@@ -1088,6 +1088,7 @@ fn evaluate_route(
         if target.resource.status != ProviderResourceStatus::Active {
             excluded_targets.push(ExcludedTarget {
                 provider_resource_id: target.resource.provider_resource_id.clone(),
+                reason_code: "provider_inactive".to_string(),
                 reason: format!("provider status is {:?}", target.resource.status),
             });
             continue;
@@ -1099,6 +1100,16 @@ fn evaluate_route(
         ) {
             excluded_targets.push(ExcludedTarget {
                 provider_resource_id: target.resource.provider_resource_id.clone(),
+                reason_code: format!(
+                    "health_{}",
+                    match target.resource.health_state {
+                        HealthState::Healthy => "healthy",
+                        HealthState::Degraded => "degraded",
+                        HealthState::Quarantined => "quarantined",
+                        HealthState::Draining => "draining",
+                        HealthState::Disabled => "disabled",
+                    }
+                ),
                 reason: format!("provider health is {:?}", target.resource.health_state),
             });
             continue;
@@ -1107,6 +1118,7 @@ fn evaluate_route(
         if !route_capabilities_supported(&active_config.route_policy, target) {
             excluded_targets.push(ExcludedTarget {
                 provider_resource_id: target.resource.provider_resource_id.clone(),
+                reason_code: "capability_gap".to_string(),
                 reason: "required capabilities are not satisfied by the target".to_string(),
             });
             continue;
@@ -1161,9 +1173,16 @@ fn route_capabilities_supported(
         .iter()
         .all(|capability| match capability.as_str() {
             "streaming" => target.resource.capabilities.supports_streaming,
-            "tool_calling" => target.resource.capabilities.supports_tool_calling,
+            "tool_calling" | "tool_related" => target.resource.capabilities.supports_tool_calling,
             "json_mode" => target.resource.capabilities.supports_json_mode,
             "chat_completions" => true,
+            "realtime" => target.resource.capabilities.supports_realtime,
+            "response_model_metadata" => {
+                target
+                    .resource
+                    .capabilities
+                    .supports_response_model_metadata
+            }
             "transit_gateway" => target.target_kind == ProviderTargetKind::TransitGateway,
             "native_provider" => target.target_kind == ProviderTargetKind::Native,
             _ => false,
@@ -1238,11 +1257,14 @@ fn build_route_receipt(
     normalized_error: Option<NormalizedError>,
     fallback_transitions: Vec<FallbackTransition>,
 ) -> RouteReceipt {
+    let failure_reason = normalized_error.as_ref().map(|error| error.message.clone());
+
     RouteReceipt {
         route_receipt_id: RouteReceiptId::parse(format!("routercpt_{}", context.sequence))
             .expect("route receipt id should be valid"),
         tenant_id: route.config_snapshot.tenant_id.clone(),
         project_id: route.config_snapshot.project_id.clone(),
+        route_policy_id: route.config_snapshot.route_policy_id.clone(),
         request_id: context.request_id.clone(),
         trace_id: context.trace_id.clone(),
         protocol_family: request.protocol_family.clone(),
@@ -1263,6 +1285,7 @@ fn build_route_receipt(
         ),
         fallback_transitions,
         normalized_error,
+        failure_reason,
         created_at: now_rfc3339(),
     }
 }
@@ -2595,12 +2618,21 @@ mod tests {
             endpoint_base_url: "https://api.openai.example/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state,
+            health_message: Some("test health".to_string()),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: core_domain::ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec![
+                "openai_chat".to_string(),
+                "openai_responses".to_string(),
+            ],
+            is_transit_gateway: false,
             version: 1,
             created_at: "2026-04-20T00:00:00Z".to_string(),
             updated_at: "2026-04-20T00:00:00Z".to_string(),

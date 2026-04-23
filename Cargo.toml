@@ -7,6 +7,7 @@ members = [
   "crates/protocol-anthropic",
   "crates/protocol-gemini",
   "crates/protocol-ir",
+  "crates/protocol-realtime",
   "crates/provider-anthropic",
   "crates/provider-gateway",
   "crates/provider-gemini",

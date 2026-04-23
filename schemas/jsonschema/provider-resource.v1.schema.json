@@ -10,12 +10,14 @@
     "deployment_scope",
     "endpoint_base_url",
     "health_state",
+    "is_transit_gateway",
     "name",
     "provenance_class",
     "provider_id",
     "provider_resource_id",
     "region",
     "status",
+    "supported_protocol_families",
     "tenant_id",
     "updated_at",
     "version"
@@ -49,8 +51,17 @@
     "endpoint_base_url": {
       "type": "string"
     },
+    "health_message": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "health_state": {
       "$ref": "#/definitions/HealthState"
+    },
+    "is_transit_gateway": {
+      "type": "boolean"
     },
     "name": {
       "type": "string"
@@ -74,11 +85,23 @@
     "provider_resource_id": {
       "$ref": "#/definitions/ProviderResourceId"
     },
+    "quarantine_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "region": {
       "type": "string"
     },
     "status": {
       "$ref": "#/definitions/ProviderResourceStatus"
+    },
+    "supported_protocol_families": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "tenant_id": {
       "$ref": "#/definitions/TenantId"
@@ -149,11 +172,19 @@
       "type": "object",
       "required": [
         "supports_json_mode",
+        "supports_realtime",
+        "supports_response_model_metadata",
         "supports_streaming",
         "supports_tool_calling"
       ],
       "properties": {
         "supports_json_mode": {
+          "type": "boolean"
+        },
+        "supports_realtime": {
+          "type": "boolean"
+        },
+        "supports_response_model_metadata": {
           "type": "boolean"
         },
         "supports_streaming": {
