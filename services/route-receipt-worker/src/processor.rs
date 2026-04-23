@@ -58,13 +58,22 @@ pub async fn ensure_route_receipt_tables(pool: &PgPool) -> Result<()> {
         )
         "#,
     ] {
-        sqlx::query(statement)
-            .execute(pool)
-            .await
-            .context("creating route receipt tables failed")?;
+        match sqlx::query(statement).execute(pool).await {
+            Ok(_) => {}
+            Err(error) if is_concurrent_create_table_race(&error) => {}
+            Err(error) => return Err(error).context("creating route receipt tables failed"),
+        }
     }
 
     Ok(())
+}
+
+fn is_concurrent_create_table_race(error: &sqlx::Error) -> bool {
+    let Some(database_error) = error.as_database_error() else {
+        return false;
+    };
+    database_error.code().is_some_and(|code| code == "23505")
+        && database_error.message().contains("pg_type_typname_nsp_index")
 }
 
 pub fn parse_route_receipt_recorded(payload: &[u8]) -> Result<RouteReceiptRecordedMessage> {

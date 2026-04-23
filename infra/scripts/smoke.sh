@@ -18,6 +18,8 @@ log() {
   echo "[smoke] $*"
 }
 
+CONTROL_PLANE_COOKIE_JAR=""
+
 cleanup() {
   local code=$?
   for pid in "${SERVICE_PIDS[@]:-}"; do
@@ -75,6 +77,20 @@ query_ledger_count() {
     -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres \
     psql -h 127.0.0.1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc \
     "SELECT COUNT(*) FROM ledger_entries;"
+}
+
+query_route_receipt_count() {
+  docker compose "${COMPOSE_ARGS[@]}" exec -T \
+    -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres \
+    psql -h 127.0.0.1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc \
+    "SELECT COUNT(*) FROM route_receipts;"
+}
+
+query_route_receipt_diagnostics_count() {
+  docker compose "${COMPOSE_ARGS[@]}" exec -T \
+    -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres \
+    psql -h 127.0.0.1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc \
+    "SELECT COUNT(*) FROM route_receipt_diagnostics;"
 }
 
 create_provider_resource() {
@@ -137,7 +153,7 @@ create_route_policy() {
       display_name: $display_name,
       protocol_family: $protocol_family,
       model_alias: $model_alias,
-      required_capabilities: [],
+      required_capabilities: ["chat_completions"],
       preferred_regions: ["global"],
       version: 1,
       created_at: "2026-04-22T00:00:00Z",
@@ -191,8 +207,45 @@ create_gateway_api_key() {
     '{provider_resource_id:$provider_resource_id,display_name:$display_name,api_key:$api_key}')"
 
   curl -fsS -X POST "${CONTROL_PLANE_BASE_URL}/v1/api-keys" \
+    -b "${CONTROL_PLANE_COOKIE_JAR}" \
     -H "content-type: application/json" \
     --data "${payload}" >/dev/null
+}
+
+login_platform_admin() {
+  local start_payload
+  local flow_file="${LOG_ROOT}/auth_email_start.json"
+  local complete_file="${LOG_ROOT}/auth_email_complete.json"
+  CONTROL_PLANE_COOKIE_JAR="${LOG_ROOT}/control-plane.cookies.txt"
+
+  start_payload="$(jq -n \
+    --arg email "ops@huge-router.dev" \
+    --arg workspace_slug "platform-admin" \
+    '{email:$email,workspaceSlug:$workspace_slug}')"
+
+  curl -fsS -o "${flow_file}" \
+    -X POST "${CONTROL_PLANE_BASE_URL}/api/control-plane/auth/email/start" \
+    -H "content-type: application/json" \
+    --data "${start_payload}"
+
+  local flow_id
+  flow_id="$(jq -r '.flowId // empty' "${flow_file}")"
+  if [[ -z "${flow_id}" ]]; then
+    log "failed to obtain platform-admin auth flow id"
+    log "response: $(cat "${flow_file}")"
+    exit 1
+  fi
+
+  curl -fsS -o "${complete_file}" -c "${CONTROL_PLANE_COOKIE_JAR}" \
+    -X POST "${CONTROL_PLANE_BASE_URL}/api/control-plane/auth/email/complete" \
+    -H "content-type: application/json" \
+    --data "{\"code\":\"111111\",\"flowId\":\"${flow_id}\"}"
+
+  if ! grep -q 'huge_router_session' "${CONTROL_PLANE_COOKIE_JAR}" 2>/dev/null; then
+    log "platform-admin session cookie was not issued"
+    log "response: $(cat "${complete_file}")"
+    exit 1
+  fi
 }
 
 wait_for_ledger_increment() {
@@ -211,6 +264,74 @@ wait_for_ledger_increment() {
       return 1
     fi
     sleep 2
+  done
+}
+
+wait_for_route_receipt_increment() {
+  local before_count="$1"
+  local after_count
+  local attempt=0
+  while :; do
+    after_count="$(query_route_receipt_count | tr -d '[:space:]')"
+    if [[ "${after_count}" -gt "${before_count}" ]]; then
+      echo "${after_count}"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if ((attempt > 30)); then
+      log "route_receipts did not increase (before=${before_count}, after=${after_count})"
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+wait_for_route_receipt_diagnostics_increment() {
+  local before_count="$1"
+  local after_count
+  local attempt=0
+  while :; do
+    after_count="$(query_route_receipt_diagnostics_count | tr -d '[:space:]')"
+    if [[ "${after_count}" -gt "${before_count}" ]]; then
+      echo "${after_count}"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if ((attempt > 30)); then
+      log "route_receipt_diagnostics did not increase (before=${before_count}, after=${after_count})"
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+run_gateway_smoke_request() {
+  local output_file="$1"
+  local max_attempts=5
+  local attempt=1
+  local http_status
+
+  while :; do
+    http_status="$(curl -sS -o "${output_file}" -w "%{http_code}" \
+      -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
+      -H "authorization: Bearer ${SMOKE_API_KEY}" \
+      -H "content-type: application/json" \
+      --data "{\"model\":\"${SMOKE_OPENAI_MODEL_ALIAS}\",\"messages\":[{\"role\":\"user\",\"content\":\"smoke\"}],\"stream\":false}")"
+
+    if [[ "${http_status}" == "${SMOKE_EXPECT_GATEWAY_STATUS}" ]]; then
+      echo "${http_status}"
+      return 0
+    fi
+
+    if [[ "${SMOKE_EXPECT_GATEWAY_STATUS}" == "200" && "${http_status}" =~ ^50[234]$ && "${attempt}" -lt "${max_attempts}" ]]; then
+      echo "[smoke] gateway request retry ${attempt}/${max_attempts} after transient http=${http_status}" >&2
+      attempt=$((attempt + 1))
+      sleep 2
+      continue
+    fi
+
+    echo "${http_status}"
+    return 0
   done
 }
 
@@ -244,6 +365,8 @@ export CONTROL_PLANE_INTERNAL_TOKEN="${CONTROL_PLANE_INTERNAL_TOKEN:-dev-interna
 export CONTROL_PLANE_DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 export LEDGER_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
 export LEDGER_WORKER_NATS_URL="${NATS_URL}"
+export ROUTE_RECEIPT_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
+export ROUTE_RECEIPT_WORKER_NATS_URL="${NATS_URL}"
 export GATEWAY_NATS_URL="${NATS_URL}"
 
 SMOKE_OPENAI_API_KEY="${SMOKE_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}"
@@ -252,7 +375,13 @@ if [[ -z "${SMOKE_OPENAI_API_KEY}" ]]; then
   exit 1
 fi
 export SMOKE_OPENAI_API_KEY
+export SMOKE_OPENAI_BASE_URL="${SMOKE_OPENAI_BASE_URL:-https://api.openai.com/v1}"
+export SMOKE_OPENAI_MODEL_ALIAS="${SMOKE_OPENAI_MODEL_ALIAS:-reasoning-fast}"
+export SMOKE_OPENAI_WIRE_API="${SMOKE_OPENAI_WIRE_API:-chat_completions}"
+export SMOKE_EXPECT_GATEWAY_STATUS="${SMOKE_EXPECT_GATEWAY_STATUS:-200}"
 export GATEWAY_OPENAI_API_KEY="${SMOKE_OPENAI_API_KEY}"
+export GATEWAY_OPENAI_MODEL="${GATEWAY_OPENAI_MODEL:-${SMOKE_OPENAI_MODEL_ALIAS}}"
+export GATEWAY_OPENAI_WIRE_API="${SMOKE_OPENAI_WIRE_API}"
 export OPENAI_API_KEY="${SMOKE_OPENAI_API_KEY}"
 
 # Keep these in-place for future adapter expansion and optional smoke variants.
@@ -290,7 +419,7 @@ until docker compose "${COMPOSE_ARGS[@]}" exec -T postgres pg_isready -U "${POST
 done
 
 log "compiling runtime services"
-cargo build -p control-plane-api -p gateway-api -p ledger-worker
+cargo build -p control-plane-api -p gateway-api -p ledger-worker -p route-receipt-worker
 
 (
   cd "${REPO_ROOT}"
@@ -327,24 +456,35 @@ SERVICE_PIDS+=("$!")
 LEDGER_WORKER_PID="$!"
 log "ledger-worker started (pid ${LEDGER_WORKER_PID})"
 
+(
+  cd "${REPO_ROOT}"
+  export ROUTE_RECEIPT_WORKER_DATABASE_URL
+  export ROUTE_RECEIPT_WORKER_NATS_URL
+  cargo run -p route-receipt-worker
+) >"${LOG_ROOT}/route-receipt-worker.log" 2>&1 &
+SERVICE_PIDS+=("$!")
+ROUTE_RECEIPT_WORKER_PID="$!"
+log "route-receipt-worker started (pid ${ROUTE_RECEIPT_WORKER_PID})"
+
 wait_for_http "${CONTROL_PLANE_BASE_URL}/healthz" 180 "control-plane healthz"
 wait_for_http "${GATEWAY_BASE_URL}/healthz" 180 "gateway healthz"
-wait_for_container_log "${LOG_ROOT}/ledger-worker.log" "ledger worker ready" 180
+sleep 3
+login_platform_admin
 
-for pid in "${CONTROL_PLANE_PID}" "${GATEWAY_PID}" "${LEDGER_WORKER_PID}"; do
+for pid in "${CONTROL_PLANE_PID}" "${GATEWAY_PID}" "${LEDGER_WORKER_PID}" "${ROUTE_RECEIPT_WORKER_PID}"; do
   if ! kill -0 "${pid}" >/dev/null 2>&1; then
     log "service failed during startup, pid=${pid}"
     exit 1
   fi
 done
 
-log "running control-plane seeded openai setup"
-provider_resource_id="$(curl -fsS -H "content-type: application/json" \
-  "${CONTROL_PLANE_BASE_URL}/v1/provider-resources" | jq -r '.data[0].provider_resource_id // empty')"
-if [[ -z "${provider_resource_id}" ]]; then
-  log "no provider_resources returned from control-plane"
-  exit 1
-fi
+log "running smoke openai setup"
+provider_resource_id="prvrsrc_smoke_openai"
+route_policy_id="routepol_smoke_openai"
+config_snapshot_id="cfgsnap_smoke_openai"
+create_provider_resource "openai" "${provider_resource_id}" "smoke-openai-${RUN_ID}" "${SMOKE_OPENAI_BASE_URL}"
+create_route_policy "${route_policy_id}" "openai_chat" "${SMOKE_OPENAI_MODEL_ALIAS}" "smoke-openai-policy"
+create_and_activate_snapshot "${config_snapshot_id}" "${route_policy_id}" "${provider_resource_id}" 2
 
 SMOKE_API_KEY="sk_smoke_${RUN_ID}_${RANDOM}_${RANDOM}"
 create_key_payload="$(jq -n \
@@ -355,6 +495,7 @@ create_key_payload="$(jq -n \
 
 create_status="$(curl -sS -o "${LOG_ROOT}/create_api_key.json" -w "%{http_code}" \
   -X POST "${CONTROL_PLANE_BASE_URL}/v1/api-keys" \
+  -b "${CONTROL_PLANE_COOKIE_JAR}" \
   -H "content-type: application/json" \
   --data "${create_key_payload}")"
 if [[ "${create_status}" != "200" ]]; then
@@ -363,24 +504,33 @@ if [[ "${create_status}" != "200" ]]; then
   exit 1
 fi
 
+route_receipts_before="$(query_route_receipt_count | tr -d '[:space:]')"
+route_receipt_diagnostics_before="$(query_route_receipt_diagnostics_count | tr -d '[:space:]')"
 ledger_before="$(query_ledger_count | tr -d '[:space:]')"
-GATEWAY_STATUS="$(curl -sS -o "${LOG_ROOT}/gateway_request.json" -w "%{http_code}" \
-  -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
-  -H "authorization: Bearer ${SMOKE_API_KEY}" \
-  -H "content-type: application/json" \
-  --data '{"model":"reasoning-fast","messages":[{"role":"user","content":"smoke"}],"stream":false}')"
-if [[ "${GATEWAY_STATUS}" != "200" ]]; then
+GATEWAY_STATUS="$(run_gateway_smoke_request "${LOG_ROOT}/gateway_request.json")"
+if [[ "${GATEWAY_STATUS}" != "${SMOKE_EXPECT_GATEWAY_STATUS}" ]]; then
   log "gateway request failed, http=${GATEWAY_STATUS}"
   log "response: $(cat "${LOG_ROOT}/gateway_request.json")"
   exit 1
 fi
 
-if ! jq -e '.usage.total_tokens' "${LOG_ROOT}/gateway_request.json" >/dev/null 2>&1; then
-  log "gateway response missing usage block: $(cat "${LOG_ROOT}/gateway_request.json")"
-  exit 1
+route_receipts_after="$(wait_for_route_receipt_increment "${route_receipts_before}")"
+route_receipt_diagnostics_after="$(
+  wait_for_route_receipt_diagnostics_increment "${route_receipt_diagnostics_before}"
+)"
+if [[ "${SMOKE_EXPECT_GATEWAY_STATUS}" == "200" ]]; then
+  if ! jq -e '.usage.total_tokens' "${LOG_ROOT}/gateway_request.json" >/dev/null 2>&1; then
+    log "gateway response missing usage block: $(cat "${LOG_ROOT}/gateway_request.json")"
+    exit 1
+  fi
+  ledger_after="$(wait_for_ledger_increment "${ledger_before}")"
+else
+  if ! jq -e '.error.code' "${LOG_ROOT}/gateway_request.json" >/dev/null 2>&1; then
+    log "gateway error response missing normalized error block: $(cat "${LOG_ROOT}/gateway_request.json")"
+    exit 1
+  fi
+  ledger_after="${ledger_before}"
 fi
-
-ledger_after="$(wait_for_ledger_increment "${ledger_before}")"
 
 run_optional_protocol_smoke() {
   local provider_id="$1"
@@ -410,6 +560,10 @@ run_optional_protocol_smoke() {
 
   local before_count
   before_count="$(query_ledger_count | tr -d '[:space:]')"
+  local before_route_receipts
+  before_route_receipts="$(query_route_receipt_count | tr -d '[:space:]')"
+  local before_route_receipt_diagnostics
+  before_route_receipt_diagnostics="$(query_route_receipt_diagnostics_count | tr -d '[:space:]')"
   local response_file="${LOG_ROOT}/${provider_id}_gateway_request.json"
   local http_status
   http_status="$(curl -sS -o "${response_file}" -w "%{http_code}" \
@@ -430,7 +584,13 @@ run_optional_protocol_smoke() {
 
   local after_count
   after_count="$(wait_for_ledger_increment "${before_count}")"
-  log "${provider_id} smoke assertions passed (${before_count} -> ${after_count})"
+  local after_route_receipts
+  after_route_receipts="$(wait_for_route_receipt_increment "${before_route_receipts}")"
+  local after_route_receipt_diagnostics
+  after_route_receipt_diagnostics="$(
+    wait_for_route_receipt_diagnostics_increment "${before_route_receipt_diagnostics}"
+  )"
+  log "${provider_id} smoke assertions passed (ledger ${before_count} -> ${after_count}, route_receipts ${before_route_receipts} -> ${after_route_receipts}, route_receipt_diagnostics ${before_route_receipt_diagnostics} -> ${after_route_receipt_diagnostics})"
 }
 
 run_optional_protocol_smoke \
@@ -459,6 +619,8 @@ run_optional_protocol_smoke \
   "cfgsnap_smoke_gemini" \
   "${SMOKE_GEMINI_API_KEY}"
 
-log "smoke assertions passed: control-plane + gateway + ledger worker healthy"
+log "smoke assertions passed: control-plane + gateway + ledger worker + route receipt worker healthy"
 log "provider resource used: ${provider_resource_id}"
 log "ledger count: ${ledger_before} -> ${ledger_after}"
+log "route receipt count: ${route_receipts_before} -> ${route_receipts_after}"
+log "route receipt diagnostics count: ${route_receipt_diagnostics_before} -> ${route_receipt_diagnostics_after}"

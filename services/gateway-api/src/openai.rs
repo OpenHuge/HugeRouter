@@ -11,12 +11,21 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone)]
 pub struct OpenAiAdapter {
     transport: Arc<dyn HttpTransport>,
+    wire_api: OpenAiWireApi,
 }
 
 impl OpenAiAdapter {
     #[must_use]
     pub fn new(transport: Arc<dyn HttpTransport>) -> Self {
-        Self { transport }
+        Self::with_wire_api(transport, OpenAiWireApi::from_env())
+    }
+
+    #[must_use]
+    fn with_wire_api(transport: Arc<dyn HttpTransport>, wire_api: OpenAiWireApi) -> Self {
+        Self {
+            transport,
+            wire_api,
+        }
     }
 }
 
@@ -30,9 +39,15 @@ impl Default for OpenAiAdapter {
 impl ProviderAdapter for OpenAiAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
-            adapter_id: "openai-chat-completions-v1",
+            adapter_id: match self.wire_api {
+                OpenAiWireApi::ChatCompletions => "openai-chat-completions-v1",
+                OpenAiWireApi::Responses => "openai-responses-v1",
+            },
             provider_kind: "openai",
-            display_name: "OpenAI Chat Completions",
+            display_name: match self.wire_api {
+                OpenAiWireApi::ChatCompletions => "OpenAI Chat Completions",
+                OpenAiWireApi::Responses => "OpenAI Responses",
+            },
             protocol_family: "openai_chat",
             streaming_support: StreamingSupport::ServerSentEvents,
         }
@@ -44,28 +59,50 @@ impl ProviderAdapter for OpenAiAdapter {
         request: &ProviderRequest,
         context: &ProviderExecutionContext,
     ) -> Result<ProviderResponse, ProviderError> {
-        let http_request = HttpRequest {
-            url: format!(
-                "{}/chat/completions",
-                context.endpoint.endpoint_base_url.trim_end_matches('/')
-            ),
-            headers: vec![
-                (
-                    AUTHORIZATION.as_str().to_string(),
-                    format!("Bearer {}", context.endpoint.api_key),
+        let http_request = match self.wire_api {
+            OpenAiWireApi::ChatCompletions => HttpRequest {
+                url: format!(
+                    "{}/chat/completions",
+                    context.endpoint.endpoint_base_url.trim_end_matches('/')
                 ),
-                (
-                    CONTENT_TYPE.as_str().to_string(),
-                    "application/json".to_string(),
+                headers: vec![
+                    (
+                        AUTHORIZATION.as_str().to_string(),
+                        format!("Bearer {}", context.endpoint.api_key),
+                    ),
+                    (
+                        CONTENT_TYPE.as_str().to_string(),
+                        "application/json".to_string(),
+                    ),
+                ],
+                body: json!({
+                    "model": request.model,
+                    "messages": request.messages.iter().map(OpenAiChatMessage::from).collect::<Vec<_>>(),
+                    "stream": false,
+                }),
+            },
+            OpenAiWireApi::Responses => HttpRequest {
+                url: format!(
+                    "{}/responses",
+                    context.endpoint.endpoint_base_url.trim_end_matches('/')
                 ),
-            ],
-            body: json!({
-                "model": request.model,
-                "messages": request.messages.iter().map(OpenAiChatMessage::from).collect::<Vec<_>>(),
-                "stream": false,
-            }),
+                headers: vec![
+                    (
+                        AUTHORIZATION.as_str().to_string(),
+                        format!("Bearer {}", context.endpoint.api_key),
+                    ),
+                    (
+                        CONTENT_TYPE.as_str().to_string(),
+                        "application/json".to_string(),
+                    ),
+                ],
+                body: json!({
+                    "model": request.model,
+                    "input": request.messages.iter().map(OpenAiResponseInputMessage::from).collect::<Vec<_>>(),
+                    "stream": false,
+                }),
+            },
         };
-
         let response = self
             .transport
             .post_json(http_request)
@@ -90,34 +127,10 @@ impl ProviderAdapter for OpenAiAdapter {
             ));
         }
 
-        let payload: OpenAiChatCompletionResponse =
-            serde_json::from_str(response.body.as_deref().ok_or_else(|| {
-                ProviderError::new(
-                    ProviderErrorKind::Protocol,
-                    "OpenAI returned an empty response body",
-                    false,
-                )
-                .with_detail(
-                    "provider_resource_id",
-                    &context.endpoint.provider_resource_id,
-                )
-            })?)
-            .map_err(|error| {
-                ProviderError::new(
-                    ProviderErrorKind::Protocol,
-                    format!("failed to decode OpenAI response: {error}"),
-                    false,
-                )
-                .with_detail(
-                    "provider_resource_id",
-                    &context.endpoint.provider_resource_id,
-                )
-            })?;
-
-        let choice = payload.choices.into_iter().next().ok_or_else(|| {
+        let body = response.body.as_deref().ok_or_else(|| {
             ProviderError::new(
                 ProviderErrorKind::Protocol,
-                "OpenAI response did not include any choices",
+                "OpenAI returned an empty response body",
                 false,
             )
             .with_detail(
@@ -126,38 +139,131 @@ impl ProviderAdapter for OpenAiAdapter {
             )
         })?;
 
-        let output_text = choice.message.content.ok_or_else(|| {
-            ProviderError::new(
-                ProviderErrorKind::Protocol,
-                "OpenAI response did not include assistant content",
-                false,
-            )
-            .with_detail(
-                "provider_resource_id",
+        match self.wire_api {
+            OpenAiWireApi::ChatCompletions => parse_chat_completion_response(
+                body,
+                request,
                 &context.endpoint.provider_resource_id,
-            )
-        })?;
-
-        let cached_input_tokens = payload
-            .usage
-            .as_ref()
-            .and_then(|usage| usage.prompt_tokens_details.as_ref())
-            .and_then(|details| details.cached_tokens)
-            .unwrap_or_default();
-        let usage = payload.usage.unwrap_or_default();
-
-        Ok(ProviderResponse {
-            response_id: payload.id,
-            model: payload.model.unwrap_or_else(|| request.model.clone()),
-            output_text,
-            finish_reason: choice.finish_reason.unwrap_or_else(|| "stop".to_string()),
-            usage: ProviderUsage {
-                input_tokens: usage.prompt_tokens,
-                output_tokens: usage.completion_tokens,
-                cached_input_tokens,
-            },
-        })
+            ),
+            OpenAiWireApi::Responses => {
+                parse_responses_api_response(body, request, &context.endpoint.provider_resource_id)
+            }
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenAiWireApi {
+    ChatCompletions,
+    Responses,
+}
+
+impl OpenAiWireApi {
+    fn from_env() -> Self {
+        match std::env::var("GATEWAY_OPENAI_WIRE_API")
+            .or_else(|_| std::env::var("OPENAI_WIRE_API"))
+            .ok()
+            .as_deref()
+        {
+            Some("responses") => Self::Responses,
+            _ => Self::ChatCompletions,
+        }
+    }
+}
+
+fn parse_chat_completion_response(
+    body: &str,
+    request: &ProviderRequest,
+    provider_resource_id: &str,
+) -> Result<ProviderResponse, ProviderError> {
+    let payload: OpenAiChatCompletionResponse = serde_json::from_str(body).map_err(|error| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            format!("failed to decode OpenAI response: {error}"),
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+
+    let choice = payload.choices.into_iter().next().ok_or_else(|| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            "OpenAI response did not include any choices",
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+
+    let output_text = choice.message.content.ok_or_else(|| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            "OpenAI response did not include assistant content",
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+
+    let cached_input_tokens = payload
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.prompt_tokens_details.as_ref())
+        .and_then(|details| details.cached_tokens)
+        .unwrap_or_default();
+    let usage = payload.usage.unwrap_or_default();
+
+    Ok(ProviderResponse {
+        response_id: payload.id,
+        model: payload.model.unwrap_or_else(|| request.model.clone()),
+        output_text,
+        finish_reason: choice.finish_reason.unwrap_or_else(|| "stop".to_string()),
+        usage: ProviderUsage {
+            input_tokens: usage.prompt_tokens,
+            output_tokens: usage.completion_tokens,
+            cached_input_tokens,
+        },
+    })
+}
+
+fn parse_responses_api_response(
+    body: &str,
+    request: &ProviderRequest,
+    provider_resource_id: &str,
+) -> Result<ProviderResponse, ProviderError> {
+    let payload: OpenAiResponsesApiResponse = serde_json::from_str(body).map_err(|error| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            format!("failed to decode OpenAI response: {error}"),
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+    let output_text = payload.output_text().ok_or_else(|| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            "OpenAI responses payload did not include assistant text",
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+    let finish_reason = payload.finish_reason();
+    let model = payload.model.clone().unwrap_or_else(|| request.model.clone());
+
+    Ok(ProviderResponse {
+        response_id: payload.id,
+        model,
+        output_text,
+        finish_reason,
+        usage: ProviderUsage {
+            input_tokens: payload.usage.input_tokens,
+            output_tokens: payload.usage.output_tokens,
+            cached_input_tokens: payload
+                .usage
+                .input_tokens_details
+                .as_ref()
+                .and_then(|details| details.cached_tokens)
+                .unwrap_or_default(),
+        },
+    })
 }
 
 fn map_error_response(
@@ -222,9 +328,18 @@ pub trait HttpTransport: Send + Sync {
     async fn post_json(&self, request: HttpRequest) -> Result<HttpResponse, HttpTransportError>;
 }
 
-#[derive(Default)]
 struct ReqwestTransport {
     client: reqwest::Client,
+}
+
+impl Default for ReqwestTransport {
+    fn default() -> Self {
+        let client = reqwest::Client::builder()
+            .use_native_tls()
+            .build()
+            .expect("native-tls reqwest client should build");
+        Self { client }
+    }
 }
 
 #[async_trait]
@@ -284,6 +399,31 @@ impl From<&provider_traits::ProviderMessage> for OpenAiChatMessage {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct OpenAiResponseInputMessage {
+    role: String,
+    content: Vec<OpenAiResponseInputContent>,
+}
+
+impl From<&provider_traits::ProviderMessage> for OpenAiResponseInputMessage {
+    fn from(message: &provider_traits::ProviderMessage) -> Self {
+        Self {
+            role: message.role.clone(),
+            content: vec![OpenAiResponseInputContent {
+                content_type: "input_text",
+                text: message.content.clone(),
+            }],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OpenAiResponseInputContent {
+    #[serde(rename = "type")]
+    content_type: &'static str,
+    text: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct OpenAiChatCompletionResponse {
     #[serde(default)]
@@ -324,6 +464,84 @@ struct OpenAiPromptTokenDetails {
     cached_tokens: Option<u32>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct OpenAiResponsesApiUsage {
+    #[serde(default)]
+    input_tokens: u32,
+    #[serde(default)]
+    output_tokens: u32,
+    #[serde(default)]
+    input_tokens_details: Option<OpenAiPromptTokenDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponsesApiResponse {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    output: Vec<OpenAiResponsesOutputItem>,
+    #[serde(default)]
+    usage: OpenAiResponsesApiUsage,
+    #[serde(default)]
+    status: Option<String>,
+}
+
+impl OpenAiResponsesApiResponse {
+    fn output_text(&self) -> Option<String> {
+        let text = self
+            .output
+            .iter()
+            .filter_map(OpenAiResponsesOutputItem::text)
+            .collect::<Vec<_>>()
+            .join("");
+        if text.is_empty() { None } else { Some(text) }
+    }
+
+    fn finish_reason(&self) -> String {
+        match self.status.as_deref() {
+            Some("completed") | None => "stop".to_string(),
+            Some(status) => status.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponsesOutputItem {
+    #[serde(default)]
+    content: Vec<OpenAiResponsesOutputContent>,
+}
+
+impl OpenAiResponsesOutputItem {
+    fn text(&self) -> Option<String> {
+        let text = self
+            .content
+            .iter()
+            .filter_map(OpenAiResponsesOutputContent::text)
+            .collect::<Vec<_>>()
+            .join("");
+        if text.is_empty() { None } else { Some(text) }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponsesOutputContent {
+    #[serde(rename = "type", default)]
+    content_type: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+impl OpenAiResponsesOutputContent {
+    fn text(&self) -> Option<String> {
+        match self.content_type.as_deref() {
+            Some("output_text") | Some("text") | None => self.text.clone(),
+            Some(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct OpenAiErrorResponse {
     #[serde(default)]
@@ -343,7 +561,7 @@ struct OpenAiErrorBody {
 mod tests {
     use super::{
         HttpRequest, HttpResponse, HttpTransport, HttpTransportError, HttpTransportErrorKind,
-        OpenAiAdapter,
+        OpenAiAdapter, OpenAiWireApi,
     };
     use async_trait::async_trait;
     use provider_traits::{
@@ -425,7 +643,8 @@ mod tests {
                 .to_string(),
             ),
         })]);
-        let adapter = OpenAiAdapter::new(Arc::new(transport.clone()));
+        let adapter =
+            OpenAiAdapter::with_wire_api(Arc::new(transport.clone()), OpenAiWireApi::ChatCompletions);
 
         let response = adapter.execute_chat(&request(), &context()).await.unwrap();
 
@@ -442,6 +661,51 @@ mod tests {
         assert_eq!(
             first_request_url,
             "https://api.openai.example/v1/chat/completions"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_api_maps_text_and_usage() {
+        let transport = MockTransport::new(vec![Ok(HttpResponse {
+            status: 200,
+            body: Some(
+                json!({
+                    "id": "resp_123",
+                    "model": "gpt-4.1-mini",
+                    "status": "completed",
+                    "output": [{
+                        "content": [
+                            { "type": "output_text", "text": "world" }
+                        ]
+                    }],
+                    "usage": {
+                        "input_tokens": 11,
+                        "output_tokens": 7,
+                        "input_tokens_details": {
+                            "cached_tokens": 2
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+        })]);
+        let adapter =
+            OpenAiAdapter::with_wire_api(Arc::new(transport.clone()), OpenAiWireApi::Responses);
+
+        let response = adapter.execute_chat(&request(), &context()).await.unwrap();
+
+        assert_eq!(response.output_text, "world");
+        assert_eq!(response.finish_reason, "stop");
+        assert_eq!(response.usage.input_tokens, 11);
+        assert_eq!(response.usage.output_tokens, 7);
+        assert_eq!(response.usage.cached_input_tokens, 2);
+
+        let recorded_requests = transport.requests.lock().unwrap();
+        assert_eq!(recorded_requests[0].url, "https://api.openai.example/v1/responses");
+        assert_eq!(recorded_requests[0].body["input"][0]["role"], "user");
+        assert_eq!(
+            recorded_requests[0].body["input"][0]["content"][0]["type"],
+            "input_text"
         );
     }
 

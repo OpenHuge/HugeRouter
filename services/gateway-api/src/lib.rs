@@ -1789,7 +1789,10 @@ struct GatewayApiKeyResolveRequest {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyResolveResponse {
-    api_key: GatewayApiKeyScope,
+    credential_id: String,
+    project_id: Option<String>,
+    status: String,
+    tenant_id: String,
 }
 
 #[derive(Debug)]
@@ -1990,7 +1993,12 @@ impl ControlPlaneApiKeyStore {
         response
             .json::<GatewayApiKeyResolveResponse>()
             .await
-            .map(|payload| payload.api_key)
+            .map(|payload| GatewayApiKeyScope {
+                credential_id: payload.credential_id,
+                tenant_id: payload.tenant_id,
+                project_id: payload.project_id,
+                status: payload.status,
+            })
             .map_err(|error| format!("failed to decode API key resolution payload: {error}"))
     }
 }
@@ -2590,12 +2598,10 @@ mod tests {
             return Err(StatusCode::UNAUTHORIZED);
         }
         Ok(Json(GatewayApiKeyResolveResponse {
-            api_key: GatewayApiKeyScope {
-                credential_id: "cred_gateway_test".to_string(),
-                tenant_id: "tenant_acme".to_string(),
-                project_id: Some("proj_core".to_string()),
-                status: "active".to_string(),
-            },
+            credential_id: "cred_gateway_test".to_string(),
+            tenant_id: "tenant_acme".to_string(),
+            project_id: Some("proj_core".to_string()),
+            status: "active".to_string(),
         }))
     }
 

@@ -78,7 +78,7 @@ fn make_usage_event_handler(pool: Arc<PgPool>) -> MessageHandler {
                     );
                 }
                 Err(error) => {
-                    tracing::warn!(error = %error, "ledger worker failed to handle usage event");
+                    tracing::warn!(error = ?error, error_chain = %format!("{error:#}"), "ledger worker failed to handle usage event");
                 }
             }
 
