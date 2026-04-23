@@ -920,14 +920,24 @@ export function createControlPlaneFetchMock() {
 
     if (path === "/v1/api-keys" && init?.method === "POST") {
       const body = parseRequestBody(init) ?? {};
+      const displayName =
+        typeof body.display_name === "string"
+          ? body.display_name
+          : "New API Key";
+      const apiKey =
+        typeof body.api_key === "string" ? body.api_key : "akp_new";
+      const providerResourceId =
+        typeof body.provider_resource_id === "string"
+          ? body.provider_resource_id
+          : "prvrsrc_unknown";
       const nextKey = {
         api_key_id: `key_${apiKeysState.length + 1}`,
         can_revoke: true,
         created_at: "2026-04-23T00:00:00Z",
-        display_name: String(body.display_name ?? "New API Key"),
+        display_name: displayName,
         is_active: true,
-        key_prefix: `${String(body.api_key ?? "akp_new").slice(0, 6)}...`,
-        provider_resource_id: String(body.provider_resource_id ?? "prvrsrc_unknown"),
+        key_prefix: `${apiKey.slice(0, 6)}...`,
+        provider_resource_id: providerResourceId,
         tenant_id: "tenant_acme",
         updated_at: "2026-04-23T00:00:00Z",
         version: 1,

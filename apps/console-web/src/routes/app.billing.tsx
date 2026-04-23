@@ -8,8 +8,8 @@ import {
   Table,
   Text,
 } from "@mantine/core";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@huge-router/ui-kit";
 import { loadRouteData } from "../features/control-plane/loaders";
 import {
@@ -68,12 +68,8 @@ export const Route = createFileRoute("/app/billing")({
 
 function BillingPage() {
   const result = Route.useLoaderData();
-  const router = useRouter();
   const search = Route.useSearch();
   const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
-  const [jobOverrides, setJobOverrides] = useState<
-    Record<string, Partial<BillingExportJobView>>
-  >({});
   const [queueingExport, setQueueingExport] = useState(false);
   const [refreshingExports, setRefreshingExports] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -97,31 +93,24 @@ function BillingPage() {
   }
 
   const data = result.data;
-  const effectiveExportJobs = data.exportJobs.map((job) => ({
-    ...job,
-    ...(jobOverrides[job.exportJobId] ?? {}),
-  }));
+  const [exportJobs, setExportJobs] = useState<BillingExportJobView[]>(
+    data.exportJobs,
+  );
+
+  useEffect(() => {
+    setExportJobs(data.exportJobs);
+  }, [data.exportJobs]);
+
+  const effectiveExportJobs = exportJobs;
 
   async function refreshBillingExports() {
     setRefreshingExports(true);
     try {
-      await router.invalidate();
-      setJobOverrides((current) => {
-        const next = { ...current };
-
-        for (const job of effectiveExportJobs) {
-          if (job.status === "queued") {
-            next[job.exportJobId] = {
-              completedAt:
-                current[job.exportJobId]?.completedAt ??
-                "2026-04-23T00:11:00Z",
-              status: "completed",
-            };
-          }
-        }
-
-        return next;
-      });
+      const refreshed = await getConsoleDataService().getBillingDashboard(
+        search.range,
+        search.projectId,
+      );
+      setExportJobs(refreshed.exportJobs);
     } finally {
       setRefreshingExports(false);
     }

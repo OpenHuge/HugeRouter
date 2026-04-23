@@ -438,8 +438,7 @@ function RoutePoliciesPage() {
               onChange={(value) =>
                 updateField(
                   "protocolFamily",
-                  (value ??
-                    "openai_chat") as RoutePolicyFormState["protocolFamily"],
+                  value ?? "openai_chat",
                 )
               }
               value={formState.protocolFamily}

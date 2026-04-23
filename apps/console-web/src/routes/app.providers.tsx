@@ -474,8 +474,7 @@ function ProvidersPage() {
                 onChange={(value) =>
                   updateField(
                     "provenanceClass",
-                    (value ??
-                      "official_api") as ProviderFormState["provenanceClass"],
+                    value ?? "official_api",
                   )
                 }
                 value={formState.provenanceClass}
@@ -486,8 +485,7 @@ function ProvidersPage() {
                 onChange={(value) =>
                   updateField(
                     "credentialOwnerType",
-                    (value ??
-                      "platform") as ProviderFormState["credentialOwnerType"],
+                    value ?? "platform",
                   )
                 }
                 value={formState.credentialOwnerType}
@@ -500,7 +498,7 @@ function ProvidersPage() {
                 onChange={(value) =>
                   updateField(
                     "deploymentScope",
-                    (value ?? "shared") as ProviderFormState["deploymentScope"],
+                    value ?? "shared",
                   )
                 }
                 value={formState.deploymentScope}
@@ -511,7 +509,7 @@ function ProvidersPage() {
                 onChange={(value) =>
                   updateField(
                     "authKind",
-                    (value ?? "api_key") as ProviderFormState["authKind"],
+                    value ?? "api_key",
                   )
                 }
                 value={formState.authKind}
@@ -524,7 +522,7 @@ function ProvidersPage() {
                 onChange={(value) =>
                   updateField(
                     "healthState",
-                    (value ?? "healthy") as ProviderFormState["healthState"],
+                    value ?? "healthy",
                   )
                 }
                 value={formState.healthState}
@@ -535,7 +533,7 @@ function ProvidersPage() {
                 onChange={(value) =>
                   updateField(
                     "status",
-                    (value ?? "active") as ProviderFormState["status"],
+                    value ?? "active",
                   )
                 }
                 value={formState.status}

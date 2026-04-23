@@ -10,8 +10,8 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { useState } from "react";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
 import type { ProviderResource } from "@huge-router/ts-shared-schema";
 import { loadRouteData } from "../features/control-plane/loaders";
@@ -96,7 +96,6 @@ export const Route = createFileRoute("/app/api-keys")({
 
 function ApiKeysPage() {
   const result = Route.useLoaderData();
-  const router = useRouter();
   const [formErrors, setFormErrors] = useState<ApiKeyFormErrors>({});
   const [formOpen, setFormOpen] = useState(false);
   const [formState, setFormState] = useState<ApiKeyFormState>(
@@ -125,7 +124,12 @@ function ApiKeysPage() {
     );
   }
 
-  const { apiKeys, providers } = result.data;
+  const { apiKeys: loadedApiKeys, providers } = result.data;
+  const [apiKeys, setApiKeys] = useState<ApiKeyView[]>(loadedApiKeys);
+
+  useEffect(() => {
+    setApiKeys(loadedApiKeys);
+  }, [loadedApiKeys]);
 
   function openCreateForm() {
     setFormErrors({});
@@ -183,7 +187,7 @@ function ApiKeysPage() {
       });
       setStatusSuccess(`Created API key ${created.displayName}.`);
       resetForm();
-      await router.invalidate();
+      setApiKeys(await getConsoleDataService().listApiKeys());
     } catch (error) {
       setStatusError(getControlPlaneActionErrorMessage(error, "api-key-create"));
     } finally {
@@ -199,7 +203,7 @@ function ApiKeysPage() {
     try {
       await getConsoleDataService().revokeApiKey(apiKeyId, version);
       setStatusSuccess(`Revoked API key ${apiKeyId}.`);
-      await router.invalidate();
+      setApiKeys(await getConsoleDataService().listApiKeys());
     } catch (error) {
       setStatusError(getControlPlaneActionErrorMessage(error, "api-key-revoke"));
     } finally {
