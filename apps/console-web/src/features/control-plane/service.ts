@@ -15,6 +15,7 @@ import {
   type ProviderResource,
   providerResourceSchema,
   relayEvaluationSchema,
+  replayCapsuleResponseSchema,
   type RoutePolicy,
   type RouteReceipt,
   routePolicySchema,
@@ -35,6 +36,7 @@ import type {
   MerchantShopView,
   MerchantWorkspaceData,
   OverviewData,
+  ReplayCapsuleView,
   ProjectSummary,
   RelayEvaluationView,
   RouteDiagnosticsView,
@@ -66,6 +68,7 @@ export type ConsoleDataService = {
   ) => Promise<BillingExportJobView>;
   getRouteDiagnostics: (routePolicyId: string) => Promise<RouteDiagnosticsView>;
   getMerchantWorkspace: () => Promise<MerchantWorkspaceData>;
+  getReplayCapsule: (replayCapsuleId: string) => Promise<ReplayCapsuleView>;
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>;
   listProviderResources: () => Promise<ProviderResource[]>;
   listRoutePolicies: () => Promise<RoutePolicyView[]>;
@@ -879,6 +882,26 @@ function parseMerchantWorkspace(payload: unknown): MerchantWorkspaceData {
   };
 }
 
+function parseReplayCapsule(payload: unknown): ReplayCapsuleView {
+  const parsed = replayCapsuleResponseSchema.parse(payload).replay_capsule;
+
+  return {
+    configSnapshotId: parsed.config_snapshot_id,
+    normalizedRequestSummary: {
+      estimatedPromptTokens:
+        parsed.normalized_request_summary.estimated_prompt_tokens,
+      modelAlias: parsed.normalized_request_summary.model_alias,
+      protocolFamily: parsed.normalized_request_summary.protocol_family,
+    },
+    redactionTier: parsed.redaction_tier,
+    replayCapsuleId: parsed.replay_capsule_id,
+    requestId: parsed.request_id,
+    routeReceiptId: parsed.route_receipt_id,
+    traceId: parsed.trace_id,
+    upstreamErrorCode: parsed.upstream_error_summary?.code,
+  };
+}
+
 function parseProviderResourceRecord(payload: unknown) {
   return providerResourceSchema.parse(payload);
 }
@@ -1368,6 +1391,19 @@ async function createRelayEvaluationInControlPlane(input: {
   );
 }
 
+async function getReplayCapsuleFromControlPlane(replayCapsuleId: string) {
+  return requestControlPlaneJson(
+    `/v1/replay-capsules/${encodeURIComponent(replayCapsuleId)}`,
+    parseReplayCapsule,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+      method: "GET",
+    },
+  );
+}
+
 async function listRouteReceiptsFromControlPlane() {
   try {
     return await requestControlPlaneJson(
@@ -1765,6 +1801,10 @@ const defaultConsoleDataService: ConsoleDataService = {
 
   async getMerchantWorkspace() {
     return getMerchantWorkspaceFromControlPlane();
+  },
+
+  async getReplayCapsule(replayCapsuleId) {
+    return getReplayCapsuleFromControlPlane(replayCapsuleId);
   },
 
   async getTenantDetail(tenantId) {

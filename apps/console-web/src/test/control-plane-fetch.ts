@@ -664,10 +664,30 @@ const relayEvaluationsInitialState: any[] = [
   },
 ];
 
+const replayCapsulesInitialState: any[] = [
+  {
+    replay_capsule_id: "replay_acme_relay_eval",
+    request_id: "req_merchant_eval_acme",
+    trace_id: "trace_merchant_eval_acme",
+    route_receipt_id: "routercpt_acme_relay_eval",
+    config_snapshot_id: "cfgsnap_gateway_v1",
+    redaction_tier: "structured_redacted",
+    normalized_request_summary: {
+      protocol_family: "openai_chat",
+      model_alias: "claude-sonnet",
+      estimated_prompt_tokens: 480,
+    },
+    upstream_error_summary: {
+      code: "provider_signature_mismatch",
+    },
+  },
+];
+
 let merchantShopsState = structuredClone(merchantShopsInitialState);
 let cardProductsState = structuredClone(cardProductsInitialState);
 let trialConnectionsState = structuredClone(trialConnectionsInitialState);
 let relayEvaluationsState = structuredClone(relayEvaluationsInitialState);
+let replayCapsulesState = structuredClone(replayCapsulesInitialState);
 
 const emptyResponse = (status: number) =>
   new Response("", {
@@ -738,6 +758,7 @@ export function createControlPlaneFetchMock() {
   merchantShopsState = structuredClone(merchantShopsInitialState);
   providerResourcesState = structuredClone(providerResourcesInitialState);
   relayEvaluationsState = structuredClone(relayEvaluationsInitialState);
+  replayCapsulesState = structuredClone(replayCapsulesInitialState);
   routePoliciesState = structuredClone(routePoliciesInitialState);
   trialConnectionsState = structuredClone(trialConnectionsInitialState);
 
@@ -902,7 +923,55 @@ export function createControlPlaneFetchMock() {
         verdict: "warning",
       };
       relayEvaluationsState = [nextEvaluation, ...relayEvaluationsState];
+      replayCapsulesState = [
+        {
+          replay_capsule_id: nextEvaluation.replay_capsule_id,
+          request_id: `req_${nextEvaluation.replay_capsule_id}`,
+          trace_id: `trace_${nextEvaluation.replay_capsule_id}`,
+          route_receipt_id: `routercpt_${nextEvaluation.replay_capsule_id}`,
+          config_snapshot_id: "cfgsnap_gateway_v1",
+          redaction_tier: "structured_redacted",
+          normalized_request_summary: {
+            protocol_family: "openai_chat",
+            model_alias: nextEvaluation.target_model,
+            estimated_prompt_tokens: 480,
+          },
+          upstream_error_summary: {
+            code: "protocol_shape_warning",
+          },
+        },
+        ...replayCapsulesState,
+      ];
       return Promise.resolve(jsonResponse(200, nextEvaluation));
+    }
+
+    if (
+      path.startsWith("/v1/replay-capsules/") &&
+      (!init?.method || init.method === "GET")
+    ) {
+      const replayCapsuleId = decodeURIComponent(path.split("/")[3] ?? "");
+      const capsule = replayCapsulesState.find(
+        (item) => item.replay_capsule_id === replayCapsuleId,
+      );
+
+      if (!capsule) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "not_found",
+              message: "Replay capsule not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      return Promise.resolve(
+        jsonResponse(200, {
+          replay_capsule: capsule,
+        }),
+      );
     }
 
     if (path === "/v1/provider-resources" && (!init?.method || init.method === "GET")) {

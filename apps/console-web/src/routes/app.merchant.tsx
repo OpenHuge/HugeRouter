@@ -28,6 +28,7 @@ import type {
   CardProductView,
   MerchantShopView,
   MerchantWorkspaceData,
+  ReplayCapsuleView,
   TrialConnectionView,
 } from "../features/control-plane/types";
 import {
@@ -233,6 +234,12 @@ function MerchantCenterPage() {
   const [isSubmittingCard, setIsSubmittingCard] = useState(false);
   const [isSubmittingTrial, setIsSubmittingTrial] = useState(false);
   const [isSubmittingEvaluation, setIsSubmittingEvaluation] = useState(false);
+  const [isLoadingReplayCapsule, setIsLoadingReplayCapsule] = useState(false);
+  const [selectedReplayCapsule, setSelectedReplayCapsule] =
+    useState<ReplayCapsuleView | null>(null);
+  const [selectedReplayCapsuleId, setSelectedReplayCapsuleId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     setWorkspace(result.data);
@@ -254,6 +261,24 @@ function MerchantCenterPage() {
 
   async function refreshWorkspace() {
     setWorkspace(await getConsoleDataService().getMerchantWorkspace());
+  }
+
+  async function onViewReplayCapsule(replayCapsuleId: string) {
+    setIsLoadingReplayCapsule(true);
+    setSelectedReplayCapsuleId(replayCapsuleId);
+    setStatusError(null);
+
+    try {
+      const capsule =
+        await getConsoleDataService().getReplayCapsule(replayCapsuleId);
+      setSelectedReplayCapsule(capsule);
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "relay-evaluation-create"),
+      );
+    } finally {
+      setIsLoadingReplayCapsule(false);
+    }
   }
 
   async function onCreateShop() {
@@ -731,7 +756,13 @@ function MerchantCenterPage() {
       <MerchantShopTable shops={workspace.shops} />
       <CardProductTable products={workspace.cardProducts} />
       <TrialConnectionTable connections={workspace.trialConnections} />
-      <RelayEvaluationTable workspace={workspace} />
+      <RelayEvaluationTable
+        isLoadingReplayCapsule={isLoadingReplayCapsule}
+        onViewReplayCapsule={onViewReplayCapsule}
+        selectedReplayCapsuleId={selectedReplayCapsuleId}
+        workspace={workspace}
+      />
+      <ReplayCapsuleDetailCard replayCapsule={selectedReplayCapsule} />
     </Stack>
   );
 }
@@ -869,8 +900,14 @@ function TrialConnectionTable({
 }
 
 function RelayEvaluationTable({
+  isLoadingReplayCapsule,
+  onViewReplayCapsule,
+  selectedReplayCapsuleId,
   workspace,
 }: {
+  isLoadingReplayCapsule: boolean;
+  onViewReplayCapsule: (replayCapsuleId: string) => void;
+  selectedReplayCapsuleId: string | null;
   workspace: MerchantWorkspaceData;
 }) {
   return (
@@ -891,6 +928,7 @@ function RelayEvaluationTable({
                 <Table.Th>Score</Table.Th>
                 <Table.Th>Replay Capsule</Table.Th>
                 <Table.Th>Saved Tokens</Table.Th>
+                <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -911,10 +949,114 @@ function RelayEvaluationTable({
                     </Text>
                   </Table.Td>
                   <Table.Td>{evaluation.estimatedTokensSaved}</Table.Td>
+                  <Table.Td>
+                    <Button
+                      loading={
+                        isLoadingReplayCapsule &&
+                        selectedReplayCapsuleId === evaluation.replayCapsuleId
+                      }
+                      onClick={() =>
+                        onViewReplayCapsule(evaluation.replayCapsuleId)
+                      }
+                      size="xs"
+                      variant="light"
+                    >
+                      View replay
+                    </Button>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
           </Table>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
+function ReplayCapsuleDetailCard({
+  replayCapsule,
+}: {
+  replayCapsule: ReplayCapsuleView | null;
+}) {
+  return (
+    <Card padding="lg" radius="md" shadow="sm">
+      <Stack>
+        <Group justify="space-between">
+          <Text fw={700}>Replay Capsule</Text>
+          {replayCapsule ? (
+            <Badge color="teal" variant="light">
+              {replayCapsule.redactionTier}
+            </Badge>
+          ) : null}
+        </Group>
+        {!replayCapsule ? (
+          <EmptyCollectionState
+            description="Open a replay capsule from the evaluation table to inspect the redacted request shape and upstream error hint."
+            title="No replay capsule selected"
+          />
+        ) : (
+          <>
+            <Group grow>
+              <Card padding="md" radius="md" withBorder>
+                <Text c="dimmed" size="sm">
+                  Replay Capsule ID
+                </Text>
+                <Text fw={600}>{replayCapsule.replayCapsuleId}</Text>
+              </Card>
+              <Card padding="md" radius="md" withBorder>
+                <Text c="dimmed" size="sm">
+                  Request / Trace
+                </Text>
+                <Text fw={600}>{replayCapsule.requestId}</Text>
+                <Text c="dimmed" size="sm">
+                  {replayCapsule.traceId}
+                </Text>
+              </Card>
+              <Card padding="md" radius="md" withBorder>
+                <Text c="dimmed" size="sm">
+                  Receipt / Snapshot
+                </Text>
+                <Text fw={600}>{replayCapsule.routeReceiptId}</Text>
+                <Text c="dimmed" size="sm">
+                  {replayCapsule.configSnapshotId}
+                </Text>
+              </Card>
+            </Group>
+            <Table striped withRowBorders>
+              <Table.Tbody>
+                <Table.Tr>
+                  <Table.Th>Protocol Family</Table.Th>
+                  <Table.Td>
+                    {
+                      replayCapsule.normalizedRequestSummary.protocolFamily
+                    }
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Model Alias</Table.Th>
+                  <Table.Td>
+                    {replayCapsule.normalizedRequestSummary.modelAlias}
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Estimated Prompt Tokens</Table.Th>
+                  <Table.Td>
+                    {
+                      replayCapsule.normalizedRequestSummary
+                        .estimatedPromptTokens
+                    }
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Upstream Error Hint</Table.Th>
+                  <Table.Td>
+                    {replayCapsule.upstreamErrorCode ?? "none"}
+                  </Table.Td>
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </>
         )}
       </Stack>
     </Card>
