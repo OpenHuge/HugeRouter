@@ -3,7 +3,7 @@ mod openai;
 use async_trait::async_trait;
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -15,11 +15,26 @@ use core_domain::{
     AdmissionResult, ConfigSnapshot, ConfigSnapshotId, DeploymentScope, ErrorEnvelope,
     ExcludedTarget, FallbackTransition, HealthState, MonetaryAmount, NormalizedError,
     ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceStatus, RoutePolicy,
-    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, UsageEvent, UsageEventId,
-    UsageMetrics, UsagePhase, ValidationIssue,
+    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, ServiceName, UsageEvent,
+    UsageEventId, UsageMetrics, UsagePhase, ValidationIssue,
 };
 use openai::OpenAiAdapter;
-use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
+use protocol_anthropic::{
+    AnthropicMessageRequest, AnthropicMessageResponse, AnthropicResponseContentBlock,
+    AnthropicUsage, MappingError as AnthropicMappingError,
+};
+use protocol_gemini::{
+    CompatibilityError as GeminiCompatibilityError, GenerateContentRequest,
+    GenerateContentResponse, from_provider_response as gemini_from_provider_response,
+};
+use protocol_ir::{
+    ConfigSnapshotResponse, MessageEnvelope, MessageType, ProviderResourcesResponse,
+    RoutePoliciesResponse, RouteReceiptDecisionTraceStep, RouteReceiptPolicyCheck,
+    RouteReceiptProviderAttempt, RouteReceiptRecorded, RouteReceiptRecordedMessage,
+    RouteReceiptRecordedMessageType, UsageEventRecorded,
+};
+use provider_anthropic::AnthropicAdapter;
+use provider_gemini::GeminiAdapter;
 use provider_traits::{
     ProviderAdapterRegistry, ProviderEndpoint, ProviderError, ProviderErrorKind,
     ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
@@ -34,7 +49,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 use tracing::{info, warn};
 
 const GATEWAY_SERVICE_NAME: &str = "gateway-api";
@@ -46,8 +61,10 @@ pub type GatewayState = Arc<AppState>;
 
 pub struct AppState {
     config_store: Arc<dyn ActiveConfigStore>,
+    auth_store: Arc<dyn ApiKeyScopeStore>,
     adapter_registry: ProviderAdapterRegistry,
     debug_headers_enabled: bool,
+    event_sink: Arc<dyn RuntimeEventSink>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -112,6 +129,18 @@ pub struct GatewaySuccess {
 }
 
 #[derive(Debug, Clone)]
+struct ExecutionSuccess {
+    sequence: u64,
+    request_id: String,
+    trace_id: String,
+    config_snapshot_id: ConfigSnapshotId,
+    route_receipt: RouteReceipt,
+    usage_event: UsageEvent,
+    provider_response: ProviderResponse,
+    debug_headers: Option<GatewayDebugHeaders>,
+}
+
+#[derive(Debug, Clone)]
 pub struct GatewayError {
     pub status: StatusCode,
     pub request_id: String,
@@ -152,6 +181,14 @@ struct ActiveGatewayConfig {
     provider_targets: Vec<ProviderTargetRuntime>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct GatewayApiKeyScope {
+    credential_id: String,
+    tenant_id: String,
+    project_id: Option<String>,
+    status: String,
+}
+
 #[derive(Debug, Clone)]
 struct ProviderTargetRuntime {
     resource: ProviderResource,
@@ -186,20 +223,34 @@ pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/messages", post(anthropic_messages))
+        .route(
+            "/v1beta/models/{*model_action}",
+            post(gemini_generate_content),
+        )
         .with_state(state)
 }
 
 fn default_state() -> GatewayState {
     let config_store = Arc::new(ControlPlaneConfigStore::from_env());
+    let auth_store = Arc::new(ControlPlaneApiKeyStore::from_env());
     let mut adapter_registry = ProviderAdapterRegistry::new();
     adapter_registry
         .register(Arc::new(OpenAiAdapter::default()))
         .expect("openai adapter registration should succeed");
+    adapter_registry
+        .register(Arc::new(AnthropicAdapter::default()))
+        .expect("anthropic adapter registration should succeed");
+    adapter_registry
+        .register(Arc::new(GeminiAdapter::default()))
+        .expect("gemini adapter registration should succeed");
 
     Arc::new(AppState {
         config_store,
+        auth_store,
         adapter_registry,
         debug_headers_enabled: debug_headers_enabled_from_env(),
+        event_sink: Arc::new(NatsEventSink::from_env()),
     })
 }
 
@@ -221,15 +272,124 @@ async fn chat_completions(
     }
 }
 
+async fn anthropic_messages(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    Json(request): Json<AnthropicMessageRequest>,
+) -> Response {
+    let context = next_request_context();
+    let normalized_request = match normalize_anthropic_request(request, &context) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+
+    match process_normalized_request(state, headers.get(AUTHORIZATION), normalized_request).await {
+        Ok(success) => anthropic_success_response(&success),
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn gemini_generate_content(
+    State(state): State<GatewayState>,
+    Path(model_action): Path<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<GenerateContentRequest>,
+) -> Response {
+    let context = next_request_context();
+    let model = match parse_gemini_model_action(&model_action, &context) {
+        Ok(model) => model,
+        Err(error) => return error.into_response(),
+    };
+    request.model = model;
+    let normalized_request = match normalize_gemini_request(request, &context) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+
+    match process_normalized_request(state, headers.get(AUTHORIZATION), normalized_request).await {
+        Ok(success) => gemini_success_response(&success),
+        Err(error) => error.into_response(),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_gemini_model_action(
+    model_action: &str,
+    context: &RequestContext,
+) -> Result<String, GatewayError> {
+    let Some(model) = model_action.strip_suffix(":generateContent") else {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            normalized_error(
+                "request_validation_failed",
+                "Gemini path must end with :generateContent".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    };
+
+    if model.trim().is_empty() {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            normalized_error(
+                "request_validation_failed",
+                "Gemini path model must not be empty".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    Ok(model.to_string())
+}
+
 async fn process_chat_completion(
     state: GatewayState,
     authorization_header: Option<&HeaderValue>,
     request: ChatCompletionRequest,
 ) -> Result<GatewaySuccess, GatewayError> {
-    let context = next_request_context();
+    let normalized_request = normalize_request(request, &next_request_context())?;
+    let success =
+        process_normalized_request(state, authorization_header, normalized_request.clone()).await?;
 
-    ensure_bearer_auth(authorization_header, &context)?;
-    let normalized_request = normalize_request(request, &context)?;
+    let context = RequestContext {
+        request_id: success.request_id.clone(),
+        trace_id: success.trace_id.clone(),
+        sequence: success.sequence,
+    };
+
+    Ok(GatewaySuccess {
+        request_id: success.request_id,
+        trace_id: success.trace_id,
+        config_snapshot_id: success.config_snapshot_id,
+        route_receipt: success.route_receipt,
+        usage_event: success.usage_event,
+        response: map_provider_response(&context, &normalized_request, &success.provider_response),
+        debug_headers: success.debug_headers,
+    })
+}
+
+async fn process_normalized_request(
+    state: GatewayState,
+    authorization_header: Option<&HeaderValue>,
+    normalized_request: NormalizedChatRequest,
+) -> Result<ExecutionSuccess, GatewayError> {
+    let context = next_request_context();
+    let bearer_token = extract_bearer_token(authorization_header, &context)?;
+    let api_key_scope = state
+        .auth_store
+        .resolve(&bearer_token)
+        .await
+        .map_err(|message| {
+            GatewayError::new(
+                StatusCode::UNAUTHORIZED,
+                normalized_error("auth_invalid", message, &context, false),
+                &context,
+            )
+        })?;
 
     let active_config = state.config_store.load().await.map_err(|error| {
         GatewayError::new(
@@ -243,6 +403,7 @@ async fn process_chat_completion(
             &context,
         )
     })?;
+    ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
     let route = evaluate_route(&active_config, &normalized_request, &context);
 
     if route.ranked_targets.is_empty() {
@@ -261,6 +422,22 @@ async fn process_chat_completion(
             Some(normalized.clone()),
             Vec::new(),
         );
+        let debug_headers = maybe_debug_headers(
+            state.debug_headers_enabled,
+            &active_config.route_policy.route_policy_id,
+            None,
+            AdmissionResult::RejectedNoCandidate,
+            0,
+        );
+        publish_route_receipt_or_error(
+            &state,
+            &route,
+            &route_receipt,
+            Vec::new(),
+            &context,
+            debug_headers.clone(),
+        )
+        .await?;
 
         return Err(GatewayError::with_route_receipt(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -268,13 +445,7 @@ async fn process_chat_completion(
             normalized,
             &context,
             Some(active_config.config_snapshot.config_snapshot_id.clone()),
-            maybe_debug_headers(
-                state.debug_headers_enabled,
-                &active_config.route_policy.route_policy_id,
-                None,
-                AdmissionResult::RejectedNoCandidate,
-                0,
-            ),
+            debug_headers,
         ));
     }
 
@@ -287,8 +458,9 @@ async fn execute_route(
     route: RouteEvaluation,
     request: NormalizedChatRequest,
     context: RequestContext,
-) -> Result<GatewaySuccess, GatewayError> {
+) -> Result<ExecutionSuccess, GatewayError> {
     let mut fallback_transitions = Vec::new();
+    let mut provider_attempts = Vec::new();
     let mut last_error = None;
 
     for (index, ranked_target) in route.ranked_targets.iter().enumerate() {
@@ -306,6 +478,16 @@ async fn execute_route(
                 "provider_resource_id",
                 target.resource.provider_resource_id.as_str(),
             );
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
 
             if let Some(next_target) = route.ranked_targets.get(index + 1) {
                 fallback_transitions.push(FallbackTransition {
@@ -347,12 +529,23 @@ async fn execute_route(
                 api_key: target.api_key.clone(),
             },
         };
+        let attempt_started_at = now_rfc3339();
+        let attempt_started = Instant::now();
 
         match adapter
             .execute_chat(&provider_request, &provider_context)
             .await
         {
             Ok(provider_response) => {
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    "succeeded",
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    "provider returned output".to_string(),
+                ));
                 let fallback_count = fallback_transitions.len();
                 let route_receipt = build_route_receipt(
                     &route,
@@ -362,8 +555,39 @@ async fn execute_route(
                     None,
                     fallback_transitions,
                 );
+                let debug_headers = maybe_debug_headers(
+                    state.debug_headers_enabled,
+                    &route.config_snapshot.route_policy_id,
+                    Some(target.resource.provider_resource_id.as_str()),
+                    AdmissionResult::Admitted,
+                    fallback_count,
+                );
+                publish_route_receipt_or_error(
+                    &state,
+                    &route,
+                    &route_receipt,
+                    provider_attempts.clone(),
+                    &context,
+                    debug_headers.clone(),
+                )
+                .await?;
                 let usage_event =
                     build_usage_event(&route_receipt, target, &request, &provider_response);
+                state
+                    .event_sink
+                    .publish(&route_receipt, &usage_event, &context)
+                    .await
+                    .map_err(|message| {
+                        GatewayError::with_route_receipt(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            route_receipt.clone(),
+                            normalized_error("usage_event_publish_failed", message, &context, true)
+                                .error,
+                            &context,
+                            Some(route.config_snapshot.config_snapshot_id.clone()),
+                            debug_headers.clone(),
+                        )
+                    })?;
 
                 info!(
                     request_id = context.request_id,
@@ -373,20 +597,15 @@ async fn execute_route(
                     "gateway request routed successfully"
                 );
 
-                return Ok(GatewaySuccess {
+                return Ok(ExecutionSuccess {
+                    sequence: context.sequence,
                     request_id: context.request_id.clone(),
                     trace_id: context.trace_id.clone(),
                     config_snapshot_id: route.config_snapshot.config_snapshot_id.clone(),
                     route_receipt,
                     usage_event,
-                    response: map_provider_response(&context, &request, &provider_response),
-                    debug_headers: maybe_debug_headers(
-                        state.debug_headers_enabled,
-                        &route.config_snapshot.route_policy_id,
-                        Some(target.resource.provider_resource_id.as_str()),
-                        AdmissionResult::Admitted,
-                        fallback_count,
-                    ),
+                    provider_response,
+                    debug_headers,
                 });
             }
             Err(error) => {
@@ -413,8 +632,20 @@ async fn execute_route(
                 }
 
                 last_error = Some((ranked_target.clone(), error.clone()));
-
                 let has_more_candidates = index + 1 < route.ranked_targets.len();
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    if error.retryable && has_more_candidates {
+                        "retryable_failure"
+                    } else {
+                        "failed"
+                    },
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    error.message.clone(),
+                ));
                 if !error.retryable || !has_more_candidates {
                     let normalized = map_provider_error(&error, &context);
                     let fallback_count = fallback_transitions.len();
@@ -426,6 +657,22 @@ async fn execute_route(
                         Some(normalized.error.clone()),
                         fallback_transitions,
                     );
+                    let debug_headers = maybe_debug_headers(
+                        state.debug_headers_enabled,
+                        &route.config_snapshot.route_policy_id,
+                        Some(ranked_target.target.resource.provider_resource_id.as_str()),
+                        route.admission_result,
+                        fallback_count,
+                    );
+                    publish_route_receipt_or_error(
+                        &state,
+                        &route,
+                        &route_receipt,
+                        provider_attempts.clone(),
+                        &context,
+                        debug_headers.clone(),
+                    )
+                    .await?;
 
                     return Err(GatewayError::with_route_receipt(
                         status_for_error_code(&normalized.error.code),
@@ -433,13 +680,7 @@ async fn execute_route(
                         normalized.error,
                         &context,
                         Some(route.config_snapshot.config_snapshot_id.clone()),
-                        maybe_debug_headers(
-                            state.debug_headers_enabled,
-                            &route.config_snapshot.route_policy_id,
-                            Some(ranked_target.target.resource.provider_resource_id.as_str()),
-                            route.admission_result,
-                            fallback_count,
-                        ),
+                        debug_headers,
                     ));
                 }
             }
@@ -457,6 +698,22 @@ async fn execute_route(
         Some(normalized.error.clone()),
         fallback_transitions,
     );
+    let debug_headers = maybe_debug_headers(
+        state.debug_headers_enabled,
+        &route.config_snapshot.route_policy_id,
+        Some(ranked_target.target.resource.provider_resource_id.as_str()),
+        route.admission_result,
+        fallback_count,
+    );
+    publish_route_receipt_or_error(
+        &state,
+        &route,
+        &route_receipt,
+        provider_attempts,
+        &context,
+        debug_headers.clone(),
+    )
+    .await?;
 
     Err(GatewayError::with_route_receipt(
         status_for_error_code(&normalized.error.code),
@@ -464,21 +721,15 @@ async fn execute_route(
         normalized.error,
         &context,
         Some(route.config_snapshot.config_snapshot_id.clone()),
-        maybe_debug_headers(
-            state.debug_headers_enabled,
-            &route.config_snapshot.route_policy_id,
-            Some(ranked_target.target.resource.provider_resource_id.as_str()),
-            route.admission_result,
-            fallback_count,
-        ),
+        debug_headers,
     ))
 }
 
 #[allow(clippy::result_large_err)]
-fn ensure_bearer_auth(
+fn extract_bearer_token(
     authorization_header: Option<&HeaderValue>,
     context: &RequestContext,
-) -> Result<(), GatewayError> {
+) -> Result<String, GatewayError> {
     let Some(value) = authorization_header else {
         return Err(GatewayError::new(
             StatusCode::UNAUTHORIZED,
@@ -492,15 +743,21 @@ fn ensure_bearer_auth(
         ));
     };
 
-    let is_bearer = value
-        .to_str()
-        .ok()
-        .is_some_and(|header| header.starts_with("Bearer "));
+    let header = value.to_str().map_err(|_| {
+        GatewayError::new(
+            StatusCode::UNAUTHORIZED,
+            normalized_error(
+                "auth_invalid",
+                "Authorization header must be valid UTF-8".to_string(),
+                context,
+                false,
+            ),
+            context,
+        )
+    })?;
 
-    if is_bearer {
-        Ok(())
-    } else {
-        Err(GatewayError::new(
+    let Some(bearer_token) = header.strip_prefix("Bearer ") else {
+        return Err(GatewayError::new(
             StatusCode::UNAUTHORIZED,
             normalized_error(
                 "auth_invalid",
@@ -509,8 +766,73 @@ fn ensure_bearer_auth(
                 false,
             ),
             context,
-        ))
+        ));
+    };
+
+    if bearer_token.trim().is_empty() {
+        return Err(GatewayError::new(
+            StatusCode::UNAUTHORIZED,
+            normalized_error(
+                "auth_invalid",
+                "Bearer token must not be empty".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
     }
+
+    Ok(bearer_token.to_string())
+}
+
+#[allow(clippy::result_large_err)]
+fn ensure_scope_matches_config(
+    api_key_scope: &GatewayApiKeyScope,
+    active_config: &ActiveGatewayConfig,
+    context: &RequestContext,
+) -> Result<(), GatewayError> {
+    if api_key_scope.status != "active" {
+        return Err(GatewayError::new(
+            StatusCode::UNAUTHORIZED,
+            normalized_error(
+                "auth_invalid",
+                "API key is not active".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    if api_key_scope.tenant_id != active_config.config_snapshot.tenant_id.as_str() {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key tenant scope does not match the active gateway configuration".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    if let Some(project_id) = api_key_scope.project_id.as_deref()
+        && project_id != active_config.config_snapshot.project_id.as_str()
+    {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key project scope does not match the active gateway configuration".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::result_large_err)]
@@ -583,6 +905,106 @@ fn normalize_request(
             })
             .collect(),
     })
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_anthropic_request(
+    request: AnthropicMessageRequest,
+    context: &RequestContext,
+) -> Result<NormalizedChatRequest, GatewayError> {
+    let normalized = protocol_anthropic::normalize_request(request)
+        .map_err(|error| anthropic_mapping_error(&error, context))?;
+    let mut messages = Vec::with_capacity(
+        normalized.messages.len() + usize::from(normalized.system_prompt.is_some()),
+    );
+
+    if let Some(system_prompt) = normalized.system_prompt.as_ref() {
+        messages.push(ProviderMessage {
+            role: "system".to_string(),
+            content: system_prompt.clone(),
+        });
+    }
+
+    messages.extend(normalized.messages.iter().map(|message| ProviderMessage {
+        role: message.role.clone(),
+        content: message.content.clone(),
+    }));
+
+    Ok(NormalizedChatRequest {
+        model_alias: normalized.model_alias.clone(),
+        protocol_family: "anthropic_messages".to_string(),
+        estimated_prompt_tokens: protocol_anthropic::estimate_prompt_tokens(&normalized),
+        messages,
+    })
+}
+
+#[allow(clippy::result_large_err, clippy::needless_pass_by_value)]
+fn normalize_gemini_request(
+    request: GenerateContentRequest,
+    context: &RequestContext,
+) -> Result<NormalizedChatRequest, GatewayError> {
+    let provider_request = protocol_gemini::to_provider_request(&request)
+        .map_err(|error| gemini_mapping_error(error, context))?;
+
+    Ok(NormalizedChatRequest {
+        model_alias: provider_request.model,
+        protocol_family: "gemini_generate_content".to_string(),
+        estimated_prompt_tokens: estimate_provider_messages_tokens(&provider_request.messages),
+        messages: provider_request.messages,
+    })
+}
+
+fn anthropic_mapping_error(
+    error: &AnthropicMappingError,
+    context: &RequestContext,
+) -> GatewayError {
+    GatewayError::new(
+        StatusCode::BAD_REQUEST,
+        validation_error(
+            "anthropic request validation failed",
+            vec![ValidationIssue {
+                field: anthropic_mapping_error_field(error),
+                message: error.to_string(),
+            }],
+            context,
+            false,
+        ),
+        context,
+    )
+}
+
+fn anthropic_mapping_error_field(error: &AnthropicMappingError) -> String {
+    match error {
+        AnthropicMappingError::EmptyModel => "model".to_string(),
+        AnthropicMappingError::EmptyMessages => "messages".to_string(),
+        AnthropicMappingError::StreamingNotSupported => "stream".to_string(),
+        AnthropicMappingError::EmptyRole { index }
+        | AnthropicMappingError::UnsupportedRole { index, .. } => {
+            format!("messages[{index}].role")
+        }
+        AnthropicMappingError::EmptyContent { index }
+        | AnthropicMappingError::UnsupportedContentBlock { index }
+        | AnthropicMappingError::UnsupportedContentTextStructure { index } => {
+            format!("messages[{index}].content")
+        }
+        AnthropicMappingError::ResponseHasNoText => "content".to_string(),
+    }
+}
+
+fn gemini_mapping_error(error: GeminiCompatibilityError, context: &RequestContext) -> GatewayError {
+    GatewayError::new(
+        StatusCode::BAD_REQUEST,
+        validation_error(
+            "gemini request validation failed",
+            vec![ValidationIssue {
+                field: error.field.to_string(),
+                message: error.detail,
+            }],
+            context,
+            false,
+        ),
+        context,
+    )
 }
 
 fn evaluate_route(
@@ -823,6 +1245,174 @@ fn build_usage_event(
     }
 }
 
+fn build_route_receipt_policy_checks(
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+) -> Vec<RouteReceiptPolicyCheck> {
+    vec![RouteReceiptPolicyCheck {
+        policy_id: route.config_snapshot.route_policy_id.clone(),
+        status: match route.admission_result {
+            AdmissionResult::Admitted => "passed".to_string(),
+            _ => "failed".to_string(),
+        },
+        reason: match route.admission_result {
+            AdmissionResult::Admitted => None,
+            _ => Some(route_receipt.normalized_error.as_ref().map_or_else(
+                || "request rejected before provider execution".to_string(),
+                |error| error.message.clone(),
+            )),
+        },
+    }]
+}
+
+fn build_route_receipt_decision_timeline(
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+    provider_attempts: &[RouteReceiptProviderAttempt],
+) -> Vec<RouteReceiptDecisionTraceStep> {
+    let mut timeline = vec![RouteReceiptDecisionTraceStep {
+        stage: "admission".to_string(),
+        status: match route.admission_result {
+            AdmissionResult::Admitted => "passed".to_string(),
+            _ => "failed".to_string(),
+        },
+        message: match route.admission_result {
+            AdmissionResult::Admitted => "Request admitted by active route policy".to_string(),
+            _ => "Request rejected before provider execution".to_string(),
+        },
+        score: Some(match route.admission_result {
+            AdmissionResult::Admitted => 1.0,
+            _ => 0.0,
+        }),
+        notes: vec![
+            format!("protocol_family={}", route_receipt.protocol_family),
+            format!("model_alias={}", route_receipt.model_alias),
+        ],
+    }];
+
+    timeline.push(RouteReceiptDecisionTraceStep {
+        stage: "candidate_selection".to_string(),
+        status: if route_receipt.selected_target.is_some() {
+            "passed".to_string()
+        } else {
+            "failed".to_string()
+        },
+        message: route_receipt.selected_target.as_ref().map_or_else(
+            || {
+                if route.ranked_targets.is_empty() {
+                    "No eligible provider target satisfied the request".to_string()
+                } else {
+                    "Candidate selection completed but no provider attempt succeeded".to_string()
+                }
+            },
+            |selected_target| {
+                format!(
+                    "Selected {selected_target} from {} ranked candidates",
+                    route.ranked_targets.len()
+                )
+            },
+        ),
+        score: route_receipt.selected_target.as_ref().map(|_| {
+            route_receipt.score_breakdown.latency
+                + route_receipt.score_breakdown.cost
+                + route_receipt.score_breakdown.health
+                + route_receipt.score_breakdown.trust
+        }),
+        notes: vec![
+            format!("excluded_targets={}", route_receipt.excluded_targets.len()),
+            format!(
+                "fallback_transitions={}",
+                route_receipt.fallback_transitions.len()
+            ),
+        ],
+    });
+
+    if let Some(last_attempt) = provider_attempts.last() {
+        timeline.push(RouteReceiptDecisionTraceStep {
+            stage: "provider_execution".to_string(),
+            status: last_attempt.status.clone(),
+            message: if route_receipt.normalized_error.is_some() {
+                format!(
+                    "Provider execution ended with {} after {} attempts",
+                    last_attempt.status,
+                    provider_attempts.len()
+                )
+            } else {
+                format!(
+                    "Provider execution completed via {} on attempt {}",
+                    last_attempt.provider_resource_id, last_attempt.attempt
+                )
+            },
+            score: None,
+            notes: vec![format!("provider_attempts={}", provider_attempts.len())],
+        });
+    }
+
+    timeline
+}
+
+fn build_route_receipt_recorded(
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+    provider_attempts: Vec<RouteReceiptProviderAttempt>,
+) -> RouteReceiptRecorded {
+    RouteReceiptRecorded {
+        route_receipt: route_receipt.clone(),
+        decision_timeline: build_route_receipt_decision_timeline(
+            route,
+            route_receipt,
+            &provider_attempts,
+        ),
+        policy_checks: build_route_receipt_policy_checks(route, route_receipt),
+        provider_attempts,
+    }
+}
+
+fn provider_attempt_record(
+    provider_resource_id: core_domain::ProviderResourceId,
+    attempt: usize,
+    status: impl Into<String>,
+    started_at: String,
+    finished_at: String,
+    latency_ms: u32,
+    reason: impl Into<String>,
+) -> RouteReceiptProviderAttempt {
+    RouteReceiptProviderAttempt {
+        provider_resource_id,
+        attempt: u8::try_from(attempt).unwrap_or(u8::MAX),
+        status: status.into(),
+        started_at,
+        finished_at,
+        latency_ms,
+        reason: reason.into(),
+    }
+}
+
+async fn publish_route_receipt_or_error(
+    state: &GatewayState,
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+    provider_attempts: Vec<RouteReceiptProviderAttempt>,
+    context: &RequestContext,
+    debug_headers: Option<GatewayDebugHeaders>,
+) -> Result<(), GatewayError> {
+    let payload = build_route_receipt_recorded(route, route_receipt, provider_attempts);
+    state
+        .event_sink
+        .publish_route_receipt(route_receipt, &payload, context)
+        .await
+        .map_err(|message| {
+            GatewayError::with_route_receipt(
+                StatusCode::SERVICE_UNAVAILABLE,
+                route_receipt.clone(),
+                normalized_error("route_receipt_publish_failed", message, context, true).error,
+                context,
+                Some(route.config_snapshot.config_snapshot_id.clone()),
+                debug_headers,
+            )
+        })
+}
+
 fn map_provider_response(
     context: &RequestContext,
     request: &NormalizedChatRequest,
@@ -943,6 +1533,18 @@ fn estimate_prompt_tokens(messages: &[ChatMessage]) -> u32 {
         .sum()
 }
 
+fn estimate_provider_messages_tokens(messages: &[ProviderMessage]) -> u32 {
+    messages
+        .iter()
+        .map(|message| {
+            u32::try_from(message.content.split_whitespace().count())
+                .unwrap_or(u32::MAX)
+                .max(1)
+                + 4
+        })
+        .sum()
+}
+
 fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -959,11 +1561,15 @@ fn now_rfc3339() -> String {
 fn status_for_error_code(code: &str) -> StatusCode {
     match code {
         "auth_invalid" => StatusCode::UNAUTHORIZED,
+        "auth_forbidden" => StatusCode::FORBIDDEN,
         "request_validation_failed" => StatusCode::BAD_REQUEST,
         "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
         "upstream_timeout" => StatusCode::GATEWAY_TIMEOUT,
         "upstream_protocol_error" => StatusCode::BAD_GATEWAY,
-        "route_not_available" | "provider_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        "route_not_available"
+        | "provider_unavailable"
+        | "route_receipt_publish_failed"
+        | "usage_event_publish_failed" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1004,9 +1610,134 @@ fn maybe_debug_headers(
     })
 }
 
+fn anthropic_success_response(success: &ExecutionSuccess) -> Response {
+    let payload = AnthropicMessageResponse {
+        id: success
+            .provider_response
+            .response_id
+            .clone()
+            .or_else(|| Some(format!("msg_{}", success.sequence))),
+        model: Some(success.provider_response.model.clone()),
+        content: vec![AnthropicResponseContentBlock::Text {
+            text: success.provider_response.output_text.clone(),
+        }],
+        stop_reason: Some(success.provider_response.finish_reason.clone()),
+        usage: Some(AnthropicUsage {
+            input_tokens: success.provider_response.usage.input_tokens,
+            output_tokens: success.provider_response.usage.output_tokens,
+        }),
+    };
+    let mut response = Json(payload).into_response();
+    insert_success_headers(
+        &mut response,
+        &success.request_id,
+        &success.trace_id,
+        &success.route_receipt,
+        &success.config_snapshot_id,
+        success.debug_headers.as_ref(),
+    );
+    response
+}
+
+fn gemini_success_response(success: &ExecutionSuccess) -> Response {
+    let payload: GenerateContentResponse =
+        gemini_from_provider_response(&success.provider_response);
+    let mut response = Json(payload).into_response();
+    insert_success_headers(
+        &mut response,
+        &success.request_id,
+        &success.trace_id,
+        &success.route_receipt,
+        &success.config_snapshot_id,
+        success.debug_headers.as_ref(),
+    );
+    response
+}
+
+fn insert_success_headers(
+    response: &mut Response,
+    request_id: &str,
+    trace_id: &str,
+    route_receipt: &RouteReceipt,
+    config_snapshot_id: &ConfigSnapshotId,
+    debug_headers: Option<&GatewayDebugHeaders>,
+) {
+    let headers = response.headers_mut();
+
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    headers.insert(
+        "x-request-id",
+        HeaderValue::from_str(request_id).expect("request id should be valid header"),
+    );
+    headers.insert(
+        "x-trace-id",
+        HeaderValue::from_str(trace_id).expect("trace id should be valid header"),
+    );
+    headers.insert(
+        "x-route-receipt-id",
+        HeaderValue::from_str(route_receipt.route_receipt_id.as_str())
+            .expect("route receipt id should be valid header"),
+    );
+    headers.insert(
+        "x-config-snapshot-id",
+        HeaderValue::from_str(config_snapshot_id.as_str())
+            .expect("config snapshot id should be valid header"),
+    );
+
+    if let Some(debug_headers) = debug_headers {
+        if let Some(selected_target) = &debug_headers.selected_target {
+            headers.insert(
+                "x-debug-selected-target",
+                HeaderValue::from_str(selected_target)
+                    .expect("selected target should be a valid header"),
+            );
+        }
+        headers.insert(
+            "x-debug-route-policy-id",
+            HeaderValue::from_str(&debug_headers.route_policy_id)
+                .expect("route policy id should be a valid header"),
+        );
+        headers.insert(
+            "x-debug-fallback-count",
+            HeaderValue::from_str(&debug_headers.fallback_count.to_string())
+                .expect("fallback count should be a valid header"),
+        );
+        headers.insert(
+            "x-debug-admission-result",
+            HeaderValue::from_str(debug_headers.admission_result)
+                .expect("admission result should be a valid header"),
+        );
+    }
+}
+
 #[async_trait]
 trait ActiveConfigStore: Send + Sync {
     async fn load(&self) -> Result<ActiveGatewayConfig, String>;
+}
+
+#[async_trait]
+trait ApiKeyScopeStore: Send + Sync {
+    async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String>;
+}
+
+#[async_trait]
+trait RuntimeEventSink: Send + Sync {
+    async fn publish_route_receipt(
+        &self,
+        route_receipt: &RouteReceipt,
+        payload: &RouteReceiptRecorded,
+        context: &RequestContext,
+    ) -> Result<(), String>;
+
+    async fn publish(
+        &self,
+        route_receipt: &RouteReceipt,
+        usage_event: &UsageEvent,
+        context: &RequestContext,
+    ) -> Result<(), String>;
 }
 
 #[cfg(test)]
@@ -1043,6 +1774,35 @@ struct ControlPlaneConfigStore {
 struct CachedActiveConfig {
     config: ActiveGatewayConfig,
     fetched_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct ControlPlaneApiKeyStore {
+    base_url: String,
+    client: reqwest::Client,
+    internal_token: Option<String>,
+    resolve_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct GatewayApiKeyResolveRequest {
+    api_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct GatewayApiKeyResolveResponse {
+    credential_id: String,
+    project_id: Option<String>,
+    status: String,
+    tenant_id: String,
+}
+
+#[derive(Debug)]
+struct NatsEventSink {
+    client: OnceCell<async_nats::Client>,
+    route_receipt_subject: String,
+    usage_event_subject: String,
+    url: String,
 }
 
 impl ControlPlaneConfigStore {
@@ -1167,6 +1927,196 @@ impl ControlPlaneConfigStore {
     }
 }
 
+impl ControlPlaneApiKeyStore {
+    fn from_env() -> Self {
+        let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
+            .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
+        let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let resolve_path = std::env::var("GATEWAY_API_KEY_RESOLVE_PATH")
+            .unwrap_or_else(|_| "/internal/gateway/api-keys/resolve".to_string());
+
+        Self::new(
+            base_url,
+            resolve_path,
+            internal_token,
+            reqwest::Client::new(),
+        )
+    }
+
+    fn new(
+        base_url: impl Into<String>,
+        resolve_path: impl Into<String>,
+        internal_token: Option<String>,
+        client: reqwest::Client,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            client,
+            internal_token,
+            resolve_path: resolve_path.into(),
+        }
+    }
+
+    async fn fetch_scope(&self, api_key: &str) -> Result<GatewayApiKeyScope, String> {
+        let internal_token = self.internal_token.as_ref().ok_or_else(|| {
+            "CONTROL_PLANE_INTERNAL_TOKEN must be configured for gateway auth resolution"
+                .to_string()
+        })?;
+        let base = self.base_url.trim_end_matches('/');
+        let path = if self.resolve_path.starts_with('/') {
+            self.resolve_path.clone()
+        } else {
+            format!("/{}", self.resolve_path)
+        };
+        let url = format!("{base}{path}");
+        let response = self
+            .client
+            .post(&url)
+            .header(AUTHORIZATION, format!("Bearer {internal_token}"))
+            .json(&GatewayApiKeyResolveRequest {
+                api_key: api_key.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|error| format!("failed to resolve API key via control plane: {error}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unable to read response body".to_string());
+            return Err(format!(
+                "control plane rejected API key with HTTP {status}: {body}"
+            ));
+        }
+
+        response
+            .json::<GatewayApiKeyResolveResponse>()
+            .await
+            .map(|payload| GatewayApiKeyScope {
+                credential_id: payload.credential_id,
+                tenant_id: payload.tenant_id,
+                project_id: payload.project_id,
+                status: payload.status,
+            })
+            .map_err(|error| format!("failed to decode API key resolution payload: {error}"))
+    }
+}
+
+#[async_trait]
+impl ApiKeyScopeStore for ControlPlaneApiKeyStore {
+    async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String> {
+        self.fetch_scope(api_key).await
+    }
+}
+
+impl NatsEventSink {
+    fn from_env() -> Self {
+        let url = std::env::var("GATEWAY_NATS_URL")
+            .or_else(|_| std::env::var("NATS_URL"))
+            .unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string());
+        let route_receipt_subject = std::env::var("GATEWAY_ROUTE_RECEIPT_SUBJECT")
+            .unwrap_or_else(|_| "events.route_receipt.recorded".to_string());
+        let usage_event_subject = std::env::var("GATEWAY_USAGE_EVENT_SUBJECT")
+            .unwrap_or_else(|_| "events.usage_event.recorded".to_string());
+
+        Self::new(url, route_receipt_subject, usage_event_subject)
+    }
+
+    fn new(
+        url: impl Into<String>,
+        route_receipt_subject: impl Into<String>,
+        usage_event_subject: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: OnceCell::new(),
+            route_receipt_subject: route_receipt_subject.into(),
+            usage_event_subject: usage_event_subject.into(),
+            url: url.into(),
+        }
+    }
+
+    async fn client(&self) -> Result<&async_nats::Client, String> {
+        self.client
+            .get_or_try_init(|| async {
+                async_nats::connect(self.url.as_str())
+                    .await
+                    .map_err(|error| format!("failed to connect to NATS at {}: {error}", self.url))
+            })
+            .await
+    }
+}
+
+#[async_trait]
+impl RuntimeEventSink for NatsEventSink {
+    async fn publish_route_receipt(
+        &self,
+        route_receipt: &RouteReceipt,
+        payload: &RouteReceiptRecorded,
+        context: &RequestContext,
+    ) -> Result<(), String> {
+        let envelope = RouteReceiptRecordedMessage {
+            message_id: format!("msg_{}", route_receipt.route_receipt_id),
+            message_type: RouteReceiptRecordedMessageType::RouteReceiptRecorded,
+            schema_version: 1,
+            occurred_at: route_receipt.created_at.clone(),
+            producer: ServiceName::parse(GATEWAY_SERVICE_NAME)
+                .expect("gateway service name should be valid"),
+            trace_id: Some(context.trace_id.clone()),
+            request_id: Some(context.request_id.clone()),
+            idempotency_key: format!("{}:recorded", route_receipt.route_receipt_id),
+            payload: payload.clone(),
+        };
+        let payload = serde_json::to_vec(&envelope)
+            .map_err(|error| format!("failed to serialize route receipt envelope: {error}"))?;
+        let client = self.client().await?;
+
+        client
+            .publish(self.route_receipt_subject.clone(), payload.into())
+            .await
+            .map_err(|error| format!("failed to publish route receipt: {error}"))?;
+        client
+            .flush()
+            .await
+            .map_err(|error| format!("failed to flush route receipt publish: {error}"))?;
+        Ok(())
+    }
+
+    async fn publish(
+        &self,
+        _route_receipt: &RouteReceipt,
+        usage_event: &UsageEvent,
+        context: &RequestContext,
+    ) -> Result<(), String> {
+        let envelope = MessageEnvelope::new(
+            format!("msg_{}", usage_event.usage_event_id),
+            MessageType::UsageEventRecorded,
+            usage_event.recorded_at.clone(),
+            ServiceName::parse(GATEWAY_SERVICE_NAME).expect("gateway service name should be valid"),
+            usage_event.idempotency_key.clone(),
+            UsageEventRecorded {
+                usage_event: usage_event.clone(),
+            },
+        )
+        .with_request_context(context.trace_id.clone(), context.request_id.clone());
+        let payload = serde_json::to_vec(&envelope)
+            .map_err(|error| format!("failed to serialize usage event envelope: {error}"))?;
+        let client = self.client().await?;
+
+        client
+            .publish(self.usage_event_subject.clone(), payload.into())
+            .await
+            .map_err(|error| format!("failed to publish usage event: {error}"))?;
+        client
+            .flush()
+            .await
+            .map_err(|error| format!("failed to flush usage event publish: {error}"))?;
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl ActiveConfigStore for ControlPlaneConfigStore {
     async fn load(&self) -> Result<ActiveGatewayConfig, String> {
@@ -1193,6 +2143,13 @@ fn api_key_for_provider(provider_id: &str) -> String {
         "openai" => std::env::var("GATEWAY_OPENAI_API_KEY")
             .or_else(|_| std::env::var("OPENAI_API_KEY"))
             .unwrap_or_default(),
+        "anthropic" => std::env::var("GATEWAY_ANTHROPIC_API_KEY")
+            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+            .unwrap_or_default(),
+        "gemini" => std::env::var("GATEWAY_GEMINI_API_KEY")
+            .or_else(|_| std::env::var("GEMINI_API_KEY"))
+            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -1201,6 +2158,14 @@ fn upstream_model_for_provider(provider_id: &str) -> Option<String> {
     match provider_id {
         "openai" => Some(
             std::env::var("GATEWAY_OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
+        ),
+        "anthropic" => Some(
+            std::env::var("GATEWAY_ANTHROPIC_MODEL")
+                .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string()),
+        ),
+        "gemini" => Some(
+            std::env::var("GATEWAY_GEMINI_MODEL")
+                .unwrap_or_else(|_| "gemini-1.5-flash-latest".to_string()),
         ),
         _ => None,
     }
@@ -1212,6 +2177,14 @@ fn usd_per_1k_tokens_for_provider(provider_id: &str) -> f64 {
             .ok()
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.01),
+        "anthropic" => std::env::var("GATEWAY_ANTHROPIC_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.012),
+        "gemini" => std::env::var("GATEWAY_GEMINI_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.008),
         _ => 0.02,
     }
 }
@@ -1271,55 +2244,14 @@ impl GatewayError {
 impl IntoResponse for GatewaySuccess {
     fn into_response(self) -> Response {
         let mut response = Json(self.response).into_response();
-        let headers = response.headers_mut();
-
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json; charset=utf-8"),
+        insert_success_headers(
+            &mut response,
+            &self.request_id,
+            &self.trace_id,
+            &self.route_receipt,
+            &self.config_snapshot_id,
+            self.debug_headers.as_ref(),
         );
-        headers.insert(
-            "x-request-id",
-            HeaderValue::from_str(&self.request_id).expect("request id should be valid header"),
-        );
-        headers.insert(
-            "x-trace-id",
-            HeaderValue::from_str(&self.trace_id).expect("trace id should be valid header"),
-        );
-        headers.insert(
-            "x-route-receipt-id",
-            HeaderValue::from_str(self.route_receipt.route_receipt_id.as_str())
-                .expect("route receipt id should be valid header"),
-        );
-        headers.insert(
-            "x-config-snapshot-id",
-            HeaderValue::from_str(self.config_snapshot_id.as_str())
-                .expect("config snapshot id should be valid header"),
-        );
-
-        if let Some(debug_headers) = self.debug_headers {
-            if let Some(selected_target) = debug_headers.selected_target {
-                headers.insert(
-                    "x-debug-selected-target",
-                    HeaderValue::from_str(&selected_target)
-                        .expect("selected target should be a valid header"),
-                );
-            }
-            headers.insert(
-                "x-debug-route-policy-id",
-                HeaderValue::from_str(&debug_headers.route_policy_id)
-                    .expect("route policy id should be a valid header"),
-            );
-            headers.insert(
-                "x-debug-fallback-count",
-                HeaderValue::from_str(&debug_headers.fallback_count.to_string())
-                    .expect("fallback count should be a valid header"),
-            );
-            headers.insert(
-                "x-debug-admission-result",
-                HeaderValue::from_str(debug_headers.admission_result)
-                    .expect("admission result should be a valid header"),
-            );
-        }
 
         response
     }
@@ -1391,24 +2323,30 @@ impl IntoResponse for GatewayError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveConfigStore, ActiveGatewayConfig, AppState, ChatCompletionRequest, ChatMessage,
-        ControlPlaneConfigStore, GatewayState, ProviderTargetRuntime, StaticConfigStore,
-        app_with_state, evaluate_route, normalize_request,
+        ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
+        ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
+        GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ProviderTargetRuntime,
+        RequestContext, RuntimeEventSink, StaticConfigStore, app_with_state, evaluate_route,
+        normalize_request,
     };
     use axum::{
         Json, Router,
         body::{Body, to_bytes},
+        extract::Json as ExtractJson,
         extract::State,
         http::{Request, StatusCode},
-        routing::get,
+        routing::{get, post},
     };
     use core_domain::{
         AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
         CredentialOwnerType, DeploymentScope, HealthState, ProjectId, ProvenanceClass,
         ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
-        RoutePolicy, RoutePolicyId, TenantId,
+        RoutePolicy, RoutePolicyId, RouteReceipt, TenantId, UsageEvent,
     };
-    use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
+    use protocol_ir::{
+        ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse,
+        RouteReceiptRecorded,
+    };
     use provider_traits::{
         AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
         ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
@@ -1423,6 +2361,7 @@ mod tests {
         time::Duration,
     };
     use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
     use tower::ServiceExt;
 
     fn valid_http_request() -> ChatCompletionRequest {
@@ -1534,6 +2473,76 @@ mod tests {
         target
     }
 
+    #[derive(Debug)]
+    struct StaticApiKeyScopeStore {
+        scope: GatewayApiKeyScope,
+    }
+
+    impl StaticApiKeyScopeStore {
+        fn matching_config() -> Self {
+            Self {
+                scope: GatewayApiKeyScope {
+                    credential_id: "cred_gateway_test".to_string(),
+                    tenant_id: "tenant_acme".to_string(),
+                    project_id: Some("proj_core".to_string()),
+                    status: "active".to_string(),
+                },
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ApiKeyScopeStore for StaticApiKeyScopeStore {
+        async fn resolve(&self, _api_key: &str) -> Result<GatewayApiKeyScope, String> {
+            Ok(self.scope.clone())
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingRuntimeEventSink {
+        route_receipt_publish_error: Option<String>,
+        usage_event_publish_error: Option<String>,
+        published_route_receipts: Arc<Mutex<Vec<RouteReceiptRecorded>>>,
+        published_usage_events: Arc<Mutex<Vec<UsageEvent>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeEventSink for RecordingRuntimeEventSink {
+        async fn publish_route_receipt(
+            &self,
+            _route_receipt: &RouteReceipt,
+            payload: &RouteReceiptRecorded,
+            _context: &RequestContext,
+        ) -> Result<(), String> {
+            if let Some(error) = &self.route_receipt_publish_error {
+                return Err(error.clone());
+            }
+
+            self.published_route_receipts
+                .lock()
+                .await
+                .push(payload.clone());
+            Ok(())
+        }
+
+        async fn publish(
+            &self,
+            _route_receipt: &RouteReceipt,
+            usage_event: &UsageEvent,
+            _context: &RequestContext,
+        ) -> Result<(), String> {
+            if let Some(error) = &self.usage_event_publish_error {
+                return Err(error.clone());
+            }
+
+            self.published_usage_events
+                .lock()
+                .await
+                .push(usage_event.clone());
+            Ok(())
+        }
+    }
+
     fn test_state(
         adapter: Arc<dyn ProviderAdapter>,
         targets: Vec<ProviderTargetRuntime>,
@@ -1551,12 +2560,20 @@ mod tests {
 
         Arc::new(AppState {
             config_store: Arc::new(StaticConfigStore::new(build_config(targets))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
             adapter_registry: registry,
             debug_headers_enabled,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
         })
     }
 
     struct MockAdapter {
+        outcomes: BTreeMap<String, Result<ProviderResponse, ProviderError>>,
+    }
+
+    struct ProtocolMockAdapter {
+        provider_kind: &'static str,
+        protocol_family: &'static str,
         outcomes: BTreeMap<String, Result<ProviderResponse, ProviderError>>,
     }
 
@@ -1574,6 +2591,22 @@ mod tests {
         request_count: Arc<AtomicUsize>,
     }
 
+    async fn control_plane_api_key_resolution(
+        State(state): State<FixtureState>,
+        ExtractJson(request): ExtractJson<GatewayApiKeyResolveRequest>,
+    ) -> Result<Json<GatewayApiKeyResolveResponse>, StatusCode> {
+        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
+        if state.fail || request.api_key != "test" {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        Ok(Json(GatewayApiKeyResolveResponse {
+            credential_id: "cred_gateway_test".to_string(),
+            tenant_id: "tenant_acme".to_string(),
+            project_id: Some("proj_core".to_string()),
+            status: "active".to_string(),
+        }))
+    }
+
     #[async_trait::async_trait]
     impl ProviderAdapter for MockAdapter {
         fn manifest(&self) -> AdapterManifest {
@@ -1582,6 +2615,30 @@ mod tests {
                 provider_kind: "openai",
                 display_name: "Mock OpenAI",
                 protocol_family: "openai_chat",
+                streaming_support: StreamingSupport::Unsupported,
+            }
+        }
+
+        async fn execute_chat(
+            &self,
+            _request: &ProviderRequest,
+            context: &ProviderExecutionContext,
+        ) -> Result<ProviderResponse, ProviderError> {
+            self.outcomes
+                .get(&context.endpoint.provider_resource_id)
+                .cloned()
+                .expect("test outcome should exist")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for ProtocolMockAdapter {
+        fn manifest(&self) -> AdapterManifest {
+            AdapterManifest {
+                adapter_id: "mock-protocol",
+                provider_kind: self.provider_kind,
+                display_name: "Mock Protocol Adapter",
+                protocol_family: self.protocol_family,
                 streaming_support: StreamingSupport::Unsupported,
             }
         }
@@ -1673,6 +2730,10 @@ mod tests {
             .route(
                 "/v1/provider-resources",
                 get(control_plane_provider_resources),
+            )
+            .route(
+                "/internal/gateway/api-keys/resolve",
+                post(control_plane_api_key_resolution),
             )
             .with_state(FixtureState {
                 fail,
@@ -2113,6 +3174,577 @@ mod tests {
 
         assert!(error.contains("HTTP 503"));
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn control_plane_api_key_store_resolves_and_caches_scope() {
+        let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
+        let store = ControlPlaneApiKeyStore::new(
+            base_url,
+            "/internal/gateway/api-keys/resolve",
+            Some("dev-internal-token".to_string()),
+            reqwest::Client::new(),
+        );
+
+        let first = store.resolve("test").await.unwrap();
+        let second = store.resolve("test").await.unwrap();
+
+        assert_eq!(first.credential_id, "cred_gateway_test");
+        assert_eq!(second.project_id.as_deref(), Some("proj_core"));
+        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 2);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn control_plane_api_key_store_fails_when_internal_token_is_missing() {
+        let (base_url, _request_count, handle) = spawn_control_plane_server(false).await;
+        let store = ControlPlaneApiKeyStore::new(
+            base_url,
+            "/internal/gateway/api-keys/resolve",
+            None,
+            reqwest::Client::new(),
+        );
+
+        let error = store.resolve("test").await.unwrap_err();
+
+        assert!(error.contains("CONTROL_PLANE_INTERNAL_TOKEN must be configured"));
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn returns_forbidden_when_api_key_scope_does_not_match_active_config() {
+        let mut registry = ProviderAdapterRegistry::new();
+        registry
+            .register(Arc::new(MockAdapter {
+                outcomes: BTreeMap::new(),
+            }))
+            .unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore {
+                scope: GatewayApiKeyScope {
+                    credential_id: "cred_other".to_string(),
+                    tenant_id: "tenant_platform".to_string(),
+                    project_id: Some("proj_core".to_string()),
+                    status: "active".to_string(),
+                },
+            }),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "auth_forbidden");
+    }
+
+    #[tokio::test]
+    async fn allows_tenant_scoped_api_keys_without_project_scope() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_tenant_scoped".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 6,
+                        output_tokens: 4,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore {
+                scope: GatewayApiKeyScope {
+                    credential_id: "cred_tenant_shared".to_string(),
+                    tenant_id: "tenant_acme".to_string(),
+                    project_id: None,
+                    status: "active".to_string(),
+                },
+            }),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn publishes_route_receipt_event_for_successful_request() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_success".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 9,
+                        output_tokens: 6,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let sink = Arc::new(RecordingRuntimeEventSink::default());
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: sink.clone(),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let (
+            receipt_count,
+            selected_target,
+            provider_attempt_count,
+            first_attempt_status,
+            first_stage,
+        ) = {
+            let receipts = sink.published_route_receipts.lock().await;
+            (
+                receipts.len(),
+                receipts[0]
+                    .route_receipt
+                    .selected_target
+                    .as_ref()
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+                receipts[0].provider_attempts.len(),
+                receipts[0].provider_attempts[0].status.clone(),
+                receipts[0].decision_timeline[0].stage.clone(),
+            )
+        };
+        assert_eq!(receipt_count, 1);
+        assert_eq!(selected_target, "prvrsrc_openai_primary");
+        assert_eq!(provider_attempt_count, 1);
+        assert_eq!(first_attempt_status, "succeeded");
+        assert_eq!(first_stage, "admission");
+
+        let usage_event_count = {
+            let usage_events = sink.published_usage_events.lock().await;
+            usage_events.len()
+        };
+        assert_eq!(usage_event_count, 1);
+    }
+
+    #[tokio::test]
+    async fn publishes_route_receipt_event_for_failed_request() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Err(ProviderError::new(
+                    ProviderErrorKind::Unavailable,
+                    "provider down",
+                    false,
+                )),
+            )]),
+        });
+        let sink = Arc::new(RecordingRuntimeEventSink::default());
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: sink.clone(),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let (receipt_count, normalized_error_code, provider_attempt_count, first_attempt_status) = {
+            let receipts = sink.published_route_receipts.lock().await;
+            (
+                receipts.len(),
+                receipts[0]
+                    .route_receipt
+                    .normalized_error
+                    .as_ref()
+                    .unwrap()
+                    .code
+                    .clone(),
+                receipts[0].provider_attempts.len(),
+                receipts[0].provider_attempts[0].status.clone(),
+            )
+        };
+        assert_eq!(receipt_count, 1);
+        assert_eq!(normalized_error_code, "provider_unavailable");
+        assert_eq!(provider_attempt_count, 1);
+        assert_eq!(first_attempt_status, "failed");
+    }
+
+    #[tokio::test]
+    async fn returns_service_unavailable_when_route_receipt_publish_fails() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_123".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 8,
+                        output_tokens: 5,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink {
+                route_receipt_publish_error: Some("nats unavailable".to_string()),
+                ..RecordingRuntimeEventSink::default()
+            }),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "route_receipt_publish_failed");
+    }
+
+    #[tokio::test]
+    async fn returns_service_unavailable_when_usage_event_publish_fails() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_123".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 8,
+                        output_tokens: 5,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink {
+                usage_event_publish_error: Some("nats unavailable".to_string()),
+                published_usage_events: Arc::new(Mutex::new(Vec::new())),
+                ..RecordingRuntimeEventSink::default()
+            }),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "usage_event_publish_failed");
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_route_returns_vendor_shaped_response() {
+        let adapter = Arc::new(ProtocolMockAdapter {
+            provider_kind: "anthropic",
+            protocol_family: "anthropic_messages",
+            outcomes: BTreeMap::from([(
+                "prvrsrc_anthropic_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("msg_123".to_string()),
+                    model: "claude-3-opus".to_string(),
+                    output_text: "anthropic summary".to_string(),
+                    finish_reason: "end_turn".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 10,
+                        output_tokens: 6,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let mut config = build_config(vec![build_target_with_provider(
+            "prvrsrc_anthropic_primary",
+            "anthropic",
+            "us-east-1",
+            0.9,
+            0.6,
+            HealthState::Healthy,
+        )]);
+        config.route_policy.protocol_family = "anthropic_messages".to_string();
+        config.route_policy.model_alias = "claude-3-opus".to_string();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(config)),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/messages")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "model": "claude-3-opus",
+                            "messages": [{
+                                "role": "user",
+                                "content": [{"type": "text", "text": "hello"}]
+                            }],
+                            "max_tokens": 256,
+                            "stream": false
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["id"], "msg_123");
+        assert_eq!(payload["content"][0]["text"], "anthropic summary");
+        assert_eq!(payload["usage"]["input_tokens"], 10);
+    }
+
+    #[tokio::test]
+    async fn gemini_generate_content_route_returns_vendor_shaped_response() {
+        let adapter = Arc::new(ProtocolMockAdapter {
+            provider_kind: "gemini",
+            protocol_family: "gemini_generate_content",
+            outcomes: BTreeMap::from([(
+                "prvrsrc_gemini_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("resp_gemini_123".to_string()),
+                    model: "gemini-1.5-pro-latest".to_string(),
+                    output_text: "gemini summary".to_string(),
+                    finish_reason: "STOP".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 14,
+                        output_tokens: 8,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let mut config = build_config(vec![build_target_with_provider(
+            "prvrsrc_gemini_primary",
+            "gemini",
+            "us-east-1",
+            0.9,
+            0.6,
+            HealthState::Healthy,
+        )]);
+        config.route_policy.protocol_family = "gemini_generate_content".to_string();
+        config.route_policy.model_alias = "gemini-1.5-pro".to_string();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(config)),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1beta/models/gemini-1.5-pro:generateContent")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "model": "placeholder",
+                            "contents": [{
+                                "role": "user",
+                                "parts": [{"text": "hello"}]
+                            }],
+                            "stream": false,
+                            "tools": []
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["responseId"], "resp_gemini_123");
+        assert_eq!(
+            payload["candidates"][0]["content"]["parts"][0]["text"],
+            "gemini summary"
+        );
+        assert_eq!(payload["usageMetadata"]["totalTokenCount"], 22);
     }
 
     #[tokio::test]

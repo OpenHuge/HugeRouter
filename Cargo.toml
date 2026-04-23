@@ -1,9 +1,14 @@
 [workspace]
 members = [
   "crates/core-domain",
+  "crates/metering",
   "crates/plugin-registry",
   "crates/plugin-sdk",
+  "crates/protocol-anthropic",
+  "crates/protocol-gemini",
   "crates/protocol-ir",
+  "crates/provider-anthropic",
+  "crates/provider-gemini",
   "crates/provider-traits",
   "crates/runtime-composition",
   "services/audit-worker",
@@ -13,6 +18,7 @@ members = [
   "services/ledger-worker",
   "services/notification-worker",
   "services/realtime-gateway",
+  "services/route-receipt-worker",
   "services/routing-worker",
 ]
 resolver = "3"

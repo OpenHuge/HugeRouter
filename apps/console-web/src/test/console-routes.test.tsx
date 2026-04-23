@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type ConsoleAuthClient } from "../features/auth/auth-client";
 import { getDefaultProviderAvailability } from "../features/auth/auth-contract";
@@ -83,6 +83,15 @@ function createAuthClientStub(
       }),
     ...overrides,
   };
+}
+
+function createRequestError(status: number, code: string, message: string) {
+  const error = new Error(message);
+
+  (error as unknown as { code: string }).code = code;
+  (error as unknown as { status: number }).status = status;
+
+  return error;
 }
 
 describe("console routes", () => {
@@ -192,8 +201,8 @@ describe("console routes", () => {
     ).toBeInTheDocument();
 
     deferred.resolve({
-      activeProviders: 3,
-      activeRoutes: 3,
+      activeProviders: 2,
+      activeRoutes: 2,
       activeSnapshotId: "cfgsnap_gateway_v1",
       estimatedCostUsd: "0.000210",
       projects: [],
@@ -234,6 +243,232 @@ describe("console routes", () => {
     expect(await screen.findByText("No projects")).toBeInTheDocument();
   });
 
+  it("renders session-expired state when CP session is denied", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getOverview: () =>
+        Promise.reject(
+          createRequestError(401, "session_expired", "Session invalid"),
+        ),
+    });
+
+    await renderRoute("/app/overview");
+
+    expect(
+      await screen.findByRole("heading", { name: "Overview" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The console session is no longer valid. Sign in to continue.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
+      "href",
+      "/login?reason=session-expired",
+    );
+  });
+
+  it("renders access-denied state when CP returns a permission error", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getOverview: () =>
+        Promise.reject(
+          createRequestError(403, "tenant_access_denied", "Tenant denied"),
+        ),
+    });
+
+    await renderRoute("/app/overview");
+
+    expect(
+      await screen.findByText(
+        "The active account does not have access to this control-plane resource.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders snapshots success state for tenant sessions", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/snapshots");
+
+    expect(
+      await screen.findByRole("heading", { name: "Snapshots" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("cfgsnap_gateway_v2")).toBeInTheDocument();
+  });
+
+  it("renders snapshots loading state while data is pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["listConfigSnapshots"]>>
+      >();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listConfigSnapshots: () => deferred.promise,
+    });
+
+    await renderRoute("/app/snapshots", { waitForLoad: false });
+
+    expect(
+      await screen.findByLabelText("Loading snapshots"),
+    ).toBeInTheDocument();
+
+    deferred.resolve([
+      {
+        budgetPolicyId: "budgetpol_default",
+        configSnapshotId: "cfgsnap_test",
+        providerResourceIds: ["prvrsrc_openai_primary"],
+        routePolicyId: "routepol_openai_chat_default",
+        revision: 5,
+        projectId: "proj_core",
+        status: "draft",
+        tenantId: "tenant_acme",
+      },
+    ]);
+
+    expect(await screen.findByText("cfgsnap_test")).toBeInTheDocument();
+  });
+
+  it("renders snapshots empty state when none are returned", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listConfigSnapshots: () => Promise.resolve([]),
+    });
+
+    await renderRoute("/app/snapshots");
+
+    expect(await screen.findByText("No snapshots")).toBeInTheDocument();
+  });
+
+  it("renders API keys success state for tenant sessions", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/api-keys");
+
+    expect(
+      await screen.findByRole("heading", { name: "API Keys" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Acme Primary Key")).toBeInTheDocument();
+    expect(screen.getByText("Acme Secondary Key")).toBeInTheDocument();
+  });
+
+  it("renders api-keys loading state while data is pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<Awaited<ReturnType<ConsoleDataService["listApiKeys"]>>>();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listApiKeys: () => deferred.promise,
+    });
+
+    await renderRoute("/app/api-keys", {
+      waitForLoad: false,
+    });
+
+    expect(
+      await screen.findByLabelText("Loading API keys"),
+    ).toBeInTheDocument();
+
+    deferred.resolve([
+      {
+        apiKeyId: "key_test",
+        canRevoke: true,
+        createdAt: "2026-04-01T00:00:00Z",
+        displayName: "Test Key",
+        isActive: true,
+        keyPrefix: "ak-test",
+        providerResourceId: "prvrsrc_openai_primary",
+        tenantId: "tenant_acme",
+        updatedAt: "2026-04-01T00:00:00Z",
+        version: 1,
+      },
+    ]);
+
+    expect(await screen.findByText("Test Key")).toBeInTheDocument();
+  });
+
+  it("renders api-keys empty state when no keys are returned", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listApiKeys: () => Promise.resolve([]),
+    });
+
+    await renderRoute("/app/api-keys");
+
+    expect(await screen.findByText("No API keys")).toBeInTheDocument();
+  });
+
+  it("shows revoked status after API key revocation action", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/api-keys");
+
+    const primaryRow = screen.getByRole("row", { name: /Acme Primary Key/ });
+    const primaryButton = within(primaryRow).getByRole("button", {
+      name: "Revoke",
+    });
+
+    fireEvent.click(primaryButton);
+
+    await waitFor(() => {
+      const row = screen.getByRole("row", { name: /Acme Primary Key/ });
+      expect(within(row).getByText("Revoked")).toBeInTheDocument();
+      expect(
+        within(row).getByRole("button", { name: "Revoke" }),
+      ).toBeDisabled();
+    });
+  });
+
   it("renders providers success state for tenant sessions", async () => {
     signIn({
       email: "tenant@acme.dev",
@@ -248,10 +483,58 @@ describe("console routes", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("OpenAI Primary")).toBeInTheDocument();
-    expect(screen.getByText("Realtime Transit Relay")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI Backup")).toBeInTheDocument();
+  });
+
+  it("renders providers loading state while data is pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["listProviderResources"]>>
+      >();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listProviderResources: () => deferred.promise,
+    });
+
+    await renderRoute("/app/providers", {
+      waitForLoad: false,
+    });
+
     expect(
-      screen.getAllByText("response-model-metadata").length,
-    ).toBeGreaterThan(0);
+      await screen.findByLabelText("Loading providers"),
+    ).toBeInTheDocument();
+
+    deferred.resolve([]);
+
+    expect(await screen.findByText("No providers")).toBeInTheDocument();
+  });
+
+  it("renders providers error state when inventory loading fails", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listProviderResources: () =>
+        Promise.reject(
+          createRequestError(500, "storage_unavailable", "Load failed"),
+        ),
+    });
+
+    await renderRoute("/app/providers");
+
+    expect(await screen.findByText("Providers unavailable")).toBeInTheDocument();
   });
 
   it("renders routes success state for tenant sessions", async () => {
@@ -268,47 +551,191 @@ describe("console routes", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Acme Reasoning Fast")).toBeInTheDocument();
-    expect(screen.getAllByText("Inspect diagnostics").length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getByText("OpenAI Primary, OpenAI Backup"),
+    ).toBeInTheDocument();
   });
 
-  it("renders route diagnostics drill-down success state", async () => {
+  it("renders routes loading state while policies are pending", async () => {
     signIn({
       email: "tenant@acme.dev",
       workspace: "acme-retail",
     });
 
-    await renderRoute("/app/route-diagnostics/routepol_acme_realtime");
+    const deferred =
+      createDeferred<Awaited<ReturnType<ConsoleDataService["listRoutePolicies"]>>>();
+    const baseService = getConsoleDataService();
 
-    expect(
-      await screen.findByRole("heading", {
-        name: "Acme Realtime Agent",
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Target decision matrix")).toBeInTheDocument();
-    expect(
-      screen.getByText(/No healthy target satisfied realtime_webrtc/i),
-    ).toBeInTheDocument();
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listRoutePolicies: () => deferred.promise,
+    });
+
+    await renderRoute("/app/routes", { waitForLoad: false });
+
+    expect(await screen.findByLabelText("Loading routes")).toBeInTheDocument();
+
+    deferred.resolve([]);
+
+    expect(await screen.findByText("No route policies")).toBeInTheDocument();
   });
 
-  it("renders route receipts success state for tenant sessions", async () => {
+  it("renders routes error state when policies fail to load", async () => {
     signIn({
       email: "tenant@acme.dev",
       workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listRoutePolicies: () =>
+        Promise.reject(
+          createRequestError(500, "storage_unavailable", "Load failed"),
+        ),
+    });
+
+    await renderRoute("/app/routes");
+
+    expect(await screen.findByText("Routes unavailable")).toBeInTheDocument();
+  });
+
+  it("renders protocol-aware route policy groups and diagnostics actions", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/routes");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Routes",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("OpenAI Chat").length).toBeGreaterThan(0);
+    expect(screen.getByText("Operator diagnostics")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open route receipts" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Inspect" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("admitted")).toBeInTheDocument();
+  });
+
+  it("renders route receipts empty state when no route receipts are available", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listRouteReceipts: () => Promise.resolve([]),
     });
 
     await renderRoute("/app/receipts");
 
+    expect(await screen.findByText("No route receipts")).toBeInTheDocument();
+  });
+
+  it("renders usage dashboard with range metrics and breakdown table", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/usage");
+
     expect(
       await screen.findByRole("heading", {
-        name: "Route receipts",
+        name: "Usage",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("routercpt_acme_realtime")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "30d" })).toBeInTheDocument();
+    expect(screen.getByText("Billable price")).toBeInTheDocument();
+    expect(screen.getAllByText("openai").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("reasoning-fast").length).toBeGreaterThan(0);
+  });
+
+  it("renders billing dashboard with projection status and export metadata", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/billing");
+
     expect(
-      screen.getByText(/Excluded: capability_gap_realtime/),
+      await screen.findByRole("heading", {
+        name: "Billing",
+      }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Configured budget")).toBeInTheDocument();
+    expect(screen.getByText("Export jobs")).toBeInTheDocument();
+    expect(screen.getByText("export_123")).toBeInTheDocument();
+    expect(screen.getByText("ok")).toBeInTheDocument();
+  });
+
+  it("renders billing loading state while dashboard data is pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["getBillingDashboard"]>>
+      >();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getBillingDashboard: () => deferred.promise,
+    });
+
+    await renderRoute("/app/billing", { waitForLoad: false });
+
+    expect(await screen.findByLabelText("Loading billing")).toBeInTheDocument();
+
+    deferred.resolve({
+      activeProjectId: undefined,
+      availableProjects: [],
+      billableTotalUsd: "0.000001",
+      configuredBudgetUsd: "1.000000",
+      exportJobs: [],
+      lastProjectedAt: "2026-04-22T00:00:00Z",
+      projectionLagSeconds: 0,
+      providerCostTotalUsd: "0.000001",
+      rangeLabel: "Last 30 days",
+      remainingBudgetUsd: "0.999999",
+      thresholdStatus: "ok",
+    });
+
+    expect(await screen.findByText("Export jobs")).toBeInTheDocument();
+  });
+
+  it("renders billing error state when dashboard loading fails", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getBillingDashboard: () =>
+        Promise.reject(
+          createRequestError(500, "storage_unavailable", "Load failed"),
+        ),
+    });
+
+    await renderRoute("/app/billing");
+
+    expect(await screen.findByText("Billing unavailable")).toBeInTheDocument();
   });
 
   it("renders tenant inventory and links to tenant detail", async () => {
@@ -357,5 +784,24 @@ describe("console routes", () => {
     await renderRoute("/admin/tenants/tenant_missing");
 
     expect(await screen.findByText("Tenant unavailable")).toBeInTheDocument();
+  });
+
+  it("signs out from app shell and returns to login screen", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    await renderRoute("/app/overview");
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", {
+          name: "Sign in",
+        }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("Signed out")).toBeInTheDocument();
   });
 });

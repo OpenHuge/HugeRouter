@@ -1,0 +1,26 @@
+{
+  "data": {
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core",
+    "currency": "USD",
+    "provider_cost_total": {
+      "currency": "USD",
+      "amount": "1.244000"
+    },
+    "billable_total": {
+      "currency": "USD",
+      "amount": "1.540000"
+    },
+    "configured_budget": {
+      "currency": "USD",
+      "amount": "75.000000"
+    },
+    "remaining_budget": {
+      "currency": "USD",
+      "amount": "73.460000"
+    },
+    "threshold_status": "ok",
+    "last_projected_at": "2026-04-21T12:20:00Z",
+    "projection_lag_seconds": 18
+  }
+}

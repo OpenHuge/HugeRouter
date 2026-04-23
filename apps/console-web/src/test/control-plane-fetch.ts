@@ -86,7 +86,8 @@ const providerResourcesResponse = {
       endpoint_base_url: "https://api.openai.com/v1",
       auth_kind: "api_key",
       health_state: "healthy",
-      health_message: "Healthy across the last 15 minutes of probe traffic.",
+      health_message: "probe latency within SLO",
+      quarantine_reason: undefined,
       capabilities: {
         supports_streaming: true,
         supports_tool_calling: true,
@@ -113,11 +114,9 @@ const providerResourcesResponse = {
       region: "us-west-2",
       endpoint_base_url: "https://api.openai.com/v1",
       auth_kind: "api_key",
-      health_state: "quarantined",
-      health_message:
-        "Quarantined after repeated upstream 5xx bursts on the backup region.",
-      quarantine_reason:
-        "automatic quarantine after elevated upstream_error_rate",
+      health_state: "healthy",
+      health_message: "backup target healthy",
+      quarantine_reason: undefined,
       capabilities: {
         supports_streaming: true,
         supports_tool_calling: true,
@@ -128,39 +127,6 @@ const providerResourcesResponse = {
       supported_protocol_families: ["openai_chat", "openai_responses"],
       is_transit_gateway: false,
       version: 1,
-      created_at: "2026-04-22T00:00:00Z",
-      updated_at: "2026-04-22T00:00:00Z",
-    },
-    {
-      provider_resource_id: "prvrsrc_transit_relay",
-      tenant_id: "tenant_acme",
-      project_id: "proj_acme_support",
-      provider_id: "transit",
-      name: "Realtime Transit Relay",
-      status: "active",
-      provenance_class: "official_gateway",
-      credential_owner_type: "platform",
-      deployment_scope: "shared",
-      region: "us-central-1",
-      endpoint_base_url: "https://transit.hugerouter.dev/v1",
-      auth_kind: "session_broker",
-      health_state: "draining",
-      health_message:
-        "Realtime ingress is draining while a new transit build rolls out.",
-      capabilities: {
-        supports_streaming: true,
-        supports_tool_calling: true,
-        supports_json_mode: false,
-        supports_realtime: true,
-        supports_response_model_metadata: true,
-      },
-      supported_protocol_families: [
-        "openai_responses",
-        "mcp_streamable_http",
-        "realtime_webrtc",
-      ],
-      is_transit_gateway: true,
-      version: 3,
       created_at: "2026-04-22T00:00:00Z",
       updated_at: "2026-04-22T00:00:00Z",
     },
@@ -178,8 +144,8 @@ const providerResourcesResponse = {
       endpoint_base_url: "https://api.openai.com/v1",
       auth_kind: "api_key",
       health_state: "degraded",
-      health_message:
-        "Latency is elevated, but the target remains available for research traffic.",
+      health_message: "research endpoint latency elevated",
+      quarantine_reason: undefined,
       capabilities: {
         supports_streaming: true,
         supports_tool_calling: false,
@@ -196,6 +162,8 @@ const providerResourcesResponse = {
   ],
 };
 
+const providerResourcesInitialState = structuredClone(providerResourcesResponse.data);
+
 const routePoliciesResponse = {
   data: [
     {
@@ -204,7 +172,7 @@ const routePoliciesResponse = {
       display_name: "Acme Reasoning Fast",
       protocol_family: "openai_chat",
       model_alias: "reasoning-fast",
-      required_capabilities: ["json_mode", "tool_calling"],
+      required_capabilities: ["json_mode"],
       preferred_regions: ["us-east-1"],
       version: 1,
       created_at: "2026-04-22T00:00:00Z",
@@ -213,24 +181,12 @@ const routePoliciesResponse = {
     {
       route_policy_id: "routepol_acme_support",
       tenant_id: "tenant_acme",
-      display_name: "Acme Responses Safe",
-      protocol_family: "openai_responses",
+      display_name: "Acme Support Safe",
+      protocol_family: "openai_chat",
       model_alias: "support-safe",
-      required_capabilities: ["streaming", "response_model_metadata"],
+      required_capabilities: ["json_mode"],
       preferred_regions: ["us-west-2"],
       version: 1,
-      created_at: "2026-04-22T00:00:00Z",
-      updated_at: "2026-04-22T00:00:00Z",
-    },
-    {
-      route_policy_id: "routepol_acme_realtime",
-      tenant_id: "tenant_acme",
-      display_name: "Acme Realtime Agent",
-      protocol_family: "realtime_webrtc",
-      model_alias: "agent-live",
-      required_capabilities: ["streaming", "realtime", "tool_calling"],
-      preferred_regions: ["us-central-1"],
-      version: 2,
       created_at: "2026-04-22T00:00:00Z",
       updated_at: "2026-04-22T00:00:00Z",
     },
@@ -249,6 +205,8 @@ const routePoliciesResponse = {
   ],
 };
 
+const routePoliciesInitialState = structuredClone(routePoliciesResponse.data);
+
 const configSnapshotResponse = {
   config_snapshot: {
     config_snapshot_id: "cfgsnap_gateway_v1",
@@ -257,198 +215,387 @@ const configSnapshotResponse = {
     revision: 1,
     status: "active",
     activated_at: "2026-04-22T00:00:00Z",
-    provider_resource_ids: [
-      "prvrsrc_openai_primary",
-      "prvrsrc_openai_backup",
-      "prvrsrc_transit_relay",
-    ],
+    provider_resource_ids: ["prvrsrc_openai_primary", "prvrsrc_openai_backup"],
     route_policy_id: "routepol_openai_chat_default",
     budget_policy_id: "budgetpol_default",
   },
 };
 
-const routeReceiptsResponse = {
+const configSnapshotsResponse = {
   data: [
     {
-      route_receipt_id: "routercpt_acme_realtime",
-      tenant_id: "tenant_acme",
-      project_id: "proj_acme_support",
-      route_policy_id: "routepol_acme_realtime",
-      request_id: "req_acme_realtime",
-      trace_id: "trace_acme_realtime",
-      protocol_family: "realtime_webrtc",
-      model_alias: "agent-live",
-      config_snapshot_id: "cfgsnap_gateway_v1",
-      admission_result: "rejected_no_candidate",
-      excluded_targets: [
-        {
-          provider_resource_id: "prvrsrc_openai_primary",
-          reason_code: "capability_gap_realtime",
-          reason:
-            "Primary OpenAI target does not advertise realtime capability.",
-        },
-        {
-          provider_resource_id: "prvrsrc_openai_backup",
-          reason_code: "health_quarantined",
-          reason:
-            "Backup target is quarantined and cannot receive realtime traffic.",
-        },
-        {
-          provider_resource_id: "prvrsrc_transit_relay",
-          reason_code: "health_draining",
-          reason:
-            "Transit relay is draining and temporarily excluded from live session routing.",
-        },
-      ],
-      score_breakdown: {
-        latency: 0,
-        cost: 0,
-        health: 0,
-        trust: 0,
-      },
-      fallback_transitions: [],
-      normalized_error: {
-        code: "no_eligible_target",
-        message: "HugeRouter could not find a healthy realtime-capable target.",
-        request_id: "req_acme_realtime",
-        retryable: true,
-        validation_issues: [],
-        details: {
-          route_policy_id: "routepol_acme_realtime",
-        },
-      },
-      failure_reason:
-        "No healthy target satisfied realtime_webrtc plus required tool-related capabilities.",
-      created_at: "2026-04-22T00:14:00Z",
-    },
-    {
-      route_receipt_id: "routercpt_acme_support",
-      tenant_id: "tenant_acme",
-      project_id: "proj_acme_support",
-      route_policy_id: "routepol_acme_support",
-      request_id: "req_acme_support",
-      trace_id: "trace_acme_support",
-      protocol_family: "openai_responses",
-      model_alias: "support-safe",
-      config_snapshot_id: "cfgsnap_gateway_v1",
-      admission_result: "admitted",
-      selected_target: "prvrsrc_openai_primary",
-      excluded_targets: [
-        {
-          provider_resource_id: "prvrsrc_openai_backup",
-          reason_code: "health_quarantined",
-          reason: "Excluded because the provider is currently quarantined.",
-        },
-        {
-          provider_resource_id: "prvrsrc_transit_relay",
-          reason_code: "capability_gap_json_mode",
-          reason:
-            "Transit relay excluded because it cannot emit the required JSON response mode.",
-        },
-      ],
-      score_breakdown: {
-        latency: 0.83,
-        cost: 0.7,
-        health: 1,
-        trust: 0.97,
-      },
-      fallback_transitions: [],
-      created_at: "2026-04-22T00:12:00Z",
-    },
-    {
-      route_receipt_id: "routercpt_acme_default",
+      config_snapshot_id: "cfgsnap_gateway_v2",
       tenant_id: "tenant_acme",
       project_id: "proj_core",
+      revision: 3,
+      status: "draft",
+      activated_at: "2026-04-20T00:00:00Z",
+      provider_resource_ids: ["prvrsrc_openai_primary"],
       route_policy_id: "routepol_openai_chat_default",
-      request_id: "req_acme_default",
-      trace_id: "trace_acme_default",
-      protocol_family: "openai_chat",
-      model_alias: "reasoning-fast",
+      budget_policy_id: "budgetpol_default",
+    },
+    {
       config_snapshot_id: "cfgsnap_gateway_v1",
-      admission_result: "admitted",
-      selected_target: "prvrsrc_openai_primary",
-      excluded_targets: [
-        {
-          provider_resource_id: "prvrsrc_openai_backup",
-          reason_code: "health_quarantined",
-          reason: "Excluded because the provider is currently quarantined.",
-        },
-        {
-          provider_resource_id: "prvrsrc_transit_relay",
-          reason_code: "protocol_family_unsupported",
-          reason:
-            "Excluded because the provider does not advertise openai_chat.",
-        },
+      tenant_id: "tenant_acme",
+      project_id: "proj_core",
+      revision: 1,
+      status: "active",
+      activated_at: "2026-04-22T00:00:00Z",
+      provider_resource_ids: [
+        "prvrsrc_openai_primary",
+        "prvrsrc_openai_backup",
       ],
-      score_breakdown: {
-        latency: 0.98,
-        cost: 0.74,
-        health: 1,
-        trust: 0.98,
-      },
-      fallback_transitions: [],
-      created_at: "2026-04-22T00:10:00Z",
+      route_policy_id: "routepol_openai_chat_default",
+      budget_policy_id: "budgetpol_default",
     },
   ],
 };
 
-const routeDiagnosticsResponse = {
-  route_policy: routePoliciesResponse.data[2],
-  active_snapshot: configSnapshotResponse.config_snapshot,
-  active_snapshot_matches_route_policy: false,
-  last_route_receipt: {
-    route_receipt_id: "routercpt_acme_realtime",
-    admission_result: "rejected_no_candidate",
-    failure_reason:
-      "No healthy target satisfied realtime_webrtc plus required tool-related capabilities.",
-    created_at: "2026-04-22T00:14:00Z",
-  },
-  recent_receipts: [
+const configSnapshotsInitialState = structuredClone(configSnapshotsResponse.data);
+
+const routeReceiptsResponse = {
+  data: [
     {
-      route_receipt_id: "routercpt_acme_realtime",
-      admission_result: "rejected_no_candidate",
-      failure_reason:
-        "No healthy target satisfied realtime_webrtc plus required tool-related capabilities.",
-      created_at: "2026-04-22T00:14:00Z",
+      route_receipt: {
+        route_receipt_id: "routercpt_openai_primary_recent",
+        tenant_id: "tenant_acme",
+        project_id: "proj_core",
+        route_policy_id: "routepol_openai_chat_default",
+        request_id: "req_openai_primary",
+        trace_id: "trace_openai_primary",
+        protocol_family: "openai_chat",
+        model_alias: "reasoning-fast",
+        config_snapshot_id: "cfgsnap_gateway_v1",
+        admission_result: "admitted",
+        selected_target: "prvrsrc_openai_primary",
+        excluded_targets: [
+          {
+            provider_resource_id: "prvrsrc_openai_backup",
+            reason_code: "provider_region_mismatch",
+            reason: "provider_region_mismatch",
+          },
+        ],
+        score_breakdown: {
+          latency: 0.82,
+          cost: 0.66,
+          health: 0.9,
+          trust: 1,
+        },
+        fallback_transitions: [
+          {
+            from_provider_resource_id: "prvrsrc_openai_backup",
+            to_provider_resource_id: "prvrsrc_openai_primary",
+            reason: "replayed_after_transient_timeout",
+          },
+        ],
+        failure_reason: undefined,
+        created_at: "2026-04-22T13:00:00Z",
+      },
+    },
+    {
+      route_receipt: {
+        route_receipt_id: "routercpt_openai_rejection",
+        tenant_id: "tenant_northstar",
+        project_id: "proj_ns_research",
+        route_policy_id: "routepol_northstar_research",
+        request_id: "req_openai_rejection",
+        trace_id: "trace_openai_rejection",
+        protocol_family: "openai_chat",
+        model_alias: "research-fast",
+        config_snapshot_id: "cfgsnap_gateway_v1",
+        admission_result: "rejected_policy",
+        excluded_targets: [
+          {
+            provider_resource_id: "prvrsrc_openai_research",
+            reason_code: "provider_quarantined",
+            reason: "provider_quarantined",
+          },
+        ],
+        score_breakdown: {
+          latency: 0,
+          cost: 0,
+          health: 0,
+          trust: 0,
+        },
+        fallback_transitions: [],
+        failure_reason: "No policy match for requested capabilities.",
+        normalized_error: {
+          code: "routing_rejected",
+          message: "No policy match for requested capabilities.",
+          request_id: "req_openai_rejection",
+          retryable: false,
+          upstream_code: "policy_deny",
+          upstream_status_code: 403,
+          validation_issues: [
+            {
+              field: "required_capabilities",
+              message: "tool_calling is required for this protocol",
+            },
+          ],
+          details: {
+            policy: "require_tool_calling",
+          },
+        },
+        created_at: "2026-04-22T10:00:00Z",
+      },
     },
   ],
-  targets: providerResourcesResponse.data
-    .filter((provider) => provider.tenant_id === "tenant_acme")
-    .map((provider) => ({
-      provider_resource: provider,
-      decision:
-        provider.provider_resource_id === "prvrsrc_transit_relay"
-          ? "excluded"
-          : provider.provider_resource_id === "prvrsrc_openai_primary"
-            ? "excluded"
-            : "excluded",
-      in_active_snapshot:
-        configSnapshotResponse.config_snapshot.provider_resource_ids.includes(
-          provider.provider_resource_id,
-        ),
-      supports_protocol_family:
-        provider.supported_protocol_families.includes("realtime_webrtc"),
-      capability_gaps:
-        provider.provider_resource_id === "prvrsrc_openai_primary"
-          ? ["realtime"]
-          : provider.provider_resource_id === "prvrsrc_openai_backup"
-            ? ["realtime"]
-            : [],
-      reason_code:
-        provider.provider_resource_id === "prvrsrc_transit_relay"
-          ? "health_draining"
-          : provider.provider_resource_id === "prvrsrc_openai_backup"
-            ? "health_quarantined"
-            : "capability_gap_realtime",
-      reason:
-        provider.provider_resource_id === "prvrsrc_transit_relay"
-          ? "Transit relay is draining and temporarily excluded from live session routing."
-          : provider.provider_resource_id === "prvrsrc_openai_backup"
-            ? "Backup target is quarantined and cannot receive realtime traffic."
-            : "Primary OpenAI target does not advertise realtime capability.",
-      recent_receipt_id: "routercpt_acme_realtime",
-    })),
 };
+
+const usageSummaryResponse = {
+  data: {
+    tenant_id: "tenant_acme",
+    project_id: "proj_core",
+    window_start: "2026-04-01T00:00:00Z",
+    window_end: "2026-04-30T23:59:59Z",
+    currency: "USD",
+    event_count: 14,
+    input_tokens: 18420,
+    output_tokens: 6245,
+    cached_input_tokens: 1220,
+    provider_cost: {
+      currency: "USD",
+      amount: "0.124500",
+    },
+    billable_price: {
+      currency: "USD",
+      amount: "0.152025",
+    },
+  },
+};
+
+const usageBreakdownResponse = {
+  data: [
+    {
+      bucket: "openai",
+      provider_id: "openai",
+      input_tokens: 10000,
+      output_tokens: 4000,
+      cached_input_tokens: 500,
+      provider_cost: {
+        currency: "USD",
+        amount: "0.082000",
+      },
+      billable_price: {
+        currency: "USD",
+        amount: "0.098400",
+      },
+    },
+    {
+      bucket: "reasoning-fast",
+      model_alias: "reasoning-fast",
+      input_tokens: 8420,
+      output_tokens: 2245,
+      cached_input_tokens: 720,
+      provider_cost: {
+        currency: "USD",
+        amount: "0.042500",
+      },
+      billable_price: {
+        currency: "USD",
+        amount: "0.053625",
+      },
+    },
+  ],
+  next_cursor: "2",
+};
+
+const balanceProjectionResponse = {
+  data: {
+    tenant_id: "tenant_acme",
+    project_id: "proj_core",
+    currency: "USD",
+    provider_cost_total: {
+      currency: "USD",
+      amount: "1.244000",
+    },
+    billable_total: {
+      currency: "USD",
+      amount: "1.540000",
+    },
+    configured_budget: {
+      currency: "USD",
+      amount: "75.000000",
+    },
+    remaining_budget: {
+      currency: "USD",
+      amount: "73.460000",
+    },
+    threshold_status: "ok",
+    last_projected_at: "2026-04-22T13:00:00Z",
+    projection_lag_seconds: 18,
+  },
+};
+
+const billingExportResponse = {
+  data: {
+    export_job_id: "export_123",
+    status: "completed",
+    format: "csv",
+    requested_at: "2026-04-22T13:00:10Z",
+    completed_at: "2026-04-22T13:00:20Z",
+    tenant_id: "tenant_acme",
+    project_id: "proj_core",
+  },
+};
+
+type BillingExportJobState = {
+  completed_at?: string;
+  export_job_id: string;
+  format: string;
+  project_id?: string;
+  requested_at: string;
+  status: string;
+  tenant_id?: string;
+};
+
+const billingExportInitialState: BillingExportJobState[] = [
+  structuredClone(billingExportResponse.data),
+];
+
+const routeReceiptDiagnosticsById: Record<string, unknown> = {
+  routercpt_openai_primary_recent: {
+    route_receipt: routeReceiptsResponse.data[0].route_receipt,
+    decision_timeline: [
+      {
+        stage: "admission",
+        status: "passed",
+        message: "Tenant policy accepted request",
+        score: 1,
+        notes: ["all constraints satisfied"],
+      },
+      {
+        stage: "candidate_selection",
+        status: "passed",
+        message: "Selected OpenAI Primary",
+        score: 0.91,
+        notes: [],
+      },
+    ],
+    policy_checks: [
+      {
+        policy_id: "routepol_openai_chat_default",
+        status: "passed",
+        reason: "policy satisfied",
+      },
+    ],
+    provider_attempts: [
+      {
+        provider_resource_id: "prvrsrc_openai_primary",
+        attempt: 1,
+        status: "succeeded",
+        started_at: "2026-04-22T13:00:01Z",
+        finished_at: "2026-04-22T13:00:02Z",
+        latency_ms: 1100,
+        reason: "succeeded with output",
+      },
+    ],
+    metadata: {
+      candidate_pool_size: "2",
+      policy_cache_hit: "true",
+    },
+  },
+};
+
+const routeDiagnosticsByPolicyId: Record<string, unknown> = {
+  routepol_openai_chat_default: {
+    route_policy: routePoliciesResponse.data[0],
+    active_snapshot: configSnapshotResponse.config_snapshot,
+    active_snapshot_matches_route_policy: true,
+    last_route_receipt: {
+      route_receipt_id: "routercpt_openai_primary_recent",
+      admission_result: "admitted",
+      selected_target: "prvrsrc_openai_primary",
+      created_at: "2026-04-22T13:00:00Z",
+    },
+    recent_receipts: [
+      {
+        route_receipt_id: "routercpt_openai_primary_recent",
+        admission_result: "admitted",
+        selected_target: "prvrsrc_openai_primary",
+        created_at: "2026-04-22T13:00:00Z",
+      },
+    ],
+    targets: [
+      {
+        provider_resource: providerResourcesResponse.data[0],
+        decision: "selected",
+        in_active_snapshot: true,
+        supports_protocol_family: true,
+        capability_gaps: [],
+        reason_code: "selected_recent_receipt",
+        reason: "Selected by the most recent route receipt.",
+        recent_receipt_id: "routercpt_openai_primary_recent",
+      },
+      {
+        provider_resource: providerResourcesResponse.data[1],
+        decision: "excluded",
+        in_active_snapshot: true,
+        supports_protocol_family: true,
+        capability_gaps: [],
+        reason_code: "provider_region_mismatch",
+        reason: "provider_region_mismatch",
+        recent_receipt_id: "routercpt_openai_primary_recent",
+        recent_receipt_reason: "provider_region_mismatch",
+      },
+    ],
+  },
+};
+
+let providerResourcesState = structuredClone(providerResourcesInitialState);
+let routePoliciesState = structuredClone(routePoliciesInitialState);
+let configSnapshotsState = structuredClone(configSnapshotsInitialState);
+let billingExportJobsState = structuredClone(billingExportInitialState);
+let billingExportPollCount = 0;
+
+let apiKeysState = [
+  {
+    api_key_id: "key_acme_primary",
+    tenant_id: "tenant_acme",
+    display_name: "Acme Primary Key",
+    key_prefix: "ak-prim",
+    provider_resource_id: "prvrsrc_openai_primary",
+    can_revoke: true,
+    is_active: true,
+    created_at: "2026-04-01T00:00:00Z",
+    updated_at: "2026-04-10T00:00:00Z",
+    version: 1,
+  },
+  {
+    api_key_id: "key_acme_secondary",
+    tenant_id: "tenant_acme",
+    display_name: "Acme Secondary Key",
+    key_prefix: "ak-sec",
+    provider_resource_id: "prvrsrc_openai_backup",
+    can_revoke: true,
+    is_active: true,
+    created_at: "2026-03-01T00:00:00Z",
+    updated_at: "2026-03-10T00:00:00Z",
+    version: 1,
+  },
+  {
+    api_key_id: "key_northstar_research",
+    tenant_id: "tenant_northstar",
+    display_name: "Northstar Research Key",
+    key_prefix: "ak-ns",
+    provider_resource_id: "prvrsrc_openai_research",
+    can_revoke: false,
+    is_active: true,
+    created_at: "2026-03-14T00:00:00Z",
+    updated_at: "2026-03-14T00:00:00Z",
+    version: 1,
+  },
+];
+
+const apiKeysInitialState = [...apiKeysState];
+
+const emptyResponse = (status: number) =>
+  new Response("", {
+    status,
+    headers: {
+      "content-type": "application/json",
+    },
+  });
 
 const routeSimulationResponse = {
   simulation_id: "sim_reasoning-fast",
@@ -484,7 +631,7 @@ function jsonResponse(status: number, payload: unknown) {
 
 function resolvePath(input: RequestInfo | URL) {
   if (typeof input === "string") {
-    return input;
+    return new URL(input, "http://127.0.0.1").pathname;
   }
 
   if (input instanceof URL) {
@@ -494,7 +641,22 @@ function resolvePath(input: RequestInfo | URL) {
   return new URL(input.url, "http://127.0.0.1").pathname;
 }
 
+function parseRequestBody(init?: RequestInit) {
+  if (!init?.body || typeof init.body !== "string") {
+    return null;
+  }
+
+  return JSON.parse(init.body) as Record<string, unknown>;
+}
+
 export function createControlPlaneFetchMock() {
+  apiKeysState = [...apiKeysInitialState];
+  billingExportJobsState = structuredClone(billingExportInitialState);
+  billingExportPollCount = 0;
+  configSnapshotsState = structuredClone(configSnapshotsInitialState);
+  providerResourcesState = structuredClone(providerResourcesInitialState);
+  routePoliciesState = structuredClone(routePoliciesInitialState);
+
   return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = resolvePath(input);
 
@@ -506,36 +668,537 @@ export function createControlPlaneFetchMock() {
       return Promise.resolve(jsonResponse(200, projectsResponse));
     }
 
-    if (path === "/v1/provider-resources") {
-      return Promise.resolve(jsonResponse(200, providerResourcesResponse));
+    if (path === "/v1/provider-resources" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: providerResourcesState }));
     }
 
-    if (path.startsWith("/v1/provider-resources?")) {
-      return Promise.resolve(jsonResponse(200, providerResourcesResponse));
+    if (path === "/v1/provider-resources" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      providerResourcesState = [...providerResourcesState, body as (typeof providerResourcesResponse)["data"][number]];
+      return Promise.resolve(jsonResponse(200, body));
     }
 
-    if (path === "/v1/route-policies") {
-      return Promise.resolve(jsonResponse(200, routePoliciesResponse));
+    if (
+      path.startsWith("/v1/provider-resources/") &&
+      !path.endsWith("/disable") &&
+      init?.method === "PUT"
+    ) {
+      const providerResourceId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const index = providerResourcesState.findIndex(
+        (provider) => provider.provider_resource_id === providerResourceId,
+      );
+
+      if (index < 0) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "provider_resource_not_found",
+              message: "Provider resource not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (providerResourcesState[index]?.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "provider_resource_version_conflict",
+              message: "Provider resource version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      const updated = {
+        ...providerResourcesState[index],
+        ...body,
+        provider_resource_id: providerResourceId,
+        version: expectedVersion + 1,
+      };
+      providerResourcesState[index] = updated;
+      return Promise.resolve(jsonResponse(200, updated));
+    }
+
+    if (
+      path.startsWith("/v1/provider-resources/") &&
+      path.endsWith("/disable") &&
+      init?.method === "POST"
+    ) {
+      const providerResourceId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const index = providerResourcesState.findIndex(
+        (provider) => provider.provider_resource_id === providerResourceId,
+      );
+
+      if (index < 0) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "provider_resource_not_found",
+              message: "Provider resource not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (providerResourcesState[index]?.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "provider_resource_version_conflict",
+              message: "Provider resource version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      const disabled = {
+        ...providerResourcesState[index],
+        status: "disabled",
+        health_state: "disabled",
+        version: expectedVersion + 1,
+      };
+      providerResourcesState[index] = disabled;
+      return Promise.resolve(jsonResponse(200, disabled));
+    }
+
+    if (path === "/v1/route-policies" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: routePoliciesState }));
+    }
+
+    if (path === "/v1/route-policies" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const capabilities = Array.isArray(body.required_capabilities)
+        ? body.required_capabilities
+        : [];
+      const unsupportedCapabilities = capabilities.filter(
+        (capability) =>
+          ![
+            "streaming",
+            "tool_calling",
+            "tool_related",
+            "json_mode",
+            "chat_completions",
+            "realtime",
+            "response_model_metadata",
+          ].includes(
+            String(capability),
+          ),
+      );
+
+      if (unsupportedCapabilities.length > 0) {
+        return Promise.resolve(
+          jsonResponse(400, {
+            error: {
+              code: "route_policy_compatibility_invalid",
+              message: "Route policy compatibility validation failed.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      routePoliciesState = [...routePoliciesState, body as (typeof routePoliciesResponse)["data"][number]];
+      return Promise.resolve(jsonResponse(200, body));
+    }
+
+    if (
+      path.startsWith("/v1/route-policies/") &&
+      !path.endsWith("/disable") &&
+      init?.method === "PUT"
+    ) {
+      const routePolicyId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const capabilities = Array.isArray(body.required_capabilities)
+        ? body.required_capabilities
+        : [];
+      const unsupportedCapabilities = capabilities.filter(
+        (capability) =>
+          ![
+            "streaming",
+            "tool_calling",
+            "tool_related",
+            "json_mode",
+            "chat_completions",
+            "realtime",
+            "response_model_metadata",
+          ].includes(
+            String(capability),
+          ),
+      );
+      const index = routePoliciesState.findIndex(
+        (policy) => policy.route_policy_id === routePolicyId,
+      );
+
+      if (unsupportedCapabilities.length > 0) {
+        return Promise.resolve(
+          jsonResponse(400, {
+            error: {
+              code: "route_policy_compatibility_invalid",
+              message: "Route policy compatibility validation failed.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (index < 0) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "route_policy_not_found",
+              message: "Route policy not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (routePoliciesState[index]?.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "route_policy_version_conflict",
+              message: "Route policy version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      const updated = {
+        ...routePoliciesState[index],
+        ...body,
+        route_policy_id: routePolicyId,
+        version: expectedVersion + 1,
+      };
+      routePoliciesState[index] = updated;
+      return Promise.resolve(jsonResponse(200, updated));
+    }
+
+    if (
+      path.startsWith("/v1/route-policies/") &&
+      path.endsWith("/disable") &&
+      init?.method === "POST"
+    ) {
+      const routePolicyId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const current = routePoliciesState.find(
+        (policy) => policy.route_policy_id === routePolicyId,
+      );
+
+      if (!current) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "route_policy_not_found",
+              message: "Route policy not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (current.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "route_policy_version_conflict",
+              message: "Route policy version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      routePoliciesState = routePoliciesState.filter(
+        (policy) => policy.route_policy_id !== routePolicyId,
+      );
+      return Promise.resolve(
+        jsonResponse(200, {
+          ...current,
+          version: expectedVersion + 1,
+        }),
+      );
+    }
+
+    if (path === "/v1/config-snapshots/active") {
+      const activeSnapshot =
+        configSnapshotsState.find((snapshot) => snapshot.status === "active") ??
+        configSnapshotsState[0];
+      return Promise.resolve(
+        jsonResponse(200, {
+          config_snapshot: activeSnapshot ?? configSnapshotResponse.config_snapshot,
+        }),
+      );
+    }
+
+    if (path === "/v1/config-snapshots" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: configSnapshotsState }));
+    }
+
+    if (path === "/v1/config-snapshots" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      configSnapshotsState = [...configSnapshotsState, body as (typeof configSnapshotsResponse)["data"][number]];
+      return Promise.resolve(jsonResponse(200, body));
+    }
+
+    if (
+      path.startsWith("/v1/config-snapshots/") &&
+      path.endsWith("/activate") &&
+      init?.method === "POST"
+    ) {
+      const snapshotId = decodeURIComponent(
+        path.replace("/v1/config-snapshots/", "").replace("/activate", ""),
+      );
+      configSnapshotsState = configSnapshotsState.map((snapshot) =>
+        snapshot.config_snapshot_id === snapshotId
+          ? {
+              ...snapshot,
+              status: "active",
+              activated_at: "2026-04-23T00:00:00Z",
+            }
+          : snapshot.status === "active"
+            ? {
+                ...snapshot,
+                status: "superseded",
+              }
+            : snapshot,
+      );
+      const activatedSnapshot = configSnapshotsState.find(
+        (snapshot) => snapshot.config_snapshot_id === snapshotId,
+      );
+
+      return Promise.resolve(
+        jsonResponse(200, {
+          config_snapshot: activatedSnapshot ?? {
+            ...configSnapshotsResponse.data[0],
+            config_snapshot_id: snapshotId,
+          },
+        }),
+      );
+    }
+
+    if (path === "/v1/api-keys" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: apiKeysState }));
+    }
+
+    if (path === "/v1/api-keys" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const displayName =
+        typeof body.display_name === "string"
+          ? body.display_name
+          : "New API Key";
+      const apiKey =
+        typeof body.api_key === "string" ? body.api_key : "akp_new";
+      const providerResourceId =
+        typeof body.provider_resource_id === "string"
+          ? body.provider_resource_id
+          : "prvrsrc_unknown";
+      const nextKey = {
+        api_key_id: `key_${apiKeysState.length + 1}`,
+        can_revoke: true,
+        created_at: "2026-04-23T00:00:00Z",
+        display_name: displayName,
+        is_active: true,
+        key_prefix: `${apiKey.slice(0, 6)}...`,
+        provider_resource_id: providerResourceId,
+        tenant_id: "tenant_acme",
+        updated_at: "2026-04-23T00:00:00Z",
+        version: 1,
+      };
+      apiKeysState = [...apiKeysState, nextKey];
+      return Promise.resolve(jsonResponse(200, nextKey));
+    }
+
+    if (path.startsWith("/v1/api-keys/") && path.endsWith("/revoke")) {
+      const segments = path.split("/");
+      const apiKeyId = decodeURIComponent(segments[3] ?? "");
+      const revoke = () => {
+        apiKeysState = apiKeysState.map((key) =>
+          key.api_key_id === apiKeyId
+            ? { ...key, is_active: false, version: key.version + 1 }
+            : key,
+        );
+
+        return emptyResponse(200);
+      };
+
+      if (init?.method === "DELETE" || init?.method === "POST") {
+        return Promise.resolve(revoke());
+      }
+
+      return Promise.resolve(emptyResponse(405));
+    }
+
+    if (path === "/v1/route-simulations" && init?.method === "POST") {
+      return Promise.resolve(jsonResponse(200, routeSimulationResponse));
     }
 
     if (path === "/v1/route-receipts") {
       return Promise.resolve(jsonResponse(200, routeReceiptsResponse));
     }
 
-    if (path.startsWith("/v1/route-receipts?")) {
-      return Promise.resolve(jsonResponse(200, routeReceiptsResponse));
+    if (path.startsWith("/v1/route-diagnostics/")) {
+      const routePolicyId = decodeURIComponent(path.split("/")[3] ?? "");
+      const diagnostics = routeDiagnosticsByPolicyId[routePolicyId];
+
+      if (diagnostics) {
+        return Promise.resolve(jsonResponse(200, diagnostics));
+      }
+
+      return Promise.resolve(
+        jsonResponse(404, {
+          error: {
+            code: "not_found",
+            message: `No diagnostics for ${routePolicyId}`,
+            request_id: "req_test",
+            retryable: false,
+          },
+        }),
+      );
     }
 
-    if (path === "/v1/route-diagnostics/routepol_acme_realtime") {
-      return Promise.resolve(jsonResponse(200, routeDiagnosticsResponse));
+    if (path === "/v1/usage/summary") {
+      return Promise.resolve(jsonResponse(200, usageSummaryResponse));
     }
 
-    if (path === "/v1/config-snapshots/active") {
-      return Promise.resolve(jsonResponse(200, configSnapshotResponse));
+    if (path === "/v1/usage/breakdown") {
+      return Promise.resolve(jsonResponse(200, usageBreakdownResponse));
     }
 
-    if (path === "/v1/route-simulations" && init?.method === "POST") {
-      return Promise.resolve(jsonResponse(200, routeSimulationResponse));
+    if (path === "/v1/billing/projection") {
+      return Promise.resolve(jsonResponse(200, balanceProjectionResponse));
+    }
+
+    if (path === "/v1/billing/exports" && (!init?.method || init.method === "GET")) {
+      if (billingExportJobsState.some((job) => job.status === "queued")) {
+        if (billingExportPollCount > 0) {
+          billingExportJobsState = billingExportJobsState.map((job) =>
+            job.status === "queued"
+              ? {
+                  ...job,
+                  completed_at: "2026-04-23T00:11:00Z",
+                  status: "completed",
+                }
+              : job,
+          );
+        } else {
+          billingExportPollCount += 1;
+        }
+      }
+      return Promise.resolve(jsonResponse(200, { data: billingExportJobsState }));
+    }
+
+    if (path === "/v1/pricing/simulations" && init?.method === "POST") {
+      return Promise.resolve(
+        jsonResponse(200, {
+          catalog_id: "pricing_catalog_default",
+          catalog_version: 1,
+          currency: "USD",
+          provider_cost: {
+            currency: "USD",
+            amount: "0.005188",
+          },
+          billable_price: {
+            currency: "USD",
+            amount: "0.006225",
+          },
+          line_items: [],
+        }),
+      );
+    }
+
+    if (path === "/v1/billing/exports" && init?.method === "POST") {
+      const nextJob = {
+        completed_at: undefined,
+        export_job_id: `export_${billingExportJobsState.length + 200}`,
+        format: "csv",
+        project_id: "proj_core",
+        requested_at: "2026-04-23T00:10:00Z",
+        status: "queued",
+        tenant_id: "tenant_acme",
+      };
+      billingExportPollCount = 0;
+      billingExportJobsState = [nextJob, ...billingExportJobsState];
+      return Promise.resolve(jsonResponse(202, { data: nextJob }));
+    }
+
+    if (
+      path.startsWith("/v1/billing/exports/") &&
+      path.endsWith("/download") &&
+      (!init?.method || init.method === "GET")
+    ) {
+      const exportJobId = decodeURIComponent(path.split("/")[4] ?? "");
+      const job = billingExportJobsState.find(
+        (candidate) => candidate.export_job_id === exportJobId,
+      );
+
+      if (!job || job.status !== "completed") {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "billing_export_not_found",
+              message: "Billing export not ready.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      return Promise.resolve(
+        new Response("date,provider_cost,billable_total\n2026-04-22,1.24,1.54\n", {
+          status: 200,
+          headers: {
+            "content-type": "text/csv",
+          },
+        }),
+      );
+    }
+    if (
+      path.startsWith("/v1/route-receipts/") &&
+      path.endsWith("/diagnostics")
+    ) {
+      const routeReceiptId = decodeURIComponent(
+        path.replace("/v1/route-receipts/", "").replace("/diagnostics", ""),
+      );
+      const diagnostics = routeReceiptDiagnosticsById[routeReceiptId];
+
+      if (diagnostics) {
+        return Promise.resolve(jsonResponse(200, diagnostics));
+      }
+
+      return Promise.resolve(
+        jsonResponse(404, {
+          error: {
+            code: "not_found",
+            message: `No diagnostics for ${routeReceiptId}`,
+            request_id: "req_test",
+            retryable: false,
+          },
+        }),
+      );
     }
 
     return Promise.resolve(

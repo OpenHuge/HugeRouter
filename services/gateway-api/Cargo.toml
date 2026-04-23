@@ -7,15 +7,21 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-nats = "0.39.0"
 async-trait = "0.1.89"
 axum.workspace = true
 core-domain = { path = "../../crates/core-domain" }
+protocol-anthropic = { path = "../../crates/protocol-anthropic" }
+protocol-gemini = { path = "../../crates/protocol-gemini" }
 protocol-ir = { path = "../../crates/protocol-ir" }
+provider-anthropic = { path = "../../crates/provider-anthropic" }
+provider-gemini = { path = "../../crates/provider-gemini" }
 provider-traits = { path = "../../crates/provider-traits" }
-reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "native-tls"] }
 runtime-composition = { path = "../../crates/runtime-composition" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 time = { version = "0.3.44", features = ["formatting"] }
 tokio.workspace = true
 tracing.workspace = true

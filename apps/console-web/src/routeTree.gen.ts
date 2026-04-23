@@ -13,10 +13,14 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as LoginCallbackRouteImport } from './routes/login.callback'
+import { Route as AppUsageRouteImport } from './routes/app.usage'
+import { Route as AppSnapshotsRouteImport } from './routes/app.snapshots'
 import { Route as AppRoutesRouteImport } from './routes/app.routes'
 import { Route as AppReceiptsRouteImport } from './routes/app.receipts'
 import { Route as AppProvidersRouteImport } from './routes/app.providers'
 import { Route as AppOverviewRouteImport } from './routes/app.overview'
+import { Route as AppBillingRouteImport } from './routes/app.billing'
+import { Route as AppApiKeysRouteImport } from './routes/app.api-keys'
 import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
 import { Route as AppRouteDiagnosticsRoutePolicyIdRouteImport } from './routes/app.route-diagnostics.$routePolicyId'
 import { Route as AdminTenantsTenantIdRouteImport } from './routes/admin.tenants.$tenantId'
@@ -41,6 +45,16 @@ const LoginCallbackRoute = LoginCallbackRouteImport.update({
   path: '/callback',
   getParentRoute: () => LoginRoute,
 } as any)
+const AppUsageRoute = AppUsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSnapshotsRoute = AppSnapshotsRouteImport.update({
+  id: '/snapshots',
+  path: '/snapshots',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppRoutesRoute = AppRoutesRouteImport.update({
   id: '/routes',
   path: '/routes',
@@ -59,6 +73,16 @@ const AppProvidersRoute = AppProvidersRouteImport.update({
 const AppOverviewRoute = AppOverviewRouteImport.update({
   id: '/overview',
   path: '/overview',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppApiKeysRoute = AppApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
   getParentRoute: () => AppRoute,
 } as any)
 const AdminTenantsRoute = AdminTenantsRouteImport.update({
@@ -83,10 +107,14 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
+  '/app/api-keys': typeof AppApiKeysRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
+  '/app/snapshots': typeof AppSnapshotsRoute
+  '/app/usage': typeof AppUsageRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
@@ -96,10 +124,14 @@ export interface FileRoutesByTo {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
+  '/app/api-keys': typeof AppApiKeysRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
+  '/app/snapshots': typeof AppSnapshotsRoute
+  '/app/usage': typeof AppUsageRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
@@ -110,10 +142,14 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
+  '/app/api-keys': typeof AppApiKeysRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
+  '/app/snapshots': typeof AppSnapshotsRoute
+  '/app/usage': typeof AppUsageRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
@@ -125,10 +161,14 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/admin/tenants'
+    | '/app/api-keys'
+    | '/app/billing'
     | '/app/overview'
     | '/app/providers'
     | '/app/receipts'
     | '/app/routes'
+    | '/app/snapshots'
+    | '/app/usage'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
     | '/app/route-diagnostics/$routePolicyId'
@@ -138,10 +178,14 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/admin/tenants'
+    | '/app/api-keys'
+    | '/app/billing'
     | '/app/overview'
     | '/app/providers'
     | '/app/receipts'
     | '/app/routes'
+    | '/app/snapshots'
+    | '/app/usage'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
     | '/app/route-diagnostics/$routePolicyId'
@@ -151,10 +195,14 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/admin/tenants'
+    | '/app/api-keys'
+    | '/app/billing'
     | '/app/overview'
     | '/app/providers'
     | '/app/receipts'
     | '/app/routes'
+    | '/app/snapshots'
+    | '/app/usage'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
     | '/app/route-diagnostics/$routePolicyId'
@@ -196,6 +244,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginCallbackRouteImport
       parentRoute: typeof LoginRoute
     }
+    '/app/usage': {
+      id: '/app/usage'
+      path: '/usage'
+      fullPath: '/app/usage'
+      preLoaderRoute: typeof AppUsageRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/snapshots': {
+      id: '/app/snapshots'
+      path: '/snapshots'
+      fullPath: '/app/snapshots'
+      preLoaderRoute: typeof AppSnapshotsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/routes': {
       id: '/app/routes'
       path: '/routes'
@@ -222,6 +284,20 @@ declare module '@tanstack/react-router' {
       path: '/overview'
       fullPath: '/app/overview'
       preLoaderRoute: typeof AppOverviewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/billing': {
+      id: '/app/billing'
+      path: '/billing'
+      fullPath: '/app/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/api-keys': {
+      id: '/app/api-keys'
+      path: '/api-keys'
+      fullPath: '/app/api-keys'
+      preLoaderRoute: typeof AppApiKeysRouteImport
       parentRoute: typeof AppRoute
     }
     '/admin/tenants': {
@@ -271,18 +347,26 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppRouteChildren {
+  AppApiKeysRoute: typeof AppApiKeysRoute
+  AppBillingRoute: typeof AppBillingRoute
   AppOverviewRoute: typeof AppOverviewRoute
   AppProvidersRoute: typeof AppProvidersRoute
   AppReceiptsRoute: typeof AppReceiptsRoute
   AppRoutesRoute: typeof AppRoutesRoute
+  AppSnapshotsRoute: typeof AppSnapshotsRoute
+  AppUsageRoute: typeof AppUsageRoute
   AppRouteDiagnosticsRoutePolicyIdRoute: typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppApiKeysRoute: AppApiKeysRoute,
+  AppBillingRoute: AppBillingRoute,
   AppOverviewRoute: AppOverviewRoute,
   AppProvidersRoute: AppProvidersRoute,
   AppReceiptsRoute: AppReceiptsRoute,
   AppRoutesRoute: AppRoutesRoute,
+  AppSnapshotsRoute: AppSnapshotsRoute,
+  AppUsageRoute: AppUsageRoute,
   AppRouteDiagnosticsRoutePolicyIdRoute: AppRouteDiagnosticsRoutePolicyIdRoute,
 }
 
