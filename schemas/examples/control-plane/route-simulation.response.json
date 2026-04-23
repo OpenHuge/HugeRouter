@@ -16,7 +16,7 @@
   "excluded_candidates": [
     {
       "provider_resource_id": "prvrsrc_backup",
-      "reason_code": "health_quarantined",
+      "reason_code": "rejected_provenance_class",
       "reason": "rejected_provenance_class"
     }
   ],

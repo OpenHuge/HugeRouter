@@ -14,7 +14,7 @@
       "endpoint_base_url": "https://api.openai.com/v1",
       "auth_kind": "api_key",
       "health_state": "healthy",
-      "health_message": "Healthy across recent operator probes.",
+      "health_message": "probe latency within SLO",
       "budget_policy_id": "budgetpol_default",
       "capabilities": {
         "supports_streaming": true,

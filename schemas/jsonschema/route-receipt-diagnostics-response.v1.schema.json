@@ -57,13 +57,17 @@
       "type": "object",
       "required": [
         "provider_resource_id",
-        "reason"
+        "reason",
+        "reason_code"
       ],
       "properties": {
         "provider_resource_id": {
           "$ref": "#/definitions/ProviderResourceId"
         },
         "reason": {
+          "type": "string"
+        },
+        "reason_code": {
           "type": "string"
         }
       }
@@ -157,6 +161,7 @@
         "project_id",
         "protocol_family",
         "request_id",
+        "route_policy_id",
         "route_receipt_id",
         "score_breakdown",
         "tenant_id",
@@ -177,6 +182,12 @@
           "items": {
             "$ref": "#/definitions/ExcludedTarget"
           }
+        },
+        "failure_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "fallback_transitions": {
           "type": "array",
@@ -205,6 +216,9 @@
         },
         "request_id": {
           "type": "string"
+        },
+        "route_policy_id": {
+          "$ref": "#/definitions/RoutePolicyId"
         },
         "route_receipt_id": {
           "$ref": "#/definitions/RouteReceiptId"
