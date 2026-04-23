@@ -1844,6 +1844,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "route-receipt-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "core-domain",
+ "protocol-ir",
+ "runtime-composition",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "routing-worker"
 version = "0.1.0"
 dependencies = [
