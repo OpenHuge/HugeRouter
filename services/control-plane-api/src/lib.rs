@@ -2052,7 +2052,7 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlPlaneState, app_with_state};
+    use super::{ControlPlaneState, app_with_state, resolve_oidc_membership};
     use crate::store::IdentityLookup;
     use axum::{
         body::{Body, to_bytes},
