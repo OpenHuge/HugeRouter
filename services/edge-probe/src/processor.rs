@@ -8,10 +8,28 @@ pub enum ProbeAssessment {
     Unhealthy { reason: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeMode {
+    CheapHealth,
+    BillableSynthetic,
+}
+
+impl ProbeMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CheapHealth => "cheap_health",
+            Self::BillableSynthetic => "billable_synthetic",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProbeEventPayload {
     pub provider_resource_id: String,
     pub target_url: String,
+    pub probe_mode: ProbeMode,
     pub assessment: ProbeAssessment,
     pub latency_ms: u32,
 }
@@ -38,6 +56,7 @@ impl PublishedProbeStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishedProbePayload {
     pub provider_resource_id: String,
+    pub probe_mode: ProbeMode,
     pub observed_status: PublishedProbeStatus,
     pub latency_ms: u32,
     pub reason: Option<String>,
@@ -90,6 +109,15 @@ pub fn assess_probe_result(
     ProbeAssessment::Healthy
 }
 
+#[must_use]
+pub fn parse_probe_mode(value: &str) -> Option<ProbeMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cheap" | "cheap_health" | "health" => Some(ProbeMode::CheapHealth),
+        "billable" | "billable_synthetic" | "synthetic" => Some(ProbeMode::BillableSynthetic),
+        _ => None,
+    }
+}
+
 pub fn build_probe_event(payload: ProbeEventPayload) -> PublishedProbeEvent {
     let (observed_status, reason) = match payload.assessment {
         ProbeAssessment::Healthy => (PublishedProbeStatus::Healthy, None),
@@ -108,6 +136,7 @@ pub fn build_probe_event(payload: ProbeEventPayload) -> PublishedProbeEvent {
         producer: "edge-probe".to_string(),
         payload: PublishedProbePayload {
             provider_resource_id: payload.provider_resource_id,
+            probe_mode: payload.probe_mode,
             observed_status,
             latency_ms: payload.latency_ms,
             reason,
@@ -148,12 +177,24 @@ mod tests {
         let event = build_probe_event(ProbeEventPayload {
             provider_resource_id: "prvrsrc_openai_primary".to_string(),
             target_url: "http://127.0.0.1:8080/healthz".to_string(),
+            probe_mode: ProbeMode::CheapHealth,
             assessment: ProbeAssessment::Healthy,
             latency_ms: 32,
         });
 
         assert_eq!(event.message_type, "provider_probe.observed");
+        assert_eq!(event.payload.probe_mode, ProbeMode::CheapHealth);
         assert_eq!(event.payload.observed_status, PublishedProbeStatus::Healthy);
         assert_eq!(event.payload.reason, None);
+    }
+
+    #[test]
+    fn parses_probe_mode_aliases() {
+        assert_eq!(parse_probe_mode("health"), Some(ProbeMode::CheapHealth));
+        assert_eq!(
+            parse_probe_mode("billable"),
+            Some(ProbeMode::BillableSynthetic)
+        );
+        assert_eq!(parse_probe_mode("unknown"), None);
     }
 }

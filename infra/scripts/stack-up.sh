@@ -39,6 +39,14 @@ case "${mode}" in
       "${SCRIPT_DIR}/bootstrap.sh" "${mode}"
     fi
 
-    stack_compose "${mode}" up -d --remove-orphans control-plane-api gateway-api ledger-worker route-receipt-worker
+    stack_compose "${mode}" up -d --remove-orphans \
+      control-plane-api \
+      gateway-api \
+      ledger-worker \
+      route-receipt-worker \
+      routing-worker \
+      edge-probe \
+      audit-worker \
+      notification-worker
     ;;
 esac

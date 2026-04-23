@@ -377,6 +377,19 @@ export LEDGER_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
 export LEDGER_WORKER_NATS_URL="${NATS_URL}"
 export ROUTE_RECEIPT_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
 export ROUTE_RECEIPT_WORKER_NATS_URL="${NATS_URL}"
+export ROUTING_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
+export ROUTING_WORKER_NATS_URL="${NATS_URL}"
+export AUDIT_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
+export AUDIT_WORKER_NATS_URL="${NATS_URL}"
+export NOTIFICATION_WORKER_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL}"
+export NOTIFICATION_WORKER_NATS_URL="${NATS_URL}"
+export EDGE_PROBE_NATS_URL="${NATS_URL}"
+export EDGE_PROBE_TARGET_URL="${EDGE_PROBE_TARGET_URL:-http://gateway-api:8080/healthz}"
+export EDGE_PROBE_PROVIDER_RESOURCE_ID="${EDGE_PROBE_PROVIDER_RESOURCE_ID:-prvrsrc_openai_primary}"
+export EDGE_PROBE_PROBE_MODE="${EDGE_PROBE_PROBE_MODE:-cheap_health}"
+export EDGE_PROBE_INTERVAL_MS="${EDGE_PROBE_INTERVAL_MS:-30000}"
+export EDGE_PROBE_TIMEOUT_MS="${EDGE_PROBE_TIMEOUT_MS:-2000}"
+export EDGE_PROBE_DEGRADED_LATENCY_MS="${EDGE_PROBE_DEGRADED_LATENCY_MS:-1500}"
 export GATEWAY_NATS_URL="${NATS_URL}"
 
 SMOKE_OPENAI_API_KEY="${SMOKE_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}"
@@ -433,7 +446,11 @@ docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" build \
   control-plane-api \
   gateway-api \
   ledger-worker \
-  route-receipt-worker
+  route-receipt-worker \
+  routing-worker \
+  edge-probe \
+  audit-worker \
+  notification-worker
 
 log "applying runtime schema and bootstrap"
 "${REPO_ROOT}/infra/scripts/migrate.sh" runtime
@@ -444,12 +461,20 @@ docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" up -d \
   control-plane-api \
   gateway-api \
   ledger-worker \
-  route-receipt-worker
+  route-receipt-worker \
+  routing-worker \
+  edge-probe \
+  audit-worker \
+  notification-worker
 
 wait_for_http "${CONTROL_PLANE_BASE_URL}/healthz" 180 "control-plane healthz"
 wait_for_http "${GATEWAY_BASE_URL}/healthz" 180 "gateway healthz"
 wait_for_compose_service_state "ledger-worker" "running" 180
 wait_for_compose_service_state "route-receipt-worker" "running" 180
+wait_for_compose_service_state "routing-worker" "running" 180
+wait_for_compose_service_state "edge-probe" "running" 180
+wait_for_compose_service_state "audit-worker" "running" 180
+wait_for_compose_service_state "notification-worker" "running" 180
 login_platform_admin
 
 log "running smoke openai setup"
