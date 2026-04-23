@@ -1188,7 +1188,7 @@ fn score_target(
         .transit_metadata
         .as_ref()
         .map_or(latency, |metadata| {
-            (latency - (f32::from(metadata.transit_hops) * 0.05)).max(0.1)
+            f32::from(metadata.transit_hops).mul_add(-0.05, latency).max(0.1)
         });
     let health = match target.resource.health_state {
         HealthState::Healthy => 1.0,
@@ -1629,8 +1629,7 @@ fn status_for_error_code(code: &str) -> StatusCode {
     match code {
         "auth_invalid" => StatusCode::UNAUTHORIZED,
         "auth_forbidden" => StatusCode::FORBIDDEN,
-        "request_validation_failed" => StatusCode::BAD_REQUEST,
-        "transit_loop_detected" => StatusCode::BAD_REQUEST,
+        "request_validation_failed" | "transit_loop_detected" => StatusCode::BAD_REQUEST,
         "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
         "upstream_timeout" => StatusCode::GATEWAY_TIMEOUT,
         "upstream_protocol_error" => StatusCode::BAD_GATEWAY,
@@ -2328,6 +2327,7 @@ fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderR
     }
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn static_cost_score_for_target(route_policy: &RoutePolicy, resource: &ProviderResource) -> f32 {
     let rate = usd_per_1k_tokens_for_target(route_policy, resource);
     let bounded_rate = (rate / 0.05).clamp(0.0, 1.0) as f32;
@@ -3178,12 +3178,14 @@ mod tests {
             "transit success"
         );
 
-        let outbound_requests = transport.requests.lock().await;
-        let outbound_headers = outbound_requests[0]
-            .headers
-            .iter()
-            .cloned()
-            .collect::<BTreeMap<_, _>>();
+        let outbound_headers = {
+            let outbound_requests = transport.requests.lock().await;
+            outbound_requests[0]
+                .headers
+                .iter()
+                .cloned()
+                .collect::<BTreeMap<_, _>>()
+        };
         assert_eq!(
             outbound_headers.get("idempotency-key"),
             Some(&"idem-route-1".to_string())
