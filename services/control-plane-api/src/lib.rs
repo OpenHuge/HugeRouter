@@ -23,9 +23,9 @@ use core_domain::{
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
     BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
-    UsageBreakdownResponse, UsageSummaryResponse,
+    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse,
+    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteSimulationRequest,
+    RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageSummaryResponse,
 };
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
@@ -33,8 +33,9 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
     ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, EMAIL_BOOTSTRAP_CODE,
-    IdentityLookup, RouteReceiptsResponse, SESSION_TTL_SECONDS, StoreMode, ensure_workspace_slug,
-    expires_at, now_rfc3339, oauth_provider_slug,
+    IdentityLookup, ProviderResourceFilters, RouteReceiptFilters, RouteReceiptsResponse,
+    SESSION_TTL_SECONDS, StoreMode, ensure_workspace_slug, expires_at, now_rfc3339,
+    oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -122,13 +123,6 @@ struct GatewayApiKeyResolveResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub status: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RouteReceiptsQuery {
-    pub tenant_id: Option<String>,
-    pub project_id: Option<String>,
-    pub protocol_family: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -422,6 +416,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/v1/route-receipts/{route_receipt_id}",
             get(get_route_receipt),
+        )
+        .route(
+            "/v1/route-diagnostics/{route_policy_id}",
+            get(get_route_diagnostics),
         )
         .layer(
             CorsLayer::new()
@@ -876,12 +874,16 @@ async fn list_projects(
 async fn list_provider_resources(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
+    Query(filters): Query<ProviderResourceFilters>,
 ) -> Result<Json<ProviderResourcesResponse>, ApiError> {
     let context = next_request_context();
     let authz = authorize_v1_request(&state, &headers, &context).await?;
+    if let Some(tenant_id) = filters.tenant_id.as_deref() {
+        authz.ensure_read_tenant(tenant_id, &context)?;
+    }
     let mut response = state
         .store
-        .list_provider_resources()
+        .list_provider_resources(&filters)
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -1903,28 +1905,23 @@ async fn get_route_receipt(
 async fn list_route_receipts(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
-    Query(query): Query<RouteReceiptsQuery>,
+    Query(filters): Query<RouteReceiptFilters>,
 ) -> Result<Json<RouteReceiptsResponse>, ApiError> {
     let context = next_request_context();
     let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = query.tenant_id.filter(|value| !value.trim().is_empty());
-    let project_id = query.project_id.filter(|value| !value.trim().is_empty());
-    let protocol_family = query
-        .protocol_family
-        .filter(|value| !value.trim().is_empty());
-    if let Some(project_id) = project_id.as_deref() {
+    if let Some(project_id) = filters.project_id.as_deref() {
         let project = load_project(&state, project_id, &context).await?;
-        if let Some(tenant_id) = tenant_id.as_deref() {
+        if let Some(tenant_id) = filters.tenant_id.as_deref() {
             ensure_project_matches_tenant(&project, tenant_id, &context)?;
             authz.ensure_read_tenant(tenant_id, &context)?;
         }
         authz.ensure_read_project(&project, &context)?;
-    } else if let Some(tenant_id) = tenant_id.as_deref() {
+    } else if let Some(tenant_id) = filters.tenant_id.as_deref() {
         authz.ensure_read_tenant(tenant_id, &context)?;
     }
     let mut response = state
         .store
-        .list_route_receipts(tenant_id, project_id, protocol_family)
+        .list_route_receipts(&filters)
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -1935,6 +1932,35 @@ async fn list_route_receipts(
         })?;
     response.data = authz.filter_route_receipts(response.data);
     Ok(Json(response))
+}
+
+async fn get_route_diagnostics(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(route_policy_id): Path<String>,
+) -> Result<Json<RouteDiagnosticsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let diagnostics = state
+        .store
+        .get_route_diagnostics(&route_policy_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load route diagnostics: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "route_policy_not_found",
+                format!("route policy `{route_policy_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(diagnostics.route_policy.tenant_id.as_str(), &context)?;
+    Ok(Json(diagnostics))
 }
 
 fn validate_route_policy_protocol_and_capabilities(
@@ -1948,8 +1974,15 @@ fn validate_route_policy_protocol_and_capabilities(
         "anthropic_messages",
         "gemini_generate_content",
     ];
-    const SUPPORTED_CAPABILITIES: [&str; 4] =
-        ["streaming", "tool_calling", "json_mode", "chat_completions"];
+    const SUPPORTED_CAPABILITIES: [&str; 7] = [
+        "streaming",
+        "tool_calling",
+        "tool_related",
+        "json_mode",
+        "chat_completions",
+        "realtime",
+        "response_model_metadata",
+    ];
 
     if !SUPPORTED_PROTOCOL_FAMILIES.contains(&route_policy.protocol_family.as_str()) {
         return Err("unsupported protocol_family");
@@ -2615,9 +2648,9 @@ mod tests {
     };
     use core_domain::{
         AdmissionResult, AuthProvider, AuthProviderLink, AuthProviderLinkId, ConfigSnapshotId,
-        ExcludedTarget, FallbackTransition, ProjectId, ProviderResourceId, RouteReceipt,
-        ScoreBreakdown, TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
-        TenantMembershipStatus, TenantSummary, UserId, UserIdentity,
+        ExcludedTarget, FallbackTransition, ProjectId, ProviderResourceId, RoutePolicyId,
+        RouteReceipt, ScoreBreakdown, TenantId, TenantMembership, TenantMembershipId,
+        TenantMembershipRole, TenantMembershipStatus, TenantSummary, UserId, UserIdentity,
     };
     use serde_json::{Value, json};
     use std::sync::{Arc, RwLock};
@@ -2776,6 +2809,7 @@ mod tests {
             route_receipt_id: core_domain::RouteReceiptId::parse(route_receipt_id).unwrap(),
             tenant_id: TenantId::parse(tenant_id).unwrap(),
             project_id: ProjectId::parse(project_id).unwrap(),
+            route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default").unwrap(),
             request_id: format!("{route_receipt_id}_request"),
             trace_id: format!("{route_receipt_id}_trace"),
             protocol_family: "openai_chat".to_string(),
@@ -2784,6 +2818,7 @@ mod tests {
             admission_result: AdmissionResult::Admitted,
             selected_target: Some(ProviderResourceId::parse(provider_resource_id).unwrap()),
             excluded_targets: Vec::<ExcludedTarget>::new(),
+            failure_reason: None,
             score_breakdown: ScoreBreakdown {
                 latency: 0.8,
                 cost: 0.6,
@@ -3113,6 +3148,7 @@ mod tests {
             route_receipt_id: core_domain::RouteReceiptId::parse(route_receipt_id).unwrap(),
             tenant_id: TenantId::parse(tenant_id).unwrap(),
             project_id: ProjectId::parse(project_id).unwrap(),
+            route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default").unwrap(),
             request_id: format!("{route_receipt_id}_request"),
             trace_id: format!("{route_receipt_id}_trace"),
             protocol_family: protocol_family.to_string(),
@@ -3122,8 +3158,10 @@ mod tests {
             selected_target: Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap()),
             excluded_targets: vec![ExcludedTarget {
                 provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_backup").unwrap(),
+                reason_code: "sample".to_string(),
                 reason: "sample".to_string(),
             }],
+            failure_reason: None,
             score_breakdown: ScoreBreakdown {
                 latency: 0.8,
                 cost: 0.6,
@@ -3485,7 +3523,7 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|entry| entry["reason"]
-                    == "provider protocol is incompatible with route policy")
+                    == "provider does not advertise protocol family `openai_chat`")
         );
     }
 
@@ -3554,7 +3592,9 @@ mod tests {
                             "endpoint_base_url":"https://api.openai.com/v1",
                             "auth_kind":"api_key",
                             "health_state":"healthy",
-                            "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true},
+                            "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true,"supports_realtime":false,"supports_response_model_metadata":true},
+                            "supported_protocol_families":["openai_chat","openai_responses"],
+                            "is_transit_gateway":false,
                             "version":1,
                             "created_at":"2026-04-22T00:00:00Z",
                             "updated_at":"2026-04-22T00:00:00Z"
@@ -3599,7 +3639,9 @@ mod tests {
                             "endpoint_base_url":"https://api.openai.com/v1",
                             "auth_kind":"api_key",
                             "health_state":"healthy",
-                            "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true},
+                            "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true,"supports_realtime":false,"supports_response_model_metadata":true},
+                            "supported_protocol_families":["openai_chat","openai_responses"],
+                            "is_transit_gateway":false,
                             "expected_version":0,
                             "version":1,
                             "created_at":"2026-04-22T00:00:00Z",
@@ -3639,7 +3681,9 @@ mod tests {
                             "endpoint_base_url":"https://api.openai.com/v1",
                             "auth_kind":"api_key",
                             "health_state":"healthy",
-                            "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true},
+                            "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true,"supports_realtime":false,"supports_response_model_metadata":true},
+                            "supported_protocol_families":["openai_chat","openai_responses"],
+                            "is_transit_gateway":false,
                             "expected_version":1,
                             "version":1,
                             "created_at":"2026-04-22T00:00:00Z",
@@ -4423,7 +4467,9 @@ mod tests {
                         "endpoint_base_url":"https://api.openai.com/v1",
                         "auth_kind":"api_key",
                         "health_state":"healthy",
-                        "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true},
+                        "capabilities":{"supports_streaming":true,"supports_tool_calling":true,"supports_json_mode":true,"supports_realtime":false,"supports_response_model_metadata":true},
+                        "supported_protocol_families":["openai_chat","openai_responses"],
+                        "is_transit_gateway":false,
                         "version":1,
                         "created_at":"2026-04-22T00:00:00Z",
                         "updated_at":"2026-04-22T00:00:00Z"

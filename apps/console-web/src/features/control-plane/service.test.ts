@@ -78,16 +78,16 @@ describe("console data service", () => {
     const receipts = await getConsoleDataService().listRouteReceipts();
 
     expect(receipts).toHaveLength(1);
-    expect(receipts[0]?.routeReceiptId).toBe("routercpt_openai_primary_recent");
-    expect(receipts[0]?.selectedTargetLabel).toBe("OpenAI Primary");
-    expect(receipts[0]?.excludedTargets[0]?.providerLabel).toBe(
-      "OpenAI Backup",
+    expect(receipts[0]?.receiptId).toBe("routercpt_openai_primary_recent");
+    expect(receipts[0]?.selectedTargetName).toBe("OpenAI Primary");
+    expect(receipts[0]?.excludedTargets[0]?.provider_resource_id).toBe(
+      "prvrsrc_openai_backup",
     );
-    expect(receipts[0]?.fallbackTransitions[0]?.fromProviderLabel).toBe(
-      "OpenAI Backup",
+    expect(receipts[0]?.fallbackTransitions[0]?.from_provider_resource_id).toBe(
+      "prvrsrc_openai_backup",
     );
-    expect(receipts[0]?.fallbackTransitions[0]?.toProviderLabel).toBe(
-      "OpenAI Primary",
+    expect(receipts[0]?.fallbackTransitions[0]?.to_provider_resource_id).toBe(
+      "prvrsrc_openai_primary",
     );
   });
 
@@ -203,6 +203,9 @@ describe("console data service", () => {
           requestedAt: "2026-04-22T00:00:00Z",
           status: "queued",
         });
+      },
+      getRouteDiagnostics() {
+        return Promise.reject(new Error("unused"));
       },
       getTenantDetail() {
         return Promise.reject(new Error("unused"));

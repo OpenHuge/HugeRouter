@@ -647,10 +647,13 @@ impl Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ProviderCapabilities {
     pub supports_streaming: bool,
     pub supports_tool_calling: bool,
     pub supports_json_mode: bool,
+    pub supports_realtime: bool,
+    pub supports_response_model_metadata: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -670,8 +673,14 @@ pub struct ProviderResource {
     pub auth_kind: AuthKind,
     pub health_state: HealthState,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quarantine_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_policy_id: Option<BudgetPolicyId>,
     pub capabilities: ProviderCapabilities,
+    pub supported_protocol_families: Vec<String>,
+    pub is_transit_gateway: bool,
     pub version: u64,
     pub created_at: String,
     pub updated_at: String,
@@ -686,6 +695,10 @@ impl ProviderResource {
         validate_non_empty("name", &self.name)?;
         validate_non_empty("region", &self.region)?;
         validate_https_url("endpoint_base_url", &self.endpoint_base_url)?;
+        validate_non_empty_slice(
+            "supported_protocol_families",
+            &self.supported_protocol_families,
+        )?;
         Ok(())
     }
 }
@@ -761,6 +774,7 @@ pub struct ScoreBreakdown {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ExcludedTarget {
     pub provider_resource_id: ProviderResourceId,
+    pub reason_code: String,
     pub reason: String,
 }
 
@@ -815,6 +829,7 @@ pub struct RouteReceipt {
     pub route_receipt_id: RouteReceiptId,
     pub tenant_id: TenantId,
     pub project_id: ProjectId,
+    pub route_policy_id: RoutePolicyId,
     pub request_id: String,
     pub trace_id: String,
     pub protocol_family: String,
@@ -828,6 +843,8 @@ pub struct RouteReceipt {
     pub fallback_transitions: Vec<FallbackTransition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normalized_error: Option<NormalizedError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
     pub created_at: String,
 }
 
@@ -908,10 +925,10 @@ mod tests {
         CredentialOwnerType, DeploymentScope, DomainError, EmailLoginCompleteRequest,
         ErrorEnvelope, HealthState, MonetaryAmount, NormalizedError, OAuthCallbackRequest,
         ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
-        ProviderResourceStatus, RoutePolicy, RouteReceipt, RouteReceiptId, ScoreBreakdown, Tenant,
-        TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
-        TenantMembershipStatus, TenantSummary, UsageEvent, UsageEventId, UsageMetrics, UsagePhase,
-        UserId, UserIdentity,
+        ProviderResourceStatus, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId,
+        ScoreBreakdown, Tenant, TenantId, TenantMembership, TenantMembershipId,
+        TenantMembershipRole, TenantMembershipStatus, TenantSummary, UsageEvent, UsageEventId,
+        UsageMetrics, UsagePhase, UserId, UserIdentity,
     };
     use serde_json::{Value, json};
 
@@ -965,12 +982,18 @@ mod tests {
             endpoint_base_url: "http://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state: HealthState::Healthy,
+            health_message: Some("probe latency within SLO".to_string()),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec!["openai_chat".to_string()],
+            is_transit_gateway: false,
             version: 7,
             created_at: "2026-04-20T00:00:00Z".to_string(),
             updated_at: "2026-04-20T00:00:00Z".to_string(),
@@ -1014,6 +1037,7 @@ mod tests {
             route_receipt_id: RouteReceiptId::parse("routercpt_123").unwrap(),
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: ProjectId::parse("proj_core").unwrap(),
+            route_policy_id: RoutePolicyId::parse("routepol_default").unwrap(),
             request_id: "req_123".to_string(),
             trace_id: "trace_123".to_string(),
             protocol_family: "openai_chat".to_string(),
@@ -1030,6 +1054,7 @@ mod tests {
             },
             fallback_transitions: Vec::new(),
             normalized_error: None,
+            failure_reason: None,
             created_at: "2026-04-20T00:00:00Z".to_string(),
         };
 
@@ -1037,6 +1062,7 @@ mod tests {
 
         assert_eq!(json["route_receipt_id"], "routercpt_123");
         assert_eq!(json["tenant_id"], "tenant_acme");
+        assert_eq!(json["route_policy_id"], "routepol_default");
         assert_eq!(json["config_snapshot_id"], "cfgsnap_123");
         assert_eq!(json["admission_result"], "admitted");
         assert_eq!(json["selected_target"], "prvrsrc_123");

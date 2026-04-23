@@ -51,7 +51,9 @@ export const serviceNameSchema = z.string().min(1)
 export const providerCapabilitySchema = z.object({
   supports_streaming: z.boolean(),
   supports_tool_calling: z.boolean(),
-  supports_json_mode: z.boolean()
+  supports_json_mode: z.boolean(),
+  supports_realtime: z.boolean(),
+  supports_response_model_metadata: z.boolean()
 })
 
 export const tenantSchema = z.object({
@@ -100,8 +102,12 @@ export const providerResourceSchema = z.object({
   endpoint_base_url: z.url().regex(/^https:\/\//, 'Expected an https endpoint'),
   auth_kind: z.enum(['api_key', 'oauth_client_credentials', 'session_broker']),
   health_state: z.enum(['healthy', 'degraded', 'quarantined', 'draining', 'disabled']),
+  health_message: z.string().min(1).optional(),
+  quarantine_reason: z.string().min(1).optional(),
   budget_policy_id: budgetPolicyIdSchema.optional(),
   capabilities: providerCapabilitySchema,
+  supported_protocol_families: z.array(protocolFamilySchema).min(1),
+  is_transit_gateway: z.boolean(),
   version: z.number().int().nonnegative(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema
@@ -146,6 +152,7 @@ export const scoreBreakdownSchema = z.object({
 
 export const excludedTargetSchema = z.object({
   provider_resource_id: providerResourceIdSchema,
+  reason_code: z.string().min(1),
   reason: z.string().min(1)
 })
 
@@ -179,6 +186,7 @@ export const routeReceiptSchema = z.object({
   route_receipt_id: routeReceiptIdSchema,
   tenant_id: tenantIdSchema,
   project_id: projectIdSchema,
+  route_policy_id: routePolicyIdSchema,
   request_id: z.string().min(1),
   trace_id: z.string().min(1),
   protocol_family: protocolFamilySchema,
@@ -190,6 +198,7 @@ export const routeReceiptSchema = z.object({
   score_breakdown: scoreBreakdownSchema,
   fallback_transitions: z.array(fallbackTransitionSchema),
   normalized_error: normalizedErrorSchema.optional(),
+  failure_reason: z.string().min(1).optional(),
   created_at: dateTimeSchema
 })
 
@@ -385,6 +394,41 @@ export const routeReceiptDiagnosticsResponseSchema = z.object({
   policy_checks: z.array(routeReceiptPolicyCheckSchema),
   provider_attempts: z.array(routeReceiptProviderAttemptSchema),
   metadata: z.record(z.string(), z.string())
+})
+
+export const routeDiagnosticDecisionSchema = z.enum([
+  'selected',
+  'eligible',
+  'excluded'
+])
+
+export const routeReceiptSummarySchema = z.object({
+  route_receipt_id: routeReceiptIdSchema,
+  admission_result: admissionResultSchema,
+  selected_target: providerResourceIdSchema.optional(),
+  failure_reason: z.string().min(1).optional(),
+  created_at: dateTimeSchema
+})
+
+export const routeDiagnosticTargetSchema = z.object({
+  provider_resource: providerResourceSchema,
+  decision: routeDiagnosticDecisionSchema,
+  in_active_snapshot: z.boolean(),
+  supports_protocol_family: z.boolean(),
+  capability_gaps: z.array(z.string().min(1)),
+  reason_code: z.string().min(1),
+  reason: z.string().min(1),
+  recent_receipt_id: routeReceiptIdSchema.optional(),
+  recent_receipt_reason: z.string().min(1).optional()
+})
+
+export const routeDiagnosticsResponseSchema = z.object({
+  route_policy: routePolicySchema,
+  active_snapshot: configSnapshotSchema.optional(),
+  active_snapshot_matches_route_policy: z.boolean(),
+  last_route_receipt: routeReceiptSummarySchema.optional(),
+  recent_receipts: z.array(routeReceiptSummarySchema),
+  targets: z.array(routeDiagnosticTargetSchema)
 })
 
 export const eligibleCandidateSchema = z.object({
@@ -781,6 +825,10 @@ export type RouteReceiptProviderAttempt = z.infer<typeof routeReceiptProviderAtt
 export type RouteReceiptDiagnosticsResponse = z.infer<
   typeof routeReceiptDiagnosticsResponseSchema
 >
+export type RouteDiagnosticDecision = z.infer<typeof routeDiagnosticDecisionSchema>
+export type RouteReceiptSummary = z.infer<typeof routeReceiptSummarySchema>
+export type RouteDiagnosticTarget = z.infer<typeof routeDiagnosticTargetSchema>
+export type RouteDiagnosticsResponse = z.infer<typeof routeDiagnosticsResponseSchema>
 export type RouteReceiptsResponse = z.infer<typeof routeReceiptsResponseSchema>
 export type AuthProvider = z.infer<typeof authProviderSchema>
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>

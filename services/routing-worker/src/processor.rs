@@ -315,12 +315,18 @@ mod tests {
             "endpoint_base_url": "https://api.openai.com/v1",
             "auth_kind": "api_key",
             "health_state": "healthy",
+            "health_message": "probe latency within SLO",
+            "quarantine_reason": null,
             "budget_policy_id": null,
             "capabilities": {
               "supports_streaming": true,
               "supports_tool_calling": true,
-              "supports_json_mode": true
+              "supports_json_mode": true,
+              "supports_realtime": false,
+              "supports_response_model_metadata": true
             },
+            "supported_protocol_families": ["openai_chat", "openai_responses"],
+            "is_transit_gateway": false,
             "version": 1,
             "created_at": "2026-04-23T00:00:00Z",
             "updated_at": "2026-04-23T00:00:00Z"

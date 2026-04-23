@@ -40,9 +40,11 @@ use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
     BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, PricingCatalogEntry,
     PricingCatalogResponse, PricingSimulationLineItem, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
-    UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
+    PricingSimulationResponse, ProjectsResponse, ProtocolFamily, ProviderResourcesResponse,
+    RouteDiagnosticDecision, RouteDiagnosticTarget, RouteDiagnosticsResponse,
+    RoutePoliciesResponse, RouteReceiptResponse, RouteReceiptSummary, RouteSimulationRequest,
+    RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow,
+    UsageSummary, UsageSummaryResponse,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -247,8 +249,30 @@ pub struct SeedData {
     pub provider_resources: Vec<ProviderResource>,
     pub route_policies: Vec<RoutePolicy>,
     pub config_snapshots: Vec<ConfigSnapshot>,
+    pub route_receipts: Vec<RouteReceipt>,
     pub active_config_snapshot_id: String,
     pub users: Vec<UserSeed>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProviderResourceFilters {
+    pub tenant_id: Option<String>,
+    pub health_state: Option<String>,
+    pub protocol_family: Option<String>,
+    pub capability: Option<String>,
+    pub transit_gateway: Option<bool>,
+    pub quarantined: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RouteReceiptFilters {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub protocol_family: Option<String>,
+    pub route_policy_id: Option<String>,
+    pub provider_resource_id: Option<String>,
+    pub admission_result: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -352,12 +376,21 @@ impl SeedData {
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state: HealthState::Healthy,
+            health_message: Some("probe latency within SLO".to_string()),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec![
+                "openai_chat".to_string(),
+                "openai_responses".to_string(),
+            ],
+            is_transit_gateway: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -376,12 +409,21 @@ impl SeedData {
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state: HealthState::Healthy,
+            health_message: Some("backup target healthy".to_string()),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec![
+                "openai_chat".to_string(),
+                "openai_responses".to_string(),
+            ],
+            is_transit_gateway: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -400,12 +442,18 @@ impl SeedData {
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state: HealthState::Degraded,
+            health_message: Some("research endpoint latency elevated".to_string()),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: false,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec!["openai_chat".to_string()],
+            is_transit_gateway: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -529,6 +577,7 @@ impl SeedData {
             provider_resources: vec![openai_primary, openai_backup, northstar_openai],
             route_policies: vec![route_default, route_support, route_research],
             config_snapshots: vec![config_active.clone(), config_research],
+            route_receipts: Vec::new(),
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
             users: vec![UserSeed {
                 user: ops_user,
@@ -600,7 +649,11 @@ impl MemoryStore {
             provider_subject_to_user_id,
             sessions: HashMap::new(),
             login_flows: HashMap::new(),
-            route_receipts: HashMap::new(),
+            route_receipts: seed
+                .route_receipts
+                .into_iter()
+                .map(|receipt| (receipt.route_receipt_id.as_str().to_string(), receipt))
+                .collect(),
             billing_export_jobs: Vec::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
@@ -889,16 +942,22 @@ impl StoreMode {
         }
     }
 
-    pub async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
+    pub async fn list_provider_resources(
+        &self,
+        filters: &ProviderResourceFilters,
+    ) -> Result<ProviderResourcesResponse> {
         match self {
             Self::Memory(store) => Ok(ProviderResourcesResponse {
                 data: store
                     .read()
                     .expect("memory store read lock")
                     .provider_resources
-                    .clone(),
+                    .iter()
+                    .filter(|resource| provider_matches_filters(resource, filters))
+                    .cloned()
+                    .collect(),
             }),
-            Self::Postgres(store) => store.list_provider_resources().await,
+            Self::Postgres(store) => store.list_provider_resources(filters).await,
         }
     }
 
@@ -1240,27 +1299,38 @@ impl StoreMode {
 
     pub async fn list_route_receipts(
         &self,
-        tenant_id: Option<String>,
-        project_id: Option<String>,
-        protocol_family: Option<String>,
+        filters: &RouteReceiptFilters,
     ) -> Result<RouteReceiptsResponse> {
         match self {
             Self::Memory(store) => {
-                let store = store.read().expect("memory store read lock");
-                Ok(RouteReceiptsResponse {
-                    data: filter_and_order_route_receipts(
-                        store.route_receipts.values().cloned().collect::<Vec<_>>(),
-                        tenant_id,
-                        project_id,
-                        protocol_family,
-                    ),
-                })
+                let mut receipts = store
+                    .read()
+                    .expect("memory store read lock")
+                    .route_receipts
+                    .values()
+                    .filter(|receipt| route_receipt_matches_filters(receipt, filters))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                receipts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+                if let Some(limit) = filters.limit {
+                    receipts.truncate(limit);
+                }
+                Ok(RouteReceiptsResponse { data: receipts })
             }
-            Self::Postgres(store) => {
-                store
-                    .list_route_receipts(tenant_id, project_id, protocol_family)
-                    .await
-            }
+            Self::Postgres(store) => store.list_route_receipts(filters).await,
+        }
+    }
+
+    pub async fn get_route_diagnostics(
+        &self,
+        route_policy_id: &str,
+    ) -> Result<Option<RouteDiagnosticsResponse>> {
+        match self {
+            Self::Memory(store) => Ok(build_memory_route_diagnostics(
+                &store.read().expect("memory store read lock"),
+                route_policy_id,
+            )),
+            Self::Postgres(store) => store.get_route_diagnostics(route_policy_id).await,
         }
     }
 
@@ -1473,6 +1543,11 @@ impl StoreMode {
                     .find(|resource| resource.provider_resource_id.as_str() == provider_resource_id)
                     .expect("provider resource should exist in memory store");
                 resource.provider_id = provider_id.to_string();
+                resource.supported_protocol_families = match provider_id {
+                    "anthropic" => vec!["anthropic_messages".to_string()],
+                    "gemini" => vec!["gemini_generate_content".to_string()],
+                    _ => vec!["openai_chat".to_string(), "openai_responses".to_string()],
+                };
             }
             Self::Postgres(_) => panic!("test helper only supports memory store"),
         }
@@ -1972,7 +2047,10 @@ impl PostgresStore {
         Ok(row.map(|row| row.get::<Json<Project>, _>("payload").0))
     }
 
-    async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
+    async fn list_provider_resources(
+        &self,
+        filters: &ProviderResourceFilters,
+    ) -> Result<ProviderResourcesResponse> {
         let rows =
             sqlx::query("SELECT payload FROM provider_resources ORDER BY provider_resource_id")
                 .fetch_all(&self.pool)
@@ -1981,6 +2059,7 @@ impl PostgresStore {
             data: rows
                 .into_iter()
                 .map(|row| row.get::<Json<ProviderResource>, _>("payload").0)
+                .filter(|resource| provider_matches_filters(resource, filters))
                 .collect(),
         })
     }
@@ -2186,6 +2265,15 @@ impl PostgresStore {
                 .map(|row| row.get::<Json<ConfigSnapshot>, _>("payload").0)
                 .collect(),
         })
+    }
+
+    async fn active_snapshot_id(&self) -> Result<Option<String>> {
+        Ok(sqlx::query(
+            "SELECT config_snapshot_id FROM active_config_pointers WHERE pointer_key = 'default'",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| row.get::<String, _>("config_snapshot_id")))
     }
 
     async fn create_config_snapshot(
@@ -2451,7 +2539,7 @@ impl PostgresStore {
         request: RouteSimulationRequest,
     ) -> Result<RouteSimulationResponse> {
         let provider_resources = self
-            .list_provider_resources()
+            .list_provider_resources(&ProviderResourceFilters::default())
             .await?
             .data
             .into_iter()
@@ -2486,23 +2574,45 @@ impl PostgresStore {
 
     async fn list_route_receipts(
         &self,
-        tenant_id: Option<String>,
-        project_id: Option<String>,
-        protocol_family: Option<String>,
+        filters: &RouteReceiptFilters,
     ) -> Result<RouteReceiptsResponse> {
-        let rows = sqlx::query("SELECT payload FROM route_receipts")
+        let rows = sqlx::query("SELECT payload FROM route_receipts ORDER BY route_receipt_id")
             .fetch_all(&self.pool)
             .await?;
-        Ok(RouteReceiptsResponse {
-            data: filter_and_order_route_receipts(
-                rows.into_iter()
-                    .map(|row| row.get::<Json<RouteReceipt>, _>("payload").0)
-                    .collect(),
-                tenant_id,
-                project_id,
-                protocol_family,
-            ),
-        })
+        let mut receipts = rows
+            .into_iter()
+            .map(|row| row.get::<Json<RouteReceipt>, _>("payload").0)
+            .filter(|receipt| route_receipt_matches_filters(receipt, filters))
+            .collect::<Vec<_>>();
+        receipts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        if let Some(limit) = filters.limit {
+            receipts.truncate(limit);
+        }
+        Ok(RouteReceiptsResponse { data: receipts })
+    }
+
+    async fn get_route_diagnostics(
+        &self,
+        route_policy_id: &str,
+    ) -> Result<Option<RouteDiagnosticsResponse>> {
+        let provider_resources = self
+            .list_provider_resources(&ProviderResourceFilters::default())
+            .await?
+            .data;
+        let route_policies = self.list_route_policies().await?.data;
+        let config_snapshots = self.list_config_snapshots().await?.data;
+        let route_receipts = self
+            .list_route_receipts(&RouteReceiptFilters::default())
+            .await?
+            .data;
+        Ok(build_route_diagnostics_response(
+            &provider_resources,
+            &route_policies,
+            &config_snapshots,
+            &route_receipts,
+            route_policy_id,
+            self.active_snapshot_id().await?.as_deref(),
+        ))
     }
 
     async fn get_usage_summary(
@@ -3836,26 +3946,45 @@ fn build_route_simulation_response(
         if candidate.status != ProviderResourceStatus::Active {
             excluded_candidates.push(ExcludedTarget {
                 provider_resource_id: candidate.provider_resource_id.clone(),
+                reason_code: "provider_inactive".to_string(),
                 reason: format!("provider status is {:?}", candidate.status),
             });
             continue;
         }
-        if !resource_protocol_matches(&candidate.provider_id, &route_policy.protocol_family) {
+        if !provider_supports_protocol_family(&candidate, &route_policy.protocol_family) {
             excluded_candidates.push(ExcludedTarget {
                 provider_resource_id: candidate.provider_resource_id.clone(),
-                reason: "provider protocol is incompatible with route policy".to_string(),
+                reason_code: "protocol_family_unsupported".to_string(),
+                reason: format!(
+                    "provider does not advertise protocol family `{}`",
+                    route_policy.protocol_family
+                ),
             });
             continue;
         }
 
-        if !route_policy
-            .required_capabilities
-            .iter()
-            .all(|capability| route_capability_supported(capability, &candidate.capabilities))
-        {
+        let capability_gaps =
+            provider_capability_gaps(&candidate, &route_policy.required_capabilities);
+        if !capability_gaps.is_empty() {
             excluded_candidates.push(ExcludedTarget {
                 provider_resource_id: candidate.provider_resource_id.clone(),
-                reason: "required capabilities are not satisfied by the target".to_string(),
+                reason_code: format!("capability_gap_{}", capability_gaps[0]),
+                reason: format!(
+                    "required capabilities are not satisfied: {}",
+                    capability_gaps.join(", ")
+                ),
+            });
+            continue;
+        }
+
+        if is_health_blocked(candidate.health_state) {
+            excluded_candidates.push(ExcludedTarget {
+                provider_resource_id: candidate.provider_resource_id.clone(),
+                reason_code: format!("health_{}", health_state_slug(candidate.health_state)),
+                reason: candidate
+                    .health_message
+                    .clone()
+                    .unwrap_or_else(|| "provider health state blocks routing".to_string()),
             });
             continue;
         }
@@ -3920,81 +4049,349 @@ fn build_route_simulation_response(
     })
 }
 
-const fn protocol_family_slug(protocol_family: &protocol_ir::ProtocolFamily) -> &'static str {
+const fn protocol_family_slug(protocol_family: &ProtocolFamily) -> &'static str {
     match protocol_family {
-        protocol_ir::ProtocolFamily::OpenAiChat => "openai_chat",
-        protocol_ir::ProtocolFamily::OpenAiResponses => "openai_responses",
-        protocol_ir::ProtocolFamily::McpStreamableHttp => "mcp_streamable_http",
-        protocol_ir::ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
-        protocol_ir::ProtocolFamily::AnthropicMessages => "anthropic_messages",
-        protocol_ir::ProtocolFamily::GeminiGenerateContent => "gemini_generate_content",
+        ProtocolFamily::OpenAiChat => "openai_chat",
+        ProtocolFamily::OpenAiResponses => "openai_responses",
+        ProtocolFamily::McpStreamableHttp => "mcp_streamable_http",
+        ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
+        ProtocolFamily::AnthropicMessages => "anthropic_messages",
+        ProtocolFamily::GeminiGenerateContent => "gemini_generate_content",
     }
 }
 
 fn route_capability_supported_by_provider_capabilities(capability: &str) -> bool {
     matches!(
         capability,
-        "streaming" | "tool_calling" | "json_mode" | "chat_completions"
+        "streaming"
+            | "tool_calling"
+            | "tool_related"
+            | "json_mode"
+            | "chat_completions"
+            | "realtime"
+            | "response_model_metadata"
     )
 }
 
 fn route_capability_supported(capability: &str, target: &ProviderCapabilities) -> bool {
     match capability {
         "streaming" => target.supports_streaming,
-        "tool_calling" => target.supports_tool_calling,
+        "tool_calling" | "tool_related" => target.supports_tool_calling,
         "json_mode" => target.supports_json_mode,
         "chat_completions" => true,
+        "realtime" => target.supports_realtime,
+        "response_model_metadata" => target.supports_response_model_metadata,
         _ => false,
     }
 }
 
-fn resource_protocol_matches(provider_id: &str, protocol_family: &str) -> bool {
-    match (provider_id, protocol_family) {
-        ("openai", "openai_chat" | "openai_responses") => true,
-        _ => false,
+fn provider_supports_protocol_family(
+    provider_resource: &ProviderResource,
+    protocol_family: &str,
+) -> bool {
+    provider_resource
+        .supported_protocol_families
+        .iter()
+        .any(|candidate| candidate == protocol_family)
+}
+
+fn provider_supports_capability(provider_resource: &ProviderResource, capability: &str) -> bool {
+    route_capability_supported(capability, &provider_resource.capabilities)
+}
+
+fn provider_capability_gaps(
+    provider_resource: &ProviderResource,
+    required_capabilities: &[String],
+) -> Vec<String> {
+    required_capabilities
+        .iter()
+        .filter(|capability| !provider_supports_capability(provider_resource, capability))
+        .cloned()
+        .collect()
+}
+
+const fn is_health_blocked(health_state: HealthState) -> bool {
+    matches!(
+        health_state,
+        HealthState::Quarantined | HealthState::Draining | HealthState::Disabled
+    )
+}
+
+const fn health_state_slug(health_state: HealthState) -> &'static str {
+    match health_state {
+        HealthState::Healthy => "healthy",
+        HealthState::Degraded => "degraded",
+        HealthState::Quarantined => "quarantined",
+        HealthState::Draining => "draining",
+        HealthState::Disabled => "disabled",
     }
 }
 
-fn route_receipt_created_at(route_receipt: &RouteReceipt) -> OffsetDateTime {
-    OffsetDateTime::parse(&route_receipt.created_at, &Rfc3339).unwrap_or(OffsetDateTime::UNIX_EPOCH)
+const fn admission_result_slug(admission_result: AdmissionResult) -> &'static str {
+    match admission_result {
+        AdmissionResult::Admitted => "admitted",
+        AdmissionResult::RejectedBudget => "rejected_budget",
+        AdmissionResult::RejectedRateLimit => "rejected_rate_limit",
+        AdmissionResult::RejectedConcurrency => "rejected_concurrency",
+        AdmissionResult::RejectedPolicy => "rejected_policy",
+        AdmissionResult::RejectedNoCandidate => "rejected_no_candidate",
+    }
 }
 
-fn filter_and_order_route_receipts(
-    mut route_receipts: Vec<RouteReceipt>,
-    tenant_id: Option<String>,
-    project_id: Option<String>,
-    protocol_family: Option<String>,
-) -> Vec<RouteReceipt> {
-    route_receipts.retain(|receipt| {
-        if let Some(tenant_id) = tenant_id.as_deref() {
-            if receipt.tenant_id.as_str() != tenant_id {
-                return false;
-            }
+fn provider_matches_filters(
+    resource: &ProviderResource,
+    filters: &ProviderResourceFilters,
+) -> bool {
+    if let Some(tenant_id) = &filters.tenant_id {
+        if resource.tenant_id.as_str() != tenant_id {
+            return false;
         }
-        if let Some(project_id) = project_id.as_deref() {
-            if receipt.project_id.as_str() != project_id {
-                return false;
-            }
+    }
+    if let Some(health_state) = &filters.health_state {
+        if health_state_slug(resource.health_state) != health_state {
+            return false;
         }
-        if let Some(protocol_family) = protocol_family.as_deref() {
-            if receipt.protocol_family != protocol_family {
-                return false;
-            }
+    }
+    if let Some(protocol_family) = &filters.protocol_family {
+        if !provider_supports_protocol_family(resource, protocol_family) {
+            return false;
         }
-        true
-    });
+    }
+    if let Some(capability) = &filters.capability {
+        if !provider_supports_capability(resource, capability) {
+            return false;
+        }
+    }
+    if let Some(transit_gateway) = filters.transit_gateway {
+        if resource.is_transit_gateway != transit_gateway {
+            return false;
+        }
+    }
+    if let Some(quarantined) = filters.quarantined {
+        if matches!(resource.health_state, HealthState::Quarantined) != quarantined {
+            return false;
+        }
+    }
+    true
+}
 
-    route_receipts.sort_by(|left, right| {
-        route_receipt_created_at(right)
-            .cmp(&route_receipt_created_at(left))
-            .then_with(|| {
-                right
-                    .route_receipt_id
-                    .as_str()
-                    .cmp(left.route_receipt_id.as_str())
-            })
+fn route_receipt_matches_filters(receipt: &RouteReceipt, filters: &RouteReceiptFilters) -> bool {
+    if let Some(tenant_id) = &filters.tenant_id {
+        if receipt.tenant_id.as_str() != tenant_id {
+            return false;
+        }
+    }
+    if let Some(project_id) = &filters.project_id {
+        if receipt.project_id.as_str() != project_id {
+            return false;
+        }
+    }
+    if let Some(protocol_family) = &filters.protocol_family {
+        if receipt.protocol_family != *protocol_family {
+            return false;
+        }
+    }
+    if let Some(route_policy_id) = &filters.route_policy_id {
+        if receipt.route_policy_id.as_str() != route_policy_id {
+            return false;
+        }
+    }
+    if let Some(admission_result) = &filters.admission_result {
+        if admission_result_slug(receipt.admission_result) != admission_result {
+            return false;
+        }
+    }
+    if let Some(provider_resource_id) = &filters.provider_resource_id {
+        let selected = receipt
+            .selected_target
+            .as_ref()
+            .is_some_and(|target| target.as_str() == provider_resource_id);
+        let excluded = receipt
+            .excluded_targets
+            .iter()
+            .any(|target| target.provider_resource_id.as_str() == provider_resource_id);
+        if !selected && !excluded {
+            return false;
+        }
+    }
+    true
+}
+
+fn to_route_receipt_summary(receipt: &RouteReceipt) -> RouteReceiptSummary {
+    RouteReceiptSummary {
+        route_receipt_id: receipt.route_receipt_id.clone(),
+        admission_result: receipt.admission_result,
+        selected_target: receipt.selected_target.clone(),
+        failure_reason: receipt.failure_reason.clone(),
+        created_at: receipt.created_at.clone(),
+    }
+}
+
+fn build_memory_route_diagnostics(
+    store: &MemoryStore,
+    route_policy_id: &str,
+) -> Option<RouteDiagnosticsResponse> {
+    build_route_diagnostics_response(
+        &store.provider_resources,
+        &store.route_policies,
+        &store.config_snapshots,
+        &store.route_receipts.values().cloned().collect::<Vec<_>>(),
+        route_policy_id,
+        Some(store.active_config_snapshot_id.as_str()),
+    )
+}
+
+fn build_route_diagnostics_response(
+    provider_resources: &[ProviderResource],
+    route_policies: &[RoutePolicy],
+    config_snapshots: &[ConfigSnapshot],
+    route_receipts: &[RouteReceipt],
+    route_policy_id: &str,
+    active_snapshot_id: Option<&str>,
+) -> Option<RouteDiagnosticsResponse> {
+    let route_policy = route_policies
+        .iter()
+        .find(|policy| policy.route_policy_id.as_str() == route_policy_id)
+        .cloned()?;
+
+    let active_snapshot = active_snapshot_id.and_then(|snapshot_id| {
+        config_snapshots
+            .iter()
+            .find(|snapshot| snapshot.config_snapshot_id.as_str() == snapshot_id)
+            .cloned()
     });
-    route_receipts
+    let active_snapshot_matches_route_policy = active_snapshot
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.route_policy_id == route_policy.route_policy_id);
+
+    let mut recent_receipts = route_receipts
+        .iter()
+        .filter(|receipt| receipt.route_policy_id == route_policy.route_policy_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    recent_receipts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+
+    let recent_receipt_summaries = recent_receipts
+        .iter()
+        .take(5)
+        .map(to_route_receipt_summary)
+        .collect::<Vec<_>>();
+    let last_route_receipt = recent_receipts.first().map(to_route_receipt_summary);
+
+    let targets = provider_resources
+        .iter()
+        .filter(|resource| resource.tenant_id == route_policy.tenant_id)
+        .cloned()
+        .map(|provider_resource| {
+            let recent_receipt = recent_receipts.iter().find(|receipt| {
+                receipt
+                    .selected_target
+                    .as_ref()
+                    .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
+                    || receipt.excluded_targets.iter().any(|excluded| {
+                        excluded.provider_resource_id == provider_resource.provider_resource_id
+                    })
+            });
+            let recent_exclusion = recent_receipt.and_then(|receipt| {
+                receipt.excluded_targets.iter().find(|excluded| {
+                    excluded.provider_resource_id == provider_resource.provider_resource_id
+                })
+            });
+            let capability_gaps =
+                provider_capability_gaps(&provider_resource, &route_policy.required_capabilities);
+            let supports_protocol_family = provider_supports_protocol_family(
+                &provider_resource,
+                &route_policy.protocol_family,
+            );
+            let in_active_snapshot = active_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .provider_resource_ids
+                    .iter()
+                    .any(|id| id == &provider_resource.provider_resource_id)
+            });
+
+            let (decision, reason_code, reason, recent_receipt_reason) = if recent_receipt
+                .and_then(|receipt| receipt.selected_target.as_ref())
+                .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
+            {
+                (
+                    RouteDiagnosticDecision::Selected,
+                    "selected_recent_receipt".to_string(),
+                    "Selected by the most recent route receipt.".to_string(),
+                    None,
+                )
+            } else if let Some(excluded) = recent_exclusion {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    excluded.reason_code.clone(),
+                    excluded.reason.clone(),
+                    Some(excluded.reason.clone()),
+                )
+            } else if !supports_protocol_family {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    "protocol_family_unsupported".to_string(),
+                    format!(
+                        "Provider does not advertise protocol family `{}`.",
+                        route_policy.protocol_family
+                    ),
+                    None,
+                )
+            } else if !capability_gaps.is_empty() {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    format!("capability_gap_{}", capability_gaps[0]),
+                    format!(
+                        "Missing required capabilities: {}.",
+                        capability_gaps.join(", ")
+                    ),
+                    None,
+                )
+            } else if is_health_blocked(provider_resource.health_state) {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    format!(
+                        "health_{}",
+                        health_state_slug(provider_resource.health_state)
+                    ),
+                    provider_resource
+                        .health_message
+                        .clone()
+                        .unwrap_or_else(|| "Provider health state blocks routing.".to_string()),
+                    None,
+                )
+            } else {
+                (
+                    RouteDiagnosticDecision::Eligible,
+                    "eligible".to_string(),
+                    "Provider satisfies current protocol, capability, and health requirements."
+                        .to_string(),
+                    None,
+                )
+            };
+
+            RouteDiagnosticTarget {
+                provider_resource,
+                decision,
+                in_active_snapshot,
+                supports_protocol_family,
+                capability_gaps,
+                reason_code,
+                reason,
+                recent_receipt_id: recent_receipt.map(|receipt| receipt.route_receipt_id.clone()),
+                recent_receipt_reason,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Some(RouteDiagnosticsResponse {
+        route_policy,
+        active_snapshot,
+        active_snapshot_matches_route_policy,
+        last_route_receipt,
+        recent_receipts: recent_receipt_summaries,
+        targets,
+    })
 }
 
 fn membership(
@@ -4044,7 +4441,7 @@ mod tests {
     use super::{
         AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ExcludedTarget, ProjectId,
         ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt,
-        ScoreBreakdown, StoreMode, TenantId,
+        RouteReceiptFilters, ScoreBreakdown, StoreMode, TenantId,
     };
     use core_domain::RouteReceiptId;
 
@@ -4059,6 +4456,7 @@ mod tests {
             route_receipt_id: RouteReceiptId::parse(route_receipt_id).unwrap(),
             tenant_id: TenantId::parse(tenant_id).unwrap(),
             project_id: ProjectId::parse(project_id).unwrap(),
+            route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default").unwrap(),
             request_id: format!("{route_receipt_id}_request"),
             trace_id: format!("{route_receipt_id}_trace"),
             protocol_family: protocol_family.to_string(),
@@ -4068,8 +4466,10 @@ mod tests {
             selected_target: Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap()),
             excluded_targets: vec![ExcludedTarget {
                 provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_backup").unwrap(),
+                reason_code: "sample".to_string(),
                 reason: "sample".to_string(),
             }],
+            failure_reason: None,
             score_breakdown: ScoreBreakdown {
                 latency: 0.8,
                 cost: 0.6,
@@ -4097,12 +4497,18 @@ mod tests {
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: core_domain::AuthKind::ApiKey,
             health_state: core_domain::HealthState::Healthy,
+            health_message: Some("probe latency within SLO".to_string()),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: core_domain::ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec!["openai_chat".to_string()],
+            is_transit_gateway: false,
             version: 1,
             created_at: "2026-04-22T00:00:00Z".to_string(),
             updated_at: "2026-04-22T00:00:00Z".to_string(),
@@ -4245,7 +4651,7 @@ mod tests {
         ));
 
         let all = store
-            .list_route_receipts(None, None, None)
+            .list_route_receipts(&RouteReceiptFilters::default())
             .await
             .unwrap()
             .data;
@@ -4255,7 +4661,10 @@ mod tests {
         assert_eq!(all[2].route_receipt_id.as_str(), "routercpt_store_a");
 
         let tenant_filtered = store
-            .list_route_receipts(Some("tenant_acme".to_string()), None, None)
+            .list_route_receipts(&RouteReceiptFilters {
+                tenant_id: Some("tenant_acme".to_string()),
+                ..RouteReceiptFilters::default()
+            })
             .await
             .unwrap()
             .data;
@@ -4266,7 +4675,10 @@ mod tests {
         );
 
         let protocol_filtered = store
-            .list_route_receipts(None, None, Some("openai_chat".to_string()))
+            .list_route_receipts(&RouteReceiptFilters {
+                protocol_family: Some("openai_chat".to_string()),
+                ..RouteReceiptFilters::default()
+            })
             .await
             .unwrap()
             .data;
