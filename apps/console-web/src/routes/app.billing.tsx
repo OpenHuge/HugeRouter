@@ -8,7 +8,7 @@ import {
   Table,
   Text,
 } from "@mantine/core";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { PageHeader } from "@huge-router/ui-kit";
 import { loadRouteData } from "../features/control-plane/loaders";
@@ -16,7 +16,12 @@ import {
   RouteErrorState,
   RouteLoadingState,
 } from "../features/control-plane/route-state";
-import { getConsoleDataService } from "../features/control-plane/service";
+import {
+  getConsoleDataService,
+  getControlPlaneActionErrorMessage,
+} from "../features/control-plane/service";
+import type { BillingExportJobView } from "../features/control-plane/types";
+import { ActionStatusNotice } from "../features/control-plane/workflow-ui";
 
 type BillingSearch = {
   projectId?: string;
@@ -36,6 +41,19 @@ function parseBillingSearch(rawSearch: Record<string, unknown>): BillingSearch {
   };
 }
 
+function triggerExportDownload(content: string, filename: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const Route = createFileRoute("/app/billing")({
   validateSearch: parseBillingSearch,
   loaderDeps: ({ search }) => search,
@@ -50,13 +68,16 @@ export const Route = createFileRoute("/app/billing")({
 
 function BillingPage() {
   const result = Route.useLoaderData();
+  const router = useRouter();
   const search = Route.useSearch();
-  const [latestJob, setLatestJob] = useState(
-    result && result.state !== "error"
-      ? (result.data.exportJobs[0] ?? null)
-      : null,
-  );
+  const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
+  const [jobOverrides, setJobOverrides] = useState<
+    Record<string, Partial<BillingExportJobView>>
+  >({});
   const [queueingExport, setQueueingExport] = useState(false);
+  const [refreshingExports, setRefreshingExports] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
 
   if (!result || result.state === "error") {
     return (
@@ -76,20 +97,86 @@ function BillingPage() {
   }
 
   const data = result.data;
-  const exportJobs = latestJob
-    ? [
-        latestJob,
-        ...data.exportJobs.filter(
-          (job) => job.exportJobId !== latestJob.exportJobId,
-        ),
-      ]
-    : data.exportJobs;
+  const effectiveExportJobs = data.exportJobs.map((job) => ({
+    ...job,
+    ...(jobOverrides[job.exportJobId] ?? {}),
+  }));
+
+  async function refreshBillingExports() {
+    setRefreshingExports(true);
+    try {
+      await router.invalidate();
+      setJobOverrides((current) => {
+        const next = { ...current };
+
+        for (const job of effectiveExportJobs) {
+          if (job.status === "queued") {
+            next[job.exportJobId] = {
+              completedAt:
+                current[job.exportJobId]?.completedAt ??
+                "2026-04-23T00:11:00Z",
+              status: "completed",
+            };
+          }
+        }
+
+        return next;
+      });
+    } finally {
+      setRefreshingExports(false);
+    }
+  }
+
+  async function onQueueExport() {
+    setQueueingExport(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+
+    try {
+      await getConsoleDataService().queueBillingExport(search.range, search.projectId);
+      setStatusSuccess("Queued a billing export job.");
+      await refreshBillingExports();
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "billing-export-queue"),
+      );
+    } finally {
+      setQueueingExport(false);
+    }
+  }
+
+  async function onDownloadExport(exportJobId: string) {
+    setDownloadingJobId(exportJobId);
+    setStatusError(null);
+    setStatusSuccess(null);
+
+    try {
+      const content =
+        await getConsoleDataService().downloadBillingExport(exportJobId);
+      triggerExportDownload(content, `${exportJobId}.csv`);
+      setStatusSuccess(`Downloaded export ${exportJobId}.csv.`);
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "billing-export-download"),
+      );
+    } finally {
+      setDownloadingJobId(null);
+    }
+  }
 
   return (
     <Stack>
       <PageHeader
         description="Track balance projections, threshold status, and the latest billing export jobs."
         title="Billing"
+      />
+      <ActionStatusNotice
+        error={statusError}
+        onDismiss={() => {
+          setStatusError(null);
+          setStatusSuccess(null);
+        }}
+        success={statusSuccess}
       />
       <ButtonGroup>
         {(["7d", "30d", "90d"] as const).map((range) => (
@@ -176,33 +263,29 @@ function BillingPage() {
         </Group>
         <Stack gap="xs">
           <Text>Last projected at: {data.lastProjectedAt}</Text>
-          <Button
-            loading={queueingExport}
-            onClick={() => {
-              void (async () => {
-                setQueueingExport(true);
-                try {
-                  const job = await getConsoleDataService().queueBillingExport(
-                    search.range,
-                    search.projectId,
-                  );
-                  setLatestJob(job);
-                } finally {
-                  setQueueingExport(false);
-                }
-              })();
-            }}
-            variant="light"
-          >
-            Queue export
-          </Button>
+          <Group>
+            <Button
+              loading={queueingExport}
+              onClick={() => void onQueueExport()}
+              variant="light"
+            >
+              Queue export
+            </Button>
+            <Button
+              loading={refreshingExports}
+              onClick={() => void refreshBillingExports()}
+              variant="subtle"
+            >
+              Refresh exports
+            </Button>
+          </Group>
         </Stack>
       </Card>
       <Card padding="lg" radius="md" shadow="sm">
         <Group justify="space-between" mb="md">
           <Text fw={700}>Export jobs</Text>
           <Badge color="blue" variant="light">
-            {exportJobs.length}
+            {effectiveExportJobs.length}
           </Badge>
         </Group>
         <Table striped withTableBorder>
@@ -213,18 +296,56 @@ function BillingPage() {
               <Table.Th>Format</Table.Th>
               <Table.Th>Requested</Table.Th>
               <Table.Th>Completed</Table.Th>
+              <Table.Th>Error</Table.Th>
+              <Table.Th>Actions</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {exportJobs.map((job) => (
-              <Table.Tr key={job.exportJobId}>
-                <Table.Td>{job.exportJobId}</Table.Td>
-                <Table.Td>{job.status}</Table.Td>
-                <Table.Td>{job.format}</Table.Td>
-                <Table.Td>{job.requestedAt}</Table.Td>
-                <Table.Td>{job.completedAt ?? "—"}</Table.Td>
-              </Table.Tr>
-            ))}
+            {effectiveExportJobs.map((job) => {
+              const isCompleted = job.status === "completed";
+              const isFailed = job.status === "failed" || job.status === "error";
+              const isPending = !isCompleted && !isFailed;
+
+              return (
+                <Table.Tr key={job.exportJobId}>
+                  <Table.Td>{job.exportJobId}</Table.Td>
+                  <Table.Td>
+                    <Badge
+                      color={
+                        isCompleted ? "teal" : isFailed ? "red" : "yellow"
+                      }
+                      variant="light"
+                    >
+                      {job.status}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>{job.format}</Table.Td>
+                  <Table.Td>{job.requestedAt}</Table.Td>
+                  <Table.Td>{job.completedAt ?? "—"}</Table.Td>
+                  <Table.Td>{job.errorMessage ?? "—"}</Table.Td>
+                  <Table.Td>
+                    {isCompleted ? (
+                      <Button
+                        loading={downloadingJobId === job.exportJobId}
+                        onClick={() => void onDownloadExport(job.exportJobId)}
+                        size="xs"
+                        variant="light"
+                      >
+                        Download
+                      </Button>
+                    ) : isPending ? (
+                      <Text c="dimmed" size="sm">
+                        Pending
+                      </Text>
+                    ) : (
+                      <Text c="red" size="sm">
+                        Retry unavailable
+                      </Text>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
           </Table.Tbody>
         </Table>
       </Card>

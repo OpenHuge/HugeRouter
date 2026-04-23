@@ -1,5 +1,17 @@
-import { Badge, Card, Group, List, Stack, Table, Text } from "@mantine/core";
-import { createFileRoute } from "@tanstack/react-router";
+import {
+  Badge,
+  Button,
+  Card,
+  Group,
+  List,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { useState } from "react";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
 import { loadRouteData } from "../features/control-plane/loaders";
 import {
@@ -11,7 +23,18 @@ import type {
   RouteReceiptDiagnosticView,
   RoutePolicyView,
 } from "../features/control-plane/types";
-import { getConsoleDataService } from "../features/control-plane/service";
+import {
+  getConsoleDataService,
+  getControlPlaneActionErrorMessage,
+  type RoutePolicyMutationInput,
+} from "../features/control-plane/service";
+import {
+  ActionStatusNotice,
+  FieldErrorText,
+  PROTOCOL_FAMILY_OPTIONS,
+  splitCommaSeparatedValues,
+  SUPPORTED_ROUTE_CAPABILITIES,
+} from "../features/control-plane/workflow-ui";
 
 const protocolLabelByFamily: Record<string, string> = {
   anthropic_messages: "Anthropic Messages",
@@ -44,6 +67,17 @@ type RoutePoliciesPageData = {
   routePolicies: RoutePolicyView[];
   routeReceipts: RouteReceiptDiagnosticView[];
 };
+
+type RoutePolicyFormState = {
+  displayName: string;
+  modelAlias: string;
+  preferredRegions: string;
+  protocolFamily: RoutePolicyMutationInput["protocolFamily"];
+  requiredCapabilities: string;
+  routePolicyId: string;
+};
+
+type RoutePolicyFormErrors = Partial<Record<keyof RoutePolicyFormState, string>>;
 
 function protocolDisplay(protocolFamily: string) {
   return protocolLabelByFamily[protocolFamily] ?? protocolFamily;
@@ -86,6 +120,62 @@ function listSortedProtocols(groups: Record<string, RoutePolicyView[]>) {
   });
 }
 
+function createEmptyRoutePolicyForm(): RoutePolicyFormState {
+  return {
+    displayName: "",
+    modelAlias: "",
+    preferredRegions: "",
+    protocolFamily: "openai_chat",
+    requiredCapabilities: "json_mode",
+    routePolicyId: "",
+  };
+}
+
+function routePolicyToFormState(policy: RoutePolicyView): RoutePolicyFormState {
+  return {
+    displayName: policy.name,
+    modelAlias: policy.modelAlias,
+    preferredRegions: policy.preferredRegions.join(", "),
+    protocolFamily: policy.protocolFamily as RoutePolicyFormState["protocolFamily"],
+    requiredCapabilities: policy.requiredCapabilities.join(", "),
+    routePolicyId: policy.id,
+  };
+}
+
+function validateRoutePolicyForm(form: RoutePolicyFormState) {
+  const errors: RoutePolicyFormErrors = {};
+  const capabilities = splitCommaSeparatedValues(form.requiredCapabilities);
+  const unsupportedCapabilities = capabilities.filter(
+    (capability) =>
+      !SUPPORTED_ROUTE_CAPABILITIES.includes(
+        capability as (typeof SUPPORTED_ROUTE_CAPABILITIES)[number],
+      ),
+  );
+
+  if (!/^routepol_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.routePolicyId)) {
+    errors.routePolicyId =
+      "Use an id that starts with routepol_ and contains letters, digits, _ or -.";
+  }
+
+  if (!form.displayName.trim()) {
+    errors.displayName = "Enter a route policy name.";
+  }
+
+  if (!form.modelAlias.trim()) {
+    errors.modelAlias = "Enter a model alias.";
+  }
+
+  if (capabilities.length === 0) {
+    errors.requiredCapabilities = "Enter at least one capability.";
+  } else if (unsupportedCapabilities.length > 0) {
+    errors.requiredCapabilities = `Unsupported capability values: ${unsupportedCapabilities.join(
+      ", ",
+    )}. Supported values: ${SUPPORTED_ROUTE_CAPABILITIES.join(", ")}.`;
+  }
+
+  return errors;
+}
+
 export const Route = createFileRoute("/app/routes")({
   loader: () =>
     loadRouteData(async () => {
@@ -106,6 +196,25 @@ export const Route = createFileRoute("/app/routes")({
 
 function RoutePoliciesPage() {
   const result = Route.useLoaderData();
+  const router = useRouter();
+  const [editingPolicy, setEditingPolicy] = useState<RoutePolicyView | null>(
+    null,
+  );
+  const [formErrors, setFormErrors] = useState<RoutePolicyFormErrors>({});
+  const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
+  const [formState, setFormState] = useState<RoutePolicyFormState>(
+    createEmptyRoutePolicyForm(),
+  );
+  const [policyOverrides, setPolicyOverrides] = useState<
+    Record<string, RoutePolicyView>
+  >({});
+  const [disabledPolicyIds, setDisabledPolicyIds] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
+  const [disablingPolicyId, setDisablingPolicyId] = useState<string | null>(
+    null,
+  );
 
   if (!result || result.state === "error") {
     return (
@@ -125,8 +234,135 @@ function RoutePoliciesPage() {
   }
 
   const { routePolicies, routeReceipts } = result.data;
-  const groupedPolicies = routePoliciesByProtocol(routePolicies);
+  const effectiveRoutePolicies = routePolicies
+    .filter((policy) => !disabledPolicyIds.includes(policy.id))
+    .map((policy) => policyOverrides[policy.id] ?? policy);
+  const groupedPolicies = routePoliciesByProtocol(effectiveRoutePolicies);
   const protocolGroups = listSortedProtocols(groupedPolicies);
+
+  function updateField<K extends keyof RoutePolicyFormState>(
+    key: K,
+    value: RoutePolicyFormState[K],
+  ) {
+    setFormState((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setFormErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function resetForm() {
+    setEditingPolicy(null);
+    setFormErrors({});
+    setFormMode(null);
+    setFormState(createEmptyRoutePolicyForm());
+  }
+
+  function openCreateForm() {
+    setStatusError(null);
+    setStatusSuccess(null);
+    setEditingPolicy(null);
+    setFormErrors({});
+    setFormMode("create");
+    setFormState(createEmptyRoutePolicyForm());
+  }
+
+  function openEditForm(policy: RoutePolicyView) {
+    setStatusError(null);
+    setStatusSuccess(null);
+    setEditingPolicy(policy);
+    setFormErrors({});
+    setFormMode("edit");
+    setFormState(routePolicyToFormState(policy));
+  }
+
+  async function onSubmit() {
+    const errors = validateRoutePolicyForm(formState);
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+
+    const input: RoutePolicyMutationInput = {
+      createdAt: editingPolicy?.createdAt,
+      displayName: formState.displayName.trim(),
+      modelAlias: formState.modelAlias.trim(),
+      preferredRegions: splitCommaSeparatedValues(formState.preferredRegions),
+      protocolFamily: formState.protocolFamily,
+      requiredCapabilities: splitCommaSeparatedValues(
+        formState.requiredCapabilities,
+      ),
+      routePolicyId: formState.routePolicyId.trim(),
+      updatedAt: editingPolicy?.updatedAt,
+      version: editingPolicy?.version,
+    };
+
+    try {
+      if (formMode === "edit" && editingPolicy) {
+        await getConsoleDataService().updateRoutePolicy(
+          editingPolicy.id,
+          input,
+          editingPolicy.version,
+        );
+        setPolicyOverrides((current) => ({
+          ...current,
+          [editingPolicy.id]: {
+            ...editingPolicy,
+            modelAlias: input.modelAlias,
+            name: input.displayName,
+            preferredRegions: input.preferredRegions,
+            protocolFamily: input.protocolFamily,
+            requiredCapabilities: input.requiredCapabilities,
+            updatedAt: new Date().toISOString(),
+            version: editingPolicy.version + 1,
+          },
+        }));
+        setStatusSuccess(`Updated route policy ${formState.displayName}.`);
+      } else {
+        await getConsoleDataService().createRoutePolicy(input);
+        setStatusSuccess(`Created route policy ${formState.displayName}.`);
+      }
+
+      resetForm();
+      await router.invalidate();
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(
+          error,
+          formMode === "edit" ? "route-policy-update" : "route-policy-create",
+        ),
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function onDisable(policy: RoutePolicyView) {
+    setDisablingPolicyId(policy.id);
+    setStatusError(null);
+    setStatusSuccess(null);
+
+    try {
+      await getConsoleDataService().disableRoutePolicy(policy.id, policy.version);
+      setDisabledPolicyIds((current) => [...current, policy.id]);
+      setStatusSuccess(`Disabled route policy ${policy.name}.`);
+      await router.invalidate();
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "route-policy-disable"),
+      );
+    } finally {
+      setDisablingPolicyId(null);
+    }
+  }
 
   return (
     <Stack>
@@ -134,14 +370,121 @@ function RoutePoliciesPage() {
         description="Review protocol-aware route policies and recent route diagnostics."
         title="Routes"
       />
+      <ActionStatusNotice
+        error={statusError}
+        onDismiss={() => {
+          setStatusError(null);
+          setStatusSuccess(null);
+        }}
+        success={statusSuccess}
+      />
+      <Card padding="lg" radius="md" shadow="sm">
+        <Group justify="space-between" mb="md">
+          <Text fw={700}>
+            {formMode === "edit" ? "Edit route policy" : "Create route policy"}
+          </Text>
+          <Group>
+            {formMode ? (
+              <Button onClick={resetForm} size="sm" variant="subtle">
+                Cancel
+              </Button>
+            ) : null}
+            {!formMode ? (
+              <Button onClick={openCreateForm} size="sm">
+                Create route policy
+              </Button>
+            ) : null}
+          </Group>
+        </Group>
+        {formMode ? (
+          <Stack>
+            <TextInput
+              label="Route policy id"
+              onChange={(event) =>
+                updateField("routePolicyId", event.currentTarget.value)
+              }
+              placeholder="routepol_openai_chat_default"
+              value={formState.routePolicyId}
+            />
+            <FieldErrorText error={formErrors.routePolicyId} />
+            <Group grow>
+              <TextInput
+                label="Display name"
+                onChange={(event) =>
+                  updateField("displayName", event.currentTarget.value)
+                }
+                placeholder="Acme Reasoning Fast"
+                value={formState.displayName}
+              />
+              <TextInput
+                label="Model alias"
+                onChange={(event) =>
+                  updateField("modelAlias", event.currentTarget.value)
+                }
+                placeholder="reasoning-fast"
+                value={formState.modelAlias}
+              />
+            </Group>
+            <Group grow>
+              <FieldErrorText error={formErrors.displayName} />
+              <FieldErrorText error={formErrors.modelAlias} />
+            </Group>
+            <Select
+              data={PROTOCOL_FAMILY_OPTIONS.map((value) => ({
+                label: protocolDisplay(value),
+                value,
+              }))}
+              label="Protocol family"
+              onChange={(value) =>
+                updateField(
+                  "protocolFamily",
+                  (value ??
+                    "openai_chat") as RoutePolicyFormState["protocolFamily"],
+                )
+              }
+              value={formState.protocolFamily}
+            />
+            <TextInput
+              description={`Supported capability values: ${SUPPORTED_ROUTE_CAPABILITIES.join(
+                ", ",
+              )}.`}
+              label="Required capabilities"
+              onChange={(event) =>
+                updateField("requiredCapabilities", event.currentTarget.value)
+              }
+              placeholder="json_mode, tool_calling"
+              value={formState.requiredCapabilities}
+            />
+            <FieldErrorText error={formErrors.requiredCapabilities} />
+            <TextInput
+              description="Comma-separated regions are optional."
+              label="Preferred regions"
+              onChange={(event) =>
+                updateField("preferredRegions", event.currentTarget.value)
+              }
+              placeholder="us-east-1, us-west-2"
+              value={formState.preferredRegions}
+            />
+            <Group justify="flex-end">
+              <Button loading={isSubmitting} onClick={() => void onSubmit()}>
+                {formMode === "edit" ? "Save route policy" : "Create route policy"}
+              </Button>
+            </Group>
+          </Stack>
+        ) : (
+          <Text c="dimmed" size="sm">
+            Create protocol-aware route policies, edit existing definitions, and disable outdated ones.
+          </Text>
+        )}
+      </Card>
       <Card padding="lg" radius="md" shadow="sm">
         <Group justify="space-between" mb="md">
           <Text fw={700}>Route policy config</Text>
           <Badge color="blue" variant="light">
-            {routePolicies.length} policies
+            {effectiveRoutePolicies.length} policies
           </Badge>
         </Group>
-        {routePolicies.length === 0 ? (
+        {effectiveRoutePolicies.length === 0 ? (
           <EmptyCollectionState
             description="Create a route policy to define protocol-aware provider resolution."
             title="No route policies"
@@ -166,15 +509,15 @@ function RoutePoliciesPage() {
                     <Table.Th>Selected providers</Table.Th>
                     <Table.Th>Preferred regions</Table.Th>
                     <Table.Th>Required capabilities</Table.Th>
+                    <Table.Th>Version</Table.Th>
+                    <Table.Th>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {policies.map((policy) => (
                     <Table.Tr key={policy.id}>
                       <Table.Td>{policy.name}</Table.Td>
-                      <Table.Td>
-                        {protocolDisplay(policy.protocolFamily)}
-                      </Table.Td>
+                      <Table.Td>{protocolDisplay(policy.protocolFamily)}</Table.Td>
                       <Table.Td>{policy.modelAlias}</Table.Td>
                       <Table.Td>
                         {policy.selectedProviders.length > 0
@@ -186,6 +529,27 @@ function RoutePoliciesPage() {
                       </Table.Td>
                       <Table.Td>
                         {policy.requiredCapabilities.join(", ")}
+                      </Table.Td>
+                      <Table.Td>{policy.version}</Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <Button
+                            onClick={() => openEditForm(policy)}
+                            size="xs"
+                            variant="light"
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            color="red"
+                            loading={disablingPolicyId === policy.id}
+                            onClick={() => void onDisable(policy)}
+                            size="xs"
+                            variant="light"
+                          >
+                            Disable
+                          </Button>
+                        </Group>
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -262,58 +626,32 @@ function RoutePoliciesPage() {
                     )}
                   </Table.Td>
                   <Table.Td>
-                    {receipt.decisionTimeline.length === 0 &&
-                    receipt.providerAttempts.length === 0 &&
-                    receipt.policyChecks.length === 0 ? (
-                      <Text c="dimmed" size="sm">
-                        No detailed diagnostics
-                      </Text>
-                    ) : (
-                      <Stack gap={6}>
-                        {receipt.decisionTimeline.length > 0 ? (
-                          <List size="sm" withPadding>
-                            {receipt.decisionTimeline.map((item) => (
-                              <List.Item
-                                key={`${receipt.routeReceiptId}-${item.stage}`}
-                              >
-                                {item.stage}: {item.message}
-                              </List.Item>
-                            ))}
-                          </List>
-                        ) : null}
-                        {receipt.providerAttempts.length > 0 ? (
-                          <List size="sm" withPadding>
-                            {receipt.providerAttempts.map((attempt) => (
-                              <List.Item
-                                key={`${receipt.routeReceiptId}-${attempt.providerResourceId}-${attempt.attempt}`}
-                              >
-                                {attempt.providerLabel} attempt{" "}
-                                {attempt.attempt} ({attempt.latencyMs}
-                                ms, {attempt.status})
-                              </List.Item>
-                            ))}
-                          </List>
-                        ) : null}
-                        {receipt.policyChecks.length > 0 ? (
-                          <List size="sm" withPadding>
-                            {receipt.policyChecks.map((policyCheck) => (
-                              <List.Item
-                                key={`${receipt.routeReceiptId}-${policyCheck.policyId}`}
-                              >
-                                {policyCheck.policyId}: {policyCheck.status}
-                              </List.Item>
-                            ))}
-                          </List>
-                        ) : null}
-                      </Stack>
-                    )}
+                    <Stack gap={2}>
+                      {receipt.decisionTimeline.map((step) => (
+                        <Text key={`${step.stage}-${step.message}`} size="sm">
+                          {step.stage}: {step.message}
+                        </Text>
+                      ))}
+                      {receipt.providerAttempts.map((attempt) => (
+                        <Text
+                          key={`${attempt.providerResourceId}-${attempt.attempt}`}
+                          size="sm"
+                        >
+                          {attempt.providerLabel} attempt {attempt.attempt} (
+                          {attempt.latencyMs}ms, {attempt.status})
+                        </Text>
+                      ))}
+                      {receipt.policyChecks.map((check) => (
+                        <Text key={check.policyId} size="sm">
+                          {check.policyId}: {check.status}
+                        </Text>
+                      ))}
+                    </Stack>
                   </Table.Td>
                   <Table.Td>
                     {receipt.normalizedError ? (
-                      <Stack gap={4}>
-                        <Text fw={500} size="sm">
-                          {receipt.normalizedError.code}
-                        </Text>
+                      <Stack gap={2}>
+                        <Text size="sm">{receipt.normalizedError.code}</Text>
                         <Text c="dimmed" size="sm">
                           {receipt.normalizedError.message}
                         </Text>

@@ -160,6 +160,9 @@ describe("console data service", () => {
           workspace: "override-workspace",
         });
       },
+      listProjects() {
+        return Promise.resolve([]);
+      },
       getUsageDashboard() {
         return Promise.resolve({
           activeProjectId: undefined,
@@ -219,6 +222,18 @@ describe("console data service", () => {
       listConfigSnapshots() {
         return Promise.resolve([]);
       },
+      createConfigSnapshot() {
+        return Promise.resolve({
+          budgetPolicyId: "budgetpol_default",
+          configSnapshotId: "cfgsnap_override",
+          providerResourceIds: [],
+          routePolicyId: "route_policy_override",
+          revision: 1,
+          projectId: "proj_core",
+          status: "draft",
+          tenantId: "tenant_acme",
+        });
+      },
       activateConfigSnapshot() {
         return Promise.resolve({
           budgetPolicyId: "budgetpol_default",
@@ -231,11 +246,41 @@ describe("console data service", () => {
           tenantId: "tenant_acme",
         });
       },
+      createProviderResource() {
+        return Promise.reject(new Error("unused"));
+      },
+      updateProviderResource() {
+        return Promise.reject(new Error("unused"));
+      },
+      disableProviderResource() {
+        return Promise.reject(new Error("unused"));
+      },
+      createRoutePolicy() {
+        return Promise.reject(new Error("unused"));
+      },
+      updateRoutePolicy() {
+        return Promise.reject(new Error("unused"));
+      },
+      disableRoutePolicy() {
+        return Promise.reject(new Error("unused"));
+      },
       listApiKeys() {
         return Promise.resolve([]);
       },
+      createApiKey() {
+        return Promise.resolve({
+          apiKeyId: "key_override",
+          displayName: "Override key",
+          keyPrefix: "ak-ovr",
+          providerResourceId: "prvrsrc_openai_primary",
+          version: 1,
+        });
+      },
       revokeApiKey() {
         return Promise.resolve();
+      },
+      downloadBillingExport() {
+        return Promise.resolve("a,b\n1,2\n");
       },
     };
 

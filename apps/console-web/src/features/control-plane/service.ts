@@ -1,5 +1,6 @@
 import {
   createControlPlaneClient,
+  ContractApiError,
   ControlPlaneClientError,
   type ControlPlaneClient,
 } from "@huge-router/ts-api-client";
@@ -9,9 +10,11 @@ import {
   type ConfigSnapshot,
   type Project,
   type ProviderResource,
+  providerResourceSchema,
   type RoutePolicy,
   type RouteReceiptDiagnosticsResponse,
   type RouteReceipt,
+  routePolicySchema,
   routeReceiptSchema,
   type RouteSimulationResponse,
 } from "@huge-router/ts-shared-schema";
@@ -20,6 +23,7 @@ import { authSessionQueryKey } from "../auth/auth-queries";
 import { getQueryClient } from "../../lib/query-client";
 import type {
   ApiKeyView,
+  ApiKeyCreateResult,
   BillingExportJobView,
   BillingDashboardData,
   ConfigSnapshotView,
@@ -35,6 +39,7 @@ import type {
 
 export type ConsoleDataService = {
   getOverview: () => Promise<OverviewData>;
+  listProjects: () => Promise<ProjectSummary[]>;
   getUsageDashboard: (
     range: "7d" | "30d" | "90d",
     groupBy: "provider" | "model" | "day",
@@ -55,11 +60,121 @@ export type ConsoleDataService = {
   listRouteReceipts: () => Promise<RouteReceiptDiagnosticView[]>;
   listTenants: () => Promise<TenantSummary[]>;
   listConfigSnapshots: () => Promise<ConfigSnapshotView[]>;
+  createConfigSnapshot: (
+    snapshot: ConfigSnapshotMutationInput,
+  ) => Promise<ConfigSnapshotView>;
   activateConfigSnapshot: (
     configSnapshotId: string,
   ) => Promise<ConfigSnapshotView>;
+  createProviderResource: (
+    providerResource: ProviderResourceMutationInput,
+  ) => Promise<ProviderResource>;
+  updateProviderResource: (
+    providerResourceId: string,
+    providerResource: ProviderResourceMutationInput,
+    expectedVersion: number,
+  ) => Promise<ProviderResource>;
+  disableProviderResource: (
+    providerResourceId: string,
+    expectedVersion: number,
+  ) => Promise<ProviderResource>;
+  createRoutePolicy: (
+    routePolicy: RoutePolicyMutationInput,
+  ) => Promise<RoutePolicy>;
+  updateRoutePolicy: (
+    routePolicyId: string,
+    routePolicy: RoutePolicyMutationInput,
+    expectedVersion: number,
+  ) => Promise<RoutePolicy>;
+  disableRoutePolicy: (
+    routePolicyId: string,
+    expectedVersion: number,
+  ) => Promise<RoutePolicy>;
   listApiKeys: () => Promise<ApiKeyView[]>;
+  createApiKey: (input: {
+    apiKey: string;
+    displayName: string;
+    providerResourceId: string;
+  }) => Promise<ApiKeyCreateResult>;
   revokeApiKey: (apiKeyId: string, version: number) => Promise<void>;
+  downloadBillingExport: (exportJobId: string) => Promise<string>;
+};
+
+type ActionErrorKind =
+  | "api-key-create"
+  | "api-key-revoke"
+  | "billing-export-download"
+  | "billing-export-queue"
+  | "provider-create"
+  | "provider-disable"
+  | "provider-update"
+  | "route-policy-create"
+  | "route-policy-disable"
+  | "route-policy-update"
+  | "snapshot-activate"
+  | "snapshot-create";
+
+export type ProviderResourceMutationInput = {
+  authKind: "api_key" | "oauth_client_credentials" | "session_broker";
+  budgetPolicyId?: string;
+  capabilities: {
+    supportsJsonMode: boolean;
+    supportsStreaming: boolean;
+    supportsToolCalling: boolean;
+  };
+  credentialOwnerType: "platform" | "tenant" | "project" | "partner";
+  createdAt?: string;
+  deploymentScope: "shared" | "tenant_dedicated" | "project_dedicated";
+  endpointBaseUrl: string;
+  healthState:
+    | "healthy"
+    | "degraded"
+    | "quarantined"
+    | "draining"
+    | "disabled";
+  name: string;
+  projectId?: string;
+  providerId: string;
+  providerResourceId: string;
+  provenanceClass:
+    | "official_api"
+    | "official_gateway"
+    | "byo_customer_credential"
+    | "dedicated_managed_account"
+    | "shared_brokered_pool"
+    | "unofficial_client_channel";
+  region: string;
+  status: "active" | "disabled" | "draining" | "quarantined" | "deleted";
+  version?: number;
+};
+
+export type RoutePolicyMutationInput = {
+  createdAt?: string;
+  displayName: string;
+  modelAlias: string;
+  preferredRegions: string[];
+  protocolFamily:
+    | "openai_chat"
+    | "openai_responses"
+    | "mcp_streamable_http"
+    | "realtime_webrtc"
+    | "anthropic_messages"
+    | "gemini_generate_content";
+  requiredCapabilities: string[];
+  routePolicyId: string;
+  updatedAt?: string;
+  version?: number;
+};
+
+export type ConfigSnapshotMutationInput = {
+  activatedAt?: string;
+  budgetPolicyId: string;
+  configSnapshotId: string;
+  projectId: string;
+  providerResourceIds: string[];
+  revision: number;
+  routePolicyId: string;
+  status: "draft" | "active" | "superseded";
 };
 
 const CONTROL_PLANE_BASE_URL = import.meta.env.VITE_CONTROL_PLANE_BASE_URL
@@ -391,6 +506,7 @@ function mapRoutePolicies(
   );
 
   return routePolicies.map((policy) => ({
+    createdAt: policy.created_at,
     id: policy.route_policy_id,
     modelAlias: policy.model_alias,
     name: policy.display_name,
@@ -403,6 +519,9 @@ function mapRoutePolicies(
             (providerId) => providerNames.get(providerId) ?? providerId,
           )
         : [],
+    tenantId: policy.tenant_id,
+    updatedAt: policy.updated_at,
+    version: policy.version,
   }));
 }
 
@@ -635,6 +754,109 @@ function parseApiKeyList(payload: unknown) {
   ]).map(parseApiKeyRecord);
 }
 
+function parseProviderResourceRecord(payload: unknown) {
+  return providerResourceSchema.parse(payload);
+}
+
+function parseRoutePolicyRecord(payload: unknown) {
+  return routePolicySchema.parse(payload);
+}
+
+function parseConfigSnapshotRecord(payload: unknown) {
+  return toConfigSnapshotView(configSnapshotSchema.parse(payload));
+}
+
+function isContractApiError(value: unknown): value is ContractApiError {
+  return value instanceof ContractApiError;
+}
+
+function getActionErrorCode(error: unknown) {
+  if (isControlPlaneError(error)) {
+    return error.code;
+  }
+
+  if (isContractApiError(error)) {
+    return error.envelope.error.code;
+  }
+
+  return undefined;
+}
+
+function getActionErrorStatus(error: unknown) {
+  if (isControlPlaneError(error) || isContractApiError(error)) {
+    return error.status;
+  }
+
+  return undefined;
+}
+
+export function getControlPlaneActionErrorMessage(
+  error: unknown,
+  kind: ActionErrorKind,
+) {
+  const code = getActionErrorCode(error);
+  const status = getActionErrorStatus(error);
+
+  if (status === 401 || code === "auth_invalid") {
+    return "Your console session expired. Sign in again and retry the action.";
+  }
+
+  if (status === 403) {
+    return "This account is not allowed to perform that action.";
+  }
+
+  if (status === 404) {
+    return kind === "billing-export-download"
+      ? "That billing export is no longer available. Refresh the page and try again."
+      : "That resource no longer exists. Refresh the page and try again.";
+  }
+
+  if (status === 409 || code?.endsWith("_version_conflict")) {
+    return "This resource changed since you opened it. Refresh the page and try again.";
+  }
+
+  if (code === "route_policy_compatibility_invalid") {
+    return "Use a supported protocol family and supported capability values only.";
+  }
+
+  if (
+    code === "provider_resource_invalid" ||
+    code === "provider_resource_id_invalid" ||
+    code === "route_policy_invalid" ||
+    code === "route_policy_id_invalid" ||
+    code === "config_snapshot_invalid" ||
+    code === "provider_resource_id_invalid"
+  ) {
+    return "Review the form fields and submit again.";
+  }
+
+  if (kind === "billing-export-download") {
+    return "The billing export could not be downloaded right now.";
+  }
+
+  if (kind === "billing-export-queue") {
+    return "The billing export could not be queued right now.";
+  }
+
+  if (kind === "provider-disable") {
+    return "The provider resource could not be disabled.";
+  }
+
+  if (kind === "route-policy-disable") {
+    return "The route policy could not be disabled.";
+  }
+
+  if (kind === "api-key-revoke") {
+    return "The API key could not be revoked.";
+  }
+
+  if (kind === "snapshot-activate") {
+    return "The config snapshot could not be activated.";
+  }
+
+  return "The requested action could not be completed. Try again.";
+}
+
 async function getActiveSnapshotOrNull(apiClient: ControlPlaneClient) {
   try {
     return await apiClient.getConfigSnapshot("active");
@@ -710,6 +932,21 @@ async function listConfigSnapshotsFromControlPlane() {
   }
 }
 
+async function createConfigSnapshotInControlPlane(snapshot: ConfigSnapshot) {
+  return requestControlPlaneJson(
+    "/v1/config-snapshots",
+    parseConfigSnapshotRecord,
+    {
+      body: JSON.stringify(snapshot),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
 async function activateConfigSnapshotFromControlPlane(
   configSnapshotId: string,
 ) {
@@ -739,6 +976,118 @@ async function activateConfigSnapshotFromControlPlane(
   }
 }
 
+async function createProviderResourceInControlPlane(
+  providerResource: ProviderResource,
+) {
+  return requestControlPlaneJson(
+    "/v1/provider-resources",
+    parseProviderResourceRecord,
+    {
+      body: JSON.stringify(providerResource),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function updateProviderResourceInControlPlane(
+  providerResourceId: string,
+  providerResource: ProviderResource,
+  expectedVersion: number,
+) {
+  return requestControlPlaneJson(
+    `/v1/provider-resources/${encodeURIComponent(providerResourceId)}`,
+    parseProviderResourceRecord,
+    {
+      body: JSON.stringify({
+        ...providerResource,
+        expected_version: expectedVersion,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "PUT",
+    },
+  );
+}
+
+async function disableProviderResourceInControlPlane(
+  providerResourceId: string,
+  expectedVersion: number,
+) {
+  return requestControlPlaneJson(
+    `/v1/provider-resources/${encodeURIComponent(providerResourceId)}/disable`,
+    parseProviderResourceRecord,
+    {
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function createRoutePolicyInControlPlane(routePolicy: RoutePolicy) {
+  return requestControlPlaneJson("/v1/route-policies", parseRoutePolicyRecord, {
+    body: JSON.stringify(routePolicy),
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+}
+
+async function updateRoutePolicyInControlPlane(
+  routePolicyId: string,
+  routePolicy: RoutePolicy,
+  expectedVersion: number,
+) {
+  return requestControlPlaneJson(
+    `/v1/route-policies/${encodeURIComponent(routePolicyId)}`,
+    parseRoutePolicyRecord,
+    {
+      body: JSON.stringify({
+        ...routePolicy,
+        expected_version: expectedVersion,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "PUT",
+    },
+  );
+}
+
+async function disableRoutePolicyInControlPlane(
+  routePolicyId: string,
+  expectedVersion: number,
+) {
+  return requestControlPlaneJson(
+    `/v1/route-policies/${encodeURIComponent(routePolicyId)}/disable`,
+    parseRoutePolicyRecord,
+    {
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
 async function listApiKeysFromControlPlane() {
   try {
     return await requestControlPlaneJson("/v1/api-keys", parseApiKeyList, {
@@ -754,6 +1103,25 @@ async function listApiKeysFromControlPlane() {
 
     throw error;
   }
+}
+
+async function createApiKeyInControlPlane(input: {
+  apiKey: string;
+  displayName: string;
+  providerResourceId: string;
+}) {
+  return requestControlPlaneJson("/v1/api-keys", parseApiKeyRecord, {
+    body: JSON.stringify({
+      api_key: input.apiKey,
+      display_name: input.displayName,
+      provider_resource_id: input.providerResourceId,
+    }),
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
 }
 
 async function listRouteReceiptsFromControlPlane() {
@@ -830,6 +1198,10 @@ async function revokeApiKeyFromControlPlane(apiKeyId: string, version: number) {
   }
 }
 
+async function downloadBillingExportFromControlPlane(exportJobId: string) {
+  return client.downloadBillingExport(exportJobId);
+}
+
 async function listTenantApiKeysFromControlPlane() {
   const keys = await listApiKeysFromControlPlane();
   const tenantId = getActiveTenantId();
@@ -867,6 +1239,80 @@ function selectedProviderLabel(
         provider.provider_resource_id === simulation.selected_target,
     )?.name ?? simulation.selected_target
   );
+}
+
+function currentTimestamp() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function requireActiveTenantId() {
+  const tenantId = getActiveTenantId();
+
+  if (!tenantId) {
+    throw new Error("tenant_not_found");
+  }
+
+  return tenantId;
+}
+
+function toProviderResourcePayload(
+  input: ProviderResourceMutationInput,
+): ProviderResource {
+  return {
+    auth_kind: input.authKind,
+    budget_policy_id: input.budgetPolicyId,
+    capabilities: {
+      supports_json_mode: input.capabilities.supportsJsonMode,
+      supports_streaming: input.capabilities.supportsStreaming,
+      supports_tool_calling: input.capabilities.supportsToolCalling,
+    },
+    created_at: input.createdAt ?? currentTimestamp(),
+    credential_owner_type: input.credentialOwnerType,
+    deployment_scope: input.deploymentScope,
+    endpoint_base_url: input.endpointBaseUrl,
+    health_state: input.healthState,
+    name: input.name,
+    project_id: input.projectId,
+    provider_id: input.providerId,
+    provider_resource_id: input.providerResourceId,
+    provenance_class: input.provenanceClass,
+    region: input.region,
+    status: input.status,
+    tenant_id: requireActiveTenantId(),
+    updated_at: currentTimestamp(),
+    version: input.version ?? 1,
+  };
+}
+
+function toRoutePolicyPayload(input: RoutePolicyMutationInput): RoutePolicy {
+  return {
+    created_at: input.createdAt ?? currentTimestamp(),
+    display_name: input.displayName,
+    model_alias: input.modelAlias,
+    preferred_regions: input.preferredRegions,
+    protocol_family: input.protocolFamily,
+    required_capabilities: input.requiredCapabilities,
+    route_policy_id: input.routePolicyId,
+    tenant_id: requireActiveTenantId(),
+    updated_at: input.updatedAt ?? currentTimestamp(),
+    version: input.version ?? 1,
+  };
+}
+
+function toConfigSnapshotPayload(
+  input: ConfigSnapshotMutationInput,
+): ConfigSnapshot {
+  return {
+    activated_at: input.activatedAt,
+    budget_policy_id: input.budgetPolicyId,
+    config_snapshot_id: input.configSnapshotId,
+    project_id: input.projectId,
+    provider_resource_ids: input.providerResourceIds,
+    revision: input.revision,
+    route_policy_id: input.routePolicyId,
+    status: input.status,
+    tenant_id: requireActiveTenantId(),
+  };
 }
 
 async function loadControlPlaneData() {
@@ -938,6 +1384,17 @@ const defaultConsoleDataService: ConsoleDataService = {
       tenantLabel: tenant.display_name,
       workspace: tenant.slug,
     };
+  },
+
+  async listProjects() {
+    const tenantId = getActiveTenantId();
+    const projects = await client.listProjects();
+    const filteredProjects =
+      tenantId && !isPlatformAdmin()
+        ? projects.filter((project) => project.tenant_id === tenantId)
+        : projects;
+
+    return filteredProjects.map(toProjectSummary);
   },
 
   async getUsageDashboard(range, groupBy, projectId, cursor) {
@@ -1195,6 +1652,10 @@ const defaultConsoleDataService: ConsoleDataService = {
     );
   },
 
+  async createConfigSnapshot(snapshot) {
+    return createConfigSnapshotInControlPlane(toConfigSnapshotPayload(snapshot));
+  },
+
   async activateConfigSnapshot(configSnapshotId) {
     const activated =
       await activateConfigSnapshotFromControlPlane(configSnapshotId);
@@ -1202,12 +1663,69 @@ const defaultConsoleDataService: ConsoleDataService = {
     return activated;
   },
 
+  async createProviderResource(providerResource) {
+    return createProviderResourceInControlPlane(
+      toProviderResourcePayload(providerResource),
+    );
+  },
+
+  async updateProviderResource(
+    providerResourceId,
+    providerResource,
+    expectedVersion,
+  ) {
+    return updateProviderResourceInControlPlane(
+      providerResourceId,
+      toProviderResourcePayload(providerResource),
+      expectedVersion,
+    );
+  },
+
+  async disableProviderResource(providerResourceId, expectedVersion) {
+    return disableProviderResourceInControlPlane(
+      providerResourceId,
+      expectedVersion,
+    );
+  },
+
+  async createRoutePolicy(routePolicy) {
+    return createRoutePolicyInControlPlane(toRoutePolicyPayload(routePolicy));
+  },
+
+  async updateRoutePolicy(routePolicyId, routePolicy, expectedVersion) {
+    return updateRoutePolicyInControlPlane(
+      routePolicyId,
+      toRoutePolicyPayload(routePolicy),
+      expectedVersion,
+    );
+  },
+
+  async disableRoutePolicy(routePolicyId, expectedVersion) {
+    return disableRoutePolicyInControlPlane(routePolicyId, expectedVersion);
+  },
+
   async listApiKeys() {
     return listTenantApiKeysFromControlPlane();
   },
 
+  async createApiKey(input) {
+    const created = await createApiKeyInControlPlane(input);
+
+    return {
+      apiKeyId: created.apiKeyId,
+      displayName: created.displayName,
+      keyPrefix: created.keyPrefix,
+      providerResourceId: created.providerResourceId,
+      version: created.version,
+    };
+  },
+
   async revokeApiKey(apiKeyId, version) {
     await revokeApiKeyFromControlPlane(apiKeyId, version);
+  },
+
+  async downloadBillingExport(exportJobId) {
+    return downloadBillingExportFromControlPlane(exportJobId);
   },
 };
 
