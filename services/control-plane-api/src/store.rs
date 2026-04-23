@@ -416,7 +416,10 @@ impl SeedData {
 
 impl MemoryStore {
     pub fn bootstrap() -> Self {
-        let seed = SeedData::bootstrap();
+        Self::from_seed(SeedData::bootstrap())
+    }
+
+    pub(crate) fn from_seed(seed: SeedData) -> Self {
         let mut users = HashMap::new();
         let mut memberships_by_user = HashMap::new();
         let mut provider_links_by_user = HashMap::new();
@@ -459,6 +462,14 @@ impl MemoryStore {
             login_flows: HashMap::new(),
             route_receipts: HashMap::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_route_receipt(&mut self, route_receipt: RouteReceipt) {
+        self.route_receipts.insert(
+            route_receipt.route_receipt_id.as_str().to_string(),
+            route_receipt,
+        );
     }
 }
 
@@ -672,6 +683,19 @@ impl StoreMode {
                     .clone(),
             }),
             Self::Postgres(store) => store.list_projects().await,
+        }
+    }
+
+    pub async fn get_project(&self, project_id: &str) -> Result<Option<Project>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .projects
+                .iter()
+                .find(|item| item.project_id.as_str() == project_id)
+                .cloned()),
+            Self::Postgres(store) => store.get_project(project_id).await,
         }
     }
 
@@ -1138,6 +1162,14 @@ impl PostgresStore {
         })
     }
 
+    async fn get_project(&self, project_id: &str) -> Result<Option<Project>> {
+        let row = sqlx::query("SELECT payload FROM projects WHERE project_id = $1")
+            .bind(project_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<Json<Project>, _>("payload").0))
+    }
+
     async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
         let rows =
             sqlx::query("SELECT payload FROM provider_resources ORDER BY provider_resource_id")
@@ -1237,14 +1269,25 @@ impl PostgresStore {
         &self,
         request: RouteSimulationRequest,
     ) -> Result<RouteSimulationResponse> {
-        let tenants = self.list_provider_resources().await?.data;
-        let policies = self.list_route_policies().await?.data;
-        let active_snapshot = self
-            .get_config_snapshot(ACTIVE_CONFIG_ALIAS)
+        let provider_resources = self
+            .list_provider_resources()
             .await?
-            .context("active config snapshot missing")?
-            .config_snapshot;
-        build_route_simulation_response(&tenants, &policies, &active_snapshot, &request)
+            .data
+            .into_iter()
+            .filter(|resource| resource.tenant_id == request.tenant_id)
+            .collect::<Vec<_>>();
+        let policies = self
+            .list_route_policies()
+            .await?
+            .data
+            .into_iter()
+            .filter(|policy| policy.tenant_id == request.tenant_id)
+            .collect::<Vec<_>>();
+        let active_snapshot = self
+            .get_active_project_snapshot(&request.tenant_id, &request.project_id)
+            .await?
+            .context("active config snapshot missing for project")?;
+        build_route_simulation_response(&provider_resources, &policies, &active_snapshot, &request)
     }
 
     async fn get_route_receipt(
@@ -1311,6 +1354,25 @@ impl PostgresStore {
             .into_iter()
             .map(|row| row.get::<Json<AuthProviderLink>, _>("payload").0)
             .collect())
+    }
+
+    async fn get_active_project_snapshot(
+        &self,
+        tenant_id: &TenantId,
+        project_id: &ProjectId,
+    ) -> Result<Option<ConfigSnapshot>> {
+        let row = sqlx::query(
+            "SELECT payload
+             FROM config_snapshots
+             WHERE tenant_id = $1 AND project_id = $2 AND status = 'active'
+             ORDER BY config_snapshot_id
+             LIMIT 1",
+        )
+        .bind(tenant_id.as_str())
+        .bind(project_id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get::<Json<ConfigSnapshot>, _>("payload").0))
     }
 }
 
@@ -1428,12 +1490,28 @@ fn simulate_memory_route(
     let active_snapshot = store
         .config_snapshots
         .iter()
-        .find(|snapshot| snapshot.config_snapshot_id.as_str() == store.active_config_snapshot_id)
+        .find(|snapshot| {
+            snapshot.status == ConfigSnapshotStatus::Active
+                && snapshot.tenant_id == request.tenant_id
+                && snapshot.project_id == request.project_id
+        })
         .cloned()
-        .context("active config snapshot missing")?;
+        .context("active config snapshot missing for project")?;
+    let provider_resources = store
+        .provider_resources
+        .iter()
+        .filter(|resource| resource.tenant_id == request.tenant_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let route_policies = store
+        .route_policies
+        .iter()
+        .filter(|policy| policy.tenant_id == request.tenant_id)
+        .cloned()
+        .collect::<Vec<_>>();
     build_route_simulation_response(
-        &store.provider_resources,
-        &store.route_policies,
+        &provider_resources,
+        &route_policies,
         &active_snapshot,
         request,
     )
