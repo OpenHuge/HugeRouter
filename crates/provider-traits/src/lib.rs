@@ -53,10 +53,33 @@ pub struct ProviderEndpoint {
     pub api_key: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderTargetKind {
+    Native,
+    TransitGateway,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransitGatewayKind {
+    OpenAiCompatible,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitProviderMetadata {
+    pub gateway_kind: TransitGatewayKind,
+    pub gateway_name: String,
+    pub route_cost_scope: String,
+    pub transit_hops: u8,
+    pub preserves_error_diagnostics: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderExecutionContext {
     pub request_id: String,
     pub trace_id: String,
+    pub gateway_service_name: String,
+    pub gateway_origin: Option<String>,
+    pub request_headers: BTreeMap<String, String>,
     pub endpoint: ProviderEndpoint,
 }
 
@@ -176,10 +199,10 @@ mod tests {
     use super::{
         AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
         ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
-        ProviderUsage, StreamingSupport,
+        ProviderUsage, StreamingSupport, TransitGatewayKind, TransitProviderMetadata,
     };
     use async_trait::async_trait;
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
 
     struct FakeAdapter;
 
@@ -238,6 +261,45 @@ mod tests {
         assert_eq!(
             error.details.get("provider_resource_id"),
             Some(&"prvrsrc_openai_primary".to_string())
+        );
+    }
+
+    #[test]
+    fn transit_metadata_is_typed() {
+        let metadata = TransitProviderMetadata {
+            gateway_kind: TransitGatewayKind::OpenAiCompatible,
+            gateway_name: "edge transit".to_string(),
+            route_cost_scope: "openai_chat".to_string(),
+            transit_hops: 1,
+            preserves_error_diagnostics: true,
+        };
+
+        assert_eq!(metadata.gateway_kind, TransitGatewayKind::OpenAiCompatible);
+        assert_eq!(metadata.transit_hops, 1);
+    }
+
+    #[test]
+    fn execution_context_can_carry_request_headers_and_origin() {
+        let context = ProviderExecutionContext {
+            request_id: "req_123".to_string(),
+            trace_id: "trace_123".to_string(),
+            gateway_service_name: "gateway-api".to_string(),
+            gateway_origin: Some("https://router.example.com/v1".to_string()),
+            request_headers: BTreeMap::from([("x-request-id".to_string(), "req_123".to_string())]),
+            endpoint: super::ProviderEndpoint {
+                provider_resource_id: "prvrsrc_openai_primary".to_string(),
+                endpoint_base_url: "https://api.example.com/v1".to_string(),
+                api_key: "secret".to_string(),
+            },
+        };
+
+        assert_eq!(
+            context.gateway_origin.as_deref(),
+            Some("https://router.example.com/v1")
+        );
+        assert_eq!(
+            context.request_headers.get("x-request-id"),
+            Some(&"req_123".to_string())
         );
     }
 }

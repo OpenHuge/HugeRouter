@@ -15,6 +15,7 @@ protocol-anthropic = { path = "../../crates/protocol-anthropic" }
 protocol-gemini = { path = "../../crates/protocol-gemini" }
 protocol-ir = { path = "../../crates/protocol-ir" }
 provider-anthropic = { path = "../../crates/provider-anthropic" }
+provider-gateway = { path = "../../crates/provider-gateway" }
 provider-gemini = { path = "../../crates/provider-gemini" }
 provider-traits = { path = "../../crates/provider-traits" }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "native-tls"] }

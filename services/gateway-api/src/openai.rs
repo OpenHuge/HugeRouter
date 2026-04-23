@@ -602,6 +602,9 @@ mod tests {
         ProviderExecutionContext {
             request_id: "req_123".to_string(),
             trace_id: "trace_123".to_string(),
+            gateway_service_name: "gateway-api".to_string(),
+            gateway_origin: Some("https://router.example.com/v1".to_string()),
+            request_headers: std::collections::BTreeMap::new(),
             endpoint: ProviderEndpoint {
                 provider_resource_id: "prvrsrc_openai_primary".to_string(),
                 endpoint_base_url: "https://api.openai.example/v1".to_string(),
