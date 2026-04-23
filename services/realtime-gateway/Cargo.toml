@@ -7,10 +7,23 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1.89"
+axum = { workspace = true, features = ["ws"] }
+chrono.workspace = true
+futures-util = "0.3.31"
+http = "1.3.1"
+protocol-realtime = { path = "../../crates/protocol-realtime" }
 runtime-composition = { path = "../../crates/runtime-composition" }
+serde.workspace = true
+serde_json.workspace = true
+serde_urlencoded = "0.7.1"
+thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 
 [lints]
 workspace = true
-
