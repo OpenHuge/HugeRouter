@@ -1800,6 +1800,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn usage_summary_endpoint_returns_projection_payload() {
+        let response = app_with_state(ControlPlaneState::memory())
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/usage/summary?tenant_id=tenant_acme")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["data"]["tenant_id"], "tenant_acme");
+        assert_eq!(body["data"]["event_count"], 14);
+    }
+
+    #[tokio::test]
+    async fn pricing_simulation_endpoint_returns_billable_quote() {
+        let response = app_with_state(ControlPlaneState::memory())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/pricing/simulations")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "provider_id": "openai",
+                            "model_alias": "reasoning-fast",
+                            "usage": {
+                                "input_tokens": 1200,
+                                "output_tokens": 320,
+                                "cached_input_tokens": 64
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["catalog_id"], "pricing_catalog_default");
+        assert_eq!(body["line_items"][0]["dimension"], "input_tokens");
+    }
+
+    #[test]
+    fn oidc_group_mapping_promotes_platform_admin_workspace() {
+        let (workspace_slug, role) =
+            resolve_oidc_membership(&["platform-admins".to_string()], "acme-retail");
+
+        assert_eq!(workspace_slug, "platform-admin");
+        assert_eq!(role, core_domain::TenantMembershipRole::Admin);
+    }
+
+    #[tokio::test]
+    async fn billing_exports_can_be_created_and_listed() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/billing/exports")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "tenant_id": "tenant_acme",
+                            "project_id": "proj_core",
+                            "window_start": "2026-04-01T00:00:00Z",
+                            "window_end": "2026-04-30T23:59:59Z",
+                            "format": "csv"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::ACCEPTED);
+        let created_body: Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let export_job_id = created_body["data"]["export_job_id"].as_str().unwrap();
+
+        let listed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/billing/exports?tenant_id=tenant_acme")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_body: Value =
+            serde_json::from_slice(&to_bytes(listed.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(listed_body["data"][0]["export_job_id"], export_job_id);
+
+        let fetched = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/billing/exports/{export_job_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fetched.status(), StatusCode::OK);
+
+        let downloaded = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/billing/exports/{export_job_id}/download"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(downloaded.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn create_route_policy_rejects_unsupported_protocol_and_capability() {
         let app = app_with_state(ControlPlaneState::memory());
 
