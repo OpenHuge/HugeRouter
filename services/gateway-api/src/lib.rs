@@ -1188,7 +1188,9 @@ fn score_target(
         .transit_metadata
         .as_ref()
         .map_or(latency, |metadata| {
-            f32::from(metadata.transit_hops).mul_add(-0.05, latency).max(0.1)
+            f32::from(metadata.transit_hops)
+                .mul_add(-0.05, latency)
+                .max(0.1)
         });
     let health = match target.resource.health_state {
         HealthState::Healthy => 1.0,
