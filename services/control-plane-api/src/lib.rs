@@ -3,7 +3,7 @@ mod store;
 use anyhow::Result;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{
         HeaderMap, HeaderValue, Method,
         header::{COOKIE, SET_COOKIE},
@@ -17,14 +17,16 @@ use core_domain::{
     OAuthLoginStartResponse, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
-    ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
+    ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RouteDiagnosticsResponse,
+    RoutePoliciesResponse, RouteReceiptResponse, RouteReceiptsResponse, RouteSimulationRequest,
+    RouteSimulationResponse, TenantsResponse,
 };
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
-    EMAIL_BOOTSTRAP_CODE, IdentityLookup, SESSION_TTL_SECONDS, StoreMode, ensure_workspace_slug,
-    expires_at, now_rfc3339, oauth_provider_slug,
+    EMAIL_BOOTSTRAP_CODE, IdentityLookup, ProviderResourceFilters, RouteReceiptFilters,
+    SESSION_TTL_SECONDS, StoreMode, ensure_workspace_slug, expires_at, now_rfc3339,
+    oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -153,9 +155,14 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             post(activate_config_snapshot),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
+        .route("/v1/route-receipts", get(list_route_receipts))
         .route(
             "/v1/route-receipts/{route_receipt_id}",
             get(get_route_receipt),
+        )
+        .route(
+            "/v1/route-diagnostics/{route_policy_id}",
+            get(get_route_diagnostics),
         )
         .layer(
             CorsLayer::new()
@@ -547,16 +554,40 @@ async fn list_projects(
 
 async fn list_provider_resources(
     State(state): State<ControlPlaneState>,
+    Query(filters): Query<ProviderResourceFilters>,
 ) -> Result<Json<ProviderResourcesResponse>, ApiError> {
-    Ok(Json(state.store.list_provider_resources().await.map_err(
-        |error| {
-            ApiError::internal(
-                "storage_unavailable",
-                format!("failed to load provider resources: {error}"),
-                &next_request_context(),
-            )
-        },
-    )?))
+    Ok(Json(
+        state
+            .store
+            .list_provider_resources(&filters)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to load provider resources: {error}"),
+                    &next_request_context(),
+                )
+            })?,
+    ))
+}
+
+async fn list_route_receipts(
+    State(state): State<ControlPlaneState>,
+    Query(filters): Query<RouteReceiptFilters>,
+) -> Result<Json<RouteReceiptsResponse>, ApiError> {
+    Ok(Json(
+        state
+            .store
+            .list_route_receipts(&filters)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to load route receipts: {error}"),
+                    &next_request_context(),
+                )
+            })?,
+    ))
 }
 
 async fn get_provider_resource(
@@ -691,6 +722,32 @@ async fn get_route_receipt(
             )
         })?;
     Ok(Json(receipt))
+}
+
+async fn get_route_diagnostics(
+    State(state): State<ControlPlaneState>,
+    Path(route_policy_id): Path<String>,
+) -> Result<Json<RouteDiagnosticsResponse>, ApiError> {
+    let context = next_request_context();
+    let diagnostics = state
+        .store
+        .get_route_diagnostics(&route_policy_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load route diagnostics: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "route_policy_not_found",
+                format!("route policy `{route_policy_id}` was not found"),
+                &context,
+            )
+        })?;
+    Ok(Json(diagnostics))
 }
 
 async fn require_session(
@@ -1011,6 +1068,95 @@ mod tests {
             snapshot_body["config_snapshot"]["config_snapshot_id"],
             "cfgsnap_gateway_v1"
         );
+    }
+
+    #[tokio::test]
+    async fn provider_resource_filters_and_route_receipts_are_operator_visible() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        let provider_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/provider-resources?capability=realtime&transit_gateway=true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(provider_response.status(), StatusCode::OK);
+        let provider_body: Value = serde_json::from_slice(
+            &to_bytes(provider_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(provider_body["data"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            provider_body["data"][0]["provider_resource_id"],
+            "prvrsrc_transit_relay"
+        );
+
+        let receipts_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/route-receipts?route_policy_id=routepol_acme_realtime&limit=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(receipts_response.status(), StatusCode::OK);
+        let receipts_body: Value = serde_json::from_slice(
+            &to_bytes(receipts_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipts_body["data"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            receipts_body["data"][0]["failure_reason"],
+            "No healthy target satisfied realtime_webrtc plus required tool-related capabilities."
+        );
+        assert_eq!(
+            receipts_body["data"][0]["excluded_targets"][0]["reason_code"],
+            "capability_gap_realtime"
+        );
+    }
+
+    #[tokio::test]
+    async fn route_diagnostics_connect_capabilities_health_and_recent_receipts() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/route-diagnostics/routepol_acme_realtime")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            body["route_policy"]["route_policy_id"],
+            "routepol_acme_realtime"
+        );
+        assert_eq!(
+            body["last_route_receipt"]["admission_result"],
+            "rejected_no_candidate"
+        );
+        assert_eq!(
+            body["targets"][2]["provider_resource"]["provider_resource_id"],
+            "prvrsrc_transit_relay"
+        );
+        assert_eq!(body["targets"][2]["reason_code"], "health_draining");
     }
 
     #[tokio::test]

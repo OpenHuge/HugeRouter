@@ -10,8 +10,10 @@ use core_domain::{
     TenantSummary, UnlinkAuthProviderResponse, UserId, UserIdentity,
 };
 use protocol_ir::{
-    ConfigSnapshotResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
+    ConfigSnapshotResponse, ProjectsResponse, ProtocolFamily, ProviderResourcesResponse,
+    RouteDiagnosticDecision, RouteDiagnosticTarget, RouteDiagnosticsResponse,
+    RoutePoliciesResponse, RouteReceiptResponse, RouteReceiptSummary, RouteReceiptsResponse,
+    RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Postgres, Row, postgres::PgPoolOptions, types::Json};
@@ -107,8 +109,29 @@ pub struct SeedData {
     pub provider_resources: Vec<ProviderResource>,
     pub route_policies: Vec<RoutePolicy>,
     pub config_snapshots: Vec<ConfigSnapshot>,
+    pub route_receipts: Vec<RouteReceipt>,
     pub active_config_snapshot_id: String,
     pub users: Vec<UserSeed>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProviderResourceFilters {
+    pub tenant_id: Option<String>,
+    pub health_state: Option<String>,
+    pub protocol_family: Option<String>,
+    pub capability: Option<String>,
+    pub transit_gateway: Option<bool>,
+    pub quarantined: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RouteReceiptFilters {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub route_policy_id: Option<String>,
+    pub provider_resource_id: Option<String>,
+    pub admission_result: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,12 +235,23 @@ impl SeedData {
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state: HealthState::Healthy,
+            health_message: Some(
+                "Healthy across the last 15 minutes of probe traffic.".to_string(),
+            ),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec![
+                "openai_chat".to_string(),
+                "openai_responses".to_string(),
+            ],
+            is_transit_gateway: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -235,14 +269,63 @@ impl SeedData {
             region: "us-west-2".to_string(),
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
-            health_state: HealthState::Healthy,
+            health_state: HealthState::Quarantined,
+            health_message: Some(
+                "Quarantined after repeated upstream 5xx bursts on the backup region.".to_string(),
+            ),
+            quarantine_reason: Some(
+                "automatic quarantine after elevated upstream_error_rate".to_string(),
+            ),
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: true,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec![
+                "openai_chat".to_string(),
+                "openai_responses".to_string(),
+            ],
+            is_transit_gateway: false,
             version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let transit_relay = ProviderResource {
+            provider_resource_id: ProviderResourceId::parse("prvrsrc_transit_relay").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            project_id: Some(proj_support.project_id.clone()),
+            provider_id: "transit".to_string(),
+            name: "Realtime Transit Relay".to_string(),
+            status: ProviderResourceStatus::Active,
+            provenance_class: ProvenanceClass::OfficialGateway,
+            credential_owner_type: CredentialOwnerType::Platform,
+            deployment_scope: DeploymentScope::Shared,
+            region: "us-central-1".to_string(),
+            endpoint_base_url: "https://transit.hugerouter.dev/v1".to_string(),
+            auth_kind: AuthKind::SessionBroker,
+            health_state: HealthState::Draining,
+            health_message: Some(
+                "Realtime ingress is draining while a new transit build rolls out.".to_string(),
+            ),
+            quarantine_reason: None,
+            budget_policy_id: None,
+            capabilities: ProviderCapabilities {
+                supports_streaming: true,
+                supports_tool_calling: true,
+                supports_json_mode: false,
+                supports_realtime: true,
+                supports_response_model_metadata: true,
+            },
+            supported_protocol_families: vec![
+                "openai_responses".to_string(),
+                "mcp_streamable_http".to_string(),
+                "realtime_webrtc".to_string(),
+            ],
+            is_transit_gateway: true,
+            version: 3,
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -260,12 +343,21 @@ impl SeedData {
             endpoint_base_url: "https://api.openai.com/v1".to_string(),
             auth_kind: AuthKind::ApiKey,
             health_state: HealthState::Degraded,
+            health_message: Some(
+                "Latency is elevated, but the target remains available for research traffic."
+                    .to_string(),
+            ),
+            quarantine_reason: None,
             budget_policy_id: None,
             capabilities: ProviderCapabilities {
                 supports_streaming: true,
                 supports_tool_calling: false,
                 supports_json_mode: true,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
             },
+            supported_protocol_families: vec!["openai_chat".to_string()],
+            is_transit_gateway: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -277,7 +369,7 @@ impl SeedData {
             display_name: "Acme Reasoning Fast".to_string(),
             protocol_family: "openai_chat".to_string(),
             model_alias: "reasoning-fast".to_string(),
-            required_capabilities: vec!["json_mode".to_string()],
+            required_capabilities: vec!["json_mode".to_string(), "tool_calling".to_string()],
             preferred_regions: vec!["us-east-1".to_string()],
             version: 1,
             created_at: now.clone(),
@@ -286,12 +378,31 @@ impl SeedData {
         let route_support = RoutePolicy {
             route_policy_id: RoutePolicyId::parse("routepol_acme_support").unwrap(),
             tenant_id: tenant_acme.tenant_id.clone(),
-            display_name: "Acme Support Safe".to_string(),
-            protocol_family: "openai_chat".to_string(),
+            display_name: "Acme Responses Safe".to_string(),
+            protocol_family: "openai_responses".to_string(),
             model_alias: "support-safe".to_string(),
-            required_capabilities: vec!["json_mode".to_string()],
+            required_capabilities: vec![
+                "streaming".to_string(),
+                "response_model_metadata".to_string(),
+            ],
             preferred_regions: vec!["us-west-2".to_string()],
             version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let route_realtime = RoutePolicy {
+            route_policy_id: RoutePolicyId::parse("routepol_acme_realtime").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            display_name: "Acme Realtime Agent".to_string(),
+            protocol_family: "realtime_webrtc".to_string(),
+            model_alias: "agent-live".to_string(),
+            required_capabilities: vec![
+                "streaming".to_string(),
+                "realtime".to_string(),
+                "tool_calling".to_string(),
+            ],
+            preferred_regions: vec!["us-central-1".to_string()],
+            version: 2,
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -318,6 +429,7 @@ impl SeedData {
             provider_resource_ids: vec![
                 openai_primary.provider_resource_id.clone(),
                 openai_backup.provider_resource_id.clone(),
+                transit_relay.provider_resource_id.clone(),
             ],
             route_policy_id: route_default.route_policy_id.clone(),
             budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
@@ -332,6 +444,132 @@ impl SeedData {
             provider_resource_ids: vec![northstar_openai.provider_resource_id.clone()],
             route_policy_id: route_research.route_policy_id.clone(),
             budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
+        };
+        let route_receipt_default = RouteReceipt {
+            route_receipt_id: core_domain::RouteReceiptId::parse("routercpt_acme_default").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            project_id: proj_core.project_id.clone(),
+            route_policy_id: route_default.route_policy_id.clone(),
+            request_id: "req_acme_default".to_string(),
+            trace_id: "trace_acme_default".to_string(),
+            protocol_family: "openai_chat".to_string(),
+            model_alias: "reasoning-fast".to_string(),
+            config_snapshot_id: config_active.config_snapshot_id.clone(),
+            admission_result: AdmissionResult::Admitted,
+            selected_target: Some(openai_primary.provider_resource_id.clone()),
+            excluded_targets: vec![
+                ExcludedTarget {
+                    provider_resource_id: openai_backup.provider_resource_id.clone(),
+                    reason_code: "health_quarantined".to_string(),
+                    reason: "Excluded because the provider is currently quarantined.".to_string(),
+                },
+                ExcludedTarget {
+                    provider_resource_id: transit_relay.provider_resource_id.clone(),
+                    reason_code: "protocol_family_unsupported".to_string(),
+                    reason: "Excluded because the provider does not advertise openai_chat."
+                        .to_string(),
+                },
+            ],
+            score_breakdown: ScoreBreakdown {
+                latency: 0.98,
+                cost: 0.74,
+                health: 1.0,
+                trust: 0.98,
+            },
+            fallback_transitions: Vec::new(),
+            normalized_error: None,
+            failure_reason: None,
+            created_at: "2026-04-22T00:10:00Z".to_string(),
+        };
+        let route_receipt_support = RouteReceipt {
+            route_receipt_id: core_domain::RouteReceiptId::parse("routercpt_acme_support").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            project_id: proj_support.project_id.clone(),
+            route_policy_id: route_support.route_policy_id.clone(),
+            request_id: "req_acme_support".to_string(),
+            trace_id: "trace_acme_support".to_string(),
+            protocol_family: "openai_responses".to_string(),
+            model_alias: "support-safe".to_string(),
+            config_snapshot_id: config_active.config_snapshot_id.clone(),
+            admission_result: AdmissionResult::Admitted,
+            selected_target: Some(openai_primary.provider_resource_id.clone()),
+            excluded_targets: vec![
+                ExcludedTarget {
+                    provider_resource_id: openai_backup.provider_resource_id.clone(),
+                    reason_code: "health_quarantined".to_string(),
+                    reason: "Excluded because the provider is currently quarantined.".to_string(),
+                },
+                ExcludedTarget {
+                    provider_resource_id: transit_relay.provider_resource_id.clone(),
+                    reason_code: "capability_gap_json_mode".to_string(),
+                    reason: "Transit relay excluded because it cannot emit the required JSON response mode.".to_string(),
+                },
+            ],
+            score_breakdown: ScoreBreakdown {
+                latency: 0.83,
+                cost: 0.7,
+                health: 1.0,
+                trust: 0.97,
+            },
+            fallback_transitions: Vec::new(),
+            normalized_error: None,
+            failure_reason: None,
+            created_at: "2026-04-22T00:12:00Z".to_string(),
+        };
+        let route_receipt_realtime = RouteReceipt {
+            route_receipt_id: core_domain::RouteReceiptId::parse("routercpt_acme_realtime").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            project_id: proj_support.project_id.clone(),
+            route_policy_id: route_realtime.route_policy_id.clone(),
+            request_id: "req_acme_realtime".to_string(),
+            trace_id: "trace_acme_realtime".to_string(),
+            protocol_family: "realtime_webrtc".to_string(),
+            model_alias: "agent-live".to_string(),
+            config_snapshot_id: config_active.config_snapshot_id.clone(),
+            admission_result: AdmissionResult::RejectedNoCandidate,
+            selected_target: None,
+            excluded_targets: vec![
+                ExcludedTarget {
+                    provider_resource_id: openai_primary.provider_resource_id.clone(),
+                    reason_code: "capability_gap_realtime".to_string(),
+                    reason: "Primary OpenAI target does not advertise realtime capability.".to_string(),
+                },
+                ExcludedTarget {
+                    provider_resource_id: openai_backup.provider_resource_id.clone(),
+                    reason_code: "health_quarantined".to_string(),
+                    reason: "Backup target is quarantined and cannot receive realtime traffic.".to_string(),
+                },
+                ExcludedTarget {
+                    provider_resource_id: transit_relay.provider_resource_id.clone(),
+                    reason_code: "health_draining".to_string(),
+                    reason: "Transit relay is draining and temporarily excluded from live session routing.".to_string(),
+                },
+            ],
+            score_breakdown: ScoreBreakdown {
+                latency: 0.0,
+                cost: 0.0,
+                health: 0.0,
+                trust: 0.0,
+            },
+            fallback_transitions: Vec::new(),
+            normalized_error: Some(core_domain::NormalizedError {
+                code: "no_eligible_target".to_string(),
+                message: "HugeRouter could not find a healthy realtime-capable target.".to_string(),
+                request_id: "req_acme_realtime".to_string(),
+                retryable: true,
+                upstream_code: None,
+                upstream_status_code: None,
+                validation_issues: Vec::new(),
+                details: std::collections::BTreeMap::from([(
+                    "route_policy_id".to_string(),
+                    route_realtime.route_policy_id.to_string(),
+                )]),
+            }),
+            failure_reason: Some(
+                "No healthy target satisfied realtime_webrtc plus required tool-related capabilities."
+                    .to_string(),
+            ),
+            created_at: "2026-04-22T00:14:00Z".to_string(),
         };
 
         let ops_user = UserIdentity {
@@ -386,9 +624,19 @@ impl SeedData {
         Self {
             tenants: vec![tenant_platform, tenant_acme, tenant_northstar],
             projects: vec![proj_core, proj_ops, proj_support, proj_research],
-            provider_resources: vec![openai_primary, openai_backup, northstar_openai],
-            route_policies: vec![route_default, route_support, route_research],
+            provider_resources: vec![
+                openai_primary,
+                openai_backup,
+                transit_relay,
+                northstar_openai,
+            ],
+            route_policies: vec![route_default, route_support, route_realtime, route_research],
             config_snapshots: vec![config_active.clone(), config_research],
+            route_receipts: vec![
+                route_receipt_realtime,
+                route_receipt_support,
+                route_receipt_default,
+            ],
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
             users: vec![UserSeed {
                 user: ops_user,
@@ -449,6 +697,11 @@ impl MemoryStore {
             provider_resources: seed.provider_resources,
             route_policies: seed.route_policies,
             config_snapshots: seed.config_snapshots,
+            route_receipts: seed
+                .route_receipts
+                .into_iter()
+                .map(|receipt| (receipt.route_receipt_id.as_str().to_string(), receipt))
+                .collect(),
             active_config_snapshot_id: seed.active_config_snapshot_id,
             users,
             memberships_by_user,
@@ -457,7 +710,6 @@ impl MemoryStore {
             provider_subject_to_user_id,
             sessions: HashMap::new(),
             login_flows: HashMap::new(),
-            route_receipts: HashMap::new(),
         }
     }
 }
@@ -675,16 +927,22 @@ impl StoreMode {
         }
     }
 
-    pub async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
+    pub async fn list_provider_resources(
+        &self,
+        filters: &ProviderResourceFilters,
+    ) -> Result<ProviderResourcesResponse> {
         match self {
             Self::Memory(store) => Ok(ProviderResourcesResponse {
                 data: store
                     .read()
                     .expect("memory store read lock")
                     .provider_resources
-                    .clone(),
+                    .iter()
+                    .filter(|resource| provider_matches_filters(resource, filters))
+                    .cloned()
+                    .collect(),
             }),
-            Self::Postgres(store) => store.list_provider_resources().await,
+            Self::Postgres(store) => store.list_provider_resources(filters).await,
         }
     }
 
@@ -714,6 +972,30 @@ impl StoreMode {
                     .clone(),
             }),
             Self::Postgres(store) => store.list_route_policies().await,
+        }
+    }
+
+    pub async fn list_route_receipts(
+        &self,
+        filters: &RouteReceiptFilters,
+    ) -> Result<RouteReceiptsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut receipts = store
+                    .read()
+                    .expect("memory store read lock")
+                    .route_receipts
+                    .values()
+                    .filter(|receipt| route_receipt_matches_filters(receipt, filters))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                receipts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+                if let Some(limit) = filters.limit {
+                    receipts.truncate(limit);
+                }
+                Ok(RouteReceiptsResponse { data: receipts })
+            }
+            Self::Postgres(store) => store.list_route_receipts(filters).await,
         }
     }
 
@@ -778,6 +1060,19 @@ impl StoreMode {
                 .cloned()
                 .map(|route_receipt| RouteReceiptResponse { route_receipt })),
             Self::Postgres(store) => store.get_route_receipt(route_receipt_id).await,
+        }
+    }
+
+    pub async fn get_route_diagnostics(
+        &self,
+        route_policy_id: &str,
+    ) -> Result<Option<RouteDiagnosticsResponse>> {
+        match self {
+            Self::Memory(store) => build_memory_route_diagnostics(
+                &store.read().expect("memory store read lock"),
+                route_policy_id,
+            ),
+            Self::Postgres(store) => store.get_route_diagnostics(route_policy_id).await,
         }
     }
 }
@@ -892,6 +1187,29 @@ impl PostgresStore {
             .bind(&project_id)
             .bind(status)
             .bind(Json(config_snapshot))
+            .execute(&self.pool)
+            .await?;
+        }
+
+        for route_receipt in seed.route_receipts {
+            let route_receipt_id = route_receipt.route_receipt_id.to_string();
+            let tenant_id = route_receipt.tenant_id.to_string();
+            let project_id = route_receipt.project_id.to_string();
+            let admission_result = admission_result_slug(route_receipt.admission_result);
+            sqlx::query(
+                "INSERT INTO route_receipts (route_receipt_id, tenant_id, project_id, admission_result, payload)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (route_receipt_id) DO UPDATE SET
+                   tenant_id = EXCLUDED.tenant_id,
+                   project_id = EXCLUDED.project_id,
+                   admission_result = EXCLUDED.admission_result,
+                   payload = EXCLUDED.payload",
+            )
+            .bind(&route_receipt_id)
+            .bind(&tenant_id)
+            .bind(&project_id)
+            .bind(admission_result)
+            .bind(Json(route_receipt))
             .execute(&self.pool)
             .await?;
         }
@@ -1138,7 +1456,10 @@ impl PostgresStore {
         })
     }
 
-    async fn list_provider_resources(&self) -> Result<ProviderResourcesResponse> {
+    async fn list_provider_resources(
+        &self,
+        filters: &ProviderResourceFilters,
+    ) -> Result<ProviderResourcesResponse> {
         let rows =
             sqlx::query("SELECT payload FROM provider_resources ORDER BY provider_resource_id")
                 .fetch_all(&self.pool)
@@ -1147,6 +1468,7 @@ impl PostgresStore {
             data: rows
                 .into_iter()
                 .map(|row| row.get::<Json<ProviderResource>, _>("payload").0)
+                .filter(|resource| provider_matches_filters(resource, filters))
                 .collect(),
         })
     }
@@ -1173,6 +1495,44 @@ impl PostgresStore {
                 .map(|row| row.get::<Json<RoutePolicy>, _>("payload").0)
                 .collect(),
         })
+    }
+
+    async fn list_config_snapshots(&self) -> Result<Vec<ConfigSnapshot>> {
+        let rows = sqlx::query("SELECT payload FROM config_snapshots ORDER BY config_snapshot_id")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<Json<ConfigSnapshot>, _>("payload").0)
+            .collect())
+    }
+
+    async fn active_snapshot_id(&self) -> Result<Option<String>> {
+        Ok(sqlx::query(
+            "SELECT config_snapshot_id FROM active_config_pointers WHERE pointer_key = 'default'",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| row.get::<String, _>("config_snapshot_id")))
+    }
+
+    async fn list_route_receipts(
+        &self,
+        filters: &RouteReceiptFilters,
+    ) -> Result<RouteReceiptsResponse> {
+        let rows = sqlx::query("SELECT payload FROM route_receipts ORDER BY route_receipt_id")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut receipts = rows
+            .into_iter()
+            .map(|row| row.get::<Json<RouteReceipt>, _>("payload").0)
+            .filter(|receipt| route_receipt_matches_filters(receipt, filters))
+            .collect::<Vec<_>>();
+        receipts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        if let Some(limit) = filters.limit {
+            receipts.truncate(limit);
+        }
+        Ok(RouteReceiptsResponse { data: receipts })
     }
 
     async fn get_config_snapshot(
@@ -1237,7 +1597,10 @@ impl PostgresStore {
         &self,
         request: RouteSimulationRequest,
     ) -> Result<RouteSimulationResponse> {
-        let tenants = self.list_provider_resources().await?.data;
+        let tenants = self
+            .list_provider_resources(&ProviderResourceFilters::default())
+            .await?
+            .data;
         let policies = self.list_route_policies().await?.data;
         let active_snapshot = self
             .get_config_snapshot(ACTIVE_CONFIG_ALIAS)
@@ -1258,6 +1621,30 @@ impl PostgresStore {
         Ok(row.map(|row| RouteReceiptResponse {
             route_receipt: row.get::<Json<RouteReceipt>, _>("payload").0,
         }))
+    }
+
+    async fn get_route_diagnostics(
+        &self,
+        route_policy_id: &str,
+    ) -> Result<Option<RouteDiagnosticsResponse>> {
+        let provider_resources = self
+            .list_provider_resources(&ProviderResourceFilters::default())
+            .await?
+            .data;
+        let route_policies = self.list_route_policies().await?.data;
+        let config_snapshots = self.list_config_snapshots().await?;
+        let route_receipts = self
+            .list_route_receipts(&RouteReceiptFilters::default())
+            .await?
+            .data;
+        Ok(build_route_diagnostics_response(
+            &provider_resources,
+            &route_policies,
+            &config_snapshots,
+            &route_receipts,
+            route_policy_id,
+            self.active_snapshot_id().await?.as_deref(),
+        ))
     }
 
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
@@ -1439,6 +1826,330 @@ fn simulate_memory_route(
     )
 }
 
+fn provider_supports_protocol_family(
+    provider_resource: &ProviderResource,
+    protocol_family: &str,
+) -> bool {
+    provider_resource
+        .supported_protocol_families
+        .iter()
+        .any(|candidate| candidate == protocol_family)
+}
+
+fn protocol_family_slug(protocol_family: ProtocolFamily) -> &'static str {
+    match protocol_family {
+        ProtocolFamily::OpenAiChat => "openai_chat",
+        ProtocolFamily::OpenAiResponses => "openai_responses",
+        ProtocolFamily::McpStreamableHttp => "mcp_streamable_http",
+        ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
+    }
+}
+
+fn provider_supports_capability(provider_resource: &ProviderResource, capability: &str) -> bool {
+    match capability {
+        "streaming" => provider_resource.capabilities.supports_streaming,
+        "tool_calling" | "tool_related" => provider_resource.capabilities.supports_tool_calling,
+        "json_mode" => provider_resource.capabilities.supports_json_mode,
+        "realtime" => provider_resource.capabilities.supports_realtime,
+        "response_model_metadata" => {
+            provider_resource
+                .capabilities
+                .supports_response_model_metadata
+        }
+        _ => false,
+    }
+}
+
+fn provider_capability_gaps(
+    provider_resource: &ProviderResource,
+    required_capabilities: &[String],
+) -> Vec<String> {
+    required_capabilities
+        .iter()
+        .filter(|capability| !provider_supports_capability(provider_resource, capability))
+        .cloned()
+        .collect()
+}
+
+fn is_health_blocked(health_state: HealthState) -> bool {
+    matches!(
+        health_state,
+        HealthState::Quarantined | HealthState::Draining | HealthState::Disabled
+    )
+}
+
+fn health_state_slug(health_state: HealthState) -> &'static str {
+    match health_state {
+        HealthState::Healthy => "healthy",
+        HealthState::Degraded => "degraded",
+        HealthState::Quarantined => "quarantined",
+        HealthState::Draining => "draining",
+        HealthState::Disabled => "disabled",
+    }
+}
+
+fn admission_result_slug(admission_result: AdmissionResult) -> &'static str {
+    match admission_result {
+        AdmissionResult::Admitted => "admitted",
+        AdmissionResult::RejectedBudget => "rejected_budget",
+        AdmissionResult::RejectedRateLimit => "rejected_rate_limit",
+        AdmissionResult::RejectedConcurrency => "rejected_concurrency",
+        AdmissionResult::RejectedPolicy => "rejected_policy",
+        AdmissionResult::RejectedNoCandidate => "rejected_no_candidate",
+    }
+}
+
+fn provider_matches_filters(
+    resource: &ProviderResource,
+    filters: &ProviderResourceFilters,
+) -> bool {
+    if let Some(tenant_id) = &filters.tenant_id {
+        if resource.tenant_id.as_str() != tenant_id {
+            return false;
+        }
+    }
+    if let Some(health_state) = &filters.health_state {
+        if health_state_slug(resource.health_state) != health_state {
+            return false;
+        }
+    }
+    if let Some(protocol_family) = &filters.protocol_family {
+        if !provider_supports_protocol_family(resource, protocol_family) {
+            return false;
+        }
+    }
+    if let Some(capability) = &filters.capability {
+        if !provider_supports_capability(resource, capability) {
+            return false;
+        }
+    }
+    if let Some(transit_gateway) = filters.transit_gateway {
+        if resource.is_transit_gateway != transit_gateway {
+            return false;
+        }
+    }
+    if let Some(quarantined) = filters.quarantined {
+        if matches!(resource.health_state, HealthState::Quarantined) != quarantined {
+            return false;
+        }
+    }
+    true
+}
+
+fn route_receipt_matches_filters(receipt: &RouteReceipt, filters: &RouteReceiptFilters) -> bool {
+    if let Some(tenant_id) = &filters.tenant_id {
+        if receipt.tenant_id.as_str() != tenant_id {
+            return false;
+        }
+    }
+    if let Some(project_id) = &filters.project_id {
+        if receipt.project_id.as_str() != project_id {
+            return false;
+        }
+    }
+    if let Some(route_policy_id) = &filters.route_policy_id {
+        if receipt.route_policy_id.as_str() != route_policy_id {
+            return false;
+        }
+    }
+    if let Some(admission_result) = &filters.admission_result {
+        if admission_result_slug(receipt.admission_result) != admission_result {
+            return false;
+        }
+    }
+    if let Some(provider_resource_id) = &filters.provider_resource_id {
+        let selected = receipt
+            .selected_target
+            .as_ref()
+            .is_some_and(|target| target.as_str() == provider_resource_id);
+        let excluded = receipt
+            .excluded_targets
+            .iter()
+            .any(|target| target.provider_resource_id.as_str() == provider_resource_id);
+        if !selected && !excluded {
+            return false;
+        }
+    }
+    true
+}
+
+fn to_route_receipt_summary(receipt: &RouteReceipt) -> RouteReceiptSummary {
+    RouteReceiptSummary {
+        route_receipt_id: receipt.route_receipt_id.clone(),
+        admission_result: receipt.admission_result,
+        selected_target: receipt.selected_target.clone(),
+        failure_reason: receipt.failure_reason.clone(),
+        created_at: receipt.created_at.clone(),
+    }
+}
+
+fn build_memory_route_diagnostics(
+    store: &MemoryStore,
+    route_policy_id: &str,
+) -> Result<Option<RouteDiagnosticsResponse>> {
+    Ok(build_route_diagnostics_response(
+        &store.provider_resources,
+        &store.route_policies,
+        &store.config_snapshots,
+        &store.route_receipts.values().cloned().collect::<Vec<_>>(),
+        route_policy_id,
+        Some(store.active_config_snapshot_id.as_str()),
+    ))
+}
+
+fn build_route_diagnostics_response(
+    provider_resources: &[ProviderResource],
+    route_policies: &[RoutePolicy],
+    config_snapshots: &[ConfigSnapshot],
+    route_receipts: &[RouteReceipt],
+    route_policy_id: &str,
+    active_snapshot_id: Option<&str>,
+) -> Option<RouteDiagnosticsResponse> {
+    let route_policy = route_policies
+        .iter()
+        .find(|policy| policy.route_policy_id.as_str() == route_policy_id)
+        .cloned()?;
+
+    let active_snapshot = active_snapshot_id.and_then(|snapshot_id| {
+        config_snapshots
+            .iter()
+            .find(|snapshot| snapshot.config_snapshot_id.as_str() == snapshot_id)
+            .cloned()
+    });
+    let active_snapshot_matches_route_policy = active_snapshot
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.route_policy_id == route_policy.route_policy_id);
+
+    let mut recent_receipts = route_receipts
+        .iter()
+        .filter(|receipt| receipt.route_policy_id == route_policy.route_policy_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    recent_receipts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+
+    let recent_receipt_summaries = recent_receipts
+        .iter()
+        .take(5)
+        .map(to_route_receipt_summary)
+        .collect::<Vec<_>>();
+    let last_route_receipt = recent_receipts.first().map(to_route_receipt_summary);
+
+    let targets = provider_resources
+        .iter()
+        .filter(|resource| resource.tenant_id == route_policy.tenant_id)
+        .cloned()
+        .map(|provider_resource| {
+            let recent_receipt = recent_receipts.iter().find(|receipt| {
+                receipt
+                    .selected_target
+                    .as_ref()
+                    .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
+                    || receipt.excluded_targets.iter().any(|excluded| {
+                        excluded.provider_resource_id == provider_resource.provider_resource_id
+                    })
+            });
+            let recent_exclusion = recent_receipt.and_then(|receipt| {
+                receipt.excluded_targets.iter().find(|excluded| {
+                    excluded.provider_resource_id == provider_resource.provider_resource_id
+                })
+            });
+            let capability_gaps =
+                provider_capability_gaps(&provider_resource, &route_policy.required_capabilities);
+            let supports_protocol_family = provider_supports_protocol_family(
+                &provider_resource,
+                &route_policy.protocol_family,
+            );
+            let in_active_snapshot = active_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .provider_resource_ids
+                    .iter()
+                    .any(|id| id == &provider_resource.provider_resource_id)
+            });
+
+            let (decision, reason_code, reason, recent_receipt_reason) = if recent_receipt
+                .and_then(|receipt| receipt.selected_target.as_ref())
+                .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
+            {
+                (
+                    RouteDiagnosticDecision::Selected,
+                    "selected_recent_receipt".to_string(),
+                    "Selected by the most recent route receipt.".to_string(),
+                    None,
+                )
+            } else if let Some(excluded) = recent_exclusion {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    excluded.reason_code.clone(),
+                    excluded.reason.clone(),
+                    Some(excluded.reason.clone()),
+                )
+            } else if !supports_protocol_family {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    "protocol_family_unsupported".to_string(),
+                    format!(
+                        "Provider does not advertise protocol family `{}`.",
+                        route_policy.protocol_family
+                    ),
+                    None,
+                )
+            } else if !capability_gaps.is_empty() {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    format!("capability_gap_{}", capability_gaps[0]),
+                    format!(
+                        "Missing required capabilities: {}.",
+                        capability_gaps.join(", ")
+                    ),
+                    None,
+                )
+            } else if is_health_blocked(provider_resource.health_state) {
+                (
+                    RouteDiagnosticDecision::Excluded,
+                    format!(
+                        "health_{}",
+                        health_state_slug(provider_resource.health_state)
+                    ),
+                    provider_resource
+                        .health_message
+                        .clone()
+                        .unwrap_or_else(|| "Provider health state blocks routing.".to_string()),
+                    None,
+                )
+            } else {
+                (
+                    RouteDiagnosticDecision::Eligible,
+                    "eligible".to_string(),
+                    "Provider satisfies current protocol, capability, and health requirements."
+                        .to_string(),
+                    None,
+                )
+            };
+
+            RouteDiagnosticTarget {
+                provider_resource,
+                decision,
+                in_active_snapshot,
+                supports_protocol_family,
+                capability_gaps,
+                reason_code,
+                reason,
+                recent_receipt_id: recent_receipt.map(|receipt| receipt.route_receipt_id.clone()),
+                recent_receipt_reason,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Some(RouteDiagnosticsResponse {
+        route_policy,
+        active_snapshot,
+        active_snapshot_matches_route_policy,
+        last_route_receipt,
+        recent_receipts: recent_receipt_summaries,
+        targets,
+    })
+}
+
 fn build_route_simulation_response(
     provider_resources: &[ProviderResource],
     route_policies: &[RoutePolicy],
@@ -1469,19 +2180,48 @@ fn build_route_simulation_response(
         if candidate.status != ProviderResourceStatus::Active {
             excluded_candidates.push(ExcludedTarget {
                 provider_resource_id: candidate.provider_resource_id.clone(),
+                reason_code: "provider_inactive".to_string(),
                 reason: format!("provider status is {:?}", candidate.status),
             });
             continue;
         }
-        if !candidate.capabilities.supports_json_mode
-            && route_policy
-                .required_capabilities
-                .iter()
-                .any(|capability| capability == "json_mode")
-        {
+        if !provider_supports_protocol_family(
+            &candidate,
+            protocol_family_slug(request.protocol_family),
+        ) {
             excluded_candidates.push(ExcludedTarget {
                 provider_resource_id: candidate.provider_resource_id.clone(),
-                reason: "required capabilities are not satisfied by the target".to_string(),
+                reason_code: "protocol_family_unsupported".to_string(),
+                reason: format!(
+                    "provider does not advertise protocol family `{}`",
+                    protocol_family_slug(request.protocol_family)
+                ),
+            });
+            continue;
+        }
+
+        let capability_gaps =
+            provider_capability_gaps(&candidate, &route_policy.required_capabilities);
+        if !capability_gaps.is_empty() {
+            excluded_candidates.push(ExcludedTarget {
+                provider_resource_id: candidate.provider_resource_id.clone(),
+                reason_code: format!("capability_gap_{}", capability_gaps[0]),
+                reason: format!(
+                    "required capabilities are not satisfied: {}",
+                    capability_gaps.join(", ")
+                ),
+            });
+            continue;
+        }
+
+        if is_health_blocked(candidate.health_state) {
+            excluded_candidates.push(ExcludedTarget {
+                provider_resource_id: candidate.provider_resource_id.clone(),
+                reason_code: format!("health_{}", health_state_slug(candidate.health_state)),
+                reason: candidate
+                    .health_message
+                    .clone()
+                    .unwrap_or_else(|| "provider health state blocks routing".to_string()),
             });
             continue;
         }
@@ -1502,7 +2242,14 @@ fn build_route_simulation_response(
                 HealthState::Degraded => 0.6,
                 HealthState::Quarantined | HealthState::Draining | HealthState::Disabled => 0.0,
             },
-            trust: 1.0,
+            trust: match candidate.provenance_class {
+                ProvenanceClass::OfficialApi => 1.0,
+                ProvenanceClass::OfficialGateway => 0.95,
+                ProvenanceClass::DedicatedManagedAccount => 0.9,
+                ProvenanceClass::ByoCustomerCredential => 0.8,
+                ProvenanceClass::SharedBrokeredPool => 0.6,
+                ProvenanceClass::UnofficialClientChannel => 0.2,
+            },
         };
         eligible_candidates.push(protocol_ir::EligibleCandidate {
             provider_resource_id: candidate.provider_resource_id.clone(),

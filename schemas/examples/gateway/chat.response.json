@@ -3,6 +3,7 @@
     "route_receipt_id": "routercpt_123",
     "tenant_id": "tenant_acme",
     "project_id": "proj_core",
+    "route_policy_id": "routepol_default",
     "request_id": "req_123",
     "trace_id": "trace_123",
     "protocol_family": "openai_chat",
@@ -13,6 +14,7 @@
     "excluded_targets": [
       {
         "provider_resource_id": "prvrsrc_backup",
+        "reason_code": "health_quarantined",
         "reason": "rejected_provenance_class"
       }
     ],

@@ -14,9 +14,11 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as LoginCallbackRouteImport } from './routes/login.callback'
 import { Route as AppRoutesRouteImport } from './routes/app.routes'
+import { Route as AppReceiptsRouteImport } from './routes/app.receipts'
 import { Route as AppProvidersRouteImport } from './routes/app.providers'
 import { Route as AppOverviewRouteImport } from './routes/app.overview'
 import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
+import { Route as AppRouteDiagnosticsRoutePolicyIdRouteImport } from './routes/app.route-diagnostics.$routePolicyId'
 import { Route as AdminTenantsTenantIdRouteImport } from './routes/admin.tenants.$tenantId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -44,6 +46,11 @@ const AppRoutesRoute = AppRoutesRouteImport.update({
   path: '/routes',
   getParentRoute: () => AppRoute,
 } as any)
+const AppReceiptsRoute = AppReceiptsRouteImport.update({
+  id: '/receipts',
+  path: '/receipts',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProvidersRoute = AppProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
@@ -59,6 +66,12 @@ const AdminTenantsRoute = AdminTenantsRouteImport.update({
   path: '/tenants',
   getParentRoute: () => AdminRoute,
 } as any)
+const AppRouteDiagnosticsRoutePolicyIdRoute =
+  AppRouteDiagnosticsRoutePolicyIdRouteImport.update({
+    id: '/route-diagnostics/$routePolicyId',
+    path: '/route-diagnostics/$routePolicyId',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AdminTenantsTenantIdRoute = AdminTenantsTenantIdRouteImport.update({
   id: '/$tenantId',
   path: '/$tenantId',
@@ -72,9 +85,11 @@ export interface FileRoutesByFullPath {
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
+  '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
+  '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
@@ -83,9 +98,11 @@ export interface FileRoutesByTo {
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
+  '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
+  '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -95,9 +112,11 @@ export interface FileRoutesById {
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
+  '/app/receipts': typeof AppReceiptsRoute
   '/app/routes': typeof AppRoutesRoute
   '/login/callback': typeof LoginCallbackRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
+  '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -108,9 +127,11 @@ export interface FileRouteTypes {
     | '/admin/tenants'
     | '/app/overview'
     | '/app/providers'
+    | '/app/receipts'
     | '/app/routes'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
+    | '/app/route-diagnostics/$routePolicyId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/admin'
@@ -119,9 +140,11 @@ export interface FileRouteTypes {
     | '/admin/tenants'
     | '/app/overview'
     | '/app/providers'
+    | '/app/receipts'
     | '/app/routes'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
+    | '/app/route-diagnostics/$routePolicyId'
   id:
     | '__root__'
     | '/admin'
@@ -130,9 +153,11 @@ export interface FileRouteTypes {
     | '/admin/tenants'
     | '/app/overview'
     | '/app/providers'
+    | '/app/receipts'
     | '/app/routes'
     | '/login/callback'
     | '/admin/tenants/$tenantId'
+    | '/app/route-diagnostics/$routePolicyId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -178,6 +203,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRoutesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/receipts': {
+      id: '/app/receipts'
+      path: '/receipts'
+      fullPath: '/app/receipts'
+      preLoaderRoute: typeof AppReceiptsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/providers': {
       id: '/app/providers'
       path: '/providers'
@@ -198,6 +230,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/tenants'
       preLoaderRoute: typeof AdminTenantsRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/app/route-diagnostics/$routePolicyId': {
+      id: '/app/route-diagnostics/$routePolicyId'
+      path: '/route-diagnostics/$routePolicyId'
+      fullPath: '/app/route-diagnostics/$routePolicyId'
+      preLoaderRoute: typeof AppRouteDiagnosticsRoutePolicyIdRouteImport
+      parentRoute: typeof AppRoute
     }
     '/admin/tenants/$tenantId': {
       id: '/admin/tenants/$tenantId'
@@ -234,13 +273,17 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 interface AppRouteChildren {
   AppOverviewRoute: typeof AppOverviewRoute
   AppProvidersRoute: typeof AppProvidersRoute
+  AppReceiptsRoute: typeof AppReceiptsRoute
   AppRoutesRoute: typeof AppRoutesRoute
+  AppRouteDiagnosticsRoutePolicyIdRoute: typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppOverviewRoute: AppOverviewRoute,
   AppProvidersRoute: AppProvidersRoute,
+  AppReceiptsRoute: AppReceiptsRoute,
   AppRoutesRoute: AppRoutesRoute,
+  AppRouteDiagnosticsRoutePolicyIdRoute: AppRouteDiagnosticsRoutePolicyIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

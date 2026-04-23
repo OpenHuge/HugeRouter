@@ -1,0 +1,91 @@
+{
+  "route_policy": {
+    "route_policy_id": "routepol_default",
+    "tenant_id": "tenant_acme",
+    "display_name": "Default Interactive Route",
+    "protocol_family": "openai_chat",
+    "model_alias": "reasoning-fast",
+    "required_capabilities": [
+      "tool_calling",
+      "json_mode"
+    ],
+    "preferred_regions": [
+      "us-east-1",
+      "us-west-2"
+    ],
+    "version": 4,
+    "created_at": "2026-04-20T00:00:00Z",
+    "updated_at": "2026-04-21T12:00:00Z"
+  },
+  "active_snapshot": {
+    "config_snapshot_id": "cfgsnap_default",
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core",
+    "revision": 12,
+    "status": "active",
+    "activated_at": "2026-04-21T12:15:00Z",
+    "provider_resource_ids": [
+      "prvrsrc_openai_primary"
+    ],
+    "route_policy_id": "routepol_default",
+    "budget_policy_id": "budgetpol_default"
+  },
+  "active_snapshot_matches_route_policy": true,
+  "last_route_receipt": {
+    "route_receipt_id": "routercpt_123",
+    "admission_result": "admitted",
+    "selected_target": "prvrsrc_openai_primary",
+    "created_at": "2026-04-21T12:16:00Z"
+  },
+  "recent_receipts": [
+    {
+      "route_receipt_id": "routercpt_123",
+      "admission_result": "admitted",
+      "selected_target": "prvrsrc_openai_primary",
+      "created_at": "2026-04-21T12:16:00Z"
+    }
+  ],
+  "targets": [
+    {
+      "provider_resource": {
+        "provider_resource_id": "prvrsrc_openai_primary",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "provider_id": "openai",
+        "name": "openai-us-east-primary",
+        "status": "active",
+        "provenance_class": "official_api",
+        "credential_owner_type": "platform",
+        "deployment_scope": "shared",
+        "region": "us-east-1",
+        "endpoint_base_url": "https://api.openai.com/v1",
+        "auth_kind": "api_key",
+        "health_state": "healthy",
+        "health_message": "Healthy across recent operator probes.",
+        "budget_policy_id": "budgetpol_default",
+        "capabilities": {
+          "supports_streaming": true,
+          "supports_tool_calling": true,
+          "supports_json_mode": true,
+          "supports_realtime": false,
+          "supports_response_model_metadata": true
+        },
+        "supported_protocol_families": [
+          "openai_chat",
+          "openai_responses"
+        ],
+        "is_transit_gateway": false,
+        "version": 7,
+        "created_at": "2026-04-20T00:00:00Z",
+        "updated_at": "2026-04-21T11:15:00Z"
+      },
+      "decision": "selected",
+      "in_active_snapshot": true,
+      "supports_protocol_family": true,
+      "capability_gaps": [],
+      "reason_code": "selected_recent_receipt",
+      "reason": "Selected by the most recent route receipt.",
+      "recent_receipt_id": "routercpt_123"
+    }
+  ]
+}

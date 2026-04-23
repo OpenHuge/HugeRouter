@@ -80,13 +80,17 @@
       "type": "object",
       "required": [
         "provider_resource_id",
-        "reason"
+        "reason",
+        "reason_code"
       ],
       "properties": {
         "provider_resource_id": {
           "$ref": "#/definitions/ProviderResourceId"
         },
         "reason": {
+          "type": "string"
+        },
+        "reason_code": {
           "type": "string"
         }
       }

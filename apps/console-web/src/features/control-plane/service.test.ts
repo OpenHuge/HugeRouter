@@ -26,8 +26,8 @@ describe('console data service', () => {
 
     expect(overview.tenantLabel).toBe('Acme Retail')
     expect(overview.workspace).toBe('acme-retail')
-    expect(overview.activeProviders).toBe(2)
-    expect(overview.activeRoutes).toBe(2)
+    expect(overview.activeProviders).toBe(3)
+    expect(overview.activeRoutes).toBe(3)
     expect(overview.activeSnapshotId).toBe('cfgsnap_gateway_v1')
     expect(overview.selectedProvider).toBe('OpenAI Primary')
     expect(overview.projects).toHaveLength(3)
@@ -66,7 +66,7 @@ describe('console data service', () => {
 
     const policies = await getConsoleDataService().listRoutePolicies()
 
-    expect(policies).toHaveLength(3)
+    expect(policies).toHaveLength(4)
   })
 
   it('loads tenant detail with tenant-specific providers and policies', async () => {
@@ -76,9 +76,46 @@ describe('console data service', () => {
     expect(detail.activeConfigSnapshotId).toBe('cfgsnap_gateway_v1')
     expect(detail.providers.map((provider) => provider.provider_resource_id)).toEqual([
       'prvrsrc_openai_primary',
-      'prvrsrc_openai_backup'
+      'prvrsrc_openai_backup',
+      'prvrsrc_transit_relay'
     ])
-    expect(detail.routePolicies).toHaveLength(2)
+    expect(detail.routePolicies).toHaveLength(3)
+  })
+
+  it('loads operator-facing provider diagnostics with recent route signals', async () => {
+    signIn({
+      email: 'tenant@acme.dev',
+      workspace: 'acme-retail'
+    })
+
+    const providers = await getConsoleDataService().listProviderResources()
+
+    expect(providers[0]?.capabilities.streaming).toBe(true)
+    expect(providers[0]?.protocolFamilies).toContain('openai_chat')
+    expect(providers.find((provider) => provider.id === 'prvrsrc_transit_relay')?.isTransitGateway)
+      .toBe(true)
+    expect(providers[0]?.latestRoutingSignal?.routeName).toBe('Acme Realtime Agent')
+  })
+
+  it('loads route diagnostics drill-down data', async () => {
+    const diagnostics = await getConsoleDataService().getRouteDiagnostics('routepol_acme_realtime')
+
+    expect(diagnostics.activeSnapshotMatchesRoutePolicy).toBe(false)
+    expect(diagnostics.diagnostics.targets).toHaveLength(3)
+    expect(diagnostics.diagnostics.last_route_receipt?.failure_reason).toContain('realtime')
+  })
+
+  it('loads recent route receipts with failure reasons', async () => {
+    signIn({
+      email: 'tenant@acme.dev',
+      workspace: 'acme-retail'
+    })
+
+    const receipts = await getConsoleDataService().listRouteReceipts()
+
+    expect(receipts[0]?.receiptId).toBe('routercpt_acme_realtime')
+    expect(receipts[0]?.failureReason).toContain('realtime_webrtc')
+    expect(receipts[1]?.selectedTargetName).toBe('OpenAI Primary')
   })
 
   it('throws when tenant detail is requested for an unknown tenant', async () => {
@@ -104,10 +141,16 @@ describe('console data service', () => {
       getTenantDetail() {
         return Promise.reject(new Error('unused'))
       },
+      getRouteDiagnostics() {
+        return Promise.reject(new Error('unused'))
+      },
       listProviderResources() {
         return Promise.resolve([])
       },
       listRoutePolicies() {
+        return Promise.resolve([])
+      },
+      listRouteReceipts() {
         return Promise.resolve([])
       },
       listTenants() {

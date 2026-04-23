@@ -193,6 +193,47 @@
         }
       }
     },
+    "/v1/route-diagnostics/{route_policy_id}": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_route_diagnostics",
+        "parameters": [
+          {
+            "name": "route_policy_id",
+            "in": "path",
+            "description": "HugeRouter route policy id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operator-focused route diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDiagnosticsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/route-policies": {
       "get": {
         "tags": [
@@ -206,6 +247,94 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RoutePoliciesResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/route-receipts": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "list_route_receipts",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Filter by tenant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Filter by project id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route_policy_id",
+            "in": "query",
+            "description": "Filter by route policy id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider_resource_id",
+            "in": "query",
+            "description": "Filter by selected or excluded provider id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "admission_result",
+            "in": "query",
+            "description": "Filter by admission result",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of receipts to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List route receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceiptsResponse"
                 }
               }
             }
@@ -481,6 +610,7 @@
         "type": "object",
         "required": [
           "provider_resource_id",
+          "reason_code",
           "reason"
         ],
         "properties": {
@@ -488,6 +618,9 @@
             "$ref": "#/components/schemas/ProviderResourceId"
           },
           "reason": {
+            "type": "string"
+          },
+          "reason_code": {
             "type": "string"
           }
         }
@@ -667,10 +800,18 @@
         "required": [
           "supports_streaming",
           "supports_tool_calling",
-          "supports_json_mode"
+          "supports_json_mode",
+          "supports_realtime",
+          "supports_response_model_metadata"
         ],
         "properties": {
           "supports_json_mode": {
+            "type": "boolean"
+          },
+          "supports_realtime": {
+            "type": "boolean"
+          },
+          "supports_response_model_metadata": {
             "type": "boolean"
           },
           "supports_streaming": {
@@ -697,6 +838,8 @@
           "auth_kind",
           "health_state",
           "capabilities",
+          "supported_protocol_families",
+          "is_transit_gateway",
           "version",
           "created_at",
           "updated_at"
@@ -730,8 +873,17 @@
           "endpoint_base_url": {
             "type": "string"
           },
+          "health_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "health_state": {
             "$ref": "#/components/schemas/HealthState"
+          },
+          "is_transit_gateway": {
+            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -755,11 +907,23 @@
           "provider_resource_id": {
             "$ref": "#/components/schemas/ProviderResourceId"
           },
+          "quarantine_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "region": {
             "type": "string"
           },
           "status": {
             "$ref": "#/components/schemas/ProviderResourceStatus"
+          },
+          "supported_protocol_families": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "tenant_id": {
             "$ref": "#/components/schemas/TenantId"
@@ -829,6 +993,117 @@
           },
           "trace_id": {
             "type": "string"
+          }
+        }
+      },
+      "RouteDiagnosticDecision": {
+        "type": "string",
+        "enum": [
+          "selected",
+          "eligible",
+          "excluded"
+        ]
+      },
+      "RouteDiagnosticTarget": {
+        "type": "object",
+        "required": [
+          "provider_resource",
+          "decision",
+          "in_active_snapshot",
+          "supports_protocol_family",
+          "capability_gaps",
+          "reason_code",
+          "reason"
+        ],
+        "properties": {
+          "capability_gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "$ref": "#/components/schemas/RouteDiagnosticDecision"
+          },
+          "in_active_snapshot": {
+            "type": "boolean"
+          },
+          "provider_resource": {
+            "$ref": "#/components/schemas/ProviderResource"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "recent_receipt_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteReceiptId"
+              }
+            ]
+          },
+          "recent_receipt_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supports_protocol_family": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RouteDiagnosticsResponse": {
+        "type": "object",
+        "required": [
+          "route_policy",
+          "active_snapshot_matches_route_policy",
+          "recent_receipts",
+          "targets"
+        ],
+        "properties": {
+          "active_snapshot": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfigSnapshot"
+              }
+            ]
+          },
+          "active_snapshot_matches_route_policy": {
+            "type": "boolean"
+          },
+          "last_route_receipt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteReceiptSummary"
+              }
+            ]
+          },
+          "recent_receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptSummary"
+            }
+          },
+          "route_policy": {
+            "$ref": "#/components/schemas/RoutePolicy"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteDiagnosticTarget"
+            }
           }
         }
       },
@@ -910,6 +1185,7 @@
           "route_receipt_id",
           "tenant_id",
           "project_id",
+          "route_policy_id",
           "request_id",
           "trace_id",
           "protocol_family",
@@ -936,6 +1212,12 @@
             "items": {
               "$ref": "#/components/schemas/ExcludedTarget"
             }
+          },
+          "failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "fallback_transitions": {
             "type": "array",
@@ -964,6 +1246,9 @@
           },
           "request_id": {
             "type": "string"
+          },
+          "route_policy_id": {
+            "$ref": "#/components/schemas/RoutePolicyId"
           },
           "route_receipt_id": {
             "$ref": "#/components/schemas/RouteReceiptId"
@@ -1000,6 +1285,55 @@
         "properties": {
           "route_receipt": {
             "$ref": "#/components/schemas/RouteReceipt"
+          }
+        }
+      },
+      "RouteReceiptSummary": {
+        "type": "object",
+        "required": [
+          "route_receipt_id",
+          "admission_result",
+          "created_at"
+        ],
+        "properties": {
+          "admission_result": {
+            "$ref": "#/components/schemas/AdmissionResult"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route_receipt_id": {
+            "$ref": "#/components/schemas/RouteReceiptId"
+          },
+          "selected_target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResourceId"
+              }
+            ]
+          }
+        }
+      },
+      "RouteReceiptsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceipt"
+            }
           }
         }
       },

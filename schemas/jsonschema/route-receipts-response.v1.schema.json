@@ -1,25 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "GatewayChatResponse",
+  "title": "RouteReceiptsResponse",
   "type": "object",
   "required": [
-    "output_text",
-    "provider_response_id",
-    "route_receipt",
-    "usage_event"
+    "data"
   ],
   "properties": {
-    "output_text": {
-      "type": "string"
-    },
-    "provider_response_id": {
-      "type": "string"
-    },
-    "route_receipt": {
-      "$ref": "#/definitions/RouteReceipt"
-    },
-    "usage_event": {
-      "$ref": "#/definitions/UsageEvent"
+    "data": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RouteReceipt"
+      }
     }
   },
   "definitions": {
@@ -72,21 +63,6 @@
         },
         "to_provider_resource_id": {
           "$ref": "#/definitions/ProviderResourceId"
-        }
-      }
-    },
-    "MonetaryAmount": {
-      "type": "object",
-      "required": [
-        "amount",
-        "currency"
-      ],
-      "properties": {
-        "amount": {
-          "type": "string"
-        },
-        "currency": {
-          "type": "string"
         }
       }
     },
@@ -275,94 +251,6 @@
     },
     "TenantId": {
       "type": "string"
-    },
-    "UsageEvent": {
-      "type": "object",
-      "required": [
-        "estimated_cost",
-        "idempotency_key",
-        "model_alias",
-        "phase",
-        "project_id",
-        "provider_resource_id",
-        "recorded_at",
-        "route_receipt_id",
-        "tenant_id",
-        "usage",
-        "usage_event_id"
-      ],
-      "properties": {
-        "estimated_cost": {
-          "$ref": "#/definitions/MonetaryAmount"
-        },
-        "idempotency_key": {
-          "type": "string"
-        },
-        "model_alias": {
-          "type": "string"
-        },
-        "phase": {
-          "$ref": "#/definitions/UsagePhase"
-        },
-        "project_id": {
-          "$ref": "#/definitions/ProjectId"
-        },
-        "provider_resource_id": {
-          "$ref": "#/definitions/ProviderResourceId"
-        },
-        "recorded_at": {
-          "type": "string"
-        },
-        "route_receipt_id": {
-          "$ref": "#/definitions/RouteReceiptId"
-        },
-        "tenant_id": {
-          "$ref": "#/definitions/TenantId"
-        },
-        "usage": {
-          "$ref": "#/definitions/UsageMetrics"
-        },
-        "usage_event_id": {
-          "$ref": "#/definitions/UsageEventId"
-        }
-      }
-    },
-    "UsageEventId": {
-      "type": "string"
-    },
-    "UsageMetrics": {
-      "type": "object",
-      "required": [
-        "cached_input_tokens",
-        "input_tokens",
-        "output_tokens"
-      ],
-      "properties": {
-        "cached_input_tokens": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "input_tokens": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "output_tokens": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        }
-      }
-    },
-    "UsagePhase": {
-      "type": "string",
-      "enum": [
-        "reserve",
-        "partial",
-        "final",
-        "release"
-      ]
     },
     "ValidationIssue": {
       "type": "object",
