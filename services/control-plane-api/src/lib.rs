@@ -23,8 +23,8 @@ use core_domain::{
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
     BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-    RouteDiagnosticsResponse, RouteReceiptResponse, RouteSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse,
+    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteSimulationRequest,
     RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageSummaryResponse,
 };
 use reqwest::Client as HttpClient;
