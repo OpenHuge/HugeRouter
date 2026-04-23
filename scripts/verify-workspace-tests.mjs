@@ -1,10 +1,16 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..'
+)
 const policy = JSON.parse(
-  readFileSync(path.join(repoRoot, 'scripts', 'workspace-test-policy.json'), 'utf8')
+  readFileSync(
+    path.join(repoRoot, 'scripts', 'workspace-test-policy.json'),
+    'utf8'
+  )
 )
 
 const placeholderAllowed = policy.placeholderAllowed ?? {}
@@ -16,6 +22,7 @@ function readWorkspacePackages(rootDir) {
   return readdirSync(baseDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => path.join(baseDir, entry.name, 'package.json'))
+    .filter((manifestPath) => existsSync(manifestPath))
 }
 
 function readPackageManifest(manifestPath) {
@@ -37,7 +44,10 @@ function isPlaceholderTest(script) {
   )
 }
 
-const manifests = [...readWorkspacePackages('apps'), ...readWorkspacePackages('packages')]
+const manifests = [
+  ...readWorkspacePackages('apps'),
+  ...readWorkspacePackages('packages')
+]
   .map(readPackageManifest)
   .sort((left, right) => left.name.localeCompare(right.name))
 

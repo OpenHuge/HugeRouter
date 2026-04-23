@@ -37,12 +37,19 @@ const supportedExtensions = new Set([
   ".yml",
 ]);
 const exactIgnoredFiles = new Set(["apps/console-web/src/routeTree.gen.ts"]);
-const baseline = JSON.parse(
+const comparePaths = (left, right) => left.localeCompare(right);
+const baselineJson = JSON.parse(
   readFileSync(
     path.join(repoRoot, "scripts", "prettier-drift-baseline.json"),
     "utf8",
   ),
 );
+/** @type {{ drift: string[] }} */
+const baseline = {
+  drift: Array.isArray(baselineJson.drift)
+    ? baselineJson.drift.filter((file) => typeof file === "string")
+    : [],
+};
 
 function toPosixPath(filePath) {
   return filePath.split(path.sep).join(path.posix.sep);
@@ -97,6 +104,7 @@ function runPrettierListDifferent(files) {
   }
 
   const batchSize = 100;
+  /** @type {Set<string>} */
   const drift = new Set();
 
   for (let index = 0; index < files.length; index += batchSize) {
@@ -133,12 +141,12 @@ function runPrettierListDifferent(files) {
     }
   }
 
-  return [...drift].sort();
+  return [...drift].sort(comparePaths);
 }
 
-const candidateFiles = collectFiles().sort();
+const candidateFiles = collectFiles().sort(comparePaths);
 const actualDrift = runPrettierListDifferent(candidateFiles);
-const baselineDrift = [...new Set(baseline.drift)].sort();
+const baselineDrift = [...new Set(baseline.drift)].sort(comparePaths);
 const baselineSet = new Set(baselineDrift);
 const actualSet = new Set(actualDrift);
 const regressions = actualDrift.filter((file) => !baselineSet.has(file));

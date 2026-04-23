@@ -8,7 +8,6 @@
     "@huge-router/ui-kit": "Track 06 owns shared frontend package test coverage; placeholder status is explicit until that track lands."
   },
   "noTestScriptAllowed": {
-    "@huge-router/eslint-config": "Configuration-only package with no runtime surface to exercise.",
     "@huge-router/typescript-config": "Configuration-only package with no runtime surface to exercise."
   }
 }

@@ -85,6 +85,7 @@ Convenience commands:
 
 Quality notes:
 
+- `pnpm js:lint` now runs a repository-wide file-size budget gate before Oxlint so new single-file monoliths are blocked while existing oversized files are tracked with explicit legacy caps in [`scripts/verify-file-size-budgets.mjs`](scripts/verify-file-size-budgets.mjs).
 - `pnpm test` runs a workspace test-policy audit before package tests so placeholder scripts are called out explicitly instead of looking like real coverage.
 - `pnpm js:lint` also runs a Prettier drift-baseline gate before package lint. This follows Prettier's CI-style `--check` model for newly introduced drift while the repository works down the current formatting backlog tracked in [`scripts/prettier-drift-baseline.json`](scripts/prettier-drift-baseline.json).
 - `pnpm js:lint` now runs a repository-wide file-size budget gate before package lint so new single-file monoliths are blocked while existing oversized files are tracked with explicit legacy caps in [`scripts/verify-file-size-budgets.mjs`](scripts/verify-file-size-budgets.mjs).

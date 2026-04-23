@@ -8,7 +8,7 @@ import { setAuthClientForTests } from '../features/auth/auth-queries'
 import { LoginPage } from '../features/auth/LoginPage'
 import { resetSessionForTests } from '../features/auth/session'
 
-const redirectToExternalMock = vi.fn()
+const redirectToExternalMock = vi.fn<(url: string) => void>()
 
 vi.mock('../features/auth/browser-navigation', () => ({
   redirectToExternal: (url: string) => {
@@ -16,66 +16,86 @@ vi.mock('../features/auth/browser-navigation', () => ({
   }
 }))
 
-function createAuthClientStub(
-  overrides: Partial<ConsoleAuthClient> = {}
-) {
-  const completeAuthCallback: ConsoleAuthClient['completeAuthCallback'] = vi.fn()
-  const completeEmailLoginMock: ConsoleAuthClient['completeEmailLogin'] = vi.fn(() => Promise.resolve({
-    data: {
-      message: 'Email verification completed.',
-      outcome: 'authenticated' as const,
-      state: {
-        availableProviders: getDefaultProviderAvailability(),
-        kind: 'authenticated' as const,
-        session: {
-          activeTenant: null,
-          expiresAt: '2026-04-29T09:30:00Z',
-          memberships: [],
-          sessionId: 'sess_123',
-          user: {
-            displayName: 'Operations Admin',
-            email: 'ops@huge-router.dev',
-            id: 'user_123',
-            isPlatformAdmin: true
+function createAuthClientStub(overrides: Partial<ConsoleAuthClient> = {}) {
+  const completeAuthCallback: ConsoleAuthClient['completeAuthCallback'] =
+    vi.fn<ConsoleAuthClient['completeAuthCallback']>()
+  const completeEmailLoginMock: ConsoleAuthClient['completeEmailLogin'] = vi.fn<
+    ConsoleAuthClient['completeEmailLogin']
+  >(() =>
+    Promise.resolve({
+      data: {
+        message: 'Email verification completed.',
+        outcome: 'authenticated' as const,
+        state: {
+          availableProviders: getDefaultProviderAvailability(),
+          kind: 'authenticated' as const,
+          session: {
+            activeTenant: null,
+            expiresAt: '2026-04-29T09:30:00Z',
+            memberships: [],
+            sessionId: 'sess_123',
+            user: {
+              displayName: 'Operations Admin',
+              email: 'ops@huge-router.dev',
+              id: 'user_123',
+              isPlatformAdmin: true
+            }
           }
         }
-      }
-    },
-    meta: {}
-  }))
-  const getSession: ConsoleAuthClient['getSession'] = vi.fn(() => Promise.resolve({
-    data: {
-      state: {
-        availableProviders: getDefaultProviderAvailability(),
-        kind: 'anonymous' as const
-      }
-    },
-    meta: {}
-  }))
-  const logout: ConsoleAuthClient['logout'] = vi.fn(() => Promise.resolve({
-    data: {
-      outcome: 'signed_out' as const
-    },
-    meta: {}
-  }))
-  const startEmailLoginMock: ConsoleAuthClient['startEmailLogin'] = vi.fn(() => Promise.resolve({
-    data: {
-      codeHint: 'Use local bootstrap verification code 111111.',
-      email: 'ops@huge-router.dev',
-      expiresAt: '2026-04-22T10:00:00Z',
-      flowId: 'authflow_123',
-      message: 'HugeRouter started an email login flow.',
-      outcome: 'email_sent' as const
-    },
-    meta: {}
-  }))
-  const startProviderLoginMock: ConsoleAuthClient['startProviderLogin'] = vi.fn(() => Promise.resolve({
-    data: {
-      authorizationUrl: 'http://127.0.0.1:3000/login/callback?provider=github&state=oauth_state_123&code=mock-github-code',
-      outcome: 'redirect' as const
-    },
-    meta: {}
-  }))
+      },
+      meta: {}
+    })
+  )
+  const getSession: ConsoleAuthClient['getSession'] = vi.fn<
+    ConsoleAuthClient['getSession']
+  >(() =>
+    Promise.resolve({
+      data: {
+        state: {
+          availableProviders: getDefaultProviderAvailability(),
+          kind: 'anonymous' as const
+        }
+      },
+      meta: {}
+    })
+  )
+  const logout: ConsoleAuthClient['logout'] = vi.fn<
+    ConsoleAuthClient['logout']
+  >(() =>
+    Promise.resolve({
+      data: {
+        outcome: 'signed_out' as const
+      },
+      meta: {}
+    })
+  )
+  const startEmailLoginMock: ConsoleAuthClient['startEmailLogin'] = vi.fn<
+    ConsoleAuthClient['startEmailLogin']
+  >(() =>
+    Promise.resolve({
+      data: {
+        codeHint: 'Use local bootstrap verification code 111111.',
+        email: 'ops@huge-router.dev',
+        expiresAt: '2026-04-22T10:00:00Z',
+        flowId: 'authflow_123',
+        message: 'HugeRouter started an email login flow.',
+        outcome: 'email_sent' as const
+      },
+      meta: {}
+    })
+  )
+  const startProviderLoginMock: ConsoleAuthClient['startProviderLogin'] = vi.fn<
+    ConsoleAuthClient['startProviderLogin']
+  >(() =>
+    Promise.resolve({
+      data: {
+        authorizationUrl:
+          'http://127.0.0.1:3000/login/callback?provider=github&state=oauth_state_123&code=mock-github-code',
+        outcome: 'redirect' as const
+      },
+      meta: {}
+    })
+  )
 
   return {
     client: {
@@ -122,14 +142,23 @@ describe('LoginPage', () => {
     )
 
     expect(screen.getByLabelText('Workspace')).toHaveValue('platform-admin')
-    expect(screen.getByRole('button', { name: 'Continue with Email' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Continue with WeChat' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Continue with Email' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Continue with GitHub' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Continue with Google' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Continue with WeChat' })
+    ).toBeInTheDocument()
   })
 
   it('starts email login and then completes verification', async () => {
-    const { client, completeEmailLoginMock, startEmailLoginMock } = createAuthClientStub()
+    const { client, completeEmailLoginMock, startEmailLoginMock } =
+      createAuthClientStub()
     setAuthClientForTests(client)
 
     renderWithProviders(
@@ -156,7 +185,9 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByLabelText('Verification code'), {
       target: { value: '111111' }
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Complete Email Sign-In' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Complete Email Sign-In' })
+    )
 
     await waitFor(() => {
       expect(completeEmailLoginMock).toHaveBeenCalledWith({
@@ -187,7 +218,9 @@ describe('LoginPage', () => {
       ['google', 'Google'],
       ['wechat', 'WeChat']
     ] as const) {
-      fireEvent.click(screen.getByRole('button', { name: `Continue with ${label}` }))
+      fireEvent.click(
+        screen.getByRole('button', { name: `Continue with ${label}` })
+      )
 
       await waitFor(() => {
         expect(startProviderLoginMock).toHaveBeenCalledWith(provider, {
