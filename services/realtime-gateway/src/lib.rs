@@ -154,18 +154,19 @@ async fn realtime_websocket(
                 .idle_timeout
                 .min(state.config.session_duration_cap);
             let upstream = state.upstream.clone();
-            let response_request_id = context.request_id.clone();
-            let response_trace_id = context.trace_id.clone();
-            let task_request_id = context.request_id.clone();
-            let task_trace_id = context.trace_id.clone();
-            let task_session_id = session_id.clone();
+            let RequestContext {
+                request_id,
+                trace_id,
+            } = context;
+            let response_request_id = request_id.clone();
+            let response_trace_id = trace_id.clone();
             let response = ws.on_upgrade(move |socket| async move {
                 run_session(
                     socket,
                     SessionContext {
-                        request_id: task_request_id,
-                        trace_id: task_trace_id,
-                        session_id: task_session_id,
+                        request_id,
+                        trace_id,
+                        session_id,
                     },
                     session,
                     idle_timeout,
@@ -214,14 +215,14 @@ fn authenticate_and_validate(
     let claims = state
         .signer
         .parse(token)
-        .map_err(map_token_error_to_rejection)?;
+        .map_err(|error| map_token_error_to_rejection(&error))?;
     let session = validate_handshake(
         &claims,
         request,
         protocol_realtime::RealtimeTransport::Websocket,
         protocol_realtime::now_epoch_seconds(),
     )
-    .map_err(map_validation_error_to_rejection)?;
+    .map_err(|error| map_validation_error_to_rejection(&error))?;
 
     if session.max_duration_seconds > state.config.session_duration_cap.as_secs() {
         return Err(HandshakeRejection::new(
@@ -292,16 +293,15 @@ fn extract_trace_id(headers: &HeaderMap) -> String {
         .get("x-trace-id")
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| new_id("trace"))
+        .map_or_else(|| new_id("trace"), ToString::to_string)
 }
 
-fn map_token_error_to_rejection(error: TokenError) -> HandshakeRejection {
+fn map_token_error_to_rejection(error: &TokenError) -> HandshakeRejection {
     HandshakeRejection::new(StatusCode::UNAUTHORIZED, "auth_invalid", error.to_string())
 }
 
 fn map_validation_error_to_rejection(
-    error: protocol_realtime::SessionValidationError,
+    error: &protocol_realtime::SessionValidationError,
 ) -> HandshakeRejection {
     match error {
         protocol_realtime::SessionValidationError::MissingConnectScope

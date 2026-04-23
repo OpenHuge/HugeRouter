@@ -11,12 +11,14 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_field_names)]
 pub struct SessionContext {
     pub request_id: String,
     pub trace_id: String,
     pub session_id: String,
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn run_session(
     mut socket: WebSocket,
     context: SessionContext,
@@ -103,7 +105,7 @@ pub async fn run_session(
                     trace_id = context.trace_id.as_str(),
                     session_id = context.session_id.as_str(),
                     close_reason = SessionCloseReason::ClientClosed.as_str(),
-                    close_code = frame.as_ref().map_or(1000, |value| u16::from(value.code)),
+                    close_code = frame.as_ref().map_or(1000, |value| value.code),
                     "client closed realtime session"
                 );
                 break;

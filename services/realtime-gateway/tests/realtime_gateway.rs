@@ -54,8 +54,8 @@ impl TestServer {
         format!("ws://{}{}", self.addr, path)
     }
 
-    fn issue_token(&self, models: Vec<&str>, scopes: Vec<&str>, expires_in_seconds: i64) -> String {
-        let signer = EphemeralTokenSigner::new("test-secret".as_bytes().to_vec())
+    fn issue_token(models: Vec<&str>, scopes: Vec<&str>, expires_in_seconds: i64) -> String {
+        let signer = EphemeralTokenSigner::new(b"test-secret".to_vec())
             .expect("signer should initialize");
         let claims = EphemeralSessionTokenClaims {
             subject: "browser-client".to_string(),
@@ -100,7 +100,11 @@ async fn rejects_missing_authentication() {
 #[tokio::test]
 async fn accepts_valid_handshake_and_echoes_response() {
     let server = TestServer::start(UpstreamMode::Echo, Duration::from_secs(30)).await;
-    let token = server.issue_token(vec!["realtime-default"], vec![REALTIME_CONNECT_SCOPE], 300);
+    let token = TestServer::issue_token(
+        vec!["realtime-default"],
+        vec![REALTIME_CONNECT_SCOPE],
+        300,
+    );
     let mut request = server
         .ws_url("/v1/realtime?model=realtime-default")
         .into_client_request()
@@ -164,7 +168,11 @@ async fn rejects_invalid_model_parameter() {
 #[tokio::test]
 async fn closes_idle_session_after_timeout() {
     let server = TestServer::start(UpstreamMode::Echo, Duration::from_millis(150)).await;
-    let token = server.issue_token(vec!["realtime-default"], vec![REALTIME_CONNECT_SCOPE], 300);
+    let token = TestServer::issue_token(
+        vec!["realtime-default"],
+        vec![REALTIME_CONNECT_SCOPE],
+        300,
+    );
     let mut request = server
         .ws_url("/v1/realtime?model=realtime-default")
         .into_client_request()
@@ -195,7 +203,11 @@ async fn closes_idle_session_after_timeout() {
 #[tokio::test]
 async fn closes_session_when_upstream_fails() {
     let server = TestServer::start(UpstreamMode::FailAllResponses, Duration::from_secs(30)).await;
-    let token = server.issue_token(vec!["realtime-default"], vec![REALTIME_CONNECT_SCOPE], 300);
+    let token = TestServer::issue_token(
+        vec!["realtime-default"],
+        vec![REALTIME_CONNECT_SCOPE],
+        300,
+    );
     let mut request = server
         .ws_url("/v1/realtime?model=realtime-default")
         .into_client_request()
@@ -259,7 +271,7 @@ async fn next_text_message(
 }
 
 fn issue_test_token(models: Vec<&str>, scopes: Vec<&str>, expires_in_seconds: i64) -> String {
-    let signer = EphemeralTokenSigner::new("test-secret".as_bytes().to_vec())
+    let signer = EphemeralTokenSigner::new(b"test-secret".to_vec())
         .expect("signer should initialize");
     let claims = EphemeralSessionTokenClaims {
         subject: "browser-client".to_string(),

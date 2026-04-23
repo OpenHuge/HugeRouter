@@ -416,8 +416,10 @@ pub fn now_epoch_seconds() -> i64 {
 #[must_use]
 pub fn timestamp_to_rfc3339(timestamp: i64) -> String {
     chrono::DateTime::<Utc>::from_timestamp(timestamp, 0)
-        .map(|date_time| date_time.to_rfc3339_opts(SecondsFormat::Secs, true))
-        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
+        .map_or_else(
+            || "1970-01-01T00:00:00Z".to_string(),
+            |date_time| date_time.to_rfc3339_opts(SecondsFormat::Secs, true),
+        )
 }
 
 #[cfg(test)]

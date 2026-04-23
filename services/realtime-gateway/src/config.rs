@@ -15,8 +15,8 @@ pub enum UpstreamMode {
 }
 
 impl UpstreamMode {
-    fn from_env(value: Option<String>) -> Self {
-        match value.as_deref() {
+    fn from_env(value: Option<&str>) -> Self {
+        match value {
             Some("fail_all_responses") => Self::FailAllResponses,
             _ => Self::Echo,
         }
@@ -64,7 +64,9 @@ impl RealtimeGatewayConfig {
             signing_secret,
             idle_timeout: Duration::from_secs(idle_timeout_seconds),
             session_duration_cap: Duration::from_secs(session_duration_cap_seconds),
-            upstream_mode: UpstreamMode::from_env(env::var("REALTIME_GATEWAY_UPSTREAM_MODE").ok()),
+            upstream_mode: UpstreamMode::from_env(
+                env::var("REALTIME_GATEWAY_UPSTREAM_MODE").ok().as_deref(),
+            ),
             stub_response_text: env::var("REALTIME_GATEWAY_STUB_RESPONSE_TEXT")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
