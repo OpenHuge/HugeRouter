@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use protocol_ir::{RouteReceiptRecordedMessage, RouteReceiptRecordedMessageType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction, types::Json};
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,7 +11,7 @@ pub enum IngestionOutcome {
     Duplicate,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRouteReceiptRecord {
     pub route_receipt_id: String,
     pub route_receipt_payload: Value,
@@ -23,7 +24,8 @@ pub struct PendingRouteReceiptRecord {
     pub source_trace_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct StoredRouteReceiptRecord {
     route_receipt_payload: Value,
     decision_timeline: Value,
@@ -31,6 +33,7 @@ struct StoredRouteReceiptRecord {
     provider_attempts: Value,
 }
 
+#[cfg(test)]
 #[derive(Debug, Default)]
 struct InMemoryRouteReceiptStore {
     route_receipts: BTreeMap<String, StoredRouteReceiptRecord>,
@@ -38,13 +41,13 @@ struct InMemoryRouteReceiptStore {
 
 pub async fn ensure_route_receipt_tables(pool: &PgPool) -> Result<()> {
     for statement in [
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS route_receipts (
             route_receipt_id TEXT PRIMARY KEY,
             payload JSONB NOT NULL
         )
-        "#,
-        r#"
+        ",
+        r"
         CREATE TABLE IF NOT EXISTS route_receipt_diagnostics (
             route_receipt_id TEXT PRIMARY KEY,
             decision_timeline JSONB NOT NULL,
@@ -56,7 +59,7 @@ pub async fn ensure_route_receipt_tables(pool: &PgPool) -> Result<()> {
             source_trace_id TEXT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-        "#,
+        ",
     ] {
         match sqlx::query(statement).execute(pool).await {
             Ok(_) => {}
@@ -73,7 +76,9 @@ fn is_concurrent_create_table_race(error: &sqlx::Error) -> bool {
         return false;
     };
     database_error.code().is_some_and(|code| code == "23505")
-        && database_error.message().contains("pg_type_typname_nsp_index")
+        && database_error
+            .message()
+            .contains("pg_type_typname_nsp_index")
 }
 
 pub fn parse_route_receipt_recorded(payload: &[u8]) -> Result<RouteReceiptRecordedMessage> {
@@ -118,6 +123,7 @@ pub fn build_pending_route_receipt_record(
     })
 }
 
+#[cfg(test)]
 fn persist_pending_route_receipt_in_memory(
     store: &mut InMemoryRouteReceiptStore,
     pending: &PendingRouteReceiptRecord,
@@ -144,14 +150,14 @@ async fn persist_pending_route_receipt(
     pending: &PendingRouteReceiptRecord,
 ) -> Result<IngestionOutcome> {
     let result = sqlx::query(
-        r#"
+        r"
         INSERT INTO route_receipts (
             route_receipt_id,
             payload
         )
         VALUES ($1, $2)
         ON CONFLICT (route_receipt_id) DO NOTHING
-        "#,
+        ",
     )
     .bind(&pending.route_receipt_id)
     .bind(Json(pending.route_receipt_payload.clone()))
@@ -164,7 +170,7 @@ async fn persist_pending_route_receipt(
     }
 
     sqlx::query(
-        r#"
+        r"
         INSERT INTO route_receipt_diagnostics (
             route_receipt_id,
             decision_timeline,
@@ -177,7 +183,7 @@ async fn persist_pending_route_receipt(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (route_receipt_id) DO NOTHING
-        "#,
+        ",
     )
     .bind(&pending.route_receipt_id)
     .bind(Json(pending.decision_timeline.clone()))

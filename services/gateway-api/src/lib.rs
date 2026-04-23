@@ -1257,13 +1257,10 @@ fn build_route_receipt_policy_checks(
         },
         reason: match route.admission_result {
             AdmissionResult::Admitted => None,
-            _ => Some(
-                route_receipt
-                    .normalized_error
-                    .as_ref()
-                    .map(|error| error.message.clone())
-                    .unwrap_or_else(|| "request rejected before provider execution".to_string()),
-            ),
+            _ => Some(route_receipt.normalized_error.as_ref().map_or_else(
+                || "request rejected before provider execution".to_string(),
+                |error| error.message.clone(),
+            )),
         },
     }]
 }
@@ -1300,16 +1297,21 @@ fn build_route_receipt_decision_timeline(
         } else {
             "failed".to_string()
         },
-        message: if let Some(selected_target) = &route_receipt.selected_target {
-            format!(
-                "Selected {selected_target} from {} ranked candidates",
-                route.ranked_targets.len()
-            )
-        } else if route.ranked_targets.is_empty() {
-            "No eligible provider target satisfied the request".to_string()
-        } else {
-            "Candidate selection completed but no provider attempt succeeded".to_string()
-        },
+        message: route_receipt.selected_target.as_ref().map_or_else(
+            || {
+                if route.ranked_targets.is_empty() {
+                    "No eligible provider target satisfied the request".to_string()
+                } else {
+                    "Candidate selection completed but no provider attempt succeeded".to_string()
+                }
+            },
+            |selected_target| {
+                format!(
+                    "Selected {selected_target} from {} ranked candidates",
+                    route.ranked_targets.len()
+                )
+            },
+        ),
         score: route_receipt.selected_target.as_ref().map(|_| {
             route_receipt.score_breakdown.latency
                 + route_receipt.score_breakdown.cost
@@ -3374,24 +3376,39 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let receipts = sink.published_route_receipts.lock().await;
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(
-            receipts[0]
-                .route_receipt
-                .selected_target
-                .as_ref()
-                .unwrap()
-                .as_str(),
-            "prvrsrc_openai_primary"
-        );
-        assert_eq!(receipts[0].provider_attempts.len(), 1);
-        assert_eq!(receipts[0].provider_attempts[0].status, "succeeded");
-        assert_eq!(receipts[0].decision_timeline[0].stage, "admission");
-        drop(receipts);
+        let (
+            receipt_count,
+            selected_target,
+            provider_attempt_count,
+            first_attempt_status,
+            first_stage,
+        ) = {
+            let receipts = sink.published_route_receipts.lock().await;
+            (
+                receipts.len(),
+                receipts[0]
+                    .route_receipt
+                    .selected_target
+                    .as_ref()
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+                receipts[0].provider_attempts.len(),
+                receipts[0].provider_attempts[0].status.clone(),
+                receipts[0].decision_timeline[0].stage.clone(),
+            )
+        };
+        assert_eq!(receipt_count, 1);
+        assert_eq!(selected_target, "prvrsrc_openai_primary");
+        assert_eq!(provider_attempt_count, 1);
+        assert_eq!(first_attempt_status, "succeeded");
+        assert_eq!(first_stage, "admission");
 
-        let usage_events = sink.published_usage_events.lock().await;
-        assert_eq!(usage_events.len(), 1);
+        let usage_event_count = {
+            let usage_events = sink.published_usage_events.lock().await;
+            usage_events.len()
+        };
+        assert_eq!(usage_event_count, 1);
     }
 
     #[tokio::test]
@@ -3441,19 +3458,25 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
-        let receipts = sink.published_route_receipts.lock().await;
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(
-            receipts[0]
-                .route_receipt
-                .normalized_error
-                .as_ref()
-                .unwrap()
-                .code,
-            "provider_unavailable"
-        );
-        assert_eq!(receipts[0].provider_attempts.len(), 1);
-        assert_eq!(receipts[0].provider_attempts[0].status, "failed");
+        let (receipt_count, normalized_error_code, provider_attempt_count, first_attempt_status) = {
+            let receipts = sink.published_route_receipts.lock().await;
+            (
+                receipts.len(),
+                receipts[0]
+                    .route_receipt
+                    .normalized_error
+                    .as_ref()
+                    .unwrap()
+                    .code
+                    .clone(),
+                receipts[0].provider_attempts.len(),
+                receipts[0].provider_attempts[0].status.clone(),
+            )
+        };
+        assert_eq!(receipt_count, 1);
+        assert_eq!(normalized_error_code, "provider_unavailable");
+        assert_eq!(provider_attempt_count, 1);
+        assert_eq!(first_attempt_status, "failed");
     }
 
     #[tokio::test]

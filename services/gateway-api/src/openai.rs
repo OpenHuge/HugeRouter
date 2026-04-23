@@ -246,7 +246,10 @@ fn parse_responses_api_response(
         .with_detail("provider_resource_id", provider_resource_id)
     })?;
     let finish_reason = payload.finish_reason();
-    let model = payload.model.clone().unwrap_or_else(|| request.model.clone());
+    let model = payload
+        .model
+        .clone()
+        .unwrap_or_else(|| request.model.clone());
 
     Ok(ProviderResponse {
         response_id: payload.id,
@@ -494,8 +497,7 @@ impl OpenAiResponsesApiResponse {
             .output
             .iter()
             .filter_map(OpenAiResponsesOutputItem::text)
-            .collect::<Vec<_>>()
-            .join("");
+            .collect::<String>();
         if text.is_empty() { None } else { Some(text) }
     }
 
@@ -519,8 +521,7 @@ impl OpenAiResponsesOutputItem {
             .content
             .iter()
             .filter_map(OpenAiResponsesOutputContent::text)
-            .collect::<Vec<_>>()
-            .join("");
+            .collect::<String>();
         if text.is_empty() { None } else { Some(text) }
     }
 }
@@ -536,7 +537,7 @@ struct OpenAiResponsesOutputContent {
 impl OpenAiResponsesOutputContent {
     fn text(&self) -> Option<String> {
         match self.content_type.as_deref() {
-            Some("output_text") | Some("text") | None => self.text.clone(),
+            Some("output_text" | "text") | None => self.text.clone(),
             Some(_) => None,
         }
     }
@@ -643,8 +644,10 @@ mod tests {
                 .to_string(),
             ),
         })]);
-        let adapter =
-            OpenAiAdapter::with_wire_api(Arc::new(transport.clone()), OpenAiWireApi::ChatCompletions);
+        let adapter = OpenAiAdapter::with_wire_api(
+            Arc::new(transport.clone()),
+            OpenAiWireApi::ChatCompletions,
+        );
 
         let response = adapter.execute_chat(&request(), &context()).await.unwrap();
 
@@ -700,13 +703,17 @@ mod tests {
         assert_eq!(response.usage.output_tokens, 7);
         assert_eq!(response.usage.cached_input_tokens, 2);
 
-        let recorded_requests = transport.requests.lock().unwrap();
-        assert_eq!(recorded_requests[0].url, "https://api.openai.example/v1/responses");
-        assert_eq!(recorded_requests[0].body["input"][0]["role"], "user");
-        assert_eq!(
-            recorded_requests[0].body["input"][0]["content"][0]["type"],
-            "input_text"
-        );
+        let (request_url, request_role, content_type) = {
+            let recorded_requests = transport.requests.lock().unwrap();
+            (
+                recorded_requests[0].url.clone(),
+                recorded_requests[0].body["input"][0]["role"].clone(),
+                recorded_requests[0].body["input"][0]["content"][0]["type"].clone(),
+            )
+        };
+        assert_eq!(request_url, "https://api.openai.example/v1/responses");
+        assert_eq!(request_role, "user");
+        assert_eq!(content_type, "input_text");
     }
 
     #[tokio::test]
