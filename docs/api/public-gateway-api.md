@@ -105,6 +105,21 @@ The secret should be:
 - non-refreshable
 - revocable
 
+### 22.7.1 Current Realtime Gateway MVP Scope
+
+The first standalone `services/realtime-gateway` slice currently supports:
+
+- `GET /v1/realtime` over WebSockets only
+- bearer-token admission using signed ephemeral realtime tokens
+- explicit `realtime.connect` scope enforcement
+- explicit expiry and parameter validation for `model` and session duration
+- lifecycle tracing for `connect`, `accepted`, `rejected`, `closed`, and `upstream-failed`
+
+Deliberate boundary:
+
+- handshake admission does **not** perform billing or usage metering mutations
+- metering should begin only after the session is accepted and later execution/usage events are emitted
+
 ### 22.8 First Implementation Acceptance Semantics
 
 Agents implementing the first public gateway should preserve these invariants:
