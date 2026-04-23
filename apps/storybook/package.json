@@ -7,7 +7,7 @@
     "dev": "storybook dev -p 6006 --ci --host 0.0.0.0",
     "build": "storybook build",
     "storybook": "storybook dev -p 6006 --ci --host 0.0.0.0",
-    "lint": "eslint . --config ../../eslint.config.mjs",
+    "lint": "pnpm --dir ../.. exec oxlint apps/storybook --deny-warnings",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "node -e \"console.log('Storybook visual checks are reserved for CI')\"",
     "generate": "node -e \"console.log('No generated assets for storybook yet')\""

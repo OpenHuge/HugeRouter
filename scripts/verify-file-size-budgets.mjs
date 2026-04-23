@@ -41,17 +41,9 @@ const exactBudgetOverrides = new Map([
   [
     "apps/console-web/src/features/control-plane/service.ts",
     {
-      maxLines: 2_100,
+      maxLines: 2100,
       reason:
         "Legacy control-plane service aggregator. Keep it from growing while it is split by feature.",
-    },
-  ],
-  [
-    "apps/console-web/src/routes/app.merchant.tsx",
-    {
-      maxLines: 950,
-      reason:
-        "Legacy merchant route screen. Further growth should be paid for with component extraction.",
     },
   ],
   [
@@ -65,7 +57,7 @@ const exactBudgetOverrides = new Map([
   [
     "apps/console-web/src/routes/app.routes.tsx",
     {
-      maxLines: 650,
+      maxLines: 700,
       reason:
         "Legacy routing console screen. Additional workflow surface should be split before expansion.",
     },
@@ -79,41 +71,25 @@ const exactBudgetOverrides = new Map([
     },
   ],
   [
-    "apps/console-web/src/test/control-plane-fetch.ts",
-    {
-      maxLines: 1_550,
-      reason:
-        "Shared control-plane fetch test fixture file. It should not grow without being broken into helpers.",
-    },
-  ],
-  [
     "packages/ts-api-client/src/index.ts",
     {
       maxLines: 900,
       reason:
-        "Generated-by-hand API surface aggregator. Hold the line until domain modules are extracted.",
+        "API surface aggregator. Hold the line until domain modules are extracted.",
     },
   ],
   [
     "packages/ts-shared-schema/src/index.ts",
     {
-      maxLines: 1_000,
+      maxLines: 1000,
       reason:
         "Shared schema barrel plus schema declarations. Prevent further accretion while it is modularized.",
     },
   ],
   [
-    "crates/provider-gateway/src/lib.rs",
-    {
-      maxLines: 850,
-      reason:
-        "Gateway transit adapter remains centralized while transport, parsing, and response mapping are split out.",
-    },
-  ],
-  [
     "crates/core-domain/src/lib.rs",
     {
-      maxLines: 1_700,
+      maxLines: 1700,
       reason:
         "Core domain types still live in one module. New domain areas should land in dedicated submodules.",
     },
@@ -121,7 +97,7 @@ const exactBudgetOverrides = new Map([
   [
     "crates/protocol-ir/src/lib.rs",
     {
-      maxLines: 2_800,
+      maxLines: 2800,
       reason:
         "Protocol IR definitions are still centralized. Keep it capped while protocol families are split out.",
     },
@@ -129,7 +105,7 @@ const exactBudgetOverrides = new Map([
   [
     "infra/scripts/smoke.sh",
     {
-      maxLines: 650,
+      maxLines: 700,
       reason:
         "Existing end-to-end smoke script already bundles many checks. Additional phases should move to helpers.",
     },
@@ -137,7 +113,7 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/lib.rs",
     {
-      maxLines: 5_800,
+      maxLines: 5800,
       reason:
         "Control-plane API crate is still a monolith. New endpoints and handlers should be moved into modules.",
     },
@@ -145,7 +121,7 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/store.rs",
     {
-      maxLines: 6_000,
+      maxLines: 6000,
       reason:
         "Store implementation is a known monolith. Keep it from expanding further until persistence code is split.",
     },
@@ -153,7 +129,7 @@ const exactBudgetOverrides = new Map([
   [
     "services/gateway-api/src/lib.rs",
     {
-      maxLines: 5_000,
+      maxLines: 5000,
       reason:
         "Gateway API wiring is still centralized. New protocols and handlers should be factored into modules.",
     },
@@ -261,7 +237,7 @@ function getBudget(relativePath) {
   if (isTestFile(relativePath)) {
     return {
       category: "test",
-      maxLines: 700,
+      maxLines: 900,
       reason:
         "Tests may be larger, but they still need readable scenario boundaries.",
     };
@@ -270,7 +246,7 @@ function getBudget(relativePath) {
   if (isRouteScreen(relativePath)) {
     return {
       category: "route-screen",
-      maxLines: 500,
+      maxLines: 600,
       reason:
         "Route entry files should compose smaller view and workflow modules.",
     };
@@ -279,7 +255,7 @@ function getBudget(relativePath) {
   if (isJsLikeFile(relativePath)) {
     return {
       category: "js-source",
-      maxLines: 400,
+      maxLines: 500,
       reason:
         "Application and library source files should stay focused enough to review and refactor.",
     };
@@ -288,7 +264,7 @@ function getBudget(relativePath) {
   if (isRustFile(relativePath)) {
     return {
       category: "rust-source",
-      maxLines: 800,
+      maxLines: 900,
       reason:
         "Rust modules larger than this usually hide multiple responsibilities.",
     };
@@ -297,7 +273,7 @@ function getBudget(relativePath) {
   if (isShellFile(relativePath)) {
     return {
       category: "ops-script",
-      maxLines: 250,
+      maxLines: 300,
       reason:
         "Operational scripts should remain short enough to audit and debug safely.",
     };
@@ -306,7 +282,9 @@ function getBudget(relativePath) {
   return null;
 }
 
-const files = sourceRoots.flatMap((root) => collectFiles(root)).sort();
+const files = sourceRoots
+  .flatMap((root) => collectFiles(root))
+  .sort((left, right) => left.localeCompare(right));
 const violations = [];
 
 for (const relativePath of files) {

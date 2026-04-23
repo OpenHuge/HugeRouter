@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ControlPlaneClient } from "@huge-router/ts-api-client";
 import { createConsoleAuthClient } from "./auth-client";
 
 const mockClient = vi.hoisted(() => ({
-  completeOAuthLogin: vi.fn(),
-  getAuthProviders: vi.fn(),
-  getCurrentSession: vi.fn(),
+  completeOAuthLogin: vi.fn<ControlPlaneClient["completeOAuthLogin"]>(),
+  getAuthProviders: vi.fn<ControlPlaneClient["getAuthProviders"]>(),
+  getCurrentSession: vi.fn<ControlPlaneClient["getCurrentSession"]>(),
 }));
 
 vi.mock("@huge-router/ts-api-client", () => {
