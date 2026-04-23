@@ -5,16 +5,20 @@
 ### 32.1 Phase 0: Foundation
 
 Deliver:
+
 - monorepo scaffolding
 - Rust workspace
 - TanStack Start app shell
 - PostgreSQL/Redis/NATS local stack
 - auth skeleton
 - trace pipeline skeleton
+- code-first review of similar project source or official technical material
+- a strengths-to-spec mapping that identifies which borrowed behaviors are implemented, bootstrap-only, or planned
 
 ### 32.2 Phase 1: Minimal Viable Gateway
 
 Deliver:
+
 - OpenAI-compatible northbound ingress
 - at least one native upstream adapter
 - API key auth
@@ -25,6 +29,7 @@ Deliver:
 ### 32.3 Phase 2: Multi-Protocol Gateway & Semantic Edge
 
 Deliver:
+
 - Anthropic and Gemini northbound support
 - richer IR with MCP (Model Context Protocol) via Streamable HTTP
 - Semantic caching layer with pgvector for repeated agent prompts
@@ -35,6 +40,7 @@ Deliver:
 ### 32.4 Phase 3: Ledger and Billing Maturity
 
 Deliver:
+
 - immutable ledger
 - pricing engine
 - balance projections
@@ -45,6 +51,7 @@ Deliver:
 ### 32.5 Phase 4: Enterprise, Realtime, and Ecosystem
 
 Deliver:
+
 - Realtime WebRTC proxy targeting OpenAI Realtime API GA
 - MCP server orchestration with stateless Streamable HTTP transport
 - A2A (Agent-to-Agent) protocol support with Agent Card discovery and task lifecycle management
@@ -57,9 +64,7 @@ Deliver:
 - advanced observability and analytics with agentic session tracing
 - optional orchestration-aware integrations with external agent runtimes and memory systems where product demand justifies them
 
-
 ---
-
 
 ## 39. Future Extension Points
 
@@ -93,22 +98,24 @@ Future internal assistants may help with:
 - cost anomaly explanation
 - policy generation suggestions
 
-
 ---
-
 
 ## 40. Risks and Mitigations
 
 ### 40.1 Risk: Over-Abstracting Too Early
 
 Mitigation:
+
 - start with a minimal but strong IR
 - preserve provider-specific metadata fields
 - only generalize where real use cases exist
+- validate new abstractions against concrete source-backed behavior from similar systems before locking them into the spec
+- prefer one copied operationally-proven behavior over three speculative generic extension points
 
 ### 40.2 Risk: Monorepo Complexity
 
 Mitigation:
+
 - strict package boundaries
 - ownership rules
 - selective CI execution
@@ -117,6 +124,7 @@ Mitigation:
 ### 40.3 Risk: Billing Errors
 
 Mitigation:
+
 - immutable ledger
 - idempotency keys
 - replayable events
@@ -126,6 +134,7 @@ Mitigation:
 ### 40.4 Risk: Route Instability
 
 Mitigation:
+
 - quarantine state
 - route simulation
 - bounded retries
@@ -135,6 +144,7 @@ Mitigation:
 ### 40.5 Risk: Security Drift
 
 Mitigation:
+
 - private admin plane by default
 - secret store integration
 - mandatory audit trails
@@ -143,6 +153,7 @@ Mitigation:
 ### 40.6 Risk: A2A Infinite Loops
 
 Mitigation:
+
 - A2A request hop limits
 - agent identity validation
 - circuit breaking on token bursts
@@ -150,13 +161,12 @@ Mitigation:
 ### 40.7 Risk: Semantic Cache Invalidation
 
 Mitigation:
+
 - TTL-based invalidation
 - content-hash keys
 - developer-controlled purge API
 
-
 ---
-
 
 ## 41. Open Questions
 
@@ -186,9 +196,7 @@ To avoid blocking implementation, use these defaults unless a later ADR changes 
 - implement NHI management as an extension of the existing credential model rather than a separate subsystem
 - treat external orchestration and memory systems as governed integrations first, not as runtime responsibilities the gateway must absorb immediately
 
-
 ---
-
 
 ## 42. Recommended Initial Delivery Slice
 
@@ -201,6 +209,7 @@ If the team wants the smallest strategically correct first milestone, ship the f
 - OpenAI native upstream adapter
 - API key auth
 - PostgreSQL + Redis + NATS local stack
+- a reference-study output tied to routing, config snapshots, admission, and observability
 - basic route policy engine
 - immutable usage events and simple ledger entries
 - basic usage dashboard
@@ -209,9 +218,7 @@ If the team wants the smallest strategically correct first milestone, ship the f
 
 This is enough to prove the architecture without prematurely committing to every advanced feature.
 
-
 ---
-
 
 ## 43. Conclusion
 
@@ -229,9 +236,7 @@ The architecture is intentionally designed around:
 
 If implemented as specified, this platform can evolve from an initial multi-provider gateway into a durable AI traffic operating system that supports commercial, enterprise, and ecosystem-scale use cases.
 
-
 ---
-
 
 ## Appendix C: Example Milestone Backlog Categories
 

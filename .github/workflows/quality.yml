@@ -6,6 +6,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      run_smoke:
+        description: Run the smoke stack (requires OPENAI_API_KEY for usage path)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -234,3 +240,48 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --workspace
+
+  contract-drift:
+    name: Contract Drift Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: contract-drift
+
+      - name: Verify checked-in protocol contracts match generated contracts
+        run: cargo test -p protocol-ir checked_in_artifacts_match_generated_contracts -- --exact
+
+  infrastructure-smoke:
+    name: Infrastructure Smoke
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_smoke == 'true'
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: infra-smoke
+
+      - name: Make smoke helper executable
+        run: chmod +x infra/scripts/smoke.sh
+
+      - name: Run full smoke path
+        env:
+          SMOKE_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          SMOKE_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
+          SMOKE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || '' }}
+        run: ./infra/scripts/smoke.sh

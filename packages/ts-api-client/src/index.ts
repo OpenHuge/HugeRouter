@@ -3,49 +3,79 @@ import {
   authProviderLinksResponseSchema,
   authProvidersResponseSchema,
   authSessionResponseSchema,
+  balanceProjectionResponseSchema,
+  billingExportJobsResponseSchema,
+  billingExportJobResponseSchema,
+  billingExportRequestSchema,
   configSnapshotResponseSchema,
   errorEnvelopeSchema,
   emailLoginCompleteRequestSchema,
   emailLoginStartRequestSchema,
   emailLoginStartResponseSchema,
+  gatewayAnthropicMessagesRequestSchema,
+  gatewayAnthropicMessagesResponseSchema,
   gatewayChatRequestSchema,
   gatewayChatResponseSchema,
+  gatewayGeminiGenerateContentRequestSchema,
+  gatewayGeminiGenerateContentResponseSchema,
   logoutResponseSchema,
   oauthCallbackRequestSchema,
   oauthLoginStartRequestSchema,
   oauthLoginStartResponseSchema,
   oauthProviderSchema,
+  pricingSimulationRequestSchema,
+  pricingSimulationResponseSchema,
+  pricingCatalogResponseSchema,
   projectsResponseSchema,
   providerResourceSchema,
   providerResourcesResponseSchema,
   routePoliciesResponseSchema,
+  routeReceiptDiagnosticsResponseSchema,
+  routeReceiptsResponseSchema,
   routeReceiptResponseSchema,
   routeSimulationRequestSchema,
   routeSimulationResponseSchema,
   tenantsResponseSchema,
   unlinkAuthProviderResponseSchema,
+  usageBreakdownResponseSchema,
+  usageSummaryResponseSchema,
   type AuthLoginResult,
   type AuthProviderLinksResponse,
   type AuthProvidersResponse,
   type AuthSessionResponse,
+  type BalanceProjectionResponse,
+  type BillingExportJobsResponse,
+  type BillingExportJobResponse,
+  type BillingExportRequest,
   type EmailLoginCompleteRequest,
   type EmailLoginStartRequest,
   type EmailLoginStartResponse,
   type ErrorEnvelope,
+  type GatewayAnthropicMessagesRequest,
+  type GatewayAnthropicMessagesResponse,
   type GatewayChatRequest,
   type GatewayChatResponse,
+  type GatewayGeminiGenerateContentRequest,
+  type GatewayGeminiGenerateContentResponse,
   type LogoutResponse,
   type OAuthCallbackRequest,
   type OAuthLoginStartRequest,
   type OAuthLoginStartResponse,
   type OAuthProvider,
+  type PricingSimulationRequest,
+  type PricingSimulationResponse,
+  type PricingCatalogResponse,
   type Project,
   type ProviderResource,
   type RoutePolicy,
   type RouteReceipt,
+  type RouteReceiptDiagnosticsResponse,
+  type RouteReceiptsResponse,
   type RouteSimulationRequest,
   type RouteSimulationResponse,
-  type Tenant
+  type Tenant,
+  type UsageBreakdownResponse,
+  type UsageSummaryResponse
 } from '@huge-router/ts-shared-schema'
 import {
   CONTRACT_DIGEST,
@@ -136,7 +166,43 @@ export type ControlPlaneClient = {
   simulateRoute: (
     request: RouteSimulationRequest
   ) => Promise<RouteSimulationResponse>
+  listRouteReceipts: () => Promise<RouteReceiptsResponse['data']>
   getRouteReceipt: (routeReceiptId: string) => Promise<RouteReceipt>
+  getRouteReceiptDiagnostics: (
+    routeReceiptId: string
+  ) => Promise<RouteReceiptDiagnosticsResponse>
+  getUsageSummary: (query: {
+    tenant_id: string
+    project_id?: string
+    window_start?: string
+    window_end?: string
+  }) => Promise<UsageSummaryResponse>
+  getUsageBreakdown: (query: {
+    tenant_id: string
+    project_id?: string
+    window_start?: string
+    window_end?: string
+    group_by?: 'provider' | 'model' | 'day'
+    cursor?: string
+    limit?: number
+  }) => Promise<UsageBreakdownResponse>
+  getBalanceProjection: (query: {
+    tenant_id: string
+    project_id?: string
+  }) => Promise<BalanceProjectionResponse>
+  getPricingCatalog: () => Promise<PricingCatalogResponse>
+  createPricingSimulation: (
+    request: PricingSimulationRequest
+  ) => Promise<PricingSimulationResponse>
+  createBillingExport: (
+    request: BillingExportRequest
+  ) => Promise<BillingExportJobResponse>
+  listBillingExports: (query?: {
+    tenant_id?: string
+    project_id?: string
+  }) => Promise<BillingExportJobsResponse>
+  getBillingExport: (exportJobId: string) => Promise<BillingExportJobResponse>
+  downloadBillingExport: (exportJobId: string) => Promise<string>
 }
 
 export type GatewayClient = {
@@ -145,6 +211,12 @@ export type GatewayClient = {
   createChatCompletion: (
     request: GatewayChatRequest
   ) => Promise<GatewayChatResponse>
+  createAnthropicMessages: (
+    request: GatewayAnthropicMessagesRequest
+  ) => Promise<GatewayAnthropicMessagesResponse>
+  createGeminiGenerateContent: (
+    request: GatewayGeminiGenerateContentRequest
+  ) => Promise<GatewayGeminiGenerateContentResponse>
 }
 
 const resolveOperation = (id: OperationId) => {
@@ -166,7 +238,8 @@ const resolveGatewayOperation = (id: GatewayOperationId) => {
 const buildUrl = (
   baseUrl: string,
   pathTemplate: string,
-  params?: Record<string, string>
+  params?: Record<string, string>,
+  query?: Record<string, string | number | undefined>
 ) => {
   const path = Object.entries(params ?? {}).reduce(
     (currentPath, [key, value]) =>
@@ -174,11 +247,21 @@ const buildUrl = (
     pathTemplate
   )
 
+  const queryString = new URLSearchParams(
+    Object.entries(query ?? {}).flatMap(([key, value]) =>
+      value == null || value === '' ? [] : [[key, String(value)]]
+    )
+  ).toString()
+
   if (!baseUrl) {
-    return path
+    return queryString ? `${path}?${queryString}` : path
   }
 
-  return new URL(path, ensureTrailingSlash(baseUrl)).toString()
+  const url = new URL(path, ensureTrailingSlash(baseUrl))
+  if (queryString) {
+    url.search = queryString
+  }
+  return url.toString()
 }
 
 const ensureTrailingSlash = (baseUrl: string) =>
@@ -199,6 +282,7 @@ const requestJson = async <T>({
   method,
   path,
   params,
+  query,
   body,
   parse
 }: {
@@ -208,10 +292,11 @@ const requestJson = async <T>({
   method: string
   path: string
   params?: Record<string, string>
+  query?: Record<string, string | number | undefined>
   body?: unknown
   parse: (payload: unknown) => T
 }) => {
-  const response = await fetchImpl(buildUrl(baseUrl, path, params), {
+  const response = await fetchImpl(buildUrl(baseUrl, path, params, query), {
     method,
     headers: {
       Accept: 'application/json',
@@ -495,6 +580,17 @@ export const createControlPlaneClient = (
         parse: (payload) => routeSimulationResponseSchema.parse(payload)
       })
     },
+    async listRouteReceipts() {
+      const operation = resolveOperation('listRouteReceipts')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        parse: (payload) => routeReceiptsResponseSchema.parse(payload).data
+      })
+    },
     async getRouteReceipt(routeReceiptId) {
       const operation = resolveOperation('getRouteReceipt')
       const parsed = await requestJson({
@@ -507,6 +603,134 @@ export const createControlPlaneClient = (
         parse: (payload) => routeReceiptResponseSchema.parse(payload)
       })
       return parsed.route_receipt
+    },
+    async getRouteReceiptDiagnostics(routeReceiptId) {
+      const operation = resolveOperation('getRouteReceiptDiagnostics')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        params: { route_receipt_id: routeReceiptId },
+        parse: (payload) => routeReceiptDiagnosticsResponseSchema.parse(payload)
+      })
+    },
+    async getUsageSummary(query) {
+      const operation = resolveOperation('getUsageSummary')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        query,
+        parse: (payload) => usageSummaryResponseSchema.parse(payload)
+      })
+    },
+    async getUsageBreakdown(query) {
+      const operation = resolveOperation('getUsageBreakdown')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        query,
+        parse: (payload) => usageBreakdownResponseSchema.parse(payload)
+      })
+    },
+    async getBalanceProjection(query) {
+      const operation = resolveOperation('getBalanceProjection')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        query,
+        parse: (payload) => balanceProjectionResponseSchema.parse(payload)
+      })
+    },
+    async getPricingCatalog() {
+      const operation = resolveOperation('getPricingCatalog')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        parse: (payload) => pricingCatalogResponseSchema.parse(payload)
+      })
+    },
+    async createPricingSimulation(request) {
+      const operation = resolveOperation('createPricingSimulation')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        body: pricingSimulationRequestSchema.parse(request),
+        parse: (payload) => pricingSimulationResponseSchema.parse(payload)
+      })
+    },
+    async createBillingExport(request) {
+      const operation = resolveOperation('createBillingExport')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        body: billingExportRequestSchema.parse(request),
+        parse: (payload) => billingExportJobResponseSchema.parse(payload)
+      })
+    },
+    async listBillingExports(query = {}) {
+      const operation = resolveOperation('listBillingExports')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        query,
+        parse: (payload) => billingExportJobsResponseSchema.parse(payload)
+      })
+    },
+    async getBillingExport(exportJobId) {
+      const operation = resolveOperation('getBillingExport')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        params: { export_job_id: exportJobId },
+        parse: (payload) => billingExportJobResponseSchema.parse(payload)
+      })
+    },
+    async downloadBillingExport(exportJobId) {
+      const response = await fetchImpl(
+        buildUrl(options.baseUrl, '/v1/billing/exports/{export_job_id}/download', {
+          export_job_id: exportJobId
+        }),
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'text/csv, text/plain, */*',
+            ...(options.headers ?? {})
+          }
+        }
+      )
+
+      if (!response.ok) {
+        const payload: unknown = await response.json()
+        throw new ContractApiError(response.status, errorEnvelopeSchema.parse(payload))
+      }
+
+      return response.text()
     }
   }
 }
@@ -532,6 +756,34 @@ export const createGatewayClient = (
         body: gatewayChatRequestSchema.parse(request),
         parse: (payload) => gatewayChatResponseSchema.parse(payload)
       })
+    },
+    async createAnthropicMessages(request) {
+      const operation = resolveGatewayOperation('createAnthropicMessages')
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        body: gatewayAnthropicMessagesRequestSchema.parse(request),
+        parse: (payload) => gatewayAnthropicMessagesResponseSchema.parse(payload)
+      })
+    },
+    async createGeminiGenerateContent(request) {
+      const operation = resolveGatewayOperation('createGeminiGenerateContent')
+      const parsedRequest = gatewayGeminiGenerateContentRequestSchema.parse(request)
+      return requestJson({
+        baseUrl: options.baseUrl,
+        fetchImpl,
+        headers: options.headers,
+        method: operation.method,
+        path: operation.path,
+        params: {
+          model: parsedRequest.model
+        },
+        body: parsedRequest,
+        parse: (payload) => gatewayGeminiGenerateContentResponseSchema.parse(payload)
+      })
     }
   }
 }
@@ -545,5 +797,29 @@ void expectType<ProviderResource[]>(
 )
 void expectType<RoutePolicy[]>(
   [] as Awaited<ReturnType<ControlPlaneClient['listRoutePolicies']>>
+)
+void expectType<RouteReceipt>(
+  {} as Awaited<ReturnType<ControlPlaneClient['getRouteReceipt']>>
+)
+void expectType<RouteReceipt[]>(
+  [] as Awaited<ReturnType<ControlPlaneClient['listRouteReceipts']>>
+)
+void expectType<RouteReceiptDiagnosticsResponse>(
+  {} as Awaited<ReturnType<ControlPlaneClient['getRouteReceiptDiagnostics']>>
+)
+void expectType<PricingCatalogResponse>(
+  {} as Awaited<ReturnType<ControlPlaneClient['getPricingCatalog']>>
+)
+void expectType<BillingExportJobsResponse>(
+  {} as Awaited<ReturnType<ControlPlaneClient['listBillingExports']>>
+)
+void expectType<BillingExportJobResponse>(
+  {} as Awaited<ReturnType<ControlPlaneClient['getBillingExport']>>
+)
+void expectType<GatewayAnthropicMessagesRequest>(
+  {} as Parameters<GatewayClient['createAnthropicMessages']>[0]
+)
+void expectType<GatewayGeminiGenerateContentRequest>(
+  {} as Parameters<GatewayClient['createGeminiGenerateContent']>[0]
 )
 void expectType<GatewayChatRequest>({} as Parameters<GatewayClient['createChatCompletion']>[0])

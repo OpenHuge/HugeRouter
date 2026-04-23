@@ -27,6 +27,8 @@ function AdminTenantsPage() {
           title="Tenants"
         />
         <RouteErrorState
+          kind={result?.kind}
+          message={result?.state === 'error' ? result?.message : undefined}
           description="Tenant inventory could not be loaded. Retry once the control-plane surface is reachable."
           title="Tenants unavailable"
         />

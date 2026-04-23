@@ -2,6 +2,14 @@
 
 [Back to Docs Index](../README.md)
 
+### 16.0 Current Implementation Reality
+
+The repository should currently be described this way:
+
+- `implemented`: basic auth and route-adjacent checks exist in the gateway and control plane, but not as a full normalized policy engine
+- `bootstrap-only`: some control-plane auth and workspace behavior is suitable for bootstrap environments rather than production policy enforcement
+- `planned`: normalized policy reason codes, approval checkpoints, quota and budget enforcement, MCP and A2A governance, and route-receipt policy summaries
+
 ### 16.1 Policy Categories
 
 Policies should exist for:
@@ -96,6 +104,28 @@ Each material policy decision should be explainable with at least:
 - `requires_approval` boolean
 - `snapshot_id`
 
+### 16.3.2 Normalized Policy Reason Vocabulary
+
+Policy enforcement should use a small stable reason-code vocabulary that other systems can rely on.
+
+At minimum, the platform should reserve machine-readable codes for:
+
+- `identity_invalid`
+- `session_not_allowed`
+- `route_not_allowed`
+- `resource_not_allowed`
+- `budget_exceeded`
+- `quota_exceeded`
+- `concurrency_exceeded`
+- `trust_class_denied`
+- `approval_required`
+- `residency_denied`
+- `tool_not_allowed`
+- `delegation_denied`
+- `memory_write_denied`
+
+These codes should be safe to embed into route receipts, error envelopes, audit events, support tooling, and billing explanations.
+
 ### 16.4 High-Side-Effect Operation Governance
 
 Recent open source agent systems have made browser automation, custom tools, and long-running delegated actions common rather than exotic. The gateway should therefore classify operation risk explicitly instead of pretending every tool call is equivalent to a read-only inference.
@@ -141,6 +171,22 @@ This is required so operators can answer:
 - why a browser or tool action was isolated
 - why semantic cache was bypassed
 - why a delegated action could or could not cross a trust boundary
+
+### 16.7.1 Route and Admission Boundary
+
+The policy layer should remain explicit about which decisions are policy decisions and which are routing or admission decisions.
+
+Boundary rule:
+
+- policy decides whether a request, session, task, operation, or resource is allowed, denied, degraded, isolated, or paused for approval
+- routing decides which eligible target is preferred
+- admission decides whether budget, quota, concurrency, and trust-class state still allow execution on the selected target
+
+Cross-system rule:
+
+- the route receipt should embed the normalized policy decision summary plus the admission terminal state
+- if a policy result forces target re-selection or changes operation class, routing and admission must be re-evaluated
+- policy, routing, and billing surfaces must reuse the same reason codes where the customer-visible meaning is the same
 
 ### 16.8 Example Policy Cases
 

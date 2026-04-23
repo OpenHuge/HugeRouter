@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BalanceProjectionResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "$ref": "#/definitions/BalanceProjection"
+    }
+  },
+  "definitions": {
+    "BalanceProjection": {
+      "type": "object",
+      "required": [
+        "billable_total",
+        "configured_budget",
+        "currency",
+        "last_projected_at",
+        "projection_lag_seconds",
+        "provider_cost_total",
+        "remaining_budget",
+        "tenant_id",
+        "threshold_status"
+      ],
+      "properties": {
+        "billable_total": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "configured_budget": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "last_projected_at": {
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projection_lag_seconds": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "provider_cost_total": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "remaining_budget": {
+          "$ref": "#/definitions/MonetaryAmount"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "threshold_status": {
+          "type": "string"
+        }
+      }
+    },
+    "MonetaryAmount": {
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

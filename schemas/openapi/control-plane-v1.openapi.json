@@ -10,6 +10,185 @@
     "version": "v1"
   },
   "paths": {
+    "/v1/billing/exports": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "list_billing_exports",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Filter by tenant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Filter by project id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List billing export jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingExportJobsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "create_billing_export",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted billing export job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingExportJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/exports/{export_job_id}": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_billing_export",
+        "parameters": [
+          {
+            "name": "export_job_id",
+            "in": "path",
+            "description": "Billing export job id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get billing export job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingExportJobResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/projection": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_balance_projection",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Filter by tenant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Filter by project id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Billing projection summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceProjectionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config-snapshots/{config_snapshot_id}": {
       "get": {
         "tags": [
@@ -80,6 +259,76 @@
             }
           },
           "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pricing/catalog": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_pricing_catalog",
+        "responses": {
+          "200": {
+            "description": "Pricing catalog entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingCatalogResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pricing/simulations": {
+      "post": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "create_pricing_simulation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingSimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pricing simulation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingSimulationResponse"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "Normalized error",
             "content": {
               "application/json": {
@@ -223,6 +472,36 @@
         }
       }
     },
+    "/v1/route-receipts": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "list_route_receipts",
+        "responses": {
+          "200": {
+            "description": "List route receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceiptsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/route-receipts/{route_receipt_id}": {
       "get": {
         "tags": [
@@ -247,6 +526,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RouteReceiptResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/route-receipts/{route_receipt_id}/diagnostics": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_route_receipt_diagnostics",
+        "parameters": [
+          {
+            "name": "route_receipt_id",
+            "in": "path",
+            "description": "HugeRouter route receipt id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get route receipt diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceiptDiagnosticsResponse"
                 }
               }
             }
@@ -333,6 +653,171 @@
           }
         }
       }
+    },
+    "/v1/usage/breakdown": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_usage_breakdown",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Filter by tenant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Filter by project id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_start",
+            "in": "query",
+            "description": "Inclusive RFC3339 start timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_end",
+            "in": "query",
+            "description": "Inclusive RFC3339 end timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "description": "Breakdown dimension: provider, model, or day",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of rows to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage breakdown rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageBreakdownResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/usage/summary": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "get_usage_summary",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Filter by tenant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Filter by project id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_start",
+            "in": "query",
+            "description": "Inclusive RFC3339 start timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_end",
+            "in": "query",
+            "description": "Inclusive RFC3339 end timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage summary for the requested scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -355,6 +840,191 @@
           "o_auth_client_credentials",
           "session_broker"
         ]
+      },
+      "BalanceProjection": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "currency",
+          "provider_cost_total",
+          "billable_total",
+          "configured_budget",
+          "remaining_budget",
+          "threshold_status",
+          "last_projected_at",
+          "projection_lag_seconds"
+        ],
+        "properties": {
+          "billable_total": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "configured_budget": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "last_projected_at": {
+            "type": "string"
+          },
+          "project_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectId"
+              }
+            ]
+          },
+          "projection_lag_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "provider_cost_total": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "remaining_budget": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "threshold_status": {
+            "type": "string"
+          }
+        }
+      },
+      "BalanceProjectionResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BalanceProjection"
+          }
+        }
+      },
+      "BillingExportJob": {
+        "type": "object",
+        "required": [
+          "export_job_id",
+          "status",
+          "format",
+          "requested_at"
+        ],
+        "properties": {
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "export_job_id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "project_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectId"
+              }
+            ]
+          },
+          "requested_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantId"
+              }
+            ]
+          }
+        }
+      },
+      "BillingExportJobResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingExportJob"
+          }
+        }
+      },
+      "BillingExportJobsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingExportJob"
+            }
+          }
+        }
+      },
+      "BillingExportRequest": {
+        "type": "object",
+        "required": [
+          "window_start",
+          "window_end",
+          "format"
+        ],
+        "properties": {
+          "format": {
+            "type": "string"
+          },
+          "project_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectId"
+              }
+            ]
+          },
+          "tenant_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantId"
+              }
+            ]
+          },
+          "window_end": {
+            "type": "string"
+          },
+          "window_start": {
+            "type": "string"
+          }
+        }
       },
       "BudgetPolicyId": {
         "type": "string"
@@ -588,6 +1258,182 @@
           }
         }
       },
+      "PricingCatalogEntry": {
+        "type": "object",
+        "required": [
+          "dimension",
+          "provider_id",
+          "micros_per_unit",
+          "unit_denominator",
+          "source"
+        ],
+        "properties": {
+          "dimension": {
+            "type": "string"
+          },
+          "micros_per_unit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "model_alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "unit_denominator": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PricingCatalogResponse": {
+        "type": "object",
+        "required": [
+          "catalog_id",
+          "catalog_version",
+          "currency",
+          "entries"
+        ],
+        "properties": {
+          "catalog_id": {
+            "type": "string"
+          },
+          "catalog_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PricingCatalogEntry"
+            }
+          }
+        }
+      },
+      "PricingSimulationLineItem": {
+        "type": "object",
+        "required": [
+          "dimension",
+          "units",
+          "provider_cost",
+          "billable_price",
+          "rate_source"
+        ],
+        "properties": {
+          "billable_price": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "provider_cost": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "rate_source": {
+            "type": "string"
+          },
+          "units": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PricingSimulationRequest": {
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model_alias",
+          "usage"
+        ],
+        "properties": {
+          "audio_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "image_generation_units": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "model_alias": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageMetrics"
+          }
+        }
+      },
+      "PricingSimulationResponse": {
+        "type": "object",
+        "required": [
+          "catalog_id",
+          "catalog_version",
+          "currency",
+          "provider_cost",
+          "billable_price",
+          "line_items"
+        ],
+        "properties": {
+          "billable_price": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "catalog_id": {
+            "type": "string"
+          },
+          "catalog_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "line_items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PricingSimulationLineItem"
+            }
+          },
+          "provider_cost": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          }
+        }
+      },
       "Project": {
         "type": "object",
         "required": [
@@ -648,7 +1494,9 @@
           "openai_chat",
           "openai_responses",
           "mcp_streamable_http",
-          "realtime_webrtc"
+          "realtime_webrtc",
+          "anthropic_messages",
+          "gemini_generate_content"
         ]
       },
       "ProvenanceClass": {
@@ -989,8 +1837,142 @@
           }
         }
       },
+      "RouteReceiptDecisionTraceStep": {
+        "type": "object",
+        "required": [
+          "stage",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteReceiptDiagnosticsResponse": {
+        "type": "object",
+        "required": [
+          "route_receipt",
+          "decision_timeline",
+          "policy_checks",
+          "provider_attempts",
+          "metadata"
+        ],
+        "properties": {
+          "decision_timeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptDecisionTraceStep"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "policy_checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptPolicyCheck"
+            }
+          },
+          "provider_attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceiptProviderAttempt"
+            }
+          },
+          "route_receipt": {
+            "$ref": "#/components/schemas/RouteReceipt"
+          }
+        }
+      },
       "RouteReceiptId": {
         "type": "string"
+      },
+      "RouteReceiptPolicyCheck": {
+        "type": "object",
+        "required": [
+          "policy_id",
+          "status"
+        ],
+        "properties": {
+          "policy_id": {
+            "$ref": "#/components/schemas/RoutePolicyId"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteReceiptProviderAttempt": {
+        "type": "object",
+        "required": [
+          "provider_resource_id",
+          "attempt",
+          "status",
+          "started_at",
+          "finished_at",
+          "latency_ms",
+          "reason"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "provider_resource_id": {
+            "$ref": "#/components/schemas/ProviderResourceId"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
       },
       "RouteReceiptResponse": {
         "type": "object",
@@ -1000,6 +1982,20 @@
         "properties": {
           "route_receipt": {
             "$ref": "#/components/schemas/RouteReceipt"
+          }
+        }
+      },
+      "RouteReceiptsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteReceipt"
+            }
           }
         }
       },
@@ -1181,6 +2177,176 @@
             "items": {
               "$ref": "#/components/schemas/Tenant"
             }
+          }
+        }
+      },
+      "UsageBreakdownResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageBreakdownRow"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UsageBreakdownRow": {
+        "type": "object",
+        "required": [
+          "bucket",
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens",
+          "provider_cost",
+          "billable_price"
+        ],
+        "properties": {
+          "billable_price": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "cached_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "model_alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "provider_cost": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "provider_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UsageMetrics": {
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens"
+        ],
+        "properties": {
+          "cached_input_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "UsageSummary": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "window_start",
+          "window_end",
+          "currency",
+          "event_count",
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens",
+          "provider_cost",
+          "billable_price"
+        ],
+        "properties": {
+          "billable_price": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "cached_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "event_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "project_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectId"
+              }
+            ]
+          },
+          "provider_cost": {
+            "$ref": "#/components/schemas/MonetaryAmount"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "window_end": {
+            "type": "string"
+          },
+          "window_start": {
+            "type": "string"
+          }
+        }
+      },
+      "UsageSummaryResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UsageSummary"
           }
         }
       },

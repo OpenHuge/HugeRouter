@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PricingSimulationRequest",
+  "type": "object",
+  "required": [
+    "model_alias",
+    "provider_id",
+    "usage"
+  ],
+  "properties": {
+    "audio_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "image_generation_units": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "model_alias": {
+      "type": "string"
+    },
+    "provider_id": {
+      "type": "string"
+    },
+    "region": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "usage": {
+      "$ref": "#/definitions/UsageMetrics"
+    }
+  },
+  "definitions": {
+    "UsageMetrics": {
+      "type": "object",
+      "required": [
+        "cached_input_tokens",
+        "input_tokens",
+        "output_tokens"
+      ],
+      "properties": {
+        "cached_input_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

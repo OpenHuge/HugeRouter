@@ -3,12 +3,15 @@
 use anyhow::Context;
 use core_domain::{
     AdmissionResult, ConfigSnapshot, ConfigSnapshotId, ErrorEnvelope, LedgerEntry, MonetaryAmount,
-    Project, ProjectId, ProviderResource, ProviderResourceId, RoutePolicy, RouteReceipt,
-    RouteReceiptId, ServiceName, Tenant, TenantId, UsageEvent, UsagePhase,
+    Project, ProjectId, ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId,
+    RouteReceipt, RouteReceiptId, ServiceName, Tenant, TenantId, UsageEvent, UsageMetrics,
+    UsagePhase,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +34,12 @@ pub enum ProtocolFamily {
     #[serde(rename = "realtime_webrtc")]
     #[schema(rename = "realtime_webrtc")]
     RealtimeWebRtc,
+    #[serde(rename = "anthropic_messages")]
+    #[schema(rename = "anthropic_messages")]
+    AnthropicMessages,
+    #[serde(rename = "gemini_generate_content")]
+    #[schema(rename = "gemini_generate_content")]
+    GeminiGenerateContent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -59,6 +68,13 @@ pub enum MessageType {
     #[serde(rename = "replay_capsule.build_requested")]
     #[schema(rename = "replay_capsule.build_requested")]
     ReplayCapsuleBuildRequested,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub enum RouteReceiptRecordedMessageType {
+    #[serde(rename = "route_receipt.recorded")]
+    #[schema(rename = "route_receipt.recorded")]
+    RouteReceiptRecorded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -142,6 +158,17 @@ impl<T> MessageEnvelope<T> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptRecorded {
+    pub route_receipt: RouteReceipt,
+    #[serde(default)]
+    pub decision_timeline: Vec<RouteReceiptDecisionTraceStep>,
+    #[serde(default)]
+    pub policy_checks: Vec<RouteReceiptPolicyCheck>,
+    #[serde(default)]
+    pub provider_attempts: Vec<RouteReceiptProviderAttempt>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct UsageEventRecorded {
     pub usage_event: UsageEvent,
@@ -170,6 +197,21 @@ pub struct UsageEventRecordedMessage {
     pub request_id: Option<String>,
     pub idempotency_key: String,
     pub payload: UsageEventRecorded,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptRecordedMessage {
+    pub message_id: String,
+    pub message_type: RouteReceiptRecordedMessageType,
+    pub schema_version: u16,
+    pub occurred_at: String,
+    pub producer: ServiceName,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    pub idempotency_key: String,
+    pub payload: RouteReceiptRecorded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -260,6 +302,360 @@ pub struct GatewayChatResponse {
     pub output_text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayAnthropicMessage {
+    pub role: String,
+    pub content: GatewayAnthropicMessageContent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(untagged)]
+pub enum GatewayAnthropicMessageContent {
+    PlainText(String),
+    Blocks(Vec<GatewayAnthropicMessageContentBlock>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GatewayAnthropicMessageContentBlock {
+    Text { text: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayAnthropicResponseContentBlock {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayAnthropicMessagesRequest {
+    pub model: String,
+    pub messages: Vec<GatewayAnthropicMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayAnthropicMessagesResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub content: Vec<GatewayAnthropicResponseContentBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<GatewayAnthropicUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayAnthropicMessagesError {
+    pub error: core_domain::NormalizedError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum GatewayGeminiRole {
+    User,
+    Assistant,
+    Model,
+    System,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiPart {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiContent {
+    pub role: GatewayGeminiRole,
+    pub parts: Vec<GatewayGeminiPart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiSystemInstruction {
+    pub parts: Vec<GatewayGeminiPart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayGeminiGenerationConfig {
+    #[serde(rename = "maxOutputTokens")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiGenerateContentRequest {
+    pub model: String,
+    pub contents: Vec<GatewayGeminiContent>,
+    #[serde(default)]
+    pub tools: Vec<Value>,
+    #[serde(default)]
+    pub stream: bool,
+    #[serde(
+        rename = "systemInstruction",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub system_instruction: Option<GatewayGeminiSystemInstruction>,
+    #[serde(
+        rename = "generationConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub generation_config: Option<GatewayGeminiGenerationConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiGenerateContentResponse {
+    #[serde(rename = "responseId", skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
+    pub candidates: Vec<GatewayGeminiCandidate>,
+    #[serde(rename = "usageMetadata", skip_serializing_if = "Option::is_none")]
+    pub usage_metadata: Option<GatewayGeminiUsageMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "modelVersion")]
+    pub model_version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiGenerateContentError {
+    pub error: core_domain::NormalizedError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayAnthropicUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct GatewayGeminiCandidate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<GatewayGeminiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "finishReason")]
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayGeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount")]
+    pub prompt_token_count: u32,
+    #[serde(rename = "candidatesTokenCount")]
+    pub candidates_token_count: u32,
+    #[serde(rename = "totalTokenCount")]
+    pub total_token_count: u32,
+    #[serde(rename = "cachedContentTokenCount")]
+    pub cached_content_token_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptDecisionTraceStep {
+    pub stage: String,
+    pub status: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptPolicyCheck {
+    pub policy_id: RoutePolicyId,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptProviderAttempt {
+    pub provider_resource_id: ProviderResourceId,
+    pub attempt: u8,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub latency_ms: u32,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptDiagnosticsResponse {
+    pub route_receipt: RouteReceipt,
+    pub decision_timeline: Vec<RouteReceiptDecisionTraceStep>,
+    pub policy_checks: Vec<RouteReceiptPolicyCheck>,
+    pub provider_attempts: Vec<RouteReceiptProviderAttempt>,
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageSummary {
+    pub tenant_id: TenantId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub window_start: String,
+    pub window_end: String,
+    pub currency: String,
+    pub event_count: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageSummaryResponse {
+    pub data: UsageSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageBreakdownRow {
+    pub bucket: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_alias: Option<String>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UsageBreakdownResponse {
+    pub data: Vec<UsageBreakdownRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BalanceProjection {
+    pub tenant_id: TenantId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub currency: String,
+    pub provider_cost_total: MonetaryAmount,
+    pub billable_total: MonetaryAmount,
+    pub configured_budget: MonetaryAmount,
+    pub remaining_budget: MonetaryAmount,
+    pub threshold_status: String,
+    pub last_projected_at: String,
+    pub projection_lag_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BalanceProjectionResponse {
+    pub data: BalanceProjection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingSimulationRequest {
+    pub provider_id: String,
+    pub model_alias: String,
+    pub usage: UsageMetrics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_generation_units: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_seconds: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingCatalogEntry {
+    pub dimension: String,
+    pub provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    pub micros_per_unit: i64,
+    pub unit_denominator: u64,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingCatalogResponse {
+    pub catalog_id: String,
+    pub catalog_version: u32,
+    pub currency: String,
+    pub entries: Vec<PricingCatalogEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingSimulationLineItem {
+    pub dimension: String,
+    pub units: u64,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+    pub rate_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct PricingSimulationResponse {
+    pub catalog_id: String,
+    pub catalog_version: u32,
+    pub currency: String,
+    pub provider_cost: MonetaryAmount,
+    pub billable_price: MonetaryAmount,
+    pub line_items: Vec<PricingSimulationLineItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<TenantId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub window_start: String,
+    pub window_end: String,
+    pub format: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportJob {
+    pub export_job_id: String,
+    pub status: String,
+    pub format: String,
+    pub requested_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<TenantId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportJobResponse {
+    pub data: BillingExportJob,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BillingExportJobsResponse {
+    pub data: Vec<BillingExportJob>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct EligibleCandidate {
     pub provider_resource_id: ProviderResourceId,
@@ -322,6 +718,11 @@ pub struct RouteReceiptResponse {
     pub route_receipt: RouteReceipt,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptsResponse {
+    pub data: Vec<RouteReceipt>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ArtifactFile {
     pub relative_path: &'static str,
@@ -358,8 +759,18 @@ pub struct ContractManifest {
         list_route_policies,
         get_config_snapshot,
         activate_config_snapshot,
+        get_usage_summary,
+        get_usage_breakdown,
+        get_balance_projection,
+        get_pricing_catalog,
+        create_pricing_simulation,
+        create_billing_export,
+        list_billing_exports,
+        get_billing_export,
         create_route_simulation,
+        list_route_receipts,
         get_route_receipt,
+        get_route_receipt_diagnostics,
     ),
     components(
         schemas(
@@ -377,17 +788,35 @@ pub struct ContractManifest {
             ProviderResource,
             ProviderResourceId,
             ProviderResourcesResponse,
+            PricingCatalogEntry,
+            PricingCatalogResponse,
+            PricingSimulationLineItem,
+            PricingSimulationRequest,
+            PricingSimulationResponse,
             RequestEnvelope,
             RoutePolicy,
             RoutePoliciesResponse,
             RouteReceipt,
+            RouteReceiptsResponse,
             RouteReceiptId,
             RouteReceiptResponse,
+            RouteReceiptDiagnosticsResponse,
             RouteSimulationRequest,
             RouteSimulationResponse,
             Tenant,
             TenantId,
             TenantsResponse,
+            UsageBreakdownResponse,
+            UsageBreakdownRow,
+            UsageSummary,
+            UsageSummaryResponse,
+            BalanceProjection,
+            BalanceProjectionResponse,
+            BillingExportJob,
+            BillingExportJobResponse,
+            BillingExportJobsResponse,
+            BillingExportRequest,
+            UsageMetrics,
         )
     ),
     tags(
@@ -406,12 +835,31 @@ pub struct ControlPlaneApiDoc;
         version = "v1",
         description = "Stable gateway contracts for chat routing and normalized failures."
     ),
-    paths(gateway_chat_completion),
+    paths(
+        gateway_chat_completion,
+        gateway_anthropic_messages,
+        gateway_gemini_generate_content,
+    ),
     components(
         schemas(
             ErrorEnvelope,
             GatewayChatRequest,
             GatewayChatResponse,
+            GatewayAnthropicMessagesError,
+            GatewayAnthropicMessagesRequest,
+            GatewayAnthropicMessagesResponse,
+            GatewayGeminiGenerateContentError,
+            GatewayGeminiGenerateContentRequest,
+            GatewayGeminiGenerateContentResponse,
+            GatewayAnthropicMessage,
+            GatewayAnthropicMessageContent,
+            GatewayAnthropicMessageContentBlock,
+            GatewayAnthropicResponseContentBlock,
+            GatewayGeminiContent,
+            GatewayGeminiGenerationConfig,
+            GatewayGeminiPart,
+            GatewayGeminiRole,
+            GatewayGeminiSystemInstruction,
             ProtocolFamily,
             RequestEnvelope,
             RouteReceipt,
@@ -420,6 +868,9 @@ pub struct ControlPlaneApiDoc;
             ChatMessage,
             ChatMessageRole,
             ToolDefinition,
+            RouteReceiptDecisionTraceStep,
+            RouteReceiptProviderAttempt,
+            RouteReceiptPolicyCheck,
         )
     ),
     tags((name = "gateway", description = "Protocol ingress contracts")))
@@ -520,6 +971,130 @@ const fn get_config_snapshot() {}
 const fn activate_config_snapshot() {}
 
 #[utoipa::path(
+    get,
+    path = "/v1/usage/summary",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("window_start" = Option<String>, Query, description = "Inclusive RFC3339 start timestamp"),
+        ("window_end" = Option<String>, Query, description = "Inclusive RFC3339 end timestamp")
+    ),
+    responses(
+        (status = 200, description = "Usage summary for the requested scope", body = UsageSummaryResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_usage_summary() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/usage/breakdown",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("window_start" = Option<String>, Query, description = "Inclusive RFC3339 start timestamp"),
+        ("window_end" = Option<String>, Query, description = "Inclusive RFC3339 end timestamp"),
+        ("group_by" = Option<String>, Query, description = "Breakdown dimension: provider, model, or day"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+        ("limit" = Option<u32>, Query, description = "Maximum number of rows to return")
+    ),
+    responses(
+        (status = 200, description = "Usage breakdown rows", body = UsageBreakdownResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_usage_breakdown() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/projection",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id")
+    ),
+    responses(
+        (status = 200, description = "Billing projection summary", body = BalanceProjectionResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_balance_projection() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/pricing/catalog",
+    tag = "routing",
+    responses(
+        (status = 200, description = "Pricing catalog entries", body = PricingCatalogResponse),
+        (status = 500, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_pricing_catalog() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/pricing/simulations",
+    tag = "routing",
+    request_body = PricingSimulationRequest,
+    responses(
+        (status = 200, description = "Pricing simulation result", body = PricingSimulationResponse),
+        (status = 422, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn create_pricing_simulation() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/billing/exports",
+    tag = "routing",
+    request_body = BillingExportRequest,
+    responses(
+        (status = 202, description = "Accepted billing export job", body = BillingExportJobResponse),
+        (status = 422, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn create_billing_export() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/exports",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id")
+    ),
+    responses(
+        (status = 200, description = "List billing export jobs", body = BillingExportJobsResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn list_billing_exports() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/exports/{export_job_id}",
+    tag = "routing",
+    params(
+        ("export_job_id" = String, Path, description = "Billing export job id")
+    ),
+    responses(
+        (status = 200, description = "Get billing export job", body = BillingExportJobResponse),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_billing_export() {}
+
+#[utoipa::path(
     post,
     path = "/v1/route-simulations",
     tag = "routing",
@@ -531,6 +1106,18 @@ const fn activate_config_snapshot() {}
 )]
 #[allow(dead_code)]
 const fn create_route_simulation() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/route-receipts",
+    tag = "routing",
+    responses(
+        (status = 200, description = "List route receipts", body = RouteReceiptsResponse),
+        (status = 500, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn list_route_receipts() {}
 
 #[utoipa::path(
     get,
@@ -548,8 +1135,23 @@ const fn create_route_simulation() {}
 const fn get_route_receipt() {}
 
 #[utoipa::path(
+    get,
+    path = "/v1/route-receipts/{route_receipt_id}/diagnostics",
+    tag = "routing",
+    params(
+        ("route_receipt_id" = String, Path, description = "HugeRouter route receipt id")
+    ),
+    responses(
+        (status = 200, description = "Get route receipt diagnostics", body = RouteReceiptDiagnosticsResponse),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_route_receipt_diagnostics() {}
+
+#[utoipa::path(
     post,
-    path = "/v1/gateway/chat/completions",
+    path = "/v1/chat/completions",
     tag = "gateway",
     request_body = GatewayChatRequest,
     responses(
@@ -559,6 +1161,35 @@ const fn get_route_receipt() {}
 )]
 #[allow(dead_code)]
 const fn gateway_chat_completion() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/messages",
+    tag = "gateway",
+    request_body = GatewayAnthropicMessagesRequest,
+    responses(
+        (status = 200, description = "Anthropic messages routed successfully", body = GatewayAnthropicMessagesResponse),
+        (status = 422, description = "Normalized error", body = GatewayAnthropicMessagesError),
+    )
+)]
+#[allow(dead_code)]
+const fn gateway_anthropic_messages() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1beta/models/{model}:generateContent",
+    tag = "gateway",
+    params(
+        ("model" = String, Path, description = "Gemini model name")
+    ),
+    request_body = GatewayGeminiGenerateContentRequest,
+    responses(
+        (status = 200, description = "Gemini generate-content routed successfully", body = GatewayGeminiGenerateContentResponse),
+        (status = 422, description = "Normalized error", body = GatewayGeminiGenerateContentError),
+    )
+)]
+#[allow(dead_code)]
+const fn gateway_gemini_generate_content() {}
 
 fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let schemas = vec![
@@ -579,6 +1210,54 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         )?,
         schema_artifact::<GatewayChatResponse>(
             "schemas/jsonschema/gateway-chat-response.v1.schema.json",
+        )?,
+        schema_artifact::<GatewayAnthropicMessagesRequest>(
+            "schemas/jsonschema/gateway-anthropic-messages-request.v1.schema.json",
+        )?,
+        schema_artifact::<GatewayAnthropicMessagesResponse>(
+            "schemas/jsonschema/gateway-anthropic-messages-response.v1.schema.json",
+        )?,
+        schema_artifact::<GatewayAnthropicMessagesError>(
+            "schemas/jsonschema/gateway-anthropic-messages-error.v1.schema.json",
+        )?,
+        schema_artifact::<GatewayGeminiGenerateContentRequest>(
+            "schemas/jsonschema/gateway-gemini-generate-content-request.v1.schema.json",
+        )?,
+        schema_artifact::<GatewayGeminiGenerateContentResponse>(
+            "schemas/jsonschema/gateway-gemini-generate-content-response.v1.schema.json",
+        )?,
+        schema_artifact::<GatewayGeminiGenerateContentError>(
+            "schemas/jsonschema/gateway-gemini-generate-content-error.v1.schema.json",
+        )?,
+        schema_artifact::<RouteReceiptDiagnosticsResponse>(
+            "schemas/jsonschema/route-receipt-diagnostics-response.v1.schema.json",
+        )?,
+        schema_artifact::<UsageSummaryResponse>(
+            "schemas/jsonschema/usage-summary-response.v1.schema.json",
+        )?,
+        schema_artifact::<UsageBreakdownResponse>(
+            "schemas/jsonschema/usage-breakdown-response.v1.schema.json",
+        )?,
+        schema_artifact::<BalanceProjectionResponse>(
+            "schemas/jsonschema/balance-projection-response.v1.schema.json",
+        )?,
+        schema_artifact::<PricingCatalogResponse>(
+            "schemas/jsonschema/pricing-catalog-response.v1.schema.json",
+        )?,
+        schema_artifact::<PricingSimulationRequest>(
+            "schemas/jsonschema/pricing-simulation-request.v1.schema.json",
+        )?,
+        schema_artifact::<PricingSimulationResponse>(
+            "schemas/jsonschema/pricing-simulation-response.v1.schema.json",
+        )?,
+        schema_artifact::<BillingExportRequest>(
+            "schemas/jsonschema/billing-export-request.v1.schema.json",
+        )?,
+        schema_artifact::<BillingExportJobResponse>(
+            "schemas/jsonschema/billing-export-job-response.v1.schema.json",
+        )?,
+        schema_artifact::<BillingExportJobsResponse>(
+            "schemas/jsonschema/billing-export-jobs-response.v1.schema.json",
         )?,
         schema_artifact::<RouteSimulationRequest>(
             "schemas/jsonschema/route-simulation-request.v1.schema.json",
@@ -615,6 +1294,7 @@ fn openapi_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     ])
 }
 
+#[allow(clippy::too_many_lines)]
 fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let tenant = sample_tenant();
     let project = sample_project();
@@ -622,11 +1302,32 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let route_policy = sample_route_policy();
     let config_snapshot = sample_config_snapshot();
     let route_receipt = sample_route_receipt();
+    let route_receipts = RouteReceiptsResponse {
+        data: vec![route_receipt.clone()],
+    };
     let usage_event = sample_usage_event();
     let simulation_request = sample_route_simulation_request();
     let simulation_response = sample_route_simulation_response();
     let gateway_request = sample_gateway_chat_request();
     let gateway_response = sample_gateway_chat_response();
+    let anthropic_request = sample_gateway_anthropic_messages_request();
+    let anthropic_response = sample_gateway_anthropic_messages_response();
+    let anthropic_error = sample_gateway_anthropic_messages_error();
+    let gemini_request = sample_gateway_gemini_generate_content_request();
+    let gemini_response = sample_gateway_gemini_generate_content_response();
+    let gemini_error = sample_gateway_gemini_generate_content_error();
+    let route_receipt_diagnostics = sample_route_receipt_diagnostics();
+    let usage_summary = sample_usage_summary_response();
+    let usage_breakdown = sample_usage_breakdown_response();
+    let balance_projection = sample_balance_projection_response();
+    let pricing_catalog = sample_pricing_catalog_response();
+    let pricing_simulation_request = sample_pricing_simulation_request();
+    let pricing_simulation_response = sample_pricing_simulation_response();
+    let billing_export_request = sample_billing_export_request();
+    let billing_export_job = sample_billing_export_job_response();
+    let billing_export_jobs = BillingExportJobsResponse {
+        data: vec![billing_export_job.data.clone()],
+    };
     let usage_message = sample_usage_event_recorded_message();
     let snapshot_message = sample_config_snapshot_activated_message();
     let error_envelope = sample_error_envelope();
@@ -671,6 +1372,10 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
             &RouteReceiptResponse { route_receipt },
         )?,
         example_artifact(
+            "schemas/examples/control-plane/route-receipts.response.json",
+            &route_receipts,
+        )?,
+        example_artifact(
             "schemas/examples/gateway/chat.request.json",
             &gateway_request,
         )?,
@@ -679,8 +1384,72 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
             &gateway_response,
         )?,
         example_artifact(
+            "schemas/examples/gateway/anthropic-messages.request.json",
+            &anthropic_request,
+        )?,
+        example_artifact(
+            "schemas/examples/gateway/anthropic-messages.response.json",
+            &anthropic_response,
+        )?,
+        example_artifact(
+            "schemas/examples/gateway/anthropic-messages.error.response.json",
+            &anthropic_error,
+        )?,
+        example_artifact(
+            "schemas/examples/gateway/gemini-generate-content.request.json",
+            &gemini_request,
+        )?,
+        example_artifact(
+            "schemas/examples/gateway/gemini-generate-content.response.json",
+            &gemini_response,
+        )?,
+        example_artifact(
+            "schemas/examples/gateway/gemini-generate-content.error.response.json",
+            &gemini_error,
+        )?,
+        example_artifact(
             "schemas/examples/gateway/error.response.json",
             &error_envelope,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/route-receipt-diagnostics.response.json",
+            &route_receipt_diagnostics,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/usage-summary.response.json",
+            &usage_summary,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/usage-breakdown.response.json",
+            &usage_breakdown,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/balance-projection.response.json",
+            &balance_projection,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/pricing-catalog.response.json",
+            &pricing_catalog,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/pricing-simulation.request.json",
+            &pricing_simulation_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/pricing-simulation.response.json",
+            &pricing_simulation_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/billing-export.request.json",
+            &billing_export_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/billing-export.response.json",
+            &billing_export_job,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/billing-exports.response.json",
+            &billing_export_jobs,
         )?,
         example_artifact(
             "schemas/examples/events/usage-event-recorded.message.json",
@@ -707,7 +1476,7 @@ export const COMPATIBILITY_RULES = [\n\
   'Serialization key changes are always breaking for v1 contracts.',\n\
   'Checked-in schemas, examples, and generated package metadata must be regenerated together.',\n\
 ] as const;\n\
-export const PROTOCOL_FAMILIES = ['openai_chat', 'openai_responses', 'mcp_streamable_http', 'realtime_webrtc'] as const;\n\
+export const PROTOCOL_FAMILIES = ['openai_chat', 'openai_responses', 'mcp_streamable_http', 'realtime_webrtc', 'anthropic_messages', 'gemini_generate_content'] as const;\n\
 export const ADMISSION_RESULTS = ['admitted', 'rejected_budget', 'rejected_rate_limit', 'rejected_concurrency', 'rejected_policy', 'rejected_no_candidate'] as const;\n\
 export const PROVIDER_RESOURCE_STATUSES = ['active', 'disabled', 'draining', 'quarantined', 'deleted'] as const;\n\
 export const USAGE_PHASES = ['reserve', 'partial', 'final', 'release'] as const;\n",
@@ -724,11 +1493,23 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'listRoutePolicies', method: 'GET', path: '/v1/route-policies' }},\n\
   {{ id: 'getConfigSnapshot', method: 'GET', path: '/v1/config-snapshots/{{config_snapshot_id}}' }},\n\
   {{ id: 'activateConfigSnapshot', method: 'POST', path: '/v1/config-snapshots/{{config_snapshot_id}}/activate' }},\n\
+  {{ id: 'getUsageSummary', method: 'GET', path: '/v1/usage/summary' }},\n\
+  {{ id: 'getUsageBreakdown', method: 'GET', path: '/v1/usage/breakdown' }},\n\
+  {{ id: 'getBalanceProjection', method: 'GET', path: '/v1/billing/projection' }},\n\
+  {{ id: 'getPricingCatalog', method: 'GET', path: '/v1/pricing/catalog' }},\n\
+  {{ id: 'createPricingSimulation', method: 'POST', path: '/v1/pricing/simulations' }},\n\
+  {{ id: 'createBillingExport', method: 'POST', path: '/v1/billing/exports' }},\n\
+  {{ id: 'listBillingExports', method: 'GET', path: '/v1/billing/exports' }},\n\
+  {{ id: 'getBillingExport', method: 'GET', path: '/v1/billing/exports/{{export_job_id}}' }},\n\
   {{ id: 'simulateRoute', method: 'POST', path: '/v1/route-simulations' }},\n\
+  {{ id: 'listRouteReceipts', method: 'GET', path: '/v1/route-receipts' }},\n\
   {{ id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}' }},\n\
+  {{ id: 'getRouteReceiptDiagnostics', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}/diagnostics' }},\n\
 ] as const;\n\
 export const GATEWAY_OPERATIONS = [\n\
-  {{ id: 'createChatCompletion', method: 'POST', path: '/v1/gateway/chat/completions' }},\n\
+  {{ id: 'createChatCompletion', method: 'POST', path: '/v1/chat/completions' }},\n\
+  {{ id: 'createAnthropicMessages', method: 'POST', path: '/v1/messages' }},\n\
+  {{ id: 'createGeminiGenerateContent', method: 'POST', path: '/v1beta/models/{{model}}:generateContent' }},\n\
 ] as const;\n",
     );
 
@@ -762,6 +1543,16 @@ fn stable_contracts() -> Vec<String> {
         "route_policy".to_string(),
         "config_snapshot".to_string(),
         "chat_request".to_string(),
+        "gateway_anthropic_messages".to_string(),
+        "gateway_gemini_generate_content".to_string(),
+        "route_receipt_diagnostics".to_string(),
+        "usage_summary".to_string(),
+        "usage_breakdown".to_string(),
+        "balance_projection".to_string(),
+        "pricing_catalog".to_string(),
+        "pricing_simulation".to_string(),
+        "billing_export_job".to_string(),
+        "billing_export_jobs".to_string(),
         "route_receipt".to_string(),
         "usage_event".to_string(),
         "normalized_error".to_string(),
@@ -1120,6 +1911,409 @@ fn sample_gateway_chat_response() -> GatewayChatResponse {
     }
 }
 
+fn sample_gateway_anthropic_messages_request() -> GatewayAnthropicMessagesRequest {
+    GatewayAnthropicMessagesRequest {
+        model: "claude-3-opus".to_string(),
+        messages: vec![GatewayAnthropicMessage {
+            role: "user".to_string(),
+            content: GatewayAnthropicMessageContent::Blocks(vec![
+                GatewayAnthropicMessageContentBlock::Text {
+                    text: "Summarize the last outage.".to_string(),
+                },
+            ]),
+        }],
+        max_tokens: Some(768),
+        system: Some("You are an observability analyst.".to_string()),
+        stream: Some(false),
+        temperature: Some(0.3),
+        top_p: Some(0.95),
+        top_k: Some(40),
+    }
+}
+
+fn sample_gateway_anthropic_messages_response() -> GatewayAnthropicMessagesResponse {
+    GatewayAnthropicMessagesResponse {
+        id: Some("msg_123".to_string()),
+        model: Some("claude-3-opus".to_string()),
+        content: vec![GatewayAnthropicResponseContentBlock {
+            kind: "text".to_string(),
+            text: "The outage was caused by a transient worker restart in eu-west.".to_string(),
+        }],
+        stop_reason: Some("end_turn".to_string()),
+        usage: Some(GatewayAnthropicUsage {
+            input_tokens: 123,
+            output_tokens: 42,
+        }),
+    }
+}
+
+fn sample_gateway_anthropic_messages_error() -> GatewayAnthropicMessagesError {
+    GatewayAnthropicMessagesError {
+        error: sample_normalized_error("Anthropic messages validation failed"),
+    }
+}
+
+fn sample_gateway_gemini_generate_content_request() -> GatewayGeminiGenerateContentRequest {
+    GatewayGeminiGenerateContentRequest {
+        model: "gemini-1.5-pro".to_string(),
+        contents: vec![GatewayGeminiContent {
+            role: GatewayGeminiRole::User,
+            parts: vec![GatewayGeminiPart {
+                text: "Summarize the last outage incident and mitigation steps.".to_string(),
+            }],
+        }],
+        tools: Vec::new(),
+        stream: false,
+        system_instruction: Some(GatewayGeminiSystemInstruction {
+            parts: vec![GatewayGeminiPart {
+                text: "Be concise and technical.".to_string(),
+            }],
+        }),
+        generation_config: Some(GatewayGeminiGenerationConfig {
+            max_output_tokens: Some(1024),
+            temperature: Some(0.4),
+        }),
+    }
+}
+
+fn sample_gateway_gemini_generate_content_response() -> GatewayGeminiGenerateContentResponse {
+    GatewayGeminiGenerateContentResponse {
+        response_id: Some("resp_gemini_123".to_string()),
+        candidates: vec![GatewayGeminiCandidate {
+            content: Some(GatewayGeminiContent {
+                role: GatewayGeminiRole::Model,
+                parts: vec![GatewayGeminiPart {
+                    text: "The outage was likely triggered by routing policy misconfiguration."
+                        .to_string(),
+                }],
+            }),
+            finish_reason: Some("STOP".to_string()),
+        }],
+        usage_metadata: Some(GatewayGeminiUsageMetadata {
+            prompt_token_count: 88,
+            candidates_token_count: 27,
+            total_token_count: 115,
+            cached_content_token_count: 0,
+        }),
+        model_version: Some("gemini-1.5-pro-latest".to_string()),
+    }
+}
+
+fn sample_gateway_gemini_generate_content_error() -> GatewayGeminiGenerateContentError {
+    GatewayGeminiGenerateContentError {
+        error: sample_normalized_error("Gemini generate-content validation failed"),
+    }
+}
+
+fn sample_route_receipt_diagnostics() -> RouteReceiptDiagnosticsResponse {
+    RouteReceiptDiagnosticsResponse {
+        route_receipt: sample_route_receipt(),
+        decision_timeline: vec![
+            RouteReceiptDecisionTraceStep {
+                stage: "admission".to_string(),
+                status: "passed".to_string(),
+                message: "Tenant policy accepted request".to_string(),
+                score: Some(1.0),
+                notes: vec!["all constraints satisfied".to_string()],
+            },
+            RouteReceiptDecisionTraceStep {
+                stage: "candidate_selection".to_string(),
+                status: "passed".to_string(),
+                message: "Selected openai-us-east-primary".to_string(),
+                score: Some(0.91),
+                notes: Vec::new(),
+            },
+        ],
+        policy_checks: vec![RouteReceiptPolicyCheck {
+            policy_id: RoutePolicyId::parse("routepol_default").unwrap(),
+            status: "passed".to_string(),
+            reason: Some("policy satisfied".to_string()),
+        }],
+        provider_attempts: vec![RouteReceiptProviderAttempt {
+            provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
+            attempt: 1,
+            status: "succeeded".to_string(),
+            started_at: "2026-04-21T12:16:01Z".to_string(),
+            finished_at: "2026-04-21T12:16:03Z".to_string(),
+            latency_ms: 1100,
+            reason: "succeeded with output".to_string(),
+        }],
+        metadata: BTreeMap::from([
+            ("policy_cache_hit".to_string(), "true".to_string()),
+            ("candidate_pool_size".to_string(), "3".to_string()),
+        ]),
+    }
+}
+
+fn sample_usage_summary_response() -> UsageSummaryResponse {
+    UsageSummaryResponse {
+        data: UsageSummary {
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            window_start: "2026-04-21T00:00:00Z".to_string(),
+            window_end: "2026-04-21T23:59:59Z".to_string(),
+            currency: "USD".to_string(),
+            event_count: 14,
+            input_tokens: 18_420,
+            output_tokens: 6_245,
+            cached_input_tokens: 1_220,
+            provider_cost: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "0.124500".to_string(),
+            },
+            billable_price: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "0.152025".to_string(),
+            },
+        },
+    }
+}
+
+fn sample_usage_breakdown_response() -> UsageBreakdownResponse {
+    UsageBreakdownResponse {
+        data: vec![
+            UsageBreakdownRow {
+                bucket: "openai".to_string(),
+                provider_id: Some("openai".to_string()),
+                model_alias: None,
+                input_tokens: 10_000,
+                output_tokens: 4_000,
+                cached_input_tokens: 500,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.082000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.098400".to_string(),
+                },
+            },
+            UsageBreakdownRow {
+                bucket: "reasoning-fast".to_string(),
+                provider_id: None,
+                model_alias: Some("reasoning-fast".to_string()),
+                input_tokens: 8_420,
+                output_tokens: 2_245,
+                cached_input_tokens: 720,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.042500".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.053625".to_string(),
+                },
+            },
+        ],
+        next_cursor: Some("2".to_string()),
+    }
+}
+
+fn sample_balance_projection_response() -> BalanceProjectionResponse {
+    BalanceProjectionResponse {
+        data: BalanceProjection {
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            currency: "USD".to_string(),
+            provider_cost_total: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "1.244000".to_string(),
+            },
+            billable_total: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "1.540000".to_string(),
+            },
+            configured_budget: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "75.000000".to_string(),
+            },
+            remaining_budget: MonetaryAmount {
+                currency: "USD".to_string(),
+                amount: "73.460000".to_string(),
+            },
+            threshold_status: "ok".to_string(),
+            last_projected_at: "2026-04-21T12:20:00Z".to_string(),
+            projection_lag_seconds: 18,
+        },
+    }
+}
+
+fn sample_pricing_catalog_response() -> PricingCatalogResponse {
+    PricingCatalogResponse {
+        catalog_id: "pricing_catalog_default".to_string(),
+        catalog_version: 1,
+        currency: "USD".to_string(),
+        entries: vec![
+            PricingCatalogEntry {
+                dimension: "input_tokens".to_string(),
+                provider_id: "openai".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 2_500,
+                unit_denominator: 1_000,
+                source: "provider_native".to_string(),
+            },
+            PricingCatalogEntry {
+                dimension: "image_generations".to_string(),
+                provider_id: "openai".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 18_000,
+                unit_denominator: 1,
+                source: "provider_native".to_string(),
+            },
+            PricingCatalogEntry {
+                dimension: "audio_seconds".to_string(),
+                provider_id: "openai".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 1_500,
+                unit_denominator: 1,
+                source: "provider_native".to_string(),
+            },
+        ],
+    }
+}
+
+fn sample_pricing_simulation_request() -> PricingSimulationRequest {
+    PricingSimulationRequest {
+        provider_id: "openai".to_string(),
+        model_alias: "reasoning-fast".to_string(),
+        usage: UsageMetrics {
+            input_tokens: 1_200,
+            output_tokens: 320,
+            cached_input_tokens: 64,
+        },
+        region: Some("us-east-1".to_string()),
+        image_generation_units: Some(1),
+        audio_seconds: Some(8),
+    }
+}
+
+fn sample_pricing_simulation_response() -> PricingSimulationResponse {
+    PricingSimulationResponse {
+        catalog_id: "pricing_catalog_default".to_string(),
+        catalog_version: 1,
+        currency: "USD".to_string(),
+        provider_cost: MonetaryAmount {
+            currency: "USD".to_string(),
+            amount: "0.005188".to_string(),
+        },
+        billable_price: MonetaryAmount {
+            currency: "USD".to_string(),
+            amount: "0.006225".to_string(),
+        },
+        line_items: vec![
+            PricingSimulationLineItem {
+                dimension: "input_tokens".to_string(),
+                units: 1_200,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.003000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.003600".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "output_tokens".to_string(),
+                units: 320,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.002720".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.003264".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "cached_input_tokens".to_string(),
+                units: 64,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.000048".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.000057".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "image_generations".to_string(),
+                units: 1,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.018000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.021600".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+            PricingSimulationLineItem {
+                dimension: "audio_seconds".to_string(),
+                units: 8,
+                provider_cost: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.012000".to_string(),
+                },
+                billable_price: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.014400".to_string(),
+                },
+                rate_source: "provider_native".to_string(),
+            },
+        ],
+    }
+}
+
+fn sample_billing_export_request() -> BillingExportRequest {
+    BillingExportRequest {
+        tenant_id: Some(TenantId::parse("tenant_acme").unwrap()),
+        project_id: Some(ProjectId::parse("proj_core").unwrap()),
+        window_start: "2026-04-01T00:00:00Z".to_string(),
+        window_end: "2026-04-30T23:59:59Z".to_string(),
+        format: "csv".to_string(),
+    }
+}
+
+fn sample_billing_export_job_response() -> BillingExportJobResponse {
+    BillingExportJobResponse {
+        data: BillingExportJob {
+            export_job_id: "export_123".to_string(),
+            status: "queued".to_string(),
+            format: "csv".to_string(),
+            requested_at: "2026-04-21T12:25:00Z".to_string(),
+            completed_at: None,
+            error_message: None,
+            tenant_id: Some(TenantId::parse("tenant_acme").unwrap()),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+        },
+    }
+}
+
+fn sample_normalized_error(message: &str) -> core_domain::NormalizedError {
+    core_domain::NormalizedError {
+        code: "validation_failed".to_string(),
+        message: message.to_string(),
+        request_id: "req_123".to_string(),
+        retryable: false,
+        upstream_code: None,
+        upstream_status_code: None,
+        validation_issues: vec![core_domain::ValidationIssue {
+            field: "messages".to_string(),
+            message: "expected valid payload".to_string(),
+        }],
+        details: BTreeMap::from([("service".to_string(), "gateway-api".to_string())]),
+    }
+}
+
 fn sample_usage_event_recorded_message() -> UsageEventRecordedMessage {
     let envelope = MessageEnvelope::new(
         "msg_usage_123",
@@ -1143,6 +2337,28 @@ fn sample_usage_event_recorded_message() -> UsageEventRecordedMessage {
         request_id: envelope.request_id,
         idempotency_key: envelope.idempotency_key,
         payload: envelope.payload,
+    }
+}
+
+#[cfg(test)]
+fn sample_route_receipt_recorded_message() -> RouteReceiptRecordedMessage {
+    let diagnostics = sample_route_receipt_diagnostics();
+    let route_receipt = diagnostics.route_receipt.clone();
+    RouteReceiptRecordedMessage {
+        message_id: "msg_routercpt_123".to_string(),
+        message_type: RouteReceiptRecordedMessageType::RouteReceiptRecorded,
+        schema_version: 1,
+        occurred_at: route_receipt.created_at.clone(),
+        producer: ServiceName::parse("gateway-api").unwrap(),
+        trace_id: Some("trace_123".to_string()),
+        request_id: Some("req_123".to_string()),
+        idempotency_key: format!("{}:recorded", route_receipt.route_receipt_id),
+        payload: RouteReceiptRecorded {
+            route_receipt,
+            decision_timeline: diagnostics.decision_timeline,
+            policy_checks: diagnostics.policy_checks,
+            provider_attempts: diagnostics.provider_attempts,
+        },
     }
 }
 
@@ -1187,8 +2403,11 @@ pub fn workspace_root() -> PathBuf {
 mod tests {
     use super::{
         ChatRequest, ConfigSnapshotActivated, MessageEnvelope, MessageType, ProtocolFamily,
-        RequestEnvelope, collect_contract_artifacts, sample_gateway_chat_request,
-        sample_usage_event_recorded_message, workspace_root,
+        RequestEnvelope, RouteReceiptRecordedMessage, collect_contract_artifacts,
+        sample_gateway_anthropic_messages_request, sample_gateway_anthropic_messages_response,
+        sample_gateway_chat_request, sample_gateway_gemini_generate_content_request,
+        sample_gateway_gemini_generate_content_response, sample_route_receipt_diagnostics,
+        sample_route_receipt_recorded_message, sample_usage_event_recorded_message, workspace_root,
     };
     use core_domain::{ConfigSnapshot, ProjectId, ServiceName, TenantId};
 
@@ -1208,6 +2427,18 @@ mod tests {
         assert_eq!(json["protocol_family"], "openai_chat");
         assert_eq!(json["source_service"], "gateway-api");
         assert_eq!(json["tenant_id"], "tenant_acme");
+    }
+
+    #[test]
+    fn request_envelope_supports_new_protocol_families() {
+        let families = serde_json::to_value(vec![
+            ProtocolFamily::AnthropicMessages,
+            ProtocolFamily::GeminiGenerateContent,
+        ])
+        .unwrap();
+
+        assert_eq!(families[0], "anthropic_messages");
+        assert_eq!(families[1], "gemini_generate_content");
     }
 
     #[test]
@@ -1294,5 +2525,62 @@ mod tests {
         let event = sample_usage_event_recorded_message();
         let event_json = serde_json::to_value(&event).unwrap();
         assert_eq!(event_json["message_type"], "usage_event.recorded");
+
+        let route_receipt_event = sample_route_receipt_recorded_message();
+        let route_receipt_event_json = serde_json::to_value(&route_receipt_event).unwrap();
+        assert_eq!(
+            route_receipt_event_json["message_type"],
+            "route_receipt.recorded"
+        );
+
+        let anthropic_request = sample_gateway_anthropic_messages_request();
+        let anthropic_response = sample_gateway_anthropic_messages_response();
+        assert_eq!(
+            serde_json::to_value(&anthropic_request).unwrap()["messages"][0]["role"],
+            "user"
+        );
+        assert_eq!(
+            serde_json::to_value(&anthropic_response).unwrap()["content"][0]["type"],
+            "text"
+        );
+
+        let gemini_request = sample_gateway_gemini_generate_content_request();
+        let gemini_response = sample_gateway_gemini_generate_content_response();
+        assert_eq!(
+            serde_json::to_value(&gemini_request).unwrap()["contents"][0]["role"],
+            "user"
+        );
+        assert_eq!(
+            serde_json::to_value(&gemini_response).unwrap()["candidates"][0]["content"]["role"],
+            "model"
+        );
+    }
+
+    #[test]
+    fn route_receipt_diagnostics_example_round_trips() {
+        let diagnostics = sample_route_receipt_diagnostics();
+        let value = serde_json::to_value(&diagnostics).unwrap();
+
+        assert_eq!(value["route_receipt"]["route_receipt_id"], "routercpt_123");
+        assert_eq!(value["decision_timeline"][0]["stage"], "admission");
+        assert_eq!(value["provider_attempts"][0]["attempt"], 1);
+    }
+
+    #[test]
+    fn route_receipt_recorded_message_round_trips() {
+        let event = sample_route_receipt_recorded_message();
+        let value = serde_json::to_value(&event).unwrap();
+        let reparsed: RouteReceiptRecordedMessage = serde_json::from_value(value.clone()).unwrap();
+
+        assert_eq!(reparsed, event);
+        assert_eq!(value["message_type"], "route_receipt.recorded");
+        assert_eq!(
+            value["payload"]["route_receipt"]["route_receipt_id"],
+            "routercpt_123"
+        );
+        assert_eq!(
+            value["payload"]["provider_attempts"][0]["status"],
+            "succeeded"
+        );
     }
 }

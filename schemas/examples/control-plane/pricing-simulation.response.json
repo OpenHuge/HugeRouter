@@ -1,0 +1,80 @@
+{
+  "catalog_id": "pricing_catalog_default",
+  "catalog_version": 1,
+  "currency": "USD",
+  "provider_cost": {
+    "currency": "USD",
+    "amount": "0.005188"
+  },
+  "billable_price": {
+    "currency": "USD",
+    "amount": "0.006225"
+  },
+  "line_items": [
+    {
+      "dimension": "input_tokens",
+      "units": 1200,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.003000"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.003600"
+      },
+      "rate_source": "provider_native"
+    },
+    {
+      "dimension": "output_tokens",
+      "units": 320,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.002720"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.003264"
+      },
+      "rate_source": "provider_native"
+    },
+    {
+      "dimension": "cached_input_tokens",
+      "units": 64,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.000048"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.000057"
+      },
+      "rate_source": "provider_native"
+    },
+    {
+      "dimension": "image_generations",
+      "units": 1,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.018000"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.021600"
+      },
+      "rate_source": "provider_native"
+    },
+    {
+      "dimension": "audio_seconds",
+      "units": 8,
+      "provider_cost": {
+        "currency": "USD",
+        "amount": "0.012000"
+      },
+      "billable_price": {
+        "currency": "USD",
+        "amount": "0.014400"
+      },
+      "rate_source": "provider_native"
+    }
+  ]
+}
