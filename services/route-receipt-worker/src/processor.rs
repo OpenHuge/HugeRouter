@@ -232,6 +232,7 @@ mod tests {
             route_receipt_id: core_domain::RouteReceiptId::parse("routercpt_123").unwrap(),
             tenant_id: core_domain::TenantId::parse("tenant_acme").unwrap(),
             project_id: core_domain::ProjectId::parse("proj_core").unwrap(),
+            route_policy_id: core_domain::RoutePolicyId::parse("routepol_default").unwrap(),
             request_id: "req_123".to_string(),
             trace_id: "trace_123".to_string(),
             protocol_family: "openai_chat".to_string(),
@@ -244,6 +245,7 @@ mod tests {
             excluded_targets: vec![core_domain::ExcludedTarget {
                 provider_resource_id: core_domain::ProviderResourceId::parse("prvrsrc_backup")
                     .unwrap(),
+                reason_code: "rejected_health_state".to_string(),
                 reason: "rejected_health_state".to_string(),
             }],
             score_breakdown: core_domain::ScoreBreakdown {
@@ -276,6 +278,7 @@ mod tests {
                     "prvrsrc_openai_primary".to_string(),
                 )]),
             }),
+            failure_reason: normalized_error_code.map(|_| "provider down".to_string()),
             created_at: "2026-04-23T10:00:00Z".to_string(),
         };
         let payload = RouteReceiptRecorded {

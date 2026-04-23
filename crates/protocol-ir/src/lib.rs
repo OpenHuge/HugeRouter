@@ -731,7 +731,7 @@ pub enum RouteDiagnosticDecision {
     Excluded,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct RouteReceiptSummary {
     pub route_receipt_id: RouteReceiptId,
     pub admission_result: AdmissionResult,
@@ -742,7 +742,7 @@ pub struct RouteReceiptSummary {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct RouteDiagnosticTarget {
     pub provider_resource: ProviderResource,
     pub decision: RouteDiagnosticDecision,
@@ -757,7 +757,7 @@ pub struct RouteDiagnosticTarget {
     pub recent_receipt_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct RouteDiagnosticsResponse {
     pub route_policy: RoutePolicy,
     #[serde(skip_serializing_if = "Option::is_none")]

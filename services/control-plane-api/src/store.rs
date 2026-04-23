@@ -1326,10 +1326,10 @@ impl StoreMode {
         route_policy_id: &str,
     ) -> Result<Option<RouteDiagnosticsResponse>> {
         match self {
-            Self::Memory(store) => build_memory_route_diagnostics(
+            Self::Memory(store) => Ok(build_memory_route_diagnostics(
                 &store.read().expect("memory store read lock"),
                 route_policy_id,
-            ),
+            )),
             Self::Postgres(store) => store.get_route_diagnostics(route_policy_id).await,
         }
     }
@@ -4110,14 +4110,14 @@ fn provider_capability_gaps(
         .collect()
 }
 
-fn is_health_blocked(health_state: HealthState) -> bool {
+const fn is_health_blocked(health_state: HealthState) -> bool {
     matches!(
         health_state,
         HealthState::Quarantined | HealthState::Draining | HealthState::Disabled
     )
 }
 
-fn health_state_slug(health_state: HealthState) -> &'static str {
+const fn health_state_slug(health_state: HealthState) -> &'static str {
     match health_state {
         HealthState::Healthy => "healthy",
         HealthState::Degraded => "degraded",
@@ -4127,7 +4127,7 @@ fn health_state_slug(health_state: HealthState) -> &'static str {
     }
 }
 
-fn admission_result_slug(admission_result: AdmissionResult) -> &'static str {
+const fn admission_result_slug(admission_result: AdmissionResult) -> &'static str {
     match admission_result {
         AdmissionResult::Admitted => "admitted",
         AdmissionResult::RejectedBudget => "rejected_budget",
@@ -4230,15 +4230,15 @@ fn to_route_receipt_summary(receipt: &RouteReceipt) -> RouteReceiptSummary {
 fn build_memory_route_diagnostics(
     store: &MemoryStore,
     route_policy_id: &str,
-) -> Result<Option<RouteDiagnosticsResponse>> {
-    Ok(build_route_diagnostics_response(
+) -> Option<RouteDiagnosticsResponse> {
+    build_route_diagnostics_response(
         &store.provider_resources,
         &store.route_policies,
         &store.config_snapshots,
         &store.route_receipts.values().cloned().collect::<Vec<_>>(),
         route_policy_id,
         Some(store.active_config_snapshot_id.as_str()),
-    ))
+    )
 }
 
 fn build_route_diagnostics_response(

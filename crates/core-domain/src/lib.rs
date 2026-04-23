@@ -647,6 +647,7 @@ impl Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ProviderCapabilities {
     pub supports_streaming: bool,
     pub supports_tool_calling: bool,
@@ -924,10 +925,10 @@ mod tests {
         CredentialOwnerType, DeploymentScope, DomainError, EmailLoginCompleteRequest,
         ErrorEnvelope, HealthState, MonetaryAmount, NormalizedError, OAuthCallbackRequest,
         ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
-        ProviderResourceStatus, RoutePolicy, RouteReceipt, RouteReceiptId, ScoreBreakdown, Tenant,
-        TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
-        TenantMembershipStatus, TenantSummary, UsageEvent, UsageEventId, UsageMetrics, UsagePhase,
-        UserId, UserIdentity,
+        ProviderResourceStatus, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId,
+        ScoreBreakdown, Tenant, TenantId, TenantMembership, TenantMembershipId,
+        TenantMembershipRole, TenantMembershipStatus, TenantSummary, UsageEvent, UsageEventId,
+        UsageMetrics, UsagePhase, UserId, UserIdentity,
     };
     use serde_json::{Value, json};
 
