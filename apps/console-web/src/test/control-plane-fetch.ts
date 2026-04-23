@@ -589,6 +589,86 @@ let apiKeysState = [
 
 const apiKeysInitialState = [...apiKeysState];
 
+const merchantShopsInitialState: any[] = [
+  {
+    merchant_shop_id: "mshop_acme",
+    tenant_id: "tenant_acme",
+    slug: "acme-small-shop",
+    display_name: "Acme Small Shop",
+    status: "active",
+    announcement: "Fresh relay trial cards with replay-backed evaluation.",
+    fulfillment_mode: "auto_card_secret",
+    version: 1,
+    created_at: "2026-04-22T00:00:00Z",
+    updated_at: "2026-04-22T00:00:00Z",
+  },
+];
+
+const cardProductsInitialState: any[] = [
+  {
+    card_product_id: "cardprod_acme_trial",
+    tenant_id: "tenant_acme",
+    merchant_shop_id: "mshop_acme",
+    title: "Claude Trial Pack",
+    description: "Starter batch for relay verification and low-risk onboarding.",
+    status: "active",
+    inventory_count: 32,
+    face_value_usd: "1.00",
+    retail_price_usd: "1.99",
+    delivery_kind: "direct_secret",
+    supports_trial: true,
+    version: 1,
+    created_at: "2026-04-22T00:00:00Z",
+    updated_at: "2026-04-22T00:00:00Z",
+  },
+];
+
+const trialConnectionsInitialState: any[] = [
+  {
+    trial_connection_id: "trialconn_acme_relay",
+    tenant_id: "tenant_acme",
+    provider_label: "Acme Relay",
+    endpoint_base_url: "https://relay.acme.example/v1",
+    api_key_masked: "sk-tria...acme",
+    target_model: "claude-sonnet",
+    status: "active",
+    notes: "Dedicated trial key only; never attach production traffic.",
+    last_verified_at: "2026-04-22T00:00:00Z",
+    version: 1,
+    created_at: "2026-04-22T00:00:00Z",
+    updated_at: "2026-04-22T00:00:00Z",
+  },
+];
+
+const relayEvaluationsInitialState: any[] = [
+  {
+    relay_evaluation_id: "reval_acme_relay",
+    tenant_id: "tenant_acme",
+    trial_connection_id: "trialconn_acme_relay",
+    replay_capsule_id: "replay_acme_relay_eval",
+    provider_label: "Acme Relay",
+    endpoint_base_url: "https://relay.acme.example/v1",
+    target_model: "claude-sonnet",
+    runner_mode: "simulated",
+    sample_request_count: 5,
+    estimated_tokens_saved: 2400,
+    overall_score: 82,
+    verdict: "warning",
+    fingerprint_status: "pass",
+    protocol_status: "warning",
+    token_status: "warning",
+    multimodal_status: "not_tested",
+    detected_channel: "vertex",
+    summary: "Replay capsule captured; protocol and token behavior still need manual follow-up.",
+    created_at: "2026-04-22T00:00:00Z",
+  },
+];
+
+let merchantShopsState = structuredClone(merchantShopsInitialState);
+let cardProductsState = structuredClone(cardProductsInitialState);
+let trialConnectionsState = structuredClone(trialConnectionsInitialState);
+let relayEvaluationsState = structuredClone(relayEvaluationsInitialState);
+
 const emptyResponse = (status: number) =>
   new Response("", {
     status,
@@ -653,9 +733,13 @@ export function createControlPlaneFetchMock() {
   apiKeysState = [...apiKeysInitialState];
   billingExportJobsState = structuredClone(billingExportInitialState);
   billingExportPollCount = 0;
+  cardProductsState = structuredClone(cardProductsInitialState);
   configSnapshotsState = structuredClone(configSnapshotsInitialState);
+  merchantShopsState = structuredClone(merchantShopsInitialState);
   providerResourcesState = structuredClone(providerResourcesInitialState);
+  relayEvaluationsState = structuredClone(relayEvaluationsInitialState);
   routePoliciesState = structuredClone(routePoliciesInitialState);
+  trialConnectionsState = structuredClone(trialConnectionsInitialState);
 
   return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = resolvePath(input);
@@ -666,6 +750,159 @@ export function createControlPlaneFetchMock() {
 
     if (path === "/v1/projects") {
       return Promise.resolve(jsonResponse(200, projectsResponse));
+    }
+
+    if (path === "/v1/merchant/workspace") {
+      return Promise.resolve(
+        jsonResponse(200, {
+          data: {
+            merchant_enabled: merchantShopsState.length > 0,
+            tenant_id: "tenant_acme",
+            shops: merchantShopsState,
+            card_products: cardProductsState,
+            trial_connections: trialConnectionsState,
+            recent_evaluations: relayEvaluationsState,
+          },
+        }),
+      );
+    }
+
+    if (path === "/v1/merchant/shops" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const nextShop = {
+        announcement:
+          typeof body.announcement === "string" ? body.announcement : undefined,
+        created_at: "2026-04-23T00:00:00Z",
+        display_name:
+          typeof body.display_name === "string"
+            ? body.display_name
+            : "Merchant Shop",
+        fulfillment_mode: "auto_card_secret",
+        merchant_shop_id:
+          typeof body.merchant_shop_id === "string"
+            ? body.merchant_shop_id
+            : `mshop_${merchantShopsState.length + 1}`,
+        slug:
+          typeof body.slug === "string"
+            ? body.slug
+            : `merchant-shop-${merchantShopsState.length + 1}`,
+        status: "active",
+        tenant_id: "tenant_acme",
+        updated_at: "2026-04-23T00:00:00Z",
+        version: 1,
+      };
+      merchantShopsState = [...merchantShopsState, nextShop];
+      return Promise.resolve(jsonResponse(200, nextShop));
+    }
+
+    if (path === "/v1/merchant/card-products" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const nextProduct = {
+        card_product_id:
+          typeof body.card_product_id === "string"
+            ? body.card_product_id
+            : `cardprod_${cardProductsState.length + 1}`,
+        created_at: "2026-04-23T00:00:00Z",
+        delivery_kind: "direct_secret",
+        description:
+          typeof body.description === "string"
+            ? body.description
+            : "Merchant product",
+        face_value_usd:
+          typeof body.face_value_usd === "string" ? body.face_value_usd : "1.00",
+        inventory_count:
+          typeof body.inventory_count === "number" ? body.inventory_count : 10,
+        merchant_shop_id:
+          typeof body.merchant_shop_id === "string"
+            ? body.merchant_shop_id
+            : merchantShopsState[0]?.merchant_shop_id ?? "mshop_unknown",
+        retail_price_usd:
+          typeof body.retail_price_usd === "string"
+            ? body.retail_price_usd
+            : "1.99",
+        status: "active",
+        supports_trial:
+          typeof body.supports_trial === "boolean" ? body.supports_trial : true,
+        tenant_id: "tenant_acme",
+        title:
+          typeof body.title === "string" ? body.title : "Merchant Card Product",
+        updated_at: "2026-04-23T00:00:00Z",
+        version: 1,
+      };
+      cardProductsState = [...cardProductsState, nextProduct];
+      return Promise.resolve(jsonResponse(200, nextProduct));
+    }
+
+    if (path === "/v1/merchant/trial-connections" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const apiKey =
+        typeof body.api_key === "string" ? body.api_key.trim() : "sk-trial-default";
+      const nextConnection = {
+        api_key_masked: `${apiKey.slice(0, 7)}...${apiKey.slice(-4)}`,
+        created_at: "2026-04-23T00:00:00Z",
+        endpoint_base_url:
+          typeof body.endpoint_base_url === "string"
+            ? body.endpoint_base_url
+            : "https://relay.example.com/v1",
+        last_verified_at: undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        provider_label:
+          typeof body.provider_label === "string"
+            ? body.provider_label
+            : "Merchant Relay",
+        status: "active",
+        target_model:
+          typeof body.target_model === "string"
+            ? body.target_model
+            : "claude-sonnet",
+        tenant_id: "tenant_acme",
+        trial_connection_id:
+          typeof body.trial_connection_id === "string"
+            ? body.trial_connection_id
+            : `trialconn_${trialConnectionsState.length + 1}`,
+        updated_at: "2026-04-23T00:00:00Z",
+        version: 1,
+      };
+      trialConnectionsState = [...trialConnectionsState, nextConnection];
+      return Promise.resolve(jsonResponse(200, nextConnection));
+    }
+
+    if (path === "/v1/merchant/evaluations" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const trialConnectionId =
+        typeof body.trial_connection_id === "string"
+          ? body.trial_connection_id
+          : trialConnectionsState[0]?.trial_connection_id ?? "trialconn_unknown";
+      const connection = trialConnectionsState.find(
+        (item) => item.trial_connection_id === trialConnectionId,
+      );
+      const nextEvaluation = {
+        created_at: "2026-04-23T00:00:00Z",
+        detected_channel: connection?.endpoint_base_url.includes("vertex")
+          ? "vertex"
+          : undefined,
+        endpoint_base_url:
+          connection?.endpoint_base_url ?? "https://relay.example.com/v1",
+        estimated_tokens_saved: 2400,
+        fingerprint_status: "pass",
+        multimodal_status: "not_tested",
+        overall_score: 88,
+        protocol_status: "warning",
+        provider_label: connection?.provider_label ?? "Merchant Relay",
+        relay_evaluation_id: `reval_${relayEvaluationsState.length + 1}`,
+        replay_capsule_id: `replay_${relayEvaluationsState.length + 1}`,
+        runner_mode: "simulated",
+        sample_request_count: 5,
+        summary:
+          "Replay-ready evaluation recorded. Review protocol consistency before spending live token budget.",
+        target_model: connection?.target_model ?? "claude-sonnet",
+        tenant_id: "tenant_acme",
+        token_status: "warning",
+        trial_connection_id: trialConnectionId,
+        verdict: "warning",
+      };
+      relayEvaluationsState = [nextEvaluation, ...relayEvaluationsState];
+      return Promise.resolve(jsonResponse(200, nextEvaluation));
     }
 
     if (path === "/v1/provider-resources" && (!init?.method || init.method === "GET")) {

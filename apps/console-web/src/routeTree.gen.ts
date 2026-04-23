@@ -19,6 +19,7 @@ import { Route as AppRoutesRouteImport } from './routes/app.routes'
 import { Route as AppReceiptsRouteImport } from './routes/app.receipts'
 import { Route as AppProvidersRouteImport } from './routes/app.providers'
 import { Route as AppOverviewRouteImport } from './routes/app.overview'
+import { Route as AppMerchantRouteImport } from './routes/app.merchant'
 import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppApiKeysRouteImport } from './routes/app.api-keys'
 import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
@@ -75,6 +76,11 @@ const AppOverviewRoute = AppOverviewRouteImport.update({
   path: '/overview',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMerchantRoute = AppMerchantRouteImport.update({
+  id: '/merchant',
+  path: '/merchant',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBillingRoute = AppBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/api-keys': typeof AppApiKeysRoute
   '/app/billing': typeof AppBillingRoute
+  '/app/merchant': typeof AppMerchantRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/receipts': typeof AppReceiptsRoute
@@ -126,6 +133,7 @@ export interface FileRoutesByTo {
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/api-keys': typeof AppApiKeysRoute
   '/app/billing': typeof AppBillingRoute
+  '/app/merchant': typeof AppMerchantRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/receipts': typeof AppReceiptsRoute
@@ -144,6 +152,7 @@ export interface FileRoutesById {
   '/admin/tenants': typeof AdminTenantsRouteWithChildren
   '/app/api-keys': typeof AppApiKeysRoute
   '/app/billing': typeof AppBillingRoute
+  '/app/merchant': typeof AppMerchantRoute
   '/app/overview': typeof AppOverviewRoute
   '/app/providers': typeof AppProvidersRoute
   '/app/receipts': typeof AppReceiptsRoute
@@ -163,6 +172,7 @@ export interface FileRouteTypes {
     | '/admin/tenants'
     | '/app/api-keys'
     | '/app/billing'
+    | '/app/merchant'
     | '/app/overview'
     | '/app/providers'
     | '/app/receipts'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
     | '/admin/tenants'
     | '/app/api-keys'
     | '/app/billing'
+    | '/app/merchant'
     | '/app/overview'
     | '/app/providers'
     | '/app/receipts'
@@ -197,6 +208,7 @@ export interface FileRouteTypes {
     | '/admin/tenants'
     | '/app/api-keys'
     | '/app/billing'
+    | '/app/merchant'
     | '/app/overview'
     | '/app/providers'
     | '/app/receipts'
@@ -286,6 +298,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOverviewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/merchant': {
+      id: '/app/merchant'
+      path: '/merchant'
+      fullPath: '/app/merchant'
+      preLoaderRoute: typeof AppMerchantRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/billing': {
       id: '/app/billing'
       path: '/billing'
@@ -349,6 +368,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 interface AppRouteChildren {
   AppApiKeysRoute: typeof AppApiKeysRoute
   AppBillingRoute: typeof AppBillingRoute
+  AppMerchantRoute: typeof AppMerchantRoute
   AppOverviewRoute: typeof AppOverviewRoute
   AppProvidersRoute: typeof AppProvidersRoute
   AppReceiptsRoute: typeof AppReceiptsRoute
@@ -361,6 +381,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppApiKeysRoute: AppApiKeysRoute,
   AppBillingRoute: AppBillingRoute,
+  AppMerchantRoute: AppMerchantRoute,
   AppOverviewRoute: AppOverviewRoute,
   AppProvidersRoute: AppProvidersRoute,
   AppReceiptsRoute: AppReceiptsRoute,

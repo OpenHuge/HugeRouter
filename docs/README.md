@@ -48,6 +48,7 @@ Recent priority docs for the source-backed spec deepening pass:
 ## Product
 
 - [Roadmap and Delivery Plan](product/roadmap-and-delivery-plan.md)
+- [Merchant Marketplace And Relay Evaluation Spec](product/merchant-marketplace-and-relay-evaluation-spec.md)
 - [Parallel Development Tracks](tasks/README.md)
 
 ## ADR

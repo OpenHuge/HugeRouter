@@ -5,6 +5,7 @@ import {
   authProviderLinkSchema,
   authSessionSchema,
   authSessionResponseSchema,
+  merchantWorkspaceResponseSchema,
   configSnapshotResponseSchema,
   contractDigest,
   emailLoginCompleteRequestSchema,
@@ -23,6 +24,7 @@ import {
   oauthProviderSchema,
   projectsResponseSchema,
   providerResourcesResponseSchema,
+  replayCapsuleResponseSchema,
   routePoliciesResponseSchema,
   routeSimulationRequestSchema,
   routeSimulationResponseSchema,
@@ -243,4 +245,108 @@ void test('email login start request requires a workspace slug', () => {
   })
 
   assert.equal(parsed.workspaceSlug, 'platform-admin')
+})
+
+void test('merchant workspace payload accepts replay-linked evaluations', () => {
+  const parsed = merchantWorkspaceResponseSchema.parse({
+    data: {
+      merchant_enabled: true,
+      tenant_id: 'tenant_acme',
+      shops: [
+        {
+          merchant_shop_id: 'mshop_acme',
+          tenant_id: 'tenant_acme',
+          slug: 'acme-small-shop',
+          display_name: 'Acme Small Shop',
+          status: 'active',
+          announcement: 'Fresh stock every day',
+          fulfillment_mode: 'auto_card_secret',
+          version: 1,
+          created_at: '2026-04-22T00:00:00Z',
+          updated_at: '2026-04-22T00:00:00Z'
+        }
+      ],
+      card_products: [
+        {
+          card_product_id: 'cardprod_trial_pack',
+          tenant_id: 'tenant_acme',
+          merchant_shop_id: 'mshop_acme',
+          title: 'Trial Claude Pack',
+          description: 'Five low-cost test cards',
+          status: 'active',
+          inventory_count: 42,
+          face_value_usd: '1.00',
+          retail_price_usd: '1.99',
+          delivery_kind: 'direct_secret',
+          supports_trial: true,
+          version: 1,
+          created_at: '2026-04-22T00:00:00Z',
+          updated_at: '2026-04-22T00:00:00Z'
+        }
+      ],
+      trial_connections: [
+        {
+          trial_connection_id: 'trialconn_acme',
+          tenant_id: 'tenant_acme',
+          provider_label: 'Acme Relay',
+          endpoint_base_url: 'https://relay.example.com/v1',
+          api_key_masked: 'sk-test...1234',
+          target_model: 'claude-sonnet',
+          status: 'active',
+          version: 1,
+          created_at: '2026-04-22T00:00:00Z',
+          updated_at: '2026-04-22T00:00:00Z'
+        }
+      ],
+      recent_evaluations: [
+        {
+          relay_evaluation_id: 'reval_acme',
+          tenant_id: 'tenant_acme',
+          trial_connection_id: 'trialconn_acme',
+          replay_capsule_id: 'replay_acme',
+          provider_label: 'Acme Relay',
+          endpoint_base_url: 'https://relay.example.com/v1',
+          target_model: 'claude-sonnet',
+          runner_mode: 'simulated',
+          sample_request_count: 5,
+          estimated_tokens_saved: 2400,
+          overall_score: 82,
+          verdict: 'warning',
+          fingerprint_status: 'pass',
+          protocol_status: 'warning',
+          token_status: 'warning',
+          multimodal_status: 'not_tested',
+          summary: 'Replay capsule captured for support review.',
+          created_at: '2026-04-22T00:00:00Z'
+        }
+      ]
+    }
+  })
+
+  assert.equal(parsed.data.recent_evaluations[0]?.replay_capsule_id, 'replay_acme')
+  assert.equal(parsed.data.card_products[0]?.delivery_kind, 'direct_secret')
+})
+
+void test('replay capsule payload keeps redacted summary shape', () => {
+  const parsed = replayCapsuleResponseSchema.parse({
+    replay_capsule: {
+      replay_capsule_id: 'replay_eval_1',
+      request_id: 'req_eval_1',
+      trace_id: 'trace_eval_1',
+      route_receipt_id: 'routercpt_eval_1',
+      config_snapshot_id: 'cfgsnap_eval_1',
+      redaction_tier: 'structured_redacted',
+      normalized_request_summary: {
+        protocol_family: 'openai_chat',
+        model_alias: 'claude-sonnet',
+        estimated_prompt_tokens: 480
+      },
+      upstream_error_summary: {
+        code: 'provider_signature_mismatch'
+      }
+    }
+  })
+
+  assert.equal(parsed.replay_capsule.redaction_tier, 'structured_redacted')
+  assert.equal(parsed.replay_capsule.normalized_request_summary.estimated_prompt_tokens, 480)
 })

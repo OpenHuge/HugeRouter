@@ -5,17 +5,22 @@ import {
   type ControlPlaneClient,
 } from "@huge-router/ts-api-client";
 import {
+  cardProductSchema,
   type BillingExportJob,
   configSnapshotSchema,
   type ConfigSnapshot,
+  merchantShopSchema,
+  merchantWorkspaceResponseSchema,
   type Project,
   type ProviderResource,
   providerResourceSchema,
+  relayEvaluationSchema,
   type RoutePolicy,
   type RouteReceipt,
   routePolicySchema,
   routeReceiptSchema,
   type RouteSimulationResponse,
+  trialConnectionSchema,
 } from "@huge-router/ts-shared-schema";
 import type { AuthSessionEnvelope } from "../auth/auth-contract";
 import { authSessionQueryKey } from "../auth/auth-queries";
@@ -25,14 +30,19 @@ import type {
   ApiKeyCreateResult,
   BillingExportJobView,
   BillingDashboardData,
+  CardProductView,
   ConfigSnapshotView,
+  MerchantShopView,
+  MerchantWorkspaceData,
   OverviewData,
   ProjectSummary,
+  RelayEvaluationView,
   RouteDiagnosticsView,
   RoutePolicyView,
   RouteReceiptView,
   TenantDetail,
   TenantSummary,
+  TrialConnectionView,
   UsageBreakdownView,
   UsageDashboardData,
 } from "./types";
@@ -55,6 +65,7 @@ export type ConsoleDataService = {
     projectId?: string,
   ) => Promise<BillingExportJobView>;
   getRouteDiagnostics: (routePolicyId: string) => Promise<RouteDiagnosticsView>;
+  getMerchantWorkspace: () => Promise<MerchantWorkspaceData>;
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>;
   listProviderResources: () => Promise<ProviderResource[]>;
   listRoutePolicies: () => Promise<RoutePolicyView[]>;
@@ -97,6 +108,33 @@ export type ConsoleDataService = {
     displayName: string;
     providerResourceId: string;
   }) => Promise<ApiKeyCreateResult>;
+  createMerchantShop: (input: {
+    merchantShopId: string;
+    slug: string;
+    displayName: string;
+    announcement?: string;
+  }) => Promise<MerchantShopView>;
+  createCardProduct: (input: {
+    cardProductId: string;
+    merchantShopId: string;
+    title: string;
+    description: string;
+    inventoryCount: number;
+    faceValueUsd: string;
+    retailPriceUsd: string;
+    supportsTrial: boolean;
+  }) => Promise<CardProductView>;
+  createTrialConnection: (input: {
+    trialConnectionId: string;
+    providerLabel: string;
+    endpointBaseUrl: string;
+    apiKey: string;
+    targetModel: string;
+    notes?: string;
+  }) => Promise<TrialConnectionView>;
+  runRelayEvaluation: (input: {
+    trialConnectionId: string;
+  }) => Promise<RelayEvaluationView>;
   revokeApiKey: (apiKeyId: string, version: number) => Promise<void>;
   downloadBillingExport: (exportJobId: string) => Promise<string>;
 };
@@ -106,14 +144,18 @@ type ActionErrorKind =
   | "api-key-revoke"
   | "billing-export-download"
   | "billing-export-queue"
+  | "card-product-create"
+  | "merchant-shop-create"
   | "provider-create"
   | "provider-disable"
   | "provider-update"
+  | "relay-evaluation-create"
   | "route-policy-create"
   | "route-policy-disable"
   | "route-policy-update"
   | "snapshot-activate"
-  | "snapshot-create";
+  | "snapshot-create"
+  | "trial-connection-create";
 
 export type ProviderResourceMutationInput = {
   authKind: "api_key" | "oauth_client_credentials" | "session_broker";
@@ -747,6 +789,96 @@ function parseApiKeyList(payload: unknown) {
   ]).map(parseApiKeyRecord);
 }
 
+function toMerchantShopView(shop: ReturnType<typeof merchantShopSchema.parse>): MerchantShopView {
+  return {
+    announcement: shop.announcement,
+    createdAt: shop.created_at,
+    displayName: shop.display_name,
+    fulfillmentMode: shop.fulfillment_mode,
+    merchantShopId: shop.merchant_shop_id,
+    slug: shop.slug,
+    status: shop.status,
+    updatedAt: shop.updated_at,
+    version: shop.version,
+  };
+}
+
+function toCardProductView(
+  product: ReturnType<typeof cardProductSchema.parse>,
+): CardProductView {
+  return {
+    cardProductId: product.card_product_id,
+    createdAt: product.created_at,
+    deliveryKind: product.delivery_kind,
+    description: product.description,
+    faceValueUsd: product.face_value_usd,
+    inventoryCount: product.inventory_count,
+    merchantShopId: product.merchant_shop_id,
+    retailPriceUsd: product.retail_price_usd,
+    status: product.status,
+    supportsTrial: product.supports_trial,
+    title: product.title,
+    updatedAt: product.updated_at,
+    version: product.version,
+  };
+}
+
+function toTrialConnectionView(
+  connection: ReturnType<typeof trialConnectionSchema.parse>,
+): TrialConnectionView {
+  return {
+    apiKeyMasked: connection.api_key_masked,
+    createdAt: connection.created_at,
+    endpointBaseUrl: connection.endpoint_base_url,
+    lastVerifiedAt: connection.last_verified_at,
+    notes: connection.notes,
+    providerLabel: connection.provider_label,
+    status: connection.status,
+    targetModel: connection.target_model,
+    trialConnectionId: connection.trial_connection_id,
+    updatedAt: connection.updated_at,
+    version: connection.version,
+  };
+}
+
+function toRelayEvaluationView(
+  evaluation: ReturnType<typeof relayEvaluationSchema.parse>,
+): RelayEvaluationView {
+  return {
+    createdAt: evaluation.created_at,
+    detectedChannel: evaluation.detected_channel,
+    endpointBaseUrl: evaluation.endpoint_base_url,
+    estimatedTokensSaved: evaluation.estimated_tokens_saved,
+    fingerprintStatus: evaluation.fingerprint_status,
+    multimodalStatus: evaluation.multimodal_status,
+    overallScore: evaluation.overall_score,
+    protocolStatus: evaluation.protocol_status,
+    providerLabel: evaluation.provider_label,
+    relayEvaluationId: evaluation.relay_evaluation_id,
+    replayCapsuleId: evaluation.replay_capsule_id,
+    runnerMode: evaluation.runner_mode,
+    sampleRequestCount: evaluation.sample_request_count,
+    summary: evaluation.summary,
+    targetModel: evaluation.target_model,
+    tokenStatus: evaluation.token_status,
+    trialConnectionId: evaluation.trial_connection_id,
+    verdict: evaluation.verdict,
+  };
+}
+
+function parseMerchantWorkspace(payload: unknown): MerchantWorkspaceData {
+  const parsed = merchantWorkspaceResponseSchema.parse(payload).data;
+
+  return {
+    cardProducts: parsed.card_products.map(toCardProductView),
+    merchantEnabled: parsed.merchant_enabled,
+    recentEvaluations: parsed.recent_evaluations.map(toRelayEvaluationView),
+    shops: parsed.shops.map(toMerchantShopView),
+    tenantId: parsed.tenant_id,
+    trialConnections: parsed.trial_connections.map(toTrialConnectionView),
+  };
+}
+
 function parseProviderResourceRecord(payload: unknown) {
   return providerResourceSchema.parse(payload);
 }
@@ -1115,6 +1247,125 @@ async function createApiKeyInControlPlane(input: {
     },
     method: "POST",
   });
+}
+
+async function getMerchantWorkspaceFromControlPlane() {
+  return requestControlPlaneJson(
+    "/v1/merchant/workspace",
+    parseMerchantWorkspace,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+      method: "GET",
+    },
+  );
+}
+
+async function createMerchantShopInControlPlane(input: {
+  merchantShopId: string;
+  slug: string;
+  displayName: string;
+  announcement?: string;
+}) {
+  return requestControlPlaneJson(
+    "/v1/merchant/shops",
+    (payload) => toMerchantShopView(merchantShopSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        announcement: input.announcement,
+        display_name: input.displayName,
+        merchant_shop_id: input.merchantShopId,
+        slug: input.slug,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function createCardProductInControlPlane(input: {
+  cardProductId: string;
+  merchantShopId: string;
+  title: string;
+  description: string;
+  inventoryCount: number;
+  faceValueUsd: string;
+  retailPriceUsd: string;
+  supportsTrial: boolean;
+}) {
+  return requestControlPlaneJson(
+    "/v1/merchant/card-products",
+    (payload) => toCardProductView(cardProductSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        card_product_id: input.cardProductId,
+        description: input.description,
+        face_value_usd: input.faceValueUsd,
+        inventory_count: input.inventoryCount,
+        merchant_shop_id: input.merchantShopId,
+        retail_price_usd: input.retailPriceUsd,
+        supports_trial: input.supportsTrial,
+        title: input.title,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function createTrialConnectionInControlPlane(input: {
+  trialConnectionId: string;
+  providerLabel: string;
+  endpointBaseUrl: string;
+  apiKey: string;
+  targetModel: string;
+  notes?: string;
+}) {
+  return requestControlPlaneJson(
+    "/v1/merchant/trial-connections",
+    (payload) => toTrialConnectionView(trialConnectionSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        api_key: input.apiKey,
+        endpoint_base_url: input.endpointBaseUrl,
+        notes: input.notes,
+        provider_label: input.providerLabel,
+        target_model: input.targetModel,
+        trial_connection_id: input.trialConnectionId,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function createRelayEvaluationInControlPlane(input: {
+  trialConnectionId: string;
+}) {
+  return requestControlPlaneJson(
+    "/v1/merchant/evaluations",
+    (payload) => toRelayEvaluationView(relayEvaluationSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        trial_connection_id: input.trialConnectionId,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
 }
 
 async function listRouteReceiptsFromControlPlane() {
@@ -1512,6 +1763,10 @@ const defaultConsoleDataService: ConsoleDataService = {
     };
   },
 
+  async getMerchantWorkspace() {
+    return getMerchantWorkspaceFromControlPlane();
+  },
+
   async getTenantDetail(tenantId) {
     const {
       activeSnapshot,
@@ -1722,6 +1977,22 @@ const defaultConsoleDataService: ConsoleDataService = {
 
   async revokeApiKey(apiKeyId, version) {
     await revokeApiKeyFromControlPlane(apiKeyId, version);
+  },
+
+  async createMerchantShop(input) {
+    return createMerchantShopInControlPlane(input);
+  },
+
+  async createCardProduct(input) {
+    return createCardProductInControlPlane(input);
+  },
+
+  async createTrialConnection(input) {
+    return createTrialConnectionInControlPlane(input);
+  },
+
+  async runRelayEvaluation(input) {
+    return createRelayEvaluationInControlPlane(input);
   },
 
   async downloadBillingExport(exportJobId) {

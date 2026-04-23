@@ -228,3 +228,75 @@ export type BillingDashboardData = {
   remainingBudgetUsd: string;
   thresholdStatus: string;
 };
+
+export type MerchantShopView = {
+  merchantShopId: string;
+  slug: string;
+  displayName: string;
+  status: "draft" | "active" | "suspended";
+  announcement?: string;
+  fulfillmentMode: "auto_card_secret";
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+};
+
+export type CardProductView = {
+  cardProductId: string;
+  merchantShopId: string;
+  title: string;
+  description: string;
+  status: "draft" | "active" | "sold_out";
+  inventoryCount: number;
+  faceValueUsd: string;
+  retailPriceUsd: string;
+  deliveryKind: "direct_secret";
+  supportsTrial: boolean;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+};
+
+export type TrialConnectionView = {
+  trialConnectionId: string;
+  providerLabel: string;
+  endpointBaseUrl: string;
+  apiKeyMasked: string;
+  targetModel: string;
+  status: "active" | "paused" | "needs_rotation";
+  notes?: string;
+  lastVerifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+};
+
+export type RelayEvaluationView = {
+  relayEvaluationId: string;
+  trialConnectionId: string;
+  replayCapsuleId: string;
+  providerLabel: string;
+  endpointBaseUrl: string;
+  targetModel: string;
+  runnerMode: "simulated" | "replay";
+  sampleRequestCount: number;
+  estimatedTokensSaved: number;
+  overallScore: number;
+  verdict: "healthy" | "warning" | "fail";
+  fingerprintStatus: "pass" | "warning" | "fail" | "not_tested";
+  protocolStatus: "pass" | "warning" | "fail" | "not_tested";
+  tokenStatus: "pass" | "warning" | "fail" | "not_tested";
+  multimodalStatus: "pass" | "warning" | "fail" | "not_tested";
+  detectedChannel?: string;
+  summary: string;
+  createdAt: string;
+};
+
+export type MerchantWorkspaceData = {
+  merchantEnabled: boolean;
+  tenantId: string;
+  shops: MerchantShopView[];
+  cardProducts: CardProductView[];
+  trialConnections: TrialConnectionView[];
+  recentEvaluations: RelayEvaluationView[];
+};

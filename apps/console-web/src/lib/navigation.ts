@@ -20,6 +20,11 @@ export const tenantNav = [
     description: 'API key inventory and revoke actions'
   },
   {
+    href: '/app/merchant',
+    label: 'Merchant',
+    description: 'Small-shop setup, card products, trial relays, and replay-backed evaluations'
+  },
+  {
     href: '/app/providers',
     label: 'Providers',
     description: 'Provider inventory, health, and routing scope'

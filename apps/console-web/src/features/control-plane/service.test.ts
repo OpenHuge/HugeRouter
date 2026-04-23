@@ -118,6 +118,26 @@ describe("console data service", () => {
     expect(keys.every((key) => key.isActive)).toBe(true);
   });
 
+  it("loads merchant workspace with replay-backed evaluations", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const workspace = await getConsoleDataService().getMerchantWorkspace();
+
+    expect(workspace.merchantEnabled).toBe(true);
+    expect(workspace.shops[0]?.merchantShopId).toBe("mshop_acme");
+    expect(workspace.cardProducts[0]?.cardProductId).toBe("cardprod_acme_trial");
+    expect(workspace.trialConnections[0]?.trialConnectionId).toBe(
+      "trialconn_acme_relay",
+    );
+    expect(workspace.recentEvaluations[0]?.replayCapsuleId).toBe(
+      "replay_acme_relay_eval",
+    );
+    expect(workspace.recentEvaluations[0]?.estimatedTokensSaved).toBe(2400);
+  });
+
   it("revokes an API key without throwing", async () => {
     signIn({
       email: "admin@huge-router.dev",
@@ -207,6 +227,16 @@ describe("console data service", () => {
       getRouteDiagnostics() {
         return Promise.reject(new Error("unused"));
       },
+      getMerchantWorkspace() {
+        return Promise.resolve({
+          merchantEnabled: true,
+          tenantId: "tenant_override",
+          shops: [],
+          cardProducts: [],
+          trialConnections: [],
+          recentEvaluations: [],
+        });
+      },
       getTenantDetail() {
         return Promise.reject(new Error("unused"));
       },
@@ -281,6 +311,18 @@ describe("console data service", () => {
       },
       revokeApiKey() {
         return Promise.resolve();
+      },
+      createMerchantShop() {
+        return Promise.reject(new Error("unused"));
+      },
+      createCardProduct() {
+        return Promise.reject(new Error("unused"));
+      },
+      createTrialConnection() {
+        return Promise.reject(new Error("unused"));
+      },
+      runRelayEvaluation() {
+        return Promise.reject(new Error("unused"));
       },
       downloadBillingExport() {
         return Promise.resolve("a,b\n1,2\n");

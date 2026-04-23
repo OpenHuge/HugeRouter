@@ -218,6 +218,10 @@ prefixed_id!(TenantMembershipId, "tmemb_");
 prefixed_id!(AuthSessionId, "sess_");
 prefixed_id!(AuthProviderLinkId, "authlink_");
 prefixed_id!(AuthFlowId, "authflow_");
+prefixed_id!(MerchantShopId, "mshop_");
+prefixed_id!(CardProductId, "cardprod_");
+prefixed_id!(TrialConnectionId, "trialconn_");
+prefixed_id!(RelayEvaluationId, "reval_");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -329,6 +333,66 @@ pub enum ConfigSnapshotStatus {
     Draft,
     Active,
     Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MerchantShopStatus {
+    Draft,
+    Active,
+    Suspended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MerchantFulfillmentMode {
+    AutoCardSecret,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CardProductStatus {
+    Draft,
+    Active,
+    SoldOut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CardDeliveryKind {
+    DirectSecret,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrialConnectionStatus {
+    Active,
+    Paused,
+    NeedsRotation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RelayEvaluationRunnerMode {
+    Simulated,
+    Replay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RelayEvaluationVerdict {
+    Healthy,
+    Warning,
+    Fail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RelayCheckStatus {
+    Pass,
+    Warning,
+    Fail,
+    NotTested,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -758,6 +822,131 @@ pub struct ConfigSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct MerchantShop {
+    pub merchant_shop_id: MerchantShopId,
+    pub tenant_id: TenantId,
+    pub slug: String,
+    pub display_name: String,
+    pub status: MerchantShopStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<String>,
+    pub fulfillment_mode: MerchantFulfillmentMode,
+    pub version: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl MerchantShop {
+    /// # Errors
+    ///
+    /// Returns an error when the merchant shop payload is invalid.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_slug("slug", &self.slug)?;
+        validate_non_empty("display_name", &self.display_name)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CardProduct {
+    pub card_product_id: CardProductId,
+    pub tenant_id: TenantId,
+    pub merchant_shop_id: MerchantShopId,
+    pub title: String,
+    pub description: String,
+    pub status: CardProductStatus,
+    pub inventory_count: u32,
+    pub face_value_usd: String,
+    pub retail_price_usd: String,
+    pub delivery_kind: CardDeliveryKind,
+    pub supports_trial: bool,
+    pub version: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl CardProduct {
+    /// # Errors
+    ///
+    /// Returns an error when the card product payload is invalid.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_non_empty("title", &self.title)?;
+        validate_non_empty("description", &self.description)?;
+        validate_non_empty("face_value_usd", &self.face_value_usd)?;
+        validate_non_empty("retail_price_usd", &self.retail_price_usd)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct TrialConnection {
+    pub trial_connection_id: TrialConnectionId,
+    pub tenant_id: TenantId,
+    pub provider_label: String,
+    pub endpoint_base_url: String,
+    pub api_key_masked: String,
+    pub target_model: String,
+    pub status: TrialConnectionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_verified_at: Option<String>,
+    pub version: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl TrialConnection {
+    /// # Errors
+    ///
+    /// Returns an error when the trial connection payload is invalid.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_non_empty("provider_label", &self.provider_label)?;
+        validate_https_url("endpoint_base_url", &self.endpoint_base_url)?;
+        validate_non_empty("api_key_masked", &self.api_key_masked)?;
+        validate_non_empty("target_model", &self.target_model)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RelayEvaluation {
+    pub relay_evaluation_id: RelayEvaluationId,
+    pub tenant_id: TenantId,
+    pub trial_connection_id: TrialConnectionId,
+    pub replay_capsule_id: ReplayCapsuleId,
+    pub provider_label: String,
+    pub endpoint_base_url: String,
+    pub target_model: String,
+    pub runner_mode: RelayEvaluationRunnerMode,
+    pub sample_request_count: u32,
+    pub estimated_tokens_saved: u32,
+    pub overall_score: u32,
+    pub verdict: RelayEvaluationVerdict,
+    pub fingerprint_status: RelayCheckStatus,
+    pub protocol_status: RelayCheckStatus,
+    pub token_status: RelayCheckStatus,
+    pub multimodal_status: RelayCheckStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_channel: Option<String>,
+    pub summary: String,
+    pub created_at: String,
+}
+
+impl RelayEvaluation {
+    /// # Errors
+    ///
+    /// Returns an error when the relay evaluation payload is invalid.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_non_empty("provider_label", &self.provider_label)?;
+        validate_https_url("endpoint_base_url", &self.endpoint_base_url)?;
+        validate_non_empty("target_model", &self.target_model)?;
+        validate_non_empty("summary", &self.summary)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct MonetaryAmount {
     pub currency: String,
     pub amount: String,
@@ -921,14 +1110,18 @@ pub struct ReplayCapsule {
 mod tests {
     use super::{
         AdmissionResult, AuthFlowId, AuthKind, AuthLoginResult, AuthProvider, AuthProviderLink,
-        AuthProviderLinkId, AuthSession, AuthSessionId, AuthSessionState, ConfigSnapshotId,
-        CredentialOwnerType, DeploymentScope, DomainError, EmailLoginCompleteRequest,
-        ErrorEnvelope, HealthState, MonetaryAmount, NormalizedError, OAuthCallbackRequest,
-        ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
-        ProviderResourceStatus, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId,
-        ScoreBreakdown, Tenant, TenantId, TenantMembership, TenantMembershipId,
-        TenantMembershipRole, TenantMembershipStatus, TenantSummary, UsageEvent, UsageEventId,
-        UsageMetrics, UsagePhase, UserId, UserIdentity,
+        AuthProviderLinkId, AuthSession, AuthSessionId, AuthSessionState, CardDeliveryKind,
+        CardProduct, CardProductId, CardProductStatus, ConfigSnapshotId, CredentialOwnerType,
+        DeploymentScope, DomainError, EmailLoginCompleteRequest, ErrorEnvelope, HealthState,
+        MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus, MonetaryAmount,
+        NormalizedError, OAuthCallbackRequest, ProjectId, ProvenanceClass, ProviderCapabilities,
+        ProviderResource, ProviderResourceId, ProviderResourceStatus, RelayCheckStatus,
+        RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode, RelayEvaluationVerdict,
+        ReplayCapsuleId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown,
+        Tenant, TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
+        TenantMembershipStatus, TenantSummary, TrialConnection, TrialConnectionId,
+        TrialConnectionStatus, UsageEvent, UsageEventId, UsageMetrics, UsagePhase, UserId,
+        UserIdentity,
     };
     use serde_json::{Value, json};
 
@@ -1027,6 +1220,56 @@ mod tests {
             policy.validate().unwrap_err(),
             DomainError::EmptyCollection {
                 field: "required_capabilities",
+            }
+        );
+    }
+
+    #[test]
+    fn merchant_shop_validation_rejects_invalid_slug() {
+        let shop = MerchantShop {
+            merchant_shop_id: MerchantShopId::parse("mshop_acme").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            slug: "Acme Shop".to_string(),
+            display_name: "Acme Shop".to_string(),
+            status: MerchantShopStatus::Draft,
+            announcement: None,
+            fulfillment_mode: MerchantFulfillmentMode::AutoCardSecret,
+            version: 1,
+            created_at: "2026-04-22T00:00:00Z".to_string(),
+            updated_at: "2026-04-22T00:00:00Z".to_string(),
+        };
+
+        assert_eq!(
+            shop.validate().unwrap_err(),
+            DomainError::InvalidSlug {
+                field: "slug",
+                actual: "Acme Shop".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn trial_connection_validation_rejects_non_https_endpoint() {
+        let connection = TrialConnection {
+            trial_connection_id: TrialConnectionId::parse("trialconn_acme").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            provider_label: "Acme Relay".to_string(),
+            endpoint_base_url: "http://relay.example.com/v1".to_string(),
+            api_key_masked: "sk-test...1234".to_string(),
+            target_model: "claude-sonnet".to_string(),
+            status: TrialConnectionStatus::Active,
+            notes: None,
+            last_verified_at: None,
+            version: 1,
+            created_at: "2026-04-22T00:00:00Z".to_string(),
+            updated_at: "2026-04-22T00:00:00Z".to_string(),
+        };
+
+        assert_eq!(
+            connection.validate().unwrap_err(),
+            DomainError::InvalidHttpsUrl {
+                field: "endpoint_base_url",
+                actual: "http://relay.example.com/v1".to_string(),
             }
         );
     }
@@ -1272,5 +1515,64 @@ mod tests {
         );
         assert_eq!(parsed.links[0].provider, AuthProvider::Email);
         assert!(!parsed.links[0].can_unlink);
+    }
+
+    #[test]
+    fn relay_evaluation_serializes_replay_reference() {
+        let evaluation = RelayEvaluation {
+            relay_evaluation_id: RelayEvaluationId::parse("reval_123").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            trial_connection_id: TrialConnectionId::parse("trialconn_123").unwrap(),
+            replay_capsule_id: ReplayCapsuleId::parse("replay_123").unwrap(),
+            provider_label: "Acme Relay".to_string(),
+            endpoint_base_url: "https://relay.example.com/v1".to_string(),
+            target_model: "claude-sonnet".to_string(),
+            runner_mode: RelayEvaluationRunnerMode::Simulated,
+            sample_request_count: 5,
+            estimated_tokens_saved: 2400,
+            overall_score: 86,
+            verdict: RelayEvaluationVerdict::Warning,
+            fingerprint_status: RelayCheckStatus::Pass,
+            protocol_status: RelayCheckStatus::Warning,
+            token_status: RelayCheckStatus::Warning,
+            multimodal_status: RelayCheckStatus::NotTested,
+            detected_channel: Some("vertex".to_string()),
+            summary: "Replay-ready evaluation capsule captured for support review.".to_string(),
+            created_at: "2026-04-22T00:00:00Z".to_string(),
+        };
+
+        evaluation.validate().unwrap();
+
+        let json = serde_json::to_value(&evaluation).unwrap();
+        assert_eq!(json["replay_capsule_id"], "replay_123");
+        assert_eq!(json["runner_mode"], "simulated");
+        assert_eq!(json["estimated_tokens_saved"], 2400);
+    }
+
+    #[test]
+    fn card_product_validation_requires_pricing_fields() {
+        let product = CardProduct {
+            card_product_id: CardProductId::parse("cardprod_trial").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            merchant_shop_id: MerchantShopId::parse("mshop_acme").unwrap(),
+            title: "Trial Claude Card".to_string(),
+            description: "Starter inventory".to_string(),
+            status: CardProductStatus::Active,
+            inventory_count: 10,
+            face_value_usd: "".to_string(),
+            retail_price_usd: "0.99".to_string(),
+            delivery_kind: CardDeliveryKind::DirectSecret,
+            supports_trial: true,
+            version: 1,
+            created_at: "2026-04-22T00:00:00Z".to_string(),
+            updated_at: "2026-04-22T00:00:00Z".to_string(),
+        };
+
+        assert_eq!(
+            product.validate().unwrap_err(),
+            DomainError::EmptyField {
+                field: "face_value_usd",
+            }
+        );
     }
 }

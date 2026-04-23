@@ -24,13 +24,18 @@
 use anyhow::{Context, Result, anyhow};
 use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
-    AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId, ConfigSnapshot,
+    AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId,
+    CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
     ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, ExcludedTarget,
-    HealthState, LogoutResponse, MonetaryAmount, OAuthProvider, Project, ProjectId,
-    ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
-    ProviderResourceStatus, RoutePolicy, RoutePolicyId, RouteReceipt, ScoreBreakdown, Tenant,
-    TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
-    TenantSummary, UnlinkAuthProviderResponse, UserId, UserIdentity,
+    HealthState, LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId,
+    MerchantShopStatus, MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project,
+    ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
+    ProviderResourceStatus, RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId,
+    RelayEvaluationRunnerMode, RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy,
+    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, Tenant, TenantId,
+    TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
+    TenantSummary, TrialConnection, TrialConnectionId, TrialConnectionStatus,
+    UnlinkAuthProviderResponse, UpstreamErrorSummary, UserId, UserIdentity,
 };
 use metering::{
     AdditionalUsageDimensions, PricingCatalog, PricingSource, default_budget_micros,
@@ -55,7 +60,6 @@ use std::{
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
-pub const EMAIL_BOOTSTRAP_CODE: &str = "111111";
 pub const SESSION_TTL_SECONDS: u64 = 60 * 60 * 8;
 pub const ACTIVE_CONFIG_ALIAS: &str = "active";
 
@@ -106,6 +110,11 @@ pub struct MemoryStore {
     provider_resources: Vec<ProviderResource>,
     route_policies: Vec<RoutePolicy>,
     config_snapshots: Vec<ConfigSnapshot>,
+    merchant_shops: Vec<MerchantShop>,
+    card_products: Vec<CardProduct>,
+    trial_connections: Vec<TrialConnection>,
+    relay_evaluations: Vec<RelayEvaluation>,
+    replay_capsules: HashMap<String, ReplayCapsule>,
     active_config_snapshot_id: String,
     users: HashMap<String, UserIdentity>,
     memberships_by_user: HashMap<String, Vec<TenantMembership>>,
@@ -182,6 +191,26 @@ pub struct ConfigSnapshotsResponse {
     pub data: Vec<ConfigSnapshot>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantWorkspaceResponse {
+    pub merchant_enabled: bool,
+    pub tenant_id: TenantId,
+    pub shops: Vec<MerchantShop>,
+    pub card_products: Vec<CardProduct>,
+    pub trial_connections: Vec<TrialConnection>,
+    pub recent_evaluations: Vec<RelayEvaluation>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantWorkspaceEnvelope {
+    pub data: MerchantWorkspaceResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayCapsuleResponse {
+    pub replay_capsule: ReplayCapsule,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConcurrencyResult<T> {
     Applied(T),
@@ -226,6 +255,7 @@ pub struct LoginFlow {
     pub email: Option<String>,
     pub provider: Option<OAuthProvider>,
     pub workspace_slug: String,
+    pub verification_code: Option<String>,
     pub expires_at: String,
 }
 
@@ -249,6 +279,11 @@ pub struct SeedData {
     pub provider_resources: Vec<ProviderResource>,
     pub route_policies: Vec<RoutePolicy>,
     pub config_snapshots: Vec<ConfigSnapshot>,
+    pub merchant_shops: Vec<MerchantShop>,
+    pub card_products: Vec<CardProduct>,
+    pub trial_connections: Vec<TrialConnection>,
+    pub relay_evaluations: Vec<RelayEvaluation>,
+    pub replay_capsules: Vec<ReplayCapsule>,
     pub route_receipts: Vec<RouteReceipt>,
     pub active_config_snapshot_id: String,
     pub users: Vec<UserSeed>,
@@ -522,6 +557,91 @@ impl SeedData {
             budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
         };
 
+        let merchant_shop = MerchantShop {
+            merchant_shop_id: MerchantShopId::parse("mshop_acme").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            slug: "acme-small-shop".to_string(),
+            display_name: "Acme Small Shop".to_string(),
+            status: MerchantShopStatus::Active,
+            announcement: Some(
+                "Fresh relay trial cards with replay-backed evaluation.".to_string(),
+            ),
+            fulfillment_mode: MerchantFulfillmentMode::AutoCardSecret,
+            version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let card_product = CardProduct {
+            card_product_id: CardProductId::parse("cardprod_acme_trial").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            merchant_shop_id: merchant_shop.merchant_shop_id.clone(),
+            title: "Claude Trial Pack".to_string(),
+            description: "Starter batch for relay verification and low-risk onboarding."
+                .to_string(),
+            status: CardProductStatus::Active,
+            inventory_count: 32,
+            face_value_usd: "1.00".to_string(),
+            retail_price_usd: "1.99".to_string(),
+            delivery_kind: CardDeliveryKind::DirectSecret,
+            supports_trial: true,
+            version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let trial_connection = TrialConnection {
+            trial_connection_id: TrialConnectionId::parse("trialconn_acme_relay").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            provider_label: "Acme Relay".to_string(),
+            endpoint_base_url: "https://relay.acme.example/v1".to_string(),
+            api_key_masked: "sk-trial...acme".to_string(),
+            target_model: "claude-sonnet".to_string(),
+            status: TrialConnectionStatus::Active,
+            notes: Some("Dedicated trial key only; never attach production traffic.".to_string()),
+            last_verified_at: Some(now.clone()),
+            version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let replay_capsule = ReplayCapsule {
+            replay_capsule_id: ReplayCapsuleId::parse("replay_acme_relay_eval").unwrap(),
+            request_id: "req_merchant_eval_acme".to_string(),
+            trace_id: "trace_merchant_eval_acme".to_string(),
+            route_receipt_id: RouteReceiptId::parse("routercpt_acme_relay_eval").unwrap(),
+            config_snapshot_id: config_active.config_snapshot_id.clone(),
+            redaction_tier: RedactionTier::StructuredRedacted,
+            normalized_request_summary: NormalizedRequestSummary {
+                protocol_family: "openai_chat".to_string(),
+                model_alias: "claude-sonnet".to_string(),
+                estimated_prompt_tokens: 480,
+            },
+            upstream_error_summary: Some(UpstreamErrorSummary {
+                code: "provider_signature_mismatch".to_string(),
+            }),
+        };
+        let relay_evaluation = RelayEvaluation {
+            relay_evaluation_id: RelayEvaluationId::parse("reval_acme_relay").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            trial_connection_id: trial_connection.trial_connection_id.clone(),
+            replay_capsule_id: replay_capsule.replay_capsule_id.clone(),
+            provider_label: trial_connection.provider_label.clone(),
+            endpoint_base_url: trial_connection.endpoint_base_url.clone(),
+            target_model: trial_connection.target_model.clone(),
+            runner_mode: RelayEvaluationRunnerMode::Simulated,
+            sample_request_count: 5,
+            estimated_tokens_saved: 2400,
+            overall_score: 82,
+            verdict: RelayEvaluationVerdict::Warning,
+            fingerprint_status: RelayCheckStatus::Pass,
+            protocol_status: RelayCheckStatus::Warning,
+            token_status: RelayCheckStatus::Warning,
+            multimodal_status: RelayCheckStatus::NotTested,
+            detected_channel: Some("vertex".to_string()),
+            summary:
+                "Replay capsule captured; protocol and token behavior still need manual follow-up."
+                    .to_string(),
+            created_at: now.clone(),
+        };
+
         let ops_user = UserIdentity {
             user_id: UserId::parse("user_ops").unwrap(),
             primary_email: Some("ops@huge-router.dev".to_string()),
@@ -577,6 +697,11 @@ impl SeedData {
             provider_resources: vec![openai_primary, openai_backup, northstar_openai],
             route_policies: vec![route_default, route_support, route_research],
             config_snapshots: vec![config_active.clone(), config_research],
+            merchant_shops: vec![merchant_shop],
+            card_products: vec![card_product],
+            trial_connections: vec![trial_connection],
+            relay_evaluations: vec![relay_evaluation],
+            replay_capsules: vec![replay_capsule],
             route_receipts: Vec::new(),
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
             users: vec![UserSeed {
@@ -641,6 +766,15 @@ impl MemoryStore {
             provider_resources: seed.provider_resources,
             route_policies: seed.route_policies,
             config_snapshots: seed.config_snapshots,
+            merchant_shops: seed.merchant_shops,
+            card_products: seed.card_products,
+            trial_connections: seed.trial_connections,
+            relay_evaluations: seed.relay_evaluations,
+            replay_capsules: seed
+                .replay_capsules
+                .into_iter()
+                .map(|capsule| (capsule.replay_capsule_id.as_str().to_string(), capsule))
+                .collect(),
             active_config_snapshot_id: seed.active_config_snapshot_id,
             users,
             memberships_by_user,
@@ -675,35 +809,58 @@ impl StoreMode {
     }
 
     pub async fn from_env() -> Result<Self> {
-        match std::env::var("CONTROL_PLANE_DATABASE_URL") {
-            Ok(database_url) => Ok(Self::Postgres(PostgresStore::connect(&database_url).await?)),
-            Err(_) => Ok(Self::memory()),
+        let store_mode =
+            std::env::var("CONTROL_PLANE_STORE_MODE").unwrap_or_else(|_| "postgres".to_string());
+
+        match store_mode.as_str() {
+            "memory" => Ok(Self::memory()),
+            "postgres" => {
+                let database_url = std::env::var("CONTROL_PLANE_DATABASE_URL").map_err(|_| {
+                    anyhow!(
+                        "CONTROL_PLANE_DATABASE_URL is required when CONTROL_PLANE_STORE_MODE=postgres"
+                    )
+                })?;
+                let store = PostgresStore::connect(&database_url).await?;
+                store.ensure_schema_ready().await?;
+                Ok(Self::Postgres(store))
+            }
+            other => Err(anyhow!(
+                "unsupported CONTROL_PLANE_STORE_MODE `{other}`; expected `postgres` or `memory`"
+            )),
         }
     }
 
     pub fn provider_catalog() -> Vec<AuthProviderAvailability> {
         let mut catalog = PROVIDER_CATALOG
             .iter()
-            .map(
-                |(provider, display_name, start_path)| AuthProviderAvailability {
+            .map(|(provider, display_name, start_path)| {
+                let enabled = auth_provider_enabled(*provider);
+                AuthProviderAvailability {
                     provider: *provider,
                     display_name: (*display_name).to_string(),
-                    enabled: true,
+                    enabled,
                     start_path: (*start_path).to_string(),
-                    reason_code: None,
-                },
-            )
+                    reason_code: if enabled {
+                        None
+                    } else {
+                        Some("provider_not_configured".to_string())
+                    },
+                }
+            })
             .collect::<Vec<_>>();
 
-        if oidc_enabled() {
-            catalog.push(AuthProviderAvailability {
-                provider: OIDC_PROVIDER_CATALOG_ENTRY.0,
-                display_name: OIDC_PROVIDER_CATALOG_ENTRY.1.to_string(),
-                enabled: true,
-                start_path: OIDC_PROVIDER_CATALOG_ENTRY.2.to_string(),
-                reason_code: None,
-            });
-        }
+        let oidc_available = oidc_enabled() || mock_auth_enabled();
+        catalog.push(AuthProviderAvailability {
+            provider: OIDC_PROVIDER_CATALOG_ENTRY.0,
+            display_name: OIDC_PROVIDER_CATALOG_ENTRY.1.to_string(),
+            enabled: oidc_available,
+            start_path: OIDC_PROVIDER_CATALOG_ENTRY.2.to_string(),
+            reason_code: if oidc_available {
+                None
+            } else {
+                Some("provider_not_configured".to_string())
+            },
+        });
 
         catalog
     }
@@ -724,6 +881,7 @@ impl StoreMode {
         flow_id: &str,
         email: &str,
         workspace_slug: &str,
+        verification_code: &str,
         expires_at: &str,
     ) -> Result<LoginFlow> {
         let flow = LoginFlow {
@@ -732,6 +890,7 @@ impl StoreMode {
             email: Some(email.to_lowercase()),
             provider: None,
             workspace_slug: workspace_slug.to_string(),
+            verification_code: Some(verification_code.to_string()),
             expires_at: expires_at.to_string(),
         };
         match self {
@@ -760,6 +919,7 @@ impl StoreMode {
             email: None,
             provider: Some(provider),
             workspace_slug: workspace_slug.to_string(),
+            verification_code: None,
             expires_at: expires_at.to_string(),
         };
         match self {
@@ -776,13 +936,27 @@ impl StoreMode {
     }
 
     pub async fn consume_login_flow(&self, flow_id: &str) -> Result<Option<LoginFlow>> {
-        match self {
-            Self::Memory(store) => Ok(store
+        let pending = match self {
+            Self::Memory(store) => store
                 .write()
                 .expect("memory store write lock")
                 .login_flows
-                .remove(flow_id)),
-            Self::Postgres(store) => store.consume_login_flow(flow_id).await,
+                .remove(flow_id),
+            Self::Postgres(store) => store.consume_login_flow(flow_id).await?,
+        };
+
+        Ok(pending.filter(|flow| !timestamp_is_expired(&flow.expires_at)))
+    }
+
+    pub async fn workspace_exists(&self, workspace_slug: &str) -> Result<bool> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .tenants
+                .iter()
+                .any(|tenant| tenant.slug == workspace_slug)),
+            Self::Postgres(store) => store.workspace_exists(workspace_slug).await,
         }
     }
 
@@ -855,17 +1029,64 @@ impl StoreMode {
         }
     }
 
+    pub async fn upsert_oauth_user(
+        &self,
+        provider: AuthProvider,
+        subject: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        workspace_slug: &str,
+        role: TenantMembershipRole,
+        now: &str,
+    ) -> Result<UserIdentity> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let user_id = upsert_memory_provider_user(
+                    &mut store,
+                    provider,
+                    subject,
+                    email,
+                    display_name,
+                    workspace_slug,
+                    role,
+                    now,
+                )?;
+                store
+                    .users
+                    .get(&user_id)
+                    .cloned()
+                    .context("oauth user should exist after upsert")
+            }
+            Self::Postgres(store) => {
+                store
+                    .upsert_oauth_user(
+                        provider,
+                        subject,
+                        email,
+                        display_name,
+                        workspace_slug,
+                        role,
+                        now,
+                    )
+                    .await
+            }
+        }
+    }
+
     pub async fn get_session(&self, session_id: &str) -> Result<Option<AuthLoginResult>> {
         match self {
-            Self::Memory(store) => Ok(store
-                .read()
-                .expect("memory store read lock")
-                .sessions
-                .get(session_id)
-                .map(|session| AuthLoginResult {
-                    session: session.session.clone(),
-                    links: session.links.clone(),
-                })),
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let Some(stored) = store.sessions.get(session_id).cloned() else {
+                    return Ok(None);
+                };
+                if timestamp_is_expired(&stored.session.expires_at) {
+                    store.sessions.remove(session_id);
+                    return Ok(None);
+                }
+                Ok(Some(refresh_memory_session(&store, stored)))
+            }
             Self::Postgres(store) => store.get_session(session_id).await,
         }
     }
@@ -926,6 +1147,199 @@ impl StoreMode {
                     .clone(),
             }),
             Self::Postgres(store) => store.list_projects().await,
+        }
+    }
+
+    pub async fn get_merchant_workspace(
+        &self,
+        tenant_id: &TenantId,
+    ) -> Result<MerchantWorkspaceEnvelope> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let tenant_id_str = tenant_id.as_str();
+                let mut recent_evaluations = store
+                    .relay_evaluations
+                    .iter()
+                    .filter(|item| item.tenant_id.as_str() == tenant_id_str)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                recent_evaluations.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+
+                Ok(MerchantWorkspaceEnvelope {
+                    data: MerchantWorkspaceResponse {
+                        merchant_enabled: store
+                            .merchant_shops
+                            .iter()
+                            .any(|shop| shop.tenant_id.as_str() == tenant_id_str),
+                        tenant_id: tenant_id.clone(),
+                        shops: store
+                            .merchant_shops
+                            .iter()
+                            .filter(|item| item.tenant_id.as_str() == tenant_id_str)
+                            .cloned()
+                            .collect(),
+                        card_products: store
+                            .card_products
+                            .iter()
+                            .filter(|item| item.tenant_id.as_str() == tenant_id_str)
+                            .cloned()
+                            .collect(),
+                        trial_connections: store
+                            .trial_connections
+                            .iter()
+                            .filter(|item| item.tenant_id.as_str() == tenant_id_str)
+                            .cloned()
+                            .collect(),
+                        recent_evaluations,
+                    },
+                })
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "merchant workspace persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn create_merchant_shop(&self, mut shop: MerchantShop) -> Result<MerchantShop> {
+        shop.version = 1;
+        shop.created_at = now_rfc3339();
+        shop.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => {
+                shop.validate()?;
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .merchant_shops
+                    .push(shop.clone());
+                Ok(shop)
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "merchant shop persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn create_card_product(&self, mut product: CardProduct) -> Result<CardProduct> {
+        product.version = 1;
+        product.created_at = now_rfc3339();
+        product.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if !store.merchant_shops.iter().any(|shop| {
+                    shop.merchant_shop_id == product.merchant_shop_id
+                        && shop.tenant_id == product.tenant_id
+                }) {
+                    return Err(anyhow!("merchant shop not found for tenant"));
+                }
+                product.validate()?;
+                store.card_products.push(product.clone());
+                Ok(product)
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "card product persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn create_trial_connection(
+        &self,
+        mut connection: TrialConnection,
+    ) -> Result<TrialConnection> {
+        connection.version = 1;
+        connection.created_at = now_rfc3339();
+        connection.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => {
+                connection.validate()?;
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .trial_connections
+                    .push(connection.clone());
+                Ok(connection)
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "trial connection persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn create_relay_evaluation(
+        &self,
+        tenant_id: &TenantId,
+        trial_connection_id: &str,
+    ) -> Result<RelayEvaluation> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let connection = store
+                    .trial_connections
+                    .iter()
+                    .find(|item| {
+                        item.tenant_id == *tenant_id
+                            && item.trial_connection_id.as_str() == trial_connection_id
+                    })
+                    .cloned()
+                    .context("trial connection not found")?;
+
+                let created_at = now_rfc3339();
+                let replay_capsule_id =
+                    ReplayCapsuleId::parse(format!("replay_{}", next_id_suffix())).unwrap();
+                let route_receipt_id =
+                    RouteReceiptId::parse(format!("routercpt_{}", next_id_suffix())).unwrap();
+
+                let replay_capsule = ReplayCapsule {
+                    replay_capsule_id: replay_capsule_id.clone(),
+                    request_id: format!("req_{}", next_id_suffix()),
+                    trace_id: format!("trace_{}", next_id_suffix()),
+                    route_receipt_id,
+                    config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_merchant_eval").unwrap(),
+                    redaction_tier: RedactionTier::StructuredRedacted,
+                    normalized_request_summary: NormalizedRequestSummary {
+                        protocol_family: "openai_chat".to_string(),
+                        model_alias: connection.target_model.clone(),
+                        estimated_prompt_tokens: 480,
+                    },
+                    upstream_error_summary: Some(UpstreamErrorSummary {
+                        code: replay_upstream_error_code(&connection),
+                    }),
+                };
+
+                let evaluation =
+                    build_relay_evaluation(tenant_id, &connection, replay_capsule_id, created_at);
+                evaluation.validate()?;
+
+                store.replay_capsules.insert(
+                    replay_capsule.replay_capsule_id.as_str().to_string(),
+                    replay_capsule,
+                );
+                store.relay_evaluations.push(evaluation.clone());
+                Ok(evaluation)
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "relay evaluation persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn get_replay_capsule(
+        &self,
+        replay_capsule_id: &str,
+    ) -> Result<Option<ReplayCapsuleResponse>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .replay_capsules
+                .get(replay_capsule_id)
+                .cloned()
+                .map(|replay_capsule| ReplayCapsuleResponse { replay_capsule })),
+            Self::Postgres(_) => Err(anyhow!(
+                "replay capsule persistence is not yet implemented for postgres mode"
+            )),
         }
     }
 
@@ -1554,6 +1968,31 @@ impl StoreMode {
     }
 }
 
+pub async fn migrate_from_env() -> Result<()> {
+    let database_url = std::env::var("CONTROL_PLANE_DATABASE_URL")
+        .map_err(|_| anyhow!("CONTROL_PLANE_DATABASE_URL is required to run migrations"))?;
+    let store = PostgresStore::connect(&database_url).await?;
+    store.migrate().await
+}
+
+pub async fn bootstrap_from_env() -> Result<()> {
+    let database_url = std::env::var("CONTROL_PLANE_DATABASE_URL").map_err(|_| {
+        anyhow!("CONTROL_PLANE_DATABASE_URL is required to bootstrap control-plane data")
+    })?;
+    let store = PostgresStore::connect(&database_url).await?;
+    store.migrate().await?;
+    store.seed().await
+}
+
+pub async fn schema_status_from_env() -> Result<String> {
+    let database_url = std::env::var("CONTROL_PLANE_DATABASE_URL").map_err(|_| {
+        anyhow!("CONTROL_PLANE_DATABASE_URL is required to inspect control-plane schema")
+    })?;
+    let store = PostgresStore::connect(&database_url).await?;
+    store.ensure_schema_ready().await?;
+    Ok("control-plane schema is ready".to_string())
+}
+
 impl PostgresStore {
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = PgPoolOptions::new()
@@ -1563,21 +2002,33 @@ impl PostgresStore {
             .with_context(|| {
                 format!("failed to connect to control-plane database at {database_url}")
             })?;
-        let store = Self { pool };
-        store.migrate().await?;
-        store.seed().await?;
-        Ok(store)
+        Ok(Self { pool })
     }
 
-    async fn migrate(&self) -> Result<()> {
+    pub async fn migrate(&self) -> Result<()> {
         for statement in MIGRATIONS {
             sqlx::query(statement).execute(&self.pool).await?;
         }
         Ok(())
     }
 
+    pub async fn ensure_schema_ready(&self) -> Result<()> {
+        for table_name in REQUIRED_TABLES {
+            let exists = sqlx::query_scalar::<_, Option<String>>("SELECT to_regclass($1)")
+                .bind(table_name)
+                .fetch_one(&self.pool)
+                .await?;
+            if exists.is_none() {
+                return Err(anyhow!(
+                    "required control-plane table `{table_name}` is missing; run `control-plane-api migrate` first"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_lines)]
-    async fn seed(&self) -> Result<()> {
+    pub async fn seed(&self) -> Result<()> {
         let seed = SeedData::bootstrap();
         for tenant in seed.tenants {
             let tenant_id = tenant.tenant_id.to_string();
@@ -1966,18 +2417,62 @@ impl PostgresStore {
         Ok(user)
     }
 
+    async fn upsert_oauth_user(
+        &self,
+        provider: AuthProvider,
+        subject: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        workspace_slug: &str,
+        role: TenantMembershipRole,
+        now: &str,
+    ) -> Result<UserIdentity> {
+        self.upsert_federated_user(
+            provider,
+            subject,
+            email,
+            display_name,
+            workspace_slug,
+            role,
+            now,
+        )
+        .await
+    }
+
     async fn get_session(&self, session_id: &str) -> Result<Option<AuthLoginResult>> {
-        let row =
-            sqlx::query("SELECT payload FROM sessions WHERE session_id = $1 AND state = 'active'")
-                .bind(session_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query(
+            "SELECT user_id, payload FROM sessions WHERE session_id = $1 AND state = 'active'",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(row) = row else {
             return Ok(None);
         };
         let session = row.get::<Json<AuthSession>, _>("payload").0;
-        let links = self.list_links(&session.user.user_id).await?;
-        Ok(Some(AuthLoginResult { session, links }))
+        if timestamp_is_expired(&session.expires_at) {
+            let _ = self.revoke_session(session_id).await?;
+            return Ok(None);
+        }
+        let user_id = row.get::<String, _>("user_id");
+        let user = self
+            .load_user(&UserId::parse(user_id).unwrap())
+            .await?
+            .unwrap_or(session.user.clone());
+        let memberships = self.list_memberships(&user.user_id).await?;
+        let links = self.list_links(&user.user_id).await?;
+        let active_tenant_id =
+            resolve_active_tenant_id(session.active_tenant_id.as_ref(), &memberships);
+
+        Ok(Some(AuthLoginResult {
+            session: AuthSession {
+                user,
+                memberships,
+                active_tenant_id,
+                ..session
+            },
+            links,
+        }))
     }
 
     async fn revoke_session(&self, session_id: &str) -> Result<LogoutResponse> {
@@ -2012,7 +2507,23 @@ impl PostgresStore {
                 .rows_affected()
                 > 0
         };
+        if removed {
+            self.revoke_sessions_for_user(&session.session.user.user_id)
+                .await?;
+        }
         Ok(Some(UnlinkAuthProviderResponse { provider, removed }))
+    }
+
+    async fn workspace_exists(&self, workspace_slug: &str) -> Result<bool> {
+        Ok(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM tenants WHERE payload->>'slug' = $1",
+            )
+            .bind(workspace_slug)
+            .fetch_one(&self.pool)
+            .await?
+                > 0,
+        )
     }
 
     async fn list_tenants(&self) -> Result<TenantsResponse> {
@@ -3072,6 +3583,121 @@ impl PostgresStore {
             .collect())
     }
 
+    async fn load_user(&self, user_id: &UserId) -> Result<Option<UserIdentity>> {
+        let row = sqlx::query("SELECT payload FROM users WHERE user_id = $1 LIMIT 1")
+            .bind(user_id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<Json<UserIdentity>, _>("payload").0))
+    }
+
+    async fn revoke_sessions_for_user(&self, user_id: &UserId) -> Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1")
+            .bind(user_id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn upsert_federated_user(
+        &self,
+        provider: AuthProvider,
+        subject: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        workspace_slug: &str,
+        role: TenantMembershipRole,
+        now: &str,
+    ) -> Result<UserIdentity> {
+        let row = sqlx::query("SELECT payload FROM tenants WHERE payload->>'slug' = $1 LIMIT 1")
+            .bind(workspace_slug)
+            .fetch_optional(&self.pool)
+            .await?
+            .context("workspace not found for provider login")?;
+        let tenant = row.get::<Json<Tenant>, _>("payload").0;
+
+        let digest =
+            Sha256::digest(format!("{}:{subject}", auth_provider_slug(provider)).as_bytes());
+        let subject_hash = digest
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let user_id = format!("user_{subject_hash}");
+        let primary_email = email
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{subject}@{}.login.local", auth_provider_slug(provider)));
+        let user = UserIdentity {
+            user_id: UserId::parse(user_id.clone()).unwrap(),
+            primary_email: Some(primary_email.clone()),
+            display_name: display_name
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{} user", auth_provider_slug(provider))),
+            avatar_url: None,
+            created_at: now.to_string(),
+            last_login_at: Some(now.to_string()),
+        };
+
+        sqlx::query(
+            "INSERT INTO users (user_id, primary_email, payload) VALUES ($1, $2, $3)
+             ON CONFLICT (user_id) DO UPDATE SET primary_email = EXCLUDED.primary_email, payload = EXCLUDED.payload",
+        )
+        .bind(&user_id)
+        .bind(&primary_email)
+        .bind(Json(user.clone()))
+        .execute(&self.pool)
+        .await?;
+
+        let membership = membership(
+            &format!("tmemb_{}_{}", auth_provider_slug(provider), subject_hash),
+            &tenant,
+            role,
+        );
+        sqlx::query(
+            "INSERT INTO tenant_memberships (membership_id, user_id, tenant_id, payload)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (membership_id) DO UPDATE SET user_id = EXCLUDED.user_id, tenant_id = EXCLUDED.tenant_id, payload = EXCLUDED.payload",
+        )
+        .bind(membership.membership_id.as_str().to_string())
+        .bind(&user_id)
+        .bind(membership.tenant.id.as_str())
+        .bind(Json(membership.clone()))
+        .execute(&self.pool)
+        .await?;
+
+        let link = link(
+            provider,
+            subject,
+            Some(&primary_email),
+            provider != AuthProvider::Oidc,
+        );
+        sqlx::query(
+            "INSERT INTO auth_provider_links (link_id, user_id, provider, provider_subject, email, can_unlink, payload)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (link_id) DO UPDATE SET
+               user_id = EXCLUDED.user_id,
+               provider = EXCLUDED.provider,
+               provider_subject = EXCLUDED.provider_subject,
+               email = EXCLUDED.email,
+               can_unlink = EXCLUDED.can_unlink,
+               payload = EXCLUDED.payload",
+        )
+        .bind(link.link_id.as_str().to_string())
+        .bind(&user_id)
+        .bind(auth_provider_slug(provider))
+        .bind(subject)
+        .bind(Some(primary_email.as_str()))
+        .bind(provider != AuthProvider::Oidc)
+        .bind(Json(link.clone()))
+        .execute(&self.pool)
+        .await?;
+
+        self.revoke_sessions_for_user(&UserId::parse(user_id).unwrap())
+            .await?;
+
+        Ok(user)
+    }
+
     async fn get_active_project_snapshot(
         &self,
         tenant_id: &TenantId,
@@ -3180,6 +3806,32 @@ fn issue_memory_session(
     Ok(AuthLoginResult { session, links })
 }
 
+fn refresh_memory_session(store: &MemoryStore, stored: StoredSession) -> AuthLoginResult {
+    let user_id = stored.session.user.user_id.as_str();
+    let memberships = store
+        .memberships_by_user
+        .get(user_id)
+        .cloned()
+        .unwrap_or_else(|| stored.session.memberships.clone());
+    let links = store
+        .provider_links_by_user
+        .get(user_id)
+        .cloned()
+        .unwrap_or_else(|| stored.links.clone());
+
+    AuthLoginResult {
+        session: AuthSession {
+            active_tenant_id: resolve_active_tenant_id(
+                stored.session.active_tenant_id.as_ref(),
+                &memberships,
+            ),
+            memberships,
+            ..stored.session
+        },
+        links,
+    }
+}
+
 fn upsert_memory_oidc_user(
     store: &mut MemoryStore,
     subject: &str,
@@ -3257,24 +3909,125 @@ fn upsert_memory_oidc_user(
     Ok(user_id)
 }
 
+fn upsert_memory_provider_user(
+    store: &mut MemoryStore,
+    provider: AuthProvider,
+    subject: &str,
+    email: Option<&str>,
+    display_name: Option<&str>,
+    workspace_slug: &str,
+    role: TenantMembershipRole,
+    now: &str,
+) -> Result<String> {
+    if provider == AuthProvider::Oidc {
+        return upsert_memory_oidc_user(
+            store,
+            subject,
+            email,
+            display_name,
+            workspace_slug,
+            role,
+            now,
+        );
+    }
+
+    let digest = Sha256::digest(format!("{}:{subject}", auth_provider_slug(provider)).as_bytes());
+    let subject_hash = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let user_id = format!("user_{subject_hash}");
+
+    let tenant = store
+        .tenants
+        .iter()
+        .find(|tenant| tenant.slug == workspace_slug)
+        .cloned()
+        .context("workspace not found for oauth login")?;
+    let primary_email = email
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{subject}@{}.login.local", auth_provider_slug(provider)));
+    let user = UserIdentity {
+        user_id: UserId::parse(user_id.clone()).unwrap(),
+        primary_email: Some(primary_email.clone()),
+        display_name: display_name
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{} user", auth_provider_slug(provider))),
+        avatar_url: None,
+        created_at: now.to_string(),
+        last_login_at: Some(now.to_string()),
+    };
+    store.users.insert(user_id.clone(), user);
+    store
+        .email_identity_to_user_id
+        .insert(primary_email.to_lowercase(), user_id.clone());
+    store.provider_subject_to_user_id.insert(
+        format!("{}:{}", auth_provider_slug(provider), subject),
+        user_id.clone(),
+    );
+
+    let membership = membership(
+        &format!("tmemb_{}_{}", auth_provider_slug(provider), subject_hash),
+        &tenant,
+        role,
+    );
+    let memberships = store
+        .memberships_by_user
+        .entry(user_id.clone())
+        .or_default();
+    if !memberships
+        .iter()
+        .any(|existing| existing.membership_id == membership.membership_id)
+    {
+        memberships.push(membership);
+    }
+    store.provider_links_by_user.insert(
+        user_id.clone(),
+        vec![link(provider, subject, Some(&primary_email), true)],
+    );
+    revoke_memory_sessions_for_user(store, &user_id);
+
+    Ok(user_id)
+}
+
+fn revoke_memory_sessions_for_user(store: &mut MemoryStore, user_id: &str) {
+    store
+        .sessions
+        .retain(|_, stored| stored.session.user.user_id.as_str() != user_id);
+}
+
 fn unlink_memory_provider(
     store: &mut MemoryStore,
     session_id: &str,
     provider: AuthProvider,
 ) -> Option<UnlinkAuthProviderResponse> {
-    let session = store.sessions.get_mut(session_id)?;
+    let user_id = store
+        .sessions
+        .get(session_id)?
+        .session
+        .user
+        .user_id
+        .as_str()
+        .to_string();
     let removed = if provider == AuthProvider::Email {
         false
     } else {
-        let before = session.links.len();
-        session.links.retain(|link| link.provider != provider);
-        if let Some(user_links) = store
-            .provider_links_by_user
-            .get_mut(session.session.user.user_id.as_str())
-        {
+        let before = store.sessions.get(session_id)?.links.len();
+        if let Some(session) = store.sessions.get_mut(session_id) {
+            session.links.retain(|link| link.provider != provider);
+        }
+        if let Some(user_links) = store.provider_links_by_user.get_mut(&user_id) {
             user_links.retain(|link| link.provider != provider);
         }
-        session.links.len() != before
+        let removed = store
+            .sessions
+            .get(session_id)
+            .is_some_and(|session| session.links.len() != before);
+        if removed {
+            revoke_memory_sessions_for_user(store, &user_id);
+        }
+        removed
     };
 
     Some(UnlinkAuthProviderResponse { provider, removed })
@@ -3458,6 +4211,83 @@ fn hash_api_key(api_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(api_key.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn next_id_suffix() -> String {
+    OffsetDateTime::now_utc().unix_timestamp_nanos().to_string()
+}
+
+fn replay_upstream_error_code(connection: &TrialConnection) -> String {
+    let endpoint = connection.endpoint_base_url.to_ascii_lowercase();
+
+    if endpoint.contains("vertex") {
+        "provider_signature_mismatch".to_string()
+    } else if endpoint.contains("bedrock") {
+        "provider_channel_proxy".to_string()
+    } else {
+        "protocol_shape_warning".to_string()
+    }
+}
+
+fn build_relay_evaluation(
+    tenant_id: &TenantId,
+    connection: &TrialConnection,
+    replay_capsule_id: ReplayCapsuleId,
+    created_at: String,
+) -> RelayEvaluation {
+    let endpoint = connection.endpoint_base_url.to_ascii_lowercase();
+    let detected_channel = if endpoint.contains("vertex") {
+        Some("vertex".to_string())
+    } else if endpoint.contains("bedrock") {
+        Some("aws-bedrock".to_string())
+    } else {
+        None
+    };
+    let protocol_status = if detected_channel.is_some() {
+        RelayCheckStatus::Warning
+    } else {
+        RelayCheckStatus::Pass
+    };
+    let token_status = if connection
+        .target_model
+        .to_ascii_lowercase()
+        .contains("flash")
+    {
+        RelayCheckStatus::Warning
+    } else {
+        RelayCheckStatus::Pass
+    };
+    let verdict = if detected_channel.is_some() {
+        RelayEvaluationVerdict::Warning
+    } else {
+        RelayEvaluationVerdict::Healthy
+    };
+    let overall_score = if detected_channel.is_some() { 82 } else { 91 };
+
+    RelayEvaluation {
+        relay_evaluation_id: RelayEvaluationId::parse(format!("reval_{}", next_id_suffix()))
+            .unwrap(),
+        tenant_id: tenant_id.clone(),
+        trial_connection_id: connection.trial_connection_id.clone(),
+        replay_capsule_id,
+        provider_label: connection.provider_label.clone(),
+        endpoint_base_url: connection.endpoint_base_url.clone(),
+        target_model: connection.target_model.clone(),
+        runner_mode: RelayEvaluationRunnerMode::Simulated,
+        sample_request_count: 5,
+        estimated_tokens_saved: 2400,
+        overall_score,
+        verdict,
+        fingerprint_status: RelayCheckStatus::Pass,
+        protocol_status,
+        token_status,
+        multimodal_status: RelayCheckStatus::NotTested,
+        detected_channel,
+        summary:
+            "Replay-ready evaluation recorded. Review protocol consistency before spending live token budget."
+                .to_string(),
+        created_at,
+    }
 }
 
 fn activate_memory_config_snapshot(
@@ -4429,13 +5259,6 @@ fn link(
     }
 }
 
-pub fn ensure_workspace_slug(workspace_slug: &str) -> bool {
-    matches!(
-        workspace_slug,
-        "platform-admin" | "acme-retail" | "northstar-labs"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -4745,6 +5568,63 @@ pub fn expires_at(seconds: u64) -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
+fn timestamp_is_expired(value: &str) -> bool {
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map(|timestamp| timestamp <= OffsetDateTime::now_utc())
+        .unwrap_or(true)
+}
+
+fn resolve_active_tenant_id(
+    existing: Option<&TenantId>,
+    memberships: &[TenantMembership],
+) -> Option<TenantId> {
+    existing
+        .filter(|tenant_id| {
+            memberships
+                .iter()
+                .any(|membership| membership.tenant.id == **tenant_id)
+        })
+        .cloned()
+        .or_else(|| {
+            memberships
+                .iter()
+                .find(|membership| membership.status == TenantMembershipStatus::Active)
+                .map(|membership| membership.tenant.id.clone())
+        })
+}
+
+fn env_flag_enabled(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+pub fn mock_auth_enabled() -> bool {
+    env_flag_enabled("CONTROL_PLANE_ALLOW_MOCK_AUTH", false)
+}
+
+pub fn auth_provider_enabled(provider: AuthProvider) -> bool {
+    match provider {
+        AuthProvider::Email => env_flag_enabled("CONTROL_PLANE_AUTH_EMAIL_ENABLED", true),
+        AuthProvider::Github => {
+            env_flag_enabled("CONTROL_PLANE_AUTH_GITHUB_ENABLED", false) || mock_auth_enabled()
+        }
+        AuthProvider::Google => {
+            env_flag_enabled("CONTROL_PLANE_AUTH_GOOGLE_ENABLED", false) || mock_auth_enabled()
+        }
+        AuthProvider::Wechat => {
+            env_flag_enabled("CONTROL_PLANE_AUTH_WECHAT_ENABLED", false) || mock_auth_enabled()
+        }
+        AuthProvider::Oidc => oidc_enabled() || mock_auth_enabled(),
+    }
+}
+
 pub const fn oauth_provider_slug(provider: OAuthProvider) -> &'static str {
     match provider {
         OAuthProvider::Github => "github",
@@ -4789,6 +5669,23 @@ const fn config_snapshot_status_slug(status: ConfigSnapshotStatus) -> &'static s
         ConfigSnapshotStatus::Superseded => "superseded",
     }
 }
+
+const REQUIRED_TABLES: &[&str] = &[
+    "tenants",
+    "projects",
+    "provider_resources",
+    "route_policies",
+    "api_keys",
+    "config_snapshots",
+    "active_config_pointers",
+    "users",
+    "tenant_memberships",
+    "auth_provider_links",
+    "sessions",
+    "login_flows",
+    "route_receipts",
+    "billing_export_jobs",
+];
 
 const MIGRATIONS: &[&str] = &[
     r"CREATE TABLE IF NOT EXISTS tenants (

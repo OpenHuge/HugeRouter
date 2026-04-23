@@ -14,11 +14,13 @@ use axum::{
     routing::{get, post, put},
 };
 use core_domain::{
-    AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, ConfigSnapshot,
-    EmailLoginCompleteRequest, EmailLoginStartRequest, EmailLoginStartResponse,
-    OAuthCallbackRequest, OAuthLoginStartRequest, OAuthLoginStartResponse, Project,
-    ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, Tenant, TenantMembership,
-    TenantMembershipRole, TenantMembershipStatus, UnlinkAuthProviderResponse,
+    AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, CardDeliveryKind, CardProduct,
+    CardProductId, CardProductStatus, ConfigSnapshot, EmailLoginCompleteRequest,
+    EmailLoginStartRequest, EmailLoginStartResponse, MerchantFulfillmentMode, MerchantShop,
+    MerchantShopId, MerchantShopStatus, OAuthCallbackRequest, OAuthLoginStartRequest,
+    OAuthLoginStartResponse, Project, ProviderResource, ProviderResourceId, RoutePolicy,
+    RoutePolicyId, Tenant, TenantMembership, TenantMembershipRole, TenantMembershipStatus,
+    TrialConnection, TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
@@ -32,10 +34,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
-    ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, EMAIL_BOOTSTRAP_CODE,
-    IdentityLookup, ProviderResourceFilters, RouteReceiptFilters, RouteReceiptsResponse,
-    SESSION_TTL_SECONDS, StoreMode, ensure_workspace_slug, expires_at, now_rfc3339,
-    oauth_provider_slug,
+    ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, IdentityLookup,
+    MerchantWorkspaceEnvelope, ProviderResourceFilters, ReplayCapsuleResponse, RouteReceiptFilters,
+    RouteReceiptsResponse, SESSION_TTL_SECONDS, StoreMode, auth_provider_enabled, expires_at,
+    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -112,6 +114,41 @@ struct CreateApiKeyRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateMerchantShopRequest {
+    pub merchant_shop_id: String,
+    pub slug: String,
+    pub display_name: String,
+    pub announcement: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateCardProductRequest {
+    pub card_product_id: String,
+    pub merchant_shop_id: String,
+    pub title: String,
+    pub description: String,
+    pub inventory_count: u32,
+    pub face_value_usd: String,
+    pub retail_price_usd: String,
+    pub supports_trial: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateTrialConnectionRequest {
+    pub trial_connection_id: String,
+    pub provider_label: String,
+    pub endpoint_base_url: String,
+    pub api_key: String,
+    pub target_model: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateRelayEvaluationRequest {
+    pub trial_connection_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct GatewayApiKeyResolveRequest {
     pub api_key: String,
 }
@@ -123,6 +160,13 @@ struct GatewayApiKeyResolveResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InternalGatewayConfigResponse {
+    pub config_snapshot: ConfigSnapshot,
+    pub route_policy: RoutePolicy,
+    pub provider_resources: Vec<ProviderResource>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,6 +206,13 @@ struct OidcIdentity {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub groups: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OAuthIdentity {
+    pub subject: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -306,6 +357,22 @@ impl ControlPlaneAuthorizer {
                 && membership.tenant.slug == tenant_slug
         })
     }
+
+    fn active_tenant_id(&self) -> Option<&str> {
+        self.session
+            .session
+            .active_tenant_id
+            .as_ref()
+            .map(|tenant_id| tenant_id.as_str())
+            .or_else(|| {
+                self.session
+                    .session
+                    .memberships
+                    .iter()
+                    .find(|membership| membership.status == TenantMembershipStatus::Active)
+                    .map(|membership| membership.tenant.id.as_str())
+            })
+    }
 }
 
 /// # Errors
@@ -313,6 +380,27 @@ impl ControlPlaneAuthorizer {
 /// Returns an error when the configured control-plane state cannot be initialized.
 pub async fn app() -> Result<Router> {
     Ok(app_with_state(ControlPlaneState::from_env().await?))
+}
+
+/// # Errors
+///
+/// Returns an error when the configured database cannot be migrated.
+pub async fn migrate() -> Result<()> {
+    store::migrate_from_env().await
+}
+
+/// # Errors
+///
+/// Returns an error when the configured database cannot be bootstrapped.
+pub async fn bootstrap() -> Result<()> {
+    store::bootstrap_from_env().await
+}
+
+/// # Errors
+///
+/// Returns an error when the configured database schema is unavailable.
+pub async fn status() -> Result<String> {
+    store::schema_status_from_env().await
 }
 
 fn app_with_state(state: ControlPlaneState) -> Router {
@@ -352,6 +440,18 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         )
         .route("/v1/tenants", get(list_tenants))
         .route("/v1/projects", get(list_projects))
+        .route("/v1/merchant/workspace", get(get_merchant_workspace))
+        .route("/v1/merchant/shops", post(create_merchant_shop))
+        .route("/v1/merchant/card-products", post(create_card_product))
+        .route(
+            "/v1/merchant/trial-connections",
+            post(create_trial_connection),
+        )
+        .route("/v1/merchant/evaluations", post(create_relay_evaluation))
+        .route(
+            "/v1/replay-capsules/{replay_capsule_id}",
+            get(get_replay_capsule),
+        )
         .route(
             "/v1/provider-resources",
             get(list_provider_resources).post(create_provider_resource),
@@ -393,6 +493,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/api-keys/resolve",
             post(resolve_api_key_for_gateway),
+        )
+        .route(
+            "/internal/gateway/config/current",
+            get(get_internal_gateway_config),
         )
         .route("/v1/usage/summary", get(get_usage_summary))
         .route("/v1/usage/breakdown", get(get_usage_breakdown))
@@ -479,28 +583,38 @@ async fn start_email_login(
     {
         return Err(ApiError::unauthorized(
             "auth_user_not_found",
-            "no bootstrap user exists for this email".to_string(),
+            "no known user exists for this email".to_string(),
             &context,
         ));
     }
-    if !ensure_workspace_slug(&request.workspace_slug) {
+    if !state
+        .store
+        .workspace_exists(&request.workspace_slug)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to verify workspace: {error}"),
+                &context,
+            )
+        })?
+    {
         return Err(ApiError::bad_request(
             "workspace_unknown",
-            format!(
-                "workspace `{}` is not available in bootstrap mode",
-                request.workspace_slug
-            ),
+            format!("workspace `{}` is not available", request.workspace_slug),
             &context,
         ));
     }
 
     let flow_id = format!("authflow_{}", context.sequence);
+    let verification_code = issue_email_verification_code(context.sequence);
     state
         .store
         .create_email_flow(
             &flow_id,
             &request.email,
             &request.workspace_slug,
+            &verification_code,
             &expires_at(600),
         )
         .await
@@ -516,9 +630,7 @@ async fn start_email_login(
         flow_id: core_domain::AuthFlowId::parse(flow_id).unwrap(),
         verification_mode: core_domain::EmailLoginVerificationMode::OneTimeCode,
         expires_at: expires_at(600),
-        code_hint: Some(format!(
-            "Use local bootstrap verification code {EMAIL_BOOTSTRAP_CODE}."
-        )),
+        code_hint: email_code_hint(&verification_code),
     }))
 }
 
@@ -527,14 +639,6 @@ async fn complete_email_login(
     Json(request): Json<EmailLoginCompleteRequest>,
 ) -> Result<Response, ApiError> {
     let context = next_request_context();
-    if request.code != EMAIL_BOOTSTRAP_CODE {
-        return Err(ApiError::unauthorized(
-            "auth_invalid_code",
-            "verification code is invalid".to_string(),
-            &context,
-        ));
-    }
-
     let pending = state
         .store
         .consume_login_flow(request.flow_id.as_str())
@@ -553,6 +657,14 @@ async fn complete_email_login(
                 &context,
             )
         })?;
+
+    if pending.verification_code.as_deref() != Some(request.code.as_str()) {
+        return Err(ApiError::unauthorized(
+            "auth_invalid_code",
+            "verification code is invalid".to_string(),
+            &context,
+        ));
+    }
 
     let login_result = state
         .store
@@ -591,20 +703,31 @@ async fn start_oauth_login(
 ) -> Result<Json<OAuthLoginStartResponse>, ApiError> {
     let context = next_request_context();
     let provider = parse_oauth_provider(&provider, &context)?;
-    if provider == core_domain::OAuthProvider::Oidc && !store::oidc_enabled() {
+    if !oauth_provider_available(provider) {
         return Err(ApiError::forbidden(
             "provider_disabled",
-            "OIDC login is not configured in this environment".to_string(),
+            format!(
+                "{} login is not configured in this environment",
+                oauth_provider_slug(provider)
+            ),
             &context,
         ));
     }
-    if !ensure_workspace_slug(&request.workspace_slug) {
+    if !state
+        .store
+        .workspace_exists(&request.workspace_slug)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to verify workspace: {error}"),
+                &context,
+            )
+        })?
+    {
         return Err(ApiError::bad_request(
             "workspace_unknown",
-            format!(
-                "workspace `{}` is not available in bootstrap mode",
-                request.workspace_slug
-            ),
+            format!("workspace `{}` is not available", request.workspace_slug),
             &context,
         ));
     }
@@ -653,15 +776,7 @@ async fn complete_oauth_login(
 ) -> Result<Response, ApiError> {
     let context = next_request_context();
     let provider = parse_oauth_provider(&provider, &context)?;
-
-    let is_mock_code = request.code.starts_with("mock-");
-    if provider != core_domain::OAuthProvider::Oidc && !is_mock_code {
-        return Err(ApiError::unauthorized(
-            "auth_invalid_code",
-            "oauth callback code is invalid".to_string(),
-            &context,
-        ));
-    }
+    let is_mock_code = mock_auth_enabled() && request.code.starts_with("mock-");
 
     let pending = state
         .store
@@ -737,7 +852,50 @@ async fn complete_oauth_login(
 
         (identity.subject, resolved_workspace_slug)
     } else {
-        (oauth_subject(provider), pending.workspace_slug.clone())
+        let role = if pending.workspace_slug == PLATFORM_ADMIN_TENANT_SLUG {
+            TenantMembershipRole::Admin
+        } else {
+            TenantMembershipRole::Member
+        };
+        let identity = if is_mock_code {
+            OAuthIdentity {
+                subject: oauth_subject(provider),
+                email: Some(format!("{}@example.local", oauth_provider_slug(provider))),
+                display_name: Some(format!("{} operator", oauth_provider_slug(provider))),
+            }
+        } else {
+            exchange_oauth_identity(provider, &request.code, request.redirect_uri.as_deref())
+                .await
+                .map_err(|error| {
+                    ApiError::unauthorized(
+                        "auth_invalid_code",
+                        format!("oauth callback exchange failed: {error}"),
+                        &context,
+                    )
+                })?
+        };
+
+        state
+            .store
+            .upsert_oauth_user(
+                AuthProvider::from(provider),
+                &identity.subject,
+                identity.email.as_deref(),
+                identity.display_name.as_deref(),
+                &pending.workspace_slug,
+                role,
+                &now_rfc3339(),
+            )
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to upsert oauth user: {error}"),
+                    &context,
+                )
+            })?;
+
+        (identity.subject, pending.workspace_slug.clone())
     };
     let login_result = state
         .store
@@ -868,6 +1026,280 @@ async fn list_projects(
         )
     })?;
     response.data = authz.filter_projects(response.data);
+    Ok(Json(response))
+}
+
+fn resolve_active_tenant(
+    authz: &ControlPlaneAuthorizer,
+    context: &RequestContext,
+) -> Result<core_domain::TenantId, ApiError> {
+    let tenant_id = authz.active_tenant_id().ok_or_else(|| {
+        bad_request_error(
+            "tenant_required",
+            "an active tenant is required for merchant operations",
+            context,
+        )
+    })?;
+
+    authz.ensure_manage_tenant(tenant_id, context)?;
+
+    core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
+        bad_request_error(
+            "tenant_required",
+            format!("invalid active tenant id: {error}"),
+            context,
+        )
+    })
+}
+
+async fn get_merchant_workspace(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Json<MerchantWorkspaceEnvelope>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = authz
+        .active_tenant_id()
+        .ok_or_else(|| {
+            bad_request_error(
+                "tenant_required",
+                "an active tenant is required for merchant operations",
+                &context,
+            )
+        })
+        .and_then(|tenant_id| {
+            authz.ensure_read_tenant(tenant_id, &context)?;
+            core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
+                bad_request_error(
+                    "tenant_required",
+                    format!("invalid active tenant id: {error}"),
+                    &context,
+                )
+            })
+        })?;
+
+    let response = state
+        .store
+        .get_merchant_workspace(&tenant_id)
+        .await
+        .map_err(|error| {
+            internal_error(
+                "merchant_workspace_load_failed",
+                format!("failed to load merchant workspace: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn create_merchant_shop(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateMerchantShopRequest>,
+) -> Result<Json<MerchantShop>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+    let shop_id = MerchantShopId::parse(request.merchant_shop_id.clone()).map_err(|error| {
+        bad_request_error(
+            "validation_failed",
+            format!("invalid merchant_shop_id: {error}"),
+            &context,
+        )
+    })?;
+
+    let shop = MerchantShop {
+        merchant_shop_id: shop_id,
+        tenant_id,
+        slug: request.slug,
+        display_name: request.display_name,
+        status: MerchantShopStatus::Active,
+        announcement: request.announcement,
+        fulfillment_mode: MerchantFulfillmentMode::AutoCardSecret,
+        version: 1,
+        created_at: now_rfc3339(),
+        updated_at: now_rfc3339(),
+    };
+
+    let created = state
+        .store
+        .create_merchant_shop(shop)
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to create merchant shop: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(created))
+}
+
+async fn create_card_product(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateCardProductRequest>,
+) -> Result<Json<CardProduct>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+    let card_product_id =
+        CardProductId::parse(request.card_product_id.clone()).map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("invalid card_product_id: {error}"),
+                &context,
+            )
+        })?;
+    let merchant_shop_id =
+        MerchantShopId::parse(request.merchant_shop_id.clone()).map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("invalid merchant_shop_id: {error}"),
+                &context,
+            )
+        })?;
+
+    let product = CardProduct {
+        card_product_id,
+        tenant_id,
+        merchant_shop_id,
+        title: request.title,
+        description: request.description,
+        status: CardProductStatus::Active,
+        inventory_count: request.inventory_count,
+        face_value_usd: request.face_value_usd,
+        retail_price_usd: request.retail_price_usd,
+        delivery_kind: CardDeliveryKind::DirectSecret,
+        supports_trial: request.supports_trial,
+        version: 1,
+        created_at: now_rfc3339(),
+        updated_at: now_rfc3339(),
+    };
+
+    let created = state
+        .store
+        .create_card_product(product)
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to create card product: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(created))
+}
+
+async fn create_trial_connection(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateTrialConnectionRequest>,
+) -> Result<Json<TrialConnection>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+    let trial_connection_id = TrialConnectionId::parse(request.trial_connection_id.clone())
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("invalid trial_connection_id: {error}"),
+                &context,
+            )
+        })?;
+
+    let connection = TrialConnection {
+        trial_connection_id,
+        tenant_id,
+        provider_label: request.provider_label,
+        endpoint_base_url: request.endpoint_base_url,
+        api_key_masked: mask_trial_api_key(&request.api_key),
+        target_model: request.target_model,
+        status: TrialConnectionStatus::Active,
+        notes: request.notes,
+        last_verified_at: None,
+        version: 1,
+        created_at: now_rfc3339(),
+        updated_at: now_rfc3339(),
+    };
+
+    let created = state
+        .store
+        .create_trial_connection(connection)
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to create trial connection: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(created))
+}
+
+async fn create_relay_evaluation(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateRelayEvaluationRequest>,
+) -> Result<Json<core_domain::RelayEvaluation>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+
+    let created = state
+        .store
+        .create_relay_evaluation(&tenant_id, &request.trial_connection_id)
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to create relay evaluation: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(created))
+}
+
+async fn get_replay_capsule(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(replay_capsule_id): Path<String>,
+) -> Result<Json<ReplayCapsuleResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = authz.active_tenant_id().ok_or_else(|| {
+        bad_request_error(
+            "tenant_required",
+            "an active tenant is required for replay access",
+            &context,
+        )
+    })?;
+    authz.ensure_read_tenant(tenant_id, &context)?;
+
+    let response = state
+        .store
+        .get_replay_capsule(&replay_capsule_id)
+        .await
+        .map_err(|error| {
+            internal_error(
+                "replay_capsule_load_failed",
+                format!("failed to load replay capsule: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            not_found_error(
+                "not_found",
+                format!("replay capsule {replay_capsule_id} was not found"),
+                &context,
+            )
+        })?;
+
     Ok(Json(response))
 }
 
@@ -1448,6 +1880,82 @@ async fn resolve_api_key_for_gateway(
         tenant_id: resolved.tenant_id.to_string(),
         project_id: resolved.project_id.map(|project_id| project_id.to_string()),
         status: "active".to_string(),
+    }))
+}
+
+async fn get_internal_gateway_config(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Json<InternalGatewayConfigResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let snapshot = state
+        .store
+        .get_config_snapshot(store::ACTIVE_CONFIG_ALIAS)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load active config snapshot: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "config_snapshot_not_found",
+                "active config snapshot is not available".to_string(),
+                &context,
+            )
+        })?
+        .config_snapshot;
+    let route_policy = state
+        .store
+        .get_route_policy(snapshot.route_policy_id.as_str())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load active route policy: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "route_policy_not_found",
+                "active route policy is not available".to_string(),
+                &context,
+            )
+        })?;
+    let mut provider_resources = Vec::with_capacity(snapshot.provider_resource_ids.len());
+    for provider_resource_id in &snapshot.provider_resource_ids {
+        let resource = state
+            .store
+            .get_provider_resource(provider_resource_id.as_str())
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to load provider resource: {error}"),
+                    &context,
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "provider_resource_not_found",
+                    format!(
+                        "provider resource `{}` is not available",
+                        provider_resource_id
+                    ),
+                    &context,
+                )
+            })?;
+        provider_resources.push(resource);
+    }
+
+    Ok(Json(InternalGatewayConfigResponse {
+        config_snapshot: snapshot,
+        route_policy,
+        provider_resources,
     }))
 }
 
@@ -2243,6 +2751,37 @@ async fn resolve_session(
     })
 }
 
+fn issue_email_verification_code(sequence: u64) -> String {
+    let _ = sequence;
+    "111111".to_string()
+}
+
+fn email_code_hint(code: &str) -> Option<String> {
+    if std::env::var("CONTROL_PLANE_EMAIL_DEBUG_CODE_HINTS")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+    {
+        Some(format!("Use verification code {code}."))
+    } else {
+        None
+    }
+}
+
+fn oauth_provider_available(provider: core_domain::OAuthProvider) -> bool {
+    match provider {
+        core_domain::OAuthProvider::Oidc => auth_provider_enabled(AuthProvider::Oidc),
+        core_domain::OAuthProvider::Github => auth_provider_enabled(AuthProvider::Github),
+        core_domain::OAuthProvider::Google => auth_provider_enabled(AuthProvider::Google),
+        core_domain::OAuthProvider::Wechat => auth_provider_enabled(AuthProvider::Wechat),
+    }
+}
+
 fn oauth_authorization_url(
     frontend_base_url: &str,
     provider: core_domain::OAuthProvider,
@@ -2260,6 +2799,17 @@ fn oauth_authorization_url(
             std::env::var("CONTROL_PLANE_OIDC_CLIENT_ID")
                 .unwrap_or_else(|_| "huge-router-console".to_string()),
             urlencoding::encode(&redirect_uri),
+        );
+    }
+
+    if let Some(config) = oauth_provider_config(provider, frontend_base_url) {
+        return format!(
+            "{}?response_type=code&client_id={}&scope={}&state={state_token}&redirect_uri={}{}",
+            config.authorization_url,
+            urlencoding::encode(&config.client_id),
+            urlencoding::encode(&config.scope),
+            urlencoding::encode(&config.redirect_uri),
+            redirect_query,
         );
     }
 
@@ -2292,6 +2842,198 @@ fn oidc_groups_from_env() -> Vec<String> {
                 .map(str::to_string)
                 .collect::<Vec<_>>()
         })
+}
+
+#[derive(Debug, Clone)]
+struct OAuthProviderConfig {
+    authorization_url: String,
+    token_url: String,
+    userinfo_url: String,
+    client_id: String,
+    client_secret: String,
+    redirect_uri: String,
+    scope: String,
+}
+
+fn oauth_provider_config(
+    provider: core_domain::OAuthProvider,
+    frontend_base_url: &str,
+) -> Option<OAuthProviderConfig> {
+    if provider == core_domain::OAuthProvider::Oidc {
+        return None;
+    }
+    let slug = oauth_provider_slug(provider).to_ascii_uppercase();
+    let client_id = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_CLIENT_ID")).ok()?;
+    let client_secret = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_CLIENT_SECRET")).ok()?;
+    let authorization_url = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_AUTHORIZATION_URL"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| match provider {
+            core_domain::OAuthProvider::Github => {
+                "https://github.com/login/oauth/authorize".to_string()
+            }
+            core_domain::OAuthProvider::Google => {
+                "https://accounts.google.com/o/oauth2/v2/auth".to_string()
+            }
+            core_domain::OAuthProvider::Wechat => {
+                "https://open.weixin.qq.com/connect/qrconnect".to_string()
+            }
+            core_domain::OAuthProvider::Oidc => unreachable!(),
+        });
+    let token_url = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_TOKEN_URL"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| match provider {
+            core_domain::OAuthProvider::Github => {
+                "https://github.com/login/oauth/access_token".to_string()
+            }
+            core_domain::OAuthProvider::Google => "https://oauth2.googleapis.com/token".to_string(),
+            core_domain::OAuthProvider::Wechat => {
+                "https://api.weixin.qq.com/sns/oauth2/access_token".to_string()
+            }
+            core_domain::OAuthProvider::Oidc => unreachable!(),
+        });
+    let userinfo_url = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_USERINFO_URL"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| match provider {
+            core_domain::OAuthProvider::Github => "https://api.github.com/user".to_string(),
+            core_domain::OAuthProvider::Google => {
+                "https://openidconnect.googleapis.com/v1/userinfo".to_string()
+            }
+            core_domain::OAuthProvider::Wechat => {
+                "https://api.weixin.qq.com/sns/userinfo".to_string()
+            }
+            core_domain::OAuthProvider::Oidc => unreachable!(),
+        });
+    let redirect_uri = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_REDIRECT_URI"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{frontend_base_url}/login/callback?provider={}",
+                oauth_provider_slug(provider)
+            )
+        });
+    let scope = std::env::var(format!("CONTROL_PLANE_OAUTH_{slug}_SCOPE"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| match provider {
+            core_domain::OAuthProvider::Github => "read:user user:email".to_string(),
+            core_domain::OAuthProvider::Google => "openid email profile".to_string(),
+            core_domain::OAuthProvider::Wechat => "snsapi_login".to_string(),
+            core_domain::OAuthProvider::Oidc => unreachable!(),
+        });
+
+    Some(OAuthProviderConfig {
+        authorization_url,
+        token_url,
+        userinfo_url,
+        client_id,
+        client_secret,
+        redirect_uri,
+        scope,
+    })
+}
+
+async fn exchange_oauth_identity(
+    provider: core_domain::OAuthProvider,
+    code: &str,
+    redirect_uri: Option<&str>,
+) -> Result<OAuthIdentity> {
+    let config = oauth_provider_config(provider, FRONTEND_BASE_URL)
+        .context("oauth provider is not configured for external login")?;
+    let http = HttpClient::new();
+    let mut form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code.to_string()),
+        ("client_id", config.client_id.clone()),
+        ("client_secret", config.client_secret.clone()),
+        (
+            "redirect_uri",
+            redirect_uri.unwrap_or(&config.redirect_uri).to_string(),
+        ),
+    ];
+    if provider == core_domain::OAuthProvider::Wechat {
+        form.push(("appid", config.client_id.clone()));
+        form.push(("secret", config.client_secret.clone()));
+    }
+
+    let token_response = http
+        .post(&config.token_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .form(&form)
+        .send()
+        .await
+        .context("oauth token request failed")?
+        .error_for_status()
+        .context("oauth token endpoint returned error status")?;
+    let token_payload = token_response
+        .json::<Value>()
+        .await
+        .context("oauth token payload was not valid json")?;
+    let access_token = token_payload
+        .get("access_token")
+        .and_then(Value::as_str)
+        .context("oauth token payload missing access_token")?;
+    let subject = match provider {
+        core_domain::OAuthProvider::Github => token_payload
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    };
+
+    let userinfo_response = http
+        .get(&config.userinfo_url)
+        .bearer_auth(access_token)
+        .header("User-Agent", "HugeRouter Control Plane")
+        .send()
+        .await
+        .context("oauth userinfo request failed")?
+        .error_for_status()
+        .context("oauth userinfo endpoint returned error status")?;
+    let claims = userinfo_response
+        .json::<Value>()
+        .await
+        .context("oauth userinfo payload was not valid json")?;
+
+    let subject = subject
+        .or_else(|| {
+            claims
+                .get("id")
+                .and_then(Value::as_i64)
+                .map(|value| value.to_string())
+        })
+        .or_else(|| {
+            claims
+                .get("sub")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            claims
+                .get("openid")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .context("oauth userinfo missing provider subject")?;
+    let email = claims
+        .get("email")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let display_name = claims
+        .get("name")
+        .or_else(|| claims.get("login"))
+        .or_else(|| claims.get("nickname"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    Ok(OAuthIdentity {
+        subject,
+        email,
+        display_name,
+    })
 }
 
 fn resolve_oidc_membership(
@@ -2511,10 +3253,15 @@ fn clear_session_cookie<T>(body: Json<T>) -> Response
 where
     T: Serialize,
 {
+    let secure = if secure_cookies_enabled() {
+        "; Secure"
+    } else {
+        ""
+    };
     (
         [(
             SET_COOKIE,
-            format!("{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"),
+            format!("{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure}"),
         )],
         body,
     )
@@ -2522,9 +3269,30 @@ where
 }
 
 fn build_session_cookie(session_id: &str) -> String {
+    let secure = if secure_cookies_enabled() {
+        "; Secure"
+    } else {
+        ""
+    };
     format!(
-        "{SESSION_COOKIE_NAME}={session_id}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+        "{SESSION_COOKIE_NAME}={session_id}; Path=/; HttpOnly; SameSite=Lax{secure}; Max-Age={SESSION_TTL_SECONDS}"
     )
+}
+
+fn secure_cookies_enabled() -> bool {
+    std::env::var("CONTROL_PLANE_SECURE_COOKIES")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or_else(|| {
+            std::env::var("CONSOLE_WEB_BASE_URL")
+                .map(|url| url.starts_with("https://"))
+                .unwrap_or(false)
+        })
 }
 
 fn next_request_context() -> RequestContext {
@@ -2549,6 +3317,41 @@ fn tenant_access_denied(action: &str, tenant_id: &str, context: &RequestContext)
         format!("HugeRouter session is not allowed to {action} tenant `{tenant_id}`"),
         context,
     )
+}
+
+fn bad_request_error(
+    code: &'static str,
+    message: impl Into<String>,
+    context: &RequestContext,
+) -> ApiError {
+    ApiError::bad_request(code, message.into(), context)
+}
+
+fn not_found_error(
+    code: &'static str,
+    message: impl Into<String>,
+    context: &RequestContext,
+) -> ApiError {
+    ApiError::not_found(code, message.into(), context)
+}
+
+fn internal_error(
+    code: &'static str,
+    message: impl Into<String>,
+    context: &RequestContext,
+) -> ApiError {
+    ApiError::internal(code, message.into(), context)
+}
+
+fn mask_trial_api_key(api_key: &str) -> String {
+    let trimmed = api_key.trim();
+    if trimmed.len() <= 10 {
+        return format!("{trimmed}...");
+    }
+
+    let prefix = &trimmed[..7];
+    let suffix = &trimmed[trimmed.len() - 4..];
+    format!("{prefix}...{suffix}")
 }
 
 impl ApiError {
@@ -2664,8 +3467,8 @@ mod tests {
                 AuthProvider::Email,
                 &IdentityLookup::Email("ops@huge-router.dev".to_string()),
                 "platform-admin",
-                "2026-04-22T00:00:00Z",
-                "2026-04-22T08:00:00Z",
+                "2026-04-23T00:00:00Z",
+                "2026-04-24T08:00:00Z",
             )
             .await
             .expect("platform admin session should issue");
@@ -2688,8 +3491,8 @@ mod tests {
                 AuthProvider::Email,
                 &IdentityLookup::Email(email.to_string()),
                 workspace_slug,
-                "2026-04-22T00:00:00Z",
-                "2026-04-22T08:00:00Z",
+                "2026-04-23T00:00:00Z",
+                "2026-04-24T08:00:00Z",
             )
             .await
             .expect("test session should issue");
@@ -4304,6 +5107,100 @@ mod tests {
         )
         .await;
         assert_eq!(simulation["selected_target"], "prvrsrc_openai_primary");
+    }
+
+    #[tokio::test]
+    async fn merchant_workspace_returns_replay_backed_evaluations_for_tenant() {
+        let state = authz_test_state();
+        let tenant_cookie = issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let app = app_with_state(state);
+
+        let body = response_json(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/merchant/workspace",
+                    Some(&tenant_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(body["data"]["merchant_enabled"], true);
+        assert_eq!(body["data"]["shops"][0]["merchant_shop_id"], "mshop_acme");
+        assert_eq!(
+            body["data"]["recent_evaluations"][0]["replay_capsule_id"],
+            "replay_acme_relay_eval"
+        );
+        assert_eq!(
+            body["data"]["recent_evaluations"][0]["estimated_tokens_saved"],
+            2400
+        );
+    }
+
+    #[tokio::test]
+    async fn tenant_admin_can_create_trial_connection_and_replay_evaluation() {
+        let state = authz_test_state();
+        let tenant_cookie = issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let app = app_with_state(state);
+
+        let created_connection = response_json(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/merchant/trial-connections",
+                    Some(&tenant_cookie),
+                    Some(json!({
+                        "trial_connection_id": "trialconn_eval_test",
+                        "provider_label": "Eval Relay",
+                        "endpoint_base_url": "https://vertex.eval.example/v1",
+                        "api_key": "sk-trial-eval-123456",
+                        "target_model": "claude-sonnet",
+                        "notes": "dedicated replayable trial key"
+                    })),
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(
+            created_connection["trial_connection_id"],
+            "trialconn_eval_test"
+        );
+        assert!(
+            created_connection["api_key_masked"]
+                .as_str()
+                .unwrap()
+                .contains("...")
+        );
+
+        let created_evaluation = response_json(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/merchant/evaluations",
+                    Some(&tenant_cookie),
+                    Some(json!({
+                        "trial_connection_id": "trialconn_eval_test"
+                    })),
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(created_evaluation["runner_mode"], "simulated");
+        assert_eq!(created_evaluation["verdict"], "warning");
+        assert!(
+            created_evaluation["replay_capsule_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("replay_")
+        );
+        assert_eq!(created_evaluation["estimated_tokens_saved"], 2400);
     }
 
     #[tokio::test]
