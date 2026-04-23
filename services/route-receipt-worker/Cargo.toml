@@ -1,0 +1,19 @@
+[package]
+name = "route-receipt-worker"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+core-domain = { path = "../../crates/core-domain" }
+protocol-ir = { path = "../../crates/protocol-ir" }
+runtime-composition = { path = "../../crates/runtime-composition" }
+serde_json.workspace = true
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio-rustls", "json"] }
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

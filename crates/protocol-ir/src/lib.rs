@@ -71,6 +71,13 @@ pub enum MessageType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub enum RouteReceiptRecordedMessageType {
+    #[serde(rename = "route_receipt.recorded")]
+    #[schema(rename = "route_receipt.recorded")]
+    RouteReceiptRecorded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct RequestEnvelope {
     pub protocol_family: ProtocolFamily,
     pub source_service: ServiceName,
@@ -151,6 +158,17 @@ impl<T> MessageEnvelope<T> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptRecorded {
+    pub route_receipt: RouteReceipt,
+    #[serde(default)]
+    pub decision_timeline: Vec<RouteReceiptDecisionTraceStep>,
+    #[serde(default)]
+    pub policy_checks: Vec<RouteReceiptPolicyCheck>,
+    #[serde(default)]
+    pub provider_attempts: Vec<RouteReceiptProviderAttempt>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct UsageEventRecorded {
     pub usage_event: UsageEvent,
@@ -179,6 +197,21 @@ pub struct UsageEventRecordedMessage {
     pub request_id: Option<String>,
     pub idempotency_key: String,
     pub payload: UsageEventRecorded,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RouteReceiptRecordedMessage {
+    pub message_id: String,
+    pub message_type: RouteReceiptRecordedMessageType,
+    pub schema_version: u16,
+    pub occurred_at: String,
+    pub producer: ServiceName,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    pub idempotency_key: String,
+    pub payload: RouteReceiptRecorded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -2307,6 +2340,28 @@ fn sample_usage_event_recorded_message() -> UsageEventRecordedMessage {
     }
 }
 
+#[cfg(test)]
+fn sample_route_receipt_recorded_message() -> RouteReceiptRecordedMessage {
+    let diagnostics = sample_route_receipt_diagnostics();
+    let route_receipt = diagnostics.route_receipt.clone();
+    RouteReceiptRecordedMessage {
+        message_id: "msg_routercpt_123".to_string(),
+        message_type: RouteReceiptRecordedMessageType::RouteReceiptRecorded,
+        schema_version: 1,
+        occurred_at: route_receipt.created_at.clone(),
+        producer: ServiceName::parse("gateway-api").unwrap(),
+        trace_id: Some("trace_123".to_string()),
+        request_id: Some("req_123".to_string()),
+        idempotency_key: format!("{}:recorded", route_receipt.route_receipt_id),
+        payload: RouteReceiptRecorded {
+            route_receipt,
+            decision_timeline: diagnostics.decision_timeline,
+            policy_checks: diagnostics.policy_checks,
+            provider_attempts: diagnostics.provider_attempts,
+        },
+    }
+}
+
 fn sample_config_snapshot_activated_message() -> ConfigSnapshotActivatedMessage {
     let envelope = MessageEnvelope::new(
         "msg_cfgsnap_123",
@@ -2348,11 +2403,11 @@ pub fn workspace_root() -> PathBuf {
 mod tests {
     use super::{
         ChatRequest, ConfigSnapshotActivated, MessageEnvelope, MessageType, ProtocolFamily,
-        RequestEnvelope, collect_contract_artifacts, sample_gateway_anthropic_messages_request,
-        sample_gateway_anthropic_messages_response, sample_gateway_chat_request,
-        sample_gateway_gemini_generate_content_request,
+        RequestEnvelope, RouteReceiptRecordedMessage, collect_contract_artifacts,
+        sample_gateway_anthropic_messages_request, sample_gateway_anthropic_messages_response,
+        sample_gateway_chat_request, sample_gateway_gemini_generate_content_request,
         sample_gateway_gemini_generate_content_response, sample_route_receipt_diagnostics,
-        sample_usage_event_recorded_message, workspace_root,
+        sample_route_receipt_recorded_message, sample_usage_event_recorded_message, workspace_root,
     };
     use core_domain::{ConfigSnapshot, ProjectId, ServiceName, TenantId};
 
@@ -2471,6 +2526,13 @@ mod tests {
         let event_json = serde_json::to_value(&event).unwrap();
         assert_eq!(event_json["message_type"], "usage_event.recorded");
 
+        let route_receipt_event = sample_route_receipt_recorded_message();
+        let route_receipt_event_json = serde_json::to_value(&route_receipt_event).unwrap();
+        assert_eq!(
+            route_receipt_event_json["message_type"],
+            "route_receipt.recorded"
+        );
+
         let anthropic_request = sample_gateway_anthropic_messages_request();
         let anthropic_response = sample_gateway_anthropic_messages_response();
         assert_eq!(
@@ -2502,5 +2564,23 @@ mod tests {
         assert_eq!(value["route_receipt"]["route_receipt_id"], "routercpt_123");
         assert_eq!(value["decision_timeline"][0]["stage"], "admission");
         assert_eq!(value["provider_attempts"][0]["attempt"], 1);
+    }
+
+    #[test]
+    fn route_receipt_recorded_message_round_trips() {
+        let event = sample_route_receipt_recorded_message();
+        let value = serde_json::to_value(&event).unwrap();
+        let reparsed: RouteReceiptRecordedMessage = serde_json::from_value(value.clone()).unwrap();
+
+        assert_eq!(reparsed, event);
+        assert_eq!(value["message_type"], "route_receipt.recorded");
+        assert_eq!(
+            value["payload"]["route_receipt"]["route_receipt_id"],
+            "routercpt_123"
+        );
+        assert_eq!(
+            value["payload"]["provider_attempts"][0]["status"],
+            "succeeded"
+        );
     }
 }

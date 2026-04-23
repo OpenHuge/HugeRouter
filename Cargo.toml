@@ -18,6 +18,7 @@ members = [
   "services/ledger-worker",
   "services/notification-worker",
   "services/realtime-gateway",
+  "services/route-receipt-worker",
   "services/routing-worker",
 ]
 resolver = "3"

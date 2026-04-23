@@ -29,7 +29,9 @@ use protocol_gemini::{
 };
 use protocol_ir::{
     ConfigSnapshotResponse, MessageEnvelope, MessageType, ProviderResourcesResponse,
-    RoutePoliciesResponse, UsageEventRecorded,
+    RoutePoliciesResponse, RouteReceiptDecisionTraceStep, RouteReceiptPolicyCheck,
+    RouteReceiptProviderAttempt, RouteReceiptRecorded, RouteReceiptRecordedMessage,
+    RouteReceiptRecordedMessageType, UsageEventRecorded,
 };
 use provider_anthropic::AnthropicAdapter;
 use provider_gemini::GeminiAdapter;
@@ -62,7 +64,7 @@ pub struct AppState {
     auth_store: Arc<dyn ApiKeyScopeStore>,
     adapter_registry: ProviderAdapterRegistry,
     debug_headers_enabled: bool,
-    usage_event_sink: Arc<dyn UsageEventSink>,
+    event_sink: Arc<dyn RuntimeEventSink>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -248,7 +250,7 @@ fn default_state() -> GatewayState {
         auth_store,
         adapter_registry,
         debug_headers_enabled: debug_headers_enabled_from_env(),
-        usage_event_sink: Arc::new(NatsUsageEventSink::from_env()),
+        event_sink: Arc::new(NatsEventSink::from_env()),
     })
 }
 
@@ -420,6 +422,22 @@ async fn process_normalized_request(
             Some(normalized.clone()),
             Vec::new(),
         );
+        let debug_headers = maybe_debug_headers(
+            state.debug_headers_enabled,
+            &active_config.route_policy.route_policy_id,
+            None,
+            AdmissionResult::RejectedNoCandidate,
+            0,
+        );
+        publish_route_receipt_or_error(
+            &state,
+            &route,
+            &route_receipt,
+            Vec::new(),
+            &context,
+            debug_headers.clone(),
+        )
+        .await?;
 
         return Err(GatewayError::with_route_receipt(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -427,13 +445,7 @@ async fn process_normalized_request(
             normalized,
             &context,
             Some(active_config.config_snapshot.config_snapshot_id.clone()),
-            maybe_debug_headers(
-                state.debug_headers_enabled,
-                &active_config.route_policy.route_policy_id,
-                None,
-                AdmissionResult::RejectedNoCandidate,
-                0,
-            ),
+            debug_headers,
         ));
     }
 
@@ -448,6 +460,7 @@ async fn execute_route(
     context: RequestContext,
 ) -> Result<ExecutionSuccess, GatewayError> {
     let mut fallback_transitions = Vec::new();
+    let mut provider_attempts = Vec::new();
     let mut last_error = None;
 
     for (index, ranked_target) in route.ranked_targets.iter().enumerate() {
@@ -465,6 +478,16 @@ async fn execute_route(
                 "provider_resource_id",
                 target.resource.provider_resource_id.as_str(),
             );
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
 
             if let Some(next_target) = route.ranked_targets.get(index + 1) {
                 fallback_transitions.push(FallbackTransition {
@@ -506,12 +529,23 @@ async fn execute_route(
                 api_key: target.api_key.clone(),
             },
         };
+        let attempt_started_at = now_rfc3339();
+        let attempt_started = Instant::now();
 
         match adapter
             .execute_chat(&provider_request, &provider_context)
             .await
         {
             Ok(provider_response) => {
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    "succeeded",
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    "provider returned output".to_string(),
+                ));
                 let fallback_count = fallback_transitions.len();
                 let route_receipt = build_route_receipt(
                     &route,
@@ -521,10 +555,26 @@ async fn execute_route(
                     None,
                     fallback_transitions,
                 );
+                let debug_headers = maybe_debug_headers(
+                    state.debug_headers_enabled,
+                    &route.config_snapshot.route_policy_id,
+                    Some(target.resource.provider_resource_id.as_str()),
+                    AdmissionResult::Admitted,
+                    fallback_count,
+                );
+                publish_route_receipt_or_error(
+                    &state,
+                    &route,
+                    &route_receipt,
+                    provider_attempts.clone(),
+                    &context,
+                    debug_headers.clone(),
+                )
+                .await?;
                 let usage_event =
                     build_usage_event(&route_receipt, target, &request, &provider_response);
                 state
-                    .usage_event_sink
+                    .event_sink
                     .publish(&route_receipt, &usage_event, &context)
                     .await
                     .map_err(|message| {
@@ -535,13 +585,7 @@ async fn execute_route(
                                 .error,
                             &context,
                             Some(route.config_snapshot.config_snapshot_id.clone()),
-                            maybe_debug_headers(
-                                state.debug_headers_enabled,
-                                &route.config_snapshot.route_policy_id,
-                                Some(target.resource.provider_resource_id.as_str()),
-                                AdmissionResult::Admitted,
-                                fallback_count,
-                            ),
+                            debug_headers.clone(),
                         )
                     })?;
 
@@ -561,13 +605,7 @@ async fn execute_route(
                     route_receipt,
                     usage_event,
                     provider_response,
-                    debug_headers: maybe_debug_headers(
-                        state.debug_headers_enabled,
-                        &route.config_snapshot.route_policy_id,
-                        Some(target.resource.provider_resource_id.as_str()),
-                        AdmissionResult::Admitted,
-                        fallback_count,
-                    ),
+                    debug_headers,
                 });
             }
             Err(error) => {
@@ -594,8 +632,20 @@ async fn execute_route(
                 }
 
                 last_error = Some((ranked_target.clone(), error.clone()));
-
                 let has_more_candidates = index + 1 < route.ranked_targets.len();
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    if error.retryable && has_more_candidates {
+                        "retryable_failure"
+                    } else {
+                        "failed"
+                    },
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    error.message.clone(),
+                ));
                 if !error.retryable || !has_more_candidates {
                     let normalized = map_provider_error(&error, &context);
                     let fallback_count = fallback_transitions.len();
@@ -607,6 +657,22 @@ async fn execute_route(
                         Some(normalized.error.clone()),
                         fallback_transitions,
                     );
+                    let debug_headers = maybe_debug_headers(
+                        state.debug_headers_enabled,
+                        &route.config_snapshot.route_policy_id,
+                        Some(ranked_target.target.resource.provider_resource_id.as_str()),
+                        route.admission_result,
+                        fallback_count,
+                    );
+                    publish_route_receipt_or_error(
+                        &state,
+                        &route,
+                        &route_receipt,
+                        provider_attempts.clone(),
+                        &context,
+                        debug_headers.clone(),
+                    )
+                    .await?;
 
                     return Err(GatewayError::with_route_receipt(
                         status_for_error_code(&normalized.error.code),
@@ -614,13 +680,7 @@ async fn execute_route(
                         normalized.error,
                         &context,
                         Some(route.config_snapshot.config_snapshot_id.clone()),
-                        maybe_debug_headers(
-                            state.debug_headers_enabled,
-                            &route.config_snapshot.route_policy_id,
-                            Some(ranked_target.target.resource.provider_resource_id.as_str()),
-                            route.admission_result,
-                            fallback_count,
-                        ),
+                        debug_headers,
                     ));
                 }
             }
@@ -638,6 +698,22 @@ async fn execute_route(
         Some(normalized.error.clone()),
         fallback_transitions,
     );
+    let debug_headers = maybe_debug_headers(
+        state.debug_headers_enabled,
+        &route.config_snapshot.route_policy_id,
+        Some(ranked_target.target.resource.provider_resource_id.as_str()),
+        route.admission_result,
+        fallback_count,
+    );
+    publish_route_receipt_or_error(
+        &state,
+        &route,
+        &route_receipt,
+        provider_attempts,
+        &context,
+        debug_headers.clone(),
+    )
+    .await?;
 
     Err(GatewayError::with_route_receipt(
         status_for_error_code(&normalized.error.code),
@@ -645,13 +721,7 @@ async fn execute_route(
         normalized.error,
         &context,
         Some(route.config_snapshot.config_snapshot_id.clone()),
-        maybe_debug_headers(
-            state.debug_headers_enabled,
-            &route.config_snapshot.route_policy_id,
-            Some(ranked_target.target.resource.provider_resource_id.as_str()),
-            route.admission_result,
-            fallback_count,
-        ),
+        debug_headers,
     ))
 }
 
@@ -1175,6 +1245,174 @@ fn build_usage_event(
     }
 }
 
+fn build_route_receipt_policy_checks(
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+) -> Vec<RouteReceiptPolicyCheck> {
+    vec![RouteReceiptPolicyCheck {
+        policy_id: route.config_snapshot.route_policy_id.clone(),
+        status: match route.admission_result {
+            AdmissionResult::Admitted => "passed".to_string(),
+            _ => "failed".to_string(),
+        },
+        reason: match route.admission_result {
+            AdmissionResult::Admitted => None,
+            _ => Some(route_receipt.normalized_error.as_ref().map_or_else(
+                || "request rejected before provider execution".to_string(),
+                |error| error.message.clone(),
+            )),
+        },
+    }]
+}
+
+fn build_route_receipt_decision_timeline(
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+    provider_attempts: &[RouteReceiptProviderAttempt],
+) -> Vec<RouteReceiptDecisionTraceStep> {
+    let mut timeline = vec![RouteReceiptDecisionTraceStep {
+        stage: "admission".to_string(),
+        status: match route.admission_result {
+            AdmissionResult::Admitted => "passed".to_string(),
+            _ => "failed".to_string(),
+        },
+        message: match route.admission_result {
+            AdmissionResult::Admitted => "Request admitted by active route policy".to_string(),
+            _ => "Request rejected before provider execution".to_string(),
+        },
+        score: Some(match route.admission_result {
+            AdmissionResult::Admitted => 1.0,
+            _ => 0.0,
+        }),
+        notes: vec![
+            format!("protocol_family={}", route_receipt.protocol_family),
+            format!("model_alias={}", route_receipt.model_alias),
+        ],
+    }];
+
+    timeline.push(RouteReceiptDecisionTraceStep {
+        stage: "candidate_selection".to_string(),
+        status: if route_receipt.selected_target.is_some() {
+            "passed".to_string()
+        } else {
+            "failed".to_string()
+        },
+        message: route_receipt.selected_target.as_ref().map_or_else(
+            || {
+                if route.ranked_targets.is_empty() {
+                    "No eligible provider target satisfied the request".to_string()
+                } else {
+                    "Candidate selection completed but no provider attempt succeeded".to_string()
+                }
+            },
+            |selected_target| {
+                format!(
+                    "Selected {selected_target} from {} ranked candidates",
+                    route.ranked_targets.len()
+                )
+            },
+        ),
+        score: route_receipt.selected_target.as_ref().map(|_| {
+            route_receipt.score_breakdown.latency
+                + route_receipt.score_breakdown.cost
+                + route_receipt.score_breakdown.health
+                + route_receipt.score_breakdown.trust
+        }),
+        notes: vec![
+            format!("excluded_targets={}", route_receipt.excluded_targets.len()),
+            format!(
+                "fallback_transitions={}",
+                route_receipt.fallback_transitions.len()
+            ),
+        ],
+    });
+
+    if let Some(last_attempt) = provider_attempts.last() {
+        timeline.push(RouteReceiptDecisionTraceStep {
+            stage: "provider_execution".to_string(),
+            status: last_attempt.status.clone(),
+            message: if route_receipt.normalized_error.is_some() {
+                format!(
+                    "Provider execution ended with {} after {} attempts",
+                    last_attempt.status,
+                    provider_attempts.len()
+                )
+            } else {
+                format!(
+                    "Provider execution completed via {} on attempt {}",
+                    last_attempt.provider_resource_id, last_attempt.attempt
+                )
+            },
+            score: None,
+            notes: vec![format!("provider_attempts={}", provider_attempts.len())],
+        });
+    }
+
+    timeline
+}
+
+fn build_route_receipt_recorded(
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+    provider_attempts: Vec<RouteReceiptProviderAttempt>,
+) -> RouteReceiptRecorded {
+    RouteReceiptRecorded {
+        route_receipt: route_receipt.clone(),
+        decision_timeline: build_route_receipt_decision_timeline(
+            route,
+            route_receipt,
+            &provider_attempts,
+        ),
+        policy_checks: build_route_receipt_policy_checks(route, route_receipt),
+        provider_attempts,
+    }
+}
+
+fn provider_attempt_record(
+    provider_resource_id: core_domain::ProviderResourceId,
+    attempt: usize,
+    status: impl Into<String>,
+    started_at: String,
+    finished_at: String,
+    latency_ms: u32,
+    reason: impl Into<String>,
+) -> RouteReceiptProviderAttempt {
+    RouteReceiptProviderAttempt {
+        provider_resource_id,
+        attempt: u8::try_from(attempt).unwrap_or(u8::MAX),
+        status: status.into(),
+        started_at,
+        finished_at,
+        latency_ms,
+        reason: reason.into(),
+    }
+}
+
+async fn publish_route_receipt_or_error(
+    state: &GatewayState,
+    route: &RouteEvaluation,
+    route_receipt: &RouteReceipt,
+    provider_attempts: Vec<RouteReceiptProviderAttempt>,
+    context: &RequestContext,
+    debug_headers: Option<GatewayDebugHeaders>,
+) -> Result<(), GatewayError> {
+    let payload = build_route_receipt_recorded(route, route_receipt, provider_attempts);
+    state
+        .event_sink
+        .publish_route_receipt(route_receipt, &payload, context)
+        .await
+        .map_err(|message| {
+            GatewayError::with_route_receipt(
+                StatusCode::SERVICE_UNAVAILABLE,
+                route_receipt.clone(),
+                normalized_error("route_receipt_publish_failed", message, context, true).error,
+                context,
+                Some(route.config_snapshot.config_snapshot_id.clone()),
+                debug_headers,
+            )
+        })
+}
+
 fn map_provider_response(
     context: &RequestContext,
     request: &NormalizedChatRequest,
@@ -1328,9 +1566,10 @@ fn status_for_error_code(code: &str) -> StatusCode {
         "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
         "upstream_timeout" => StatusCode::GATEWAY_TIMEOUT,
         "upstream_protocol_error" => StatusCode::BAD_GATEWAY,
-        "route_not_available" | "provider_unavailable" | "usage_event_publish_failed" => {
-            StatusCode::SERVICE_UNAVAILABLE
-        }
+        "route_not_available"
+        | "provider_unavailable"
+        | "route_receipt_publish_failed"
+        | "usage_event_publish_failed" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1485,7 +1724,14 @@ trait ApiKeyScopeStore: Send + Sync {
 }
 
 #[async_trait]
-trait UsageEventSink: Send + Sync {
+trait RuntimeEventSink: Send + Sync {
+    async fn publish_route_receipt(
+        &self,
+        route_receipt: &RouteReceipt,
+        payload: &RouteReceiptRecorded,
+        context: &RequestContext,
+    ) -> Result<(), String>;
+
     async fn publish(
         &self,
         route_receipt: &RouteReceipt,
@@ -1545,13 +1791,17 @@ struct GatewayApiKeyResolveRequest {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyResolveResponse {
-    api_key: GatewayApiKeyScope,
+    credential_id: String,
+    project_id: Option<String>,
+    status: String,
+    tenant_id: String,
 }
 
 #[derive(Debug)]
-struct NatsUsageEventSink {
+struct NatsEventSink {
     client: OnceCell<async_nats::Client>,
-    subject: String,
+    route_receipt_subject: String,
+    usage_event_subject: String,
     url: String,
 }
 
@@ -1745,7 +1995,12 @@ impl ControlPlaneApiKeyStore {
         response
             .json::<GatewayApiKeyResolveResponse>()
             .await
-            .map(|payload| payload.api_key)
+            .map(|payload| GatewayApiKeyScope {
+                credential_id: payload.credential_id,
+                tenant_id: payload.tenant_id,
+                project_id: payload.project_id,
+                status: payload.status,
+            })
             .map_err(|error| format!("failed to decode API key resolution payload: {error}"))
     }
 }
@@ -1757,21 +2012,28 @@ impl ApiKeyScopeStore for ControlPlaneApiKeyStore {
     }
 }
 
-impl NatsUsageEventSink {
+impl NatsEventSink {
     fn from_env() -> Self {
         let url = std::env::var("GATEWAY_NATS_URL")
             .or_else(|_| std::env::var("NATS_URL"))
             .unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string());
-        let subject = std::env::var("GATEWAY_USAGE_EVENT_SUBJECT")
+        let route_receipt_subject = std::env::var("GATEWAY_ROUTE_RECEIPT_SUBJECT")
+            .unwrap_or_else(|_| "events.route_receipt.recorded".to_string());
+        let usage_event_subject = std::env::var("GATEWAY_USAGE_EVENT_SUBJECT")
             .unwrap_or_else(|_| "events.usage_event.recorded".to_string());
 
-        Self::new(url, subject)
+        Self::new(url, route_receipt_subject, usage_event_subject)
     }
 
-    fn new(url: impl Into<String>, subject: impl Into<String>) -> Self {
+    fn new(
+        url: impl Into<String>,
+        route_receipt_subject: impl Into<String>,
+        usage_event_subject: impl Into<String>,
+    ) -> Self {
         Self {
             client: OnceCell::new(),
-            subject: subject.into(),
+            route_receipt_subject: route_receipt_subject.into(),
+            usage_event_subject: usage_event_subject.into(),
             url: url.into(),
         }
     }
@@ -1788,7 +2050,40 @@ impl NatsUsageEventSink {
 }
 
 #[async_trait]
-impl UsageEventSink for NatsUsageEventSink {
+impl RuntimeEventSink for NatsEventSink {
+    async fn publish_route_receipt(
+        &self,
+        route_receipt: &RouteReceipt,
+        payload: &RouteReceiptRecorded,
+        context: &RequestContext,
+    ) -> Result<(), String> {
+        let envelope = RouteReceiptRecordedMessage {
+            message_id: format!("msg_{}", route_receipt.route_receipt_id),
+            message_type: RouteReceiptRecordedMessageType::RouteReceiptRecorded,
+            schema_version: 1,
+            occurred_at: route_receipt.created_at.clone(),
+            producer: ServiceName::parse(GATEWAY_SERVICE_NAME)
+                .expect("gateway service name should be valid"),
+            trace_id: Some(context.trace_id.clone()),
+            request_id: Some(context.request_id.clone()),
+            idempotency_key: format!("{}:recorded", route_receipt.route_receipt_id),
+            payload: payload.clone(),
+        };
+        let payload = serde_json::to_vec(&envelope)
+            .map_err(|error| format!("failed to serialize route receipt envelope: {error}"))?;
+        let client = self.client().await?;
+
+        client
+            .publish(self.route_receipt_subject.clone(), payload.into())
+            .await
+            .map_err(|error| format!("failed to publish route receipt: {error}"))?;
+        client
+            .flush()
+            .await
+            .map_err(|error| format!("failed to flush route receipt publish: {error}"))?;
+        Ok(())
+    }
+
     async fn publish(
         &self,
         _route_receipt: &RouteReceipt,
@@ -1811,7 +2106,7 @@ impl UsageEventSink for NatsUsageEventSink {
         let client = self.client().await?;
 
         client
-            .publish(self.subject.clone(), payload.into())
+            .publish(self.usage_event_subject.clone(), payload.into())
             .await
             .map_err(|error| format!("failed to publish usage event: {error}"))?;
         client
@@ -2031,7 +2326,7 @@ mod tests {
         ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
         ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
         GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ProviderTargetRuntime,
-        RequestContext, StaticConfigStore, UsageEventSink, app_with_state, evaluate_route,
+        RequestContext, RuntimeEventSink, StaticConfigStore, app_with_state, evaluate_route,
         normalize_request,
     };
     use axum::{
@@ -2048,7 +2343,10 @@ mod tests {
         ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
         RoutePolicy, RoutePolicyId, RouteReceipt, TenantId, UsageEvent,
     };
-    use protocol_ir::{ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse};
+    use protocol_ir::{
+        ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse,
+        RouteReceiptRecorded,
+    };
     use provider_traits::{
         AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
         ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
@@ -2201,24 +2499,46 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct RecordingUsageEventSink {
-        publish_error: Option<String>,
-        published_events: Arc<Mutex<Vec<UsageEvent>>>,
+    struct RecordingRuntimeEventSink {
+        route_receipt_publish_error: Option<String>,
+        usage_event_publish_error: Option<String>,
+        published_route_receipts: Arc<Mutex<Vec<RouteReceiptRecorded>>>,
+        published_usage_events: Arc<Mutex<Vec<UsageEvent>>>,
     }
 
     #[async_trait::async_trait]
-    impl UsageEventSink for RecordingUsageEventSink {
+    impl RuntimeEventSink for RecordingRuntimeEventSink {
+        async fn publish_route_receipt(
+            &self,
+            _route_receipt: &RouteReceipt,
+            payload: &RouteReceiptRecorded,
+            _context: &RequestContext,
+        ) -> Result<(), String> {
+            if let Some(error) = &self.route_receipt_publish_error {
+                return Err(error.clone());
+            }
+
+            self.published_route_receipts
+                .lock()
+                .await
+                .push(payload.clone());
+            Ok(())
+        }
+
         async fn publish(
             &self,
             _route_receipt: &RouteReceipt,
             usage_event: &UsageEvent,
             _context: &RequestContext,
         ) -> Result<(), String> {
-            if let Some(error) = &self.publish_error {
+            if let Some(error) = &self.usage_event_publish_error {
                 return Err(error.clone());
             }
 
-            self.published_events.lock().await.push(usage_event.clone());
+            self.published_usage_events
+                .lock()
+                .await
+                .push(usage_event.clone());
             Ok(())
         }
     }
@@ -2243,7 +2563,7 @@ mod tests {
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
             adapter_registry: registry,
             debug_headers_enabled,
-            usage_event_sink: Arc::new(RecordingUsageEventSink::default()),
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
         })
     }
 
@@ -2280,12 +2600,10 @@ mod tests {
             return Err(StatusCode::UNAUTHORIZED);
         }
         Ok(Json(GatewayApiKeyResolveResponse {
-            api_key: GatewayApiKeyScope {
-                credential_id: "cred_gateway_test".to_string(),
-                tenant_id: "tenant_acme".to_string(),
-                project_id: Some("proj_core".to_string()),
-                status: "active".to_string(),
-            },
+            credential_id: "cred_gateway_test".to_string(),
+            tenant_id: "tenant_acme".to_string(),
+            project_id: Some("proj_core".to_string()),
+            status: "active".to_string(),
         }))
     }
 
@@ -2920,7 +3238,7 @@ mod tests {
             }),
             adapter_registry: registry,
             debug_headers_enabled: false,
-            usage_event_sink: Arc::new(RecordingUsageEventSink::default()),
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
         });
         let app = app_with_state(state);
 
@@ -2983,7 +3301,7 @@ mod tests {
             }),
             adapter_registry: registry,
             debug_headers_enabled: false,
-            usage_event_sink: Arc::new(RecordingUsageEventSink::default()),
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
         });
         let app = app_with_state(state);
 
@@ -3003,6 +3321,221 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn publishes_route_receipt_event_for_successful_request() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_success".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 9,
+                        output_tokens: 6,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let sink = Arc::new(RecordingRuntimeEventSink::default());
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: sink.clone(),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let (
+            receipt_count,
+            selected_target,
+            provider_attempt_count,
+            first_attempt_status,
+            first_stage,
+        ) = {
+            let receipts = sink.published_route_receipts.lock().await;
+            (
+                receipts.len(),
+                receipts[0]
+                    .route_receipt
+                    .selected_target
+                    .as_ref()
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+                receipts[0].provider_attempts.len(),
+                receipts[0].provider_attempts[0].status.clone(),
+                receipts[0].decision_timeline[0].stage.clone(),
+            )
+        };
+        assert_eq!(receipt_count, 1);
+        assert_eq!(selected_target, "prvrsrc_openai_primary");
+        assert_eq!(provider_attempt_count, 1);
+        assert_eq!(first_attempt_status, "succeeded");
+        assert_eq!(first_stage, "admission");
+
+        let usage_event_count = {
+            let usage_events = sink.published_usage_events.lock().await;
+            usage_events.len()
+        };
+        assert_eq!(usage_event_count, 1);
+    }
+
+    #[tokio::test]
+    async fn publishes_route_receipt_event_for_failed_request() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Err(ProviderError::new(
+                    ProviderErrorKind::Unavailable,
+                    "provider down",
+                    false,
+                )),
+            )]),
+        });
+        let sink = Arc::new(RecordingRuntimeEventSink::default());
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: sink.clone(),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let (receipt_count, normalized_error_code, provider_attempt_count, first_attempt_status) = {
+            let receipts = sink.published_route_receipts.lock().await;
+            (
+                receipts.len(),
+                receipts[0]
+                    .route_receipt
+                    .normalized_error
+                    .as_ref()
+                    .unwrap()
+                    .code
+                    .clone(),
+                receipts[0].provider_attempts.len(),
+                receipts[0].provider_attempts[0].status.clone(),
+            )
+        };
+        assert_eq!(receipt_count, 1);
+        assert_eq!(normalized_error_code, "provider_unavailable");
+        assert_eq!(provider_attempt_count, 1);
+        assert_eq!(first_attempt_status, "failed");
+    }
+
+    #[tokio::test]
+    async fn returns_service_unavailable_when_route_receipt_publish_fails() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_123".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 8,
+                        output_tokens: 5,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let state = Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink {
+                route_receipt_publish_error: Some("nats unavailable".to_string()),
+                ..RecordingRuntimeEventSink::default()
+            }),
+        });
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "route_receipt_publish_failed");
     }
 
     #[tokio::test]
@@ -3036,9 +3569,10 @@ mod tests {
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
             adapter_registry: registry,
             debug_headers_enabled: false,
-            usage_event_sink: Arc::new(RecordingUsageEventSink {
-                publish_error: Some("nats unavailable".to_string()),
-                published_events: Arc::new(Mutex::new(Vec::new())),
+            event_sink: Arc::new(RecordingRuntimeEventSink {
+                usage_event_publish_error: Some("nats unavailable".to_string()),
+                published_usage_events: Arc::new(Mutex::new(Vec::new())),
+                ..RecordingRuntimeEventSink::default()
             }),
         });
         let app = app_with_state(state);
@@ -3101,7 +3635,7 @@ mod tests {
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
             adapter_registry: registry,
             debug_headers_enabled: false,
-            usage_event_sink: Arc::new(RecordingUsageEventSink::default()),
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
         });
         let app = app_with_state(state);
 
@@ -3174,7 +3708,7 @@ mod tests {
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
             adapter_registry: registry,
             debug_headers_enabled: false,
-            usage_event_sink: Arc::new(RecordingUsageEventSink::default()),
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
         });
         let app = app_with_state(state);
 

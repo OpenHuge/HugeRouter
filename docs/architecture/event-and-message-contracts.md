@@ -83,6 +83,7 @@ Implementation freedom:
 
 The first implementation should usually standardize only the event families that directly support runtime behavior or operator workflows:
 
+- `route_receipt.recorded`
 - `usage_event.recorded`
 - `ledger_entry.created`
 - `budget_threshold.exceeded`
@@ -104,9 +105,14 @@ Recommended default:
 
 Examples:
 
+- `route_receipt.recorded` means a gateway routing decision was materialized into a durable receipt payload
 - `usage_event.recorded` means a usage record was accepted into the authoritative write path
 - `ledger_entry.created` means an immutable ledger artifact now exists
 - `config_snapshot.activated` means a snapshot became eligible for request selection
+
+Current runtime subject convention:
+
+- `events.route_receipt.recorded` carries `route_receipt.recorded` envelopes from `gateway-api` to the receipt persistence worker
 
 Should avoid:
 

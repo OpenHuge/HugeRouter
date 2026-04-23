@@ -9,12 +9,12 @@ use tracing::info;
 
 mod processor;
 
-use processor::{IngestionOutcome, handle_usage_event_recorded};
+use processor::{IngestionOutcome, handle_route_receipt_recorded};
 
-const WORKER_PREFIX: &str = "LEDGER_WORKER";
-const SERVICE_NAME: &str = "ledger-worker";
-const WORKER_ROLE: &str = "usage-ledger-worker";
-const DEFAULT_NATS_SUBJECT: &str = "events.usage_event.recorded";
+const WORKER_PREFIX: &str = "ROUTE_RECEIPT_WORKER";
+const SERVICE_NAME: &str = "route-receipt-worker";
+const WORKER_ROLE: &str = "route-receipt-persistence-worker";
+const DEFAULT_NATS_SUBJECT: &str = "events.route_receipt.recorded";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,50 +35,50 @@ async fn main() -> Result<()> {
     let database_url = config
         .database_url
         .clone()
-        .context("LEDGER_WORKER_DATABASE_URL or DATABASE_URL is required")?;
+        .context("ROUTE_RECEIPT_WORKER_DATABASE_URL or DATABASE_URL is required")?;
 
     let pool = PgPool::connect(&database_url)
         .await
         .context("failed to connect to postgres")?;
-    processor::ensure_ledger_table(&pool)
+    processor::ensure_route_receipt_tables(&pool)
         .await
-        .context("failed to create ledger_entries table")?;
-    processor::ensure_projection_tables(&pool)
-        .await
-        .context("failed to create ledger projection tables")?;
+        .context("failed to create route receipt tables")?;
 
     info!(
         subject = config.nats.subject,
         nats_url = config.nats.url,
         queue_group = config.nats.queue_group,
-        "ledger worker ready"
+        "route receipt worker ready"
     );
 
     let shutdown = install_shutdown_listener();
     let pool = Arc::new(pool);
-    let handler = make_usage_event_handler(Arc::clone(&pool));
+    let handler = make_route_receipt_handler(Arc::clone(&pool));
     run_nats_consumer(&config.nats, handler, shutdown).await
 }
 
-fn make_usage_event_handler(pool: Arc<PgPool>) -> MessageHandler {
+fn make_route_receipt_handler(pool: Arc<PgPool>) -> MessageHandler {
     std::sync::Arc::new(move |message| {
         let pool = Arc::clone(&pool);
         Box::pin(async move {
-            match handle_usage_event_recorded(&pool, &message.payload).await {
+            match handle_route_receipt_recorded(&pool, &message.payload).await {
                 Ok(IngestionOutcome::Inserted) => {
                     info!(
                         bytes = message.payload.len(),
-                        "ledger worker persisted usage event"
+                        "route receipt worker persisted route receipt"
                     );
                 }
                 Ok(IngestionOutcome::Duplicate) => {
                     info!(
                         bytes = message.payload.len(),
-                        "ledger worker deduplicated usage event"
+                        "route receipt worker deduplicated route receipt"
                     );
                 }
                 Err(error) => {
-                    tracing::warn!(error = ?error, error_chain = %format!("{error:#}"), "ledger worker failed to handle usage event");
+                    tracing::warn!(
+                        error = %error,
+                        "route receipt worker failed to handle route receipt"
+                    );
                 }
             }
 
