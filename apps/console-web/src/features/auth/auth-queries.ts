@@ -16,8 +16,7 @@ import {
   type AuthSessionEnvelope,
   type EmailLoginInput,
   type LoginSearch,
-  type ProviderLoginStartInput,
-  getDefaultProviderAvailability
+  type ProviderLoginStartInput
 } from './auth-contract'
 
 export const authSessionQueryKey = ['auth', 'session'] as const
@@ -27,7 +26,7 @@ let authClient = createConsoleAuthClient()
 function anonymousEnvelope(): AuthSessionEnvelope {
   return {
     state: {
-      availableProviders: getDefaultProviderAvailability(),
+      availableProviders: [],
       kind: 'anonymous'
     }
   }
@@ -86,10 +85,13 @@ export function useEmailLoginMutation() {
   return useMutation({
     mutationFn: async (input: EmailLoginInput) => {
       const result = await authClient.startEmailLogin(input)
+      const availableProviders =
+        getQueryClient().getQueryData<AuthSessionEnvelope>(authSessionQueryKey)?.state
+          .availableProviders ?? []
       syncRequestContext({
         requestId: result.meta.requestId,
         state: {
-          availableProviders: getDefaultProviderAvailability(),
+          availableProviders,
           kind: 'anonymous'
         },
         traceId: result.meta.traceId

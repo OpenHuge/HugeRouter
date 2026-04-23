@@ -28,10 +28,9 @@ use protocol_gemini::{
     GenerateContentResponse, from_provider_response as gemini_from_provider_response,
 };
 use protocol_ir::{
-    ConfigSnapshotResponse, MessageEnvelope, MessageType, ProviderResourcesResponse,
-    RoutePoliciesResponse, RouteReceiptDecisionTraceStep, RouteReceiptPolicyCheck,
-    RouteReceiptProviderAttempt, RouteReceiptRecorded, RouteReceiptRecordedMessage,
-    RouteReceiptRecordedMessageType, UsageEventRecorded,
+    BalanceProjectionResponse, MessageEnvelope, MessageType, RouteReceiptDecisionTraceStep,
+    RouteReceiptPolicyCheck, RouteReceiptProviderAttempt, RouteReceiptRecorded,
+    RouteReceiptRecordedMessage, RouteReceiptRecordedMessageType, UsageEventRecorded,
 };
 use provider_anthropic::AnthropicAdapter;
 use provider_gateway::GatewayAdapter;
@@ -64,6 +63,7 @@ pub type GatewayState = Arc<AppState>;
 pub struct AppState {
     config_store: Arc<dyn ActiveConfigStore>,
     auth_store: Arc<dyn ApiKeyScopeStore>,
+    budget_store: Arc<dyn BudgetProjectionStore>,
     adapter_registry: ProviderAdapterRegistry,
     debug_headers_enabled: bool,
     event_sink: Arc<dyn RuntimeEventSink>,
@@ -75,6 +75,27 @@ pub struct ChatCompletionRequest {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
     pub stream: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsesApiRequest {
+    pub model: String,
+    pub input: Vec<ResponsesApiInputMessage>,
+    #[serde(default)]
+    pub stream: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsesApiInputMessage {
+    pub role: String,
+    pub content: Vec<ResponsesApiInputContent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsesApiInputContent {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -111,6 +132,32 @@ pub struct UsageSummary {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResponsesApiResponse {
+    pub id: String,
+    pub object: &'static str,
+    pub model: String,
+    pub output: Vec<ResponsesApiOutputItem>,
+    pub output_text: String,
+    pub usage: UsageSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResponsesApiOutputItem {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub role: &'static str,
+    pub content: Vec<ResponsesApiOutputContent>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResponsesApiOutputContent {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub text: String,
+    pub annotations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,6 +273,7 @@ pub fn app() -> Router {
 pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
+        .route("/v1/responses", post(responses))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(anthropic_messages))
         .route(
@@ -238,6 +286,7 @@ pub fn app_with_state(state: GatewayState) -> Router {
 fn default_state() -> GatewayState {
     let config_store = Arc::new(ControlPlaneConfigStore::from_env());
     let auth_store = Arc::new(ControlPlaneApiKeyStore::from_env());
+    let budget_store = Arc::new(ControlPlaneBudgetStore::from_env());
     let mut adapter_registry = ProviderAdapterRegistry::new();
     adapter_registry
         .register(Arc::new(OpenAiAdapter::default()))
@@ -255,6 +304,7 @@ fn default_state() -> GatewayState {
     Arc::new(AppState {
         config_store,
         auth_store,
+        budget_store,
         adapter_registry,
         debug_headers_enabled: debug_headers_enabled_from_env(),
         event_sink: Arc::new(NatsEventSink::from_env()),
@@ -275,6 +325,17 @@ async fn chat_completions(
 ) -> Response {
     match process_chat_completion(state, &headers, request).await {
         Ok(success) => success.into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn responses(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    Json(request): Json<ResponsesApiRequest>,
+) -> Response {
+    match process_responses_request(state, &headers, request).await {
+        Ok(success) => responses_success_response(&success),
         Err(error) => error.into_response(),
     }
 }
@@ -378,6 +439,16 @@ async fn process_chat_completion(
     })
 }
 
+async fn process_responses_request(
+    state: GatewayState,
+    headers: &HeaderMap,
+    request: ResponsesApiRequest,
+) -> Result<ExecutionSuccess, GatewayError> {
+    let normalized_request = normalize_responses_request(request, &next_request_context())?;
+    process_normalized_request(state, headers, normalized_request).await
+}
+
+#[allow(clippy::too_many_lines)]
 async fn process_normalized_request(
     state: GatewayState,
     headers: &HeaderMap,
@@ -392,6 +463,13 @@ async fn process_normalized_request(
         .resolve(&bearer_token)
         .await
         .map_err(|message| {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.rejected",
+                "auth_invalid",
+                &context,
+                BTreeMap::from([("reason".to_string(), message.clone())]),
+            );
             GatewayError::new(
                 StatusCode::UNAUTHORIZED,
                 normalized_error("auth_invalid", message, &context, false),
@@ -412,6 +490,14 @@ async fn process_normalized_request(
         )
     })?;
     ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
+    ensure_budget_allows_request(
+        &state,
+        &api_key_scope,
+        &active_config,
+        &normalized_request,
+        &context,
+    )
+    .await?;
     let route = evaluate_route(&active_config, &normalized_request, &context);
 
     if route.ranked_targets.is_empty() {
@@ -457,15 +543,59 @@ async fn process_normalized_request(
         ));
     }
 
-    execute_route(
-        state,
+    let result = execute_route(
+        state.clone(),
         route,
         normalized_request,
-        context,
+        context.clone(),
         request_headers,
         gateway_origin,
     )
-    .await
+    .await;
+    match &result {
+        Ok(success) => {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.succeeded",
+                "admitted",
+                &context,
+                BTreeMap::from([
+                    (
+                        "route_receipt_id".to_string(),
+                        success.route_receipt.route_receipt_id.to_string(),
+                    ),
+                    (
+                        "provider_resource_id".to_string(),
+                        success
+                            .route_receipt
+                            .selected_target
+                            .as_ref()
+                            .map_or_else(String::new, ToString::to_string),
+                    ),
+                ]),
+            );
+        }
+        Err(error) => {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.failed",
+                &error.envelope.error.code,
+                &context,
+                BTreeMap::from([
+                    ("message".to_string(), error.envelope.error.message.clone()),
+                    (
+                        "route_receipt_id".to_string(),
+                        error
+                            .route_receipt_id
+                            .as_ref()
+                            .map_or_else(String::new, ToString::to_string),
+                    ),
+                ]),
+            );
+        }
+    }
+
+    result
 }
 
 fn normalize_forward_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
@@ -950,6 +1080,86 @@ fn normalize_request(
                 content: message.content,
             })
             .collect(),
+    })
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_responses_request(
+    request: ResponsesApiRequest,
+    context: &RequestContext,
+) -> Result<NormalizedChatRequest, GatewayError> {
+    let mut validation_issues = Vec::new();
+
+    if request.model.trim().is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "model".to_string(),
+            message: "model must not be empty".to_string(),
+        });
+    }
+
+    if request.stream {
+        validation_issues.push(ValidationIssue {
+            field: "stream".to_string(),
+            message: "stream=true is intentionally deferred for this slice".to_string(),
+        });
+    }
+
+    if request.input.is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "input".to_string(),
+            message: "input must include at least one message".to_string(),
+        });
+    }
+
+    let mut messages = Vec::with_capacity(request.input.len());
+    for (message_index, message) in request.input.iter().enumerate() {
+        if message.role.trim().is_empty() {
+            validation_issues.push(ValidationIssue {
+                field: format!("input[{message_index}].role"),
+                message: "role must not be empty".to_string(),
+            });
+        }
+        let text = message
+            .content
+            .iter()
+            .filter(|content| content.kind == "input_text")
+            .map(|content| content.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.is_empty() {
+            validation_issues.push(ValidationIssue {
+                field: format!("input[{message_index}].content"),
+                message:
+                    "responses input content must include at least one non-empty input_text item"
+                        .to_string(),
+            });
+            continue;
+        }
+        messages.push(ProviderMessage {
+            role: message.role.clone(),
+            content: text,
+        });
+    }
+
+    if !validation_issues.is_empty() {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            validation_error(
+                "request validation failed",
+                validation_issues,
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    Ok(NormalizedChatRequest {
+        model_alias: request.model,
+        protocol_family: "openai_responses".to_string(),
+        estimated_prompt_tokens: estimate_provider_messages_tokens(&messages),
+        messages,
     })
 }
 
@@ -1534,6 +1744,43 @@ fn map_provider_response(
     }
 }
 
+fn map_provider_response_to_responses(
+    context: &RequestContext,
+    request: &NormalizedChatRequest,
+    response: &ProviderResponse,
+) -> ResponsesApiResponse {
+    let prompt_tokens = response
+        .usage
+        .input_tokens
+        .max(request.estimated_prompt_tokens);
+    let completion_tokens = response.usage.output_tokens;
+    let response_id = response
+        .response_id
+        .clone()
+        .unwrap_or_else(|| format!("resp_{}", context.sequence));
+
+    ResponsesApiResponse {
+        id: response_id,
+        object: "response",
+        model: response.model.clone(),
+        output_text: response.output_text.clone(),
+        output: vec![ResponsesApiOutputItem {
+            kind: "message",
+            role: "assistant",
+            content: vec![ResponsesApiOutputContent {
+                kind: "output_text",
+                text: response.output_text.clone(),
+                annotations: Vec::new(),
+            }],
+        }],
+        usage: UsageSummary {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+        },
+    }
+}
+
 fn map_provider_error(error: &ProviderError, context: &RequestContext) -> ErrorEnvelope {
     let code = match error.kind {
         ProviderErrorKind::Auth | ProviderErrorKind::Unavailable => "provider_unavailable",
@@ -1637,11 +1884,139 @@ fn estimate_provider_messages_tokens(messages: &[ProviderMessage]) -> u32 {
         .sum()
 }
 
+async fn ensure_budget_allows_request(
+    state: &GatewayState,
+    api_key_scope: &GatewayApiKeyScope,
+    active_config: &ActiveGatewayConfig,
+    request: &NormalizedChatRequest,
+    context: &RequestContext,
+) -> Result<(), GatewayError> {
+    let projection = state
+        .budget_store
+        .load_budget(&BudgetProjectionScope {
+            tenant_id: api_key_scope.tenant_id.clone(),
+            project_id: api_key_scope.project_id.clone(),
+        })
+        .await
+        .map_err(|error| {
+            GatewayError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                normalized_error(
+                    "budget_projection_unavailable",
+                    format!("budget projection is unavailable: {error}"),
+                    context,
+                    true,
+                ),
+                context,
+            )
+        })?;
+
+    if projection.data.threshold_status != "exceeded" {
+        return Ok(());
+    }
+
+    let route = RouteEvaluation {
+        config_snapshot: active_config.config_snapshot.clone(),
+        admission_result: AdmissionResult::RejectedBudget,
+        excluded_targets: Vec::new(),
+        ranked_targets: Vec::new(),
+    };
+    let reason = format!(
+        "budget exhausted for tenant `{}` project `{}`; remaining budget {} {}",
+        projection.data.tenant_id,
+        projection
+            .data
+            .project_id
+            .as_ref()
+            .map_or_else(|| "global".to_string(), ToString::to_string),
+        projection.data.remaining_budget.amount,
+        projection.data.remaining_budget.currency
+    );
+    let normalized = normalized_error("budget_exceeded", reason, context, false).error;
+    let route_receipt = build_route_receipt(
+        &route,
+        context,
+        request,
+        None,
+        Some(normalized.clone()),
+        Vec::new(),
+    );
+    let debug_headers = maybe_debug_headers(
+        state.debug_headers_enabled,
+        &active_config.route_policy.route_policy_id,
+        None,
+        AdmissionResult::RejectedBudget,
+        0,
+    );
+    publish_route_receipt_or_error(
+        state,
+        &route,
+        &route_receipt,
+        Vec::new(),
+        context,
+        debug_headers.clone(),
+    )
+    .await?;
+    publish_audit_best_effort(
+        state,
+        "gateway.request.rejected",
+        "budget_exceeded",
+        context,
+        BTreeMap::from([
+            (
+                "configured_budget".to_string(),
+                projection.data.configured_budget.amount.clone(),
+            ),
+            (
+                "remaining_budget".to_string(),
+                projection.data.remaining_budget.amount.clone(),
+            ),
+        ]),
+    );
+
+    Err(GatewayError::with_route_receipt(
+        StatusCode::FORBIDDEN,
+        route_receipt,
+        normalized,
+        context,
+        Some(active_config.config_snapshot.config_snapshot_id.clone()),
+        debug_headers,
+    ))
+}
+
 fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+fn publish_audit_best_effort(
+    state: &GatewayState,
+    action: &str,
+    outcome: &str,
+    context: &RequestContext,
+    details: BTreeMap<String, String>,
+) {
+    let sink = Arc::clone(&state.event_sink);
+    let context = context.clone();
+    let action = action.to_string();
+    let outcome = outcome.to_string();
+    tokio::spawn(async move {
+        if let Err(error) = sink
+            .publish_audit(&action, &outcome, &context, details)
+            .await
+        {
+            warn!(
+                request_id = context.request_id,
+                trace_id = context.trace_id,
+                action,
+                outcome,
+                error,
+                "failed to publish gateway audit event"
+            );
+        }
+    });
 }
 
 fn now_rfc3339() -> String {
@@ -1719,6 +2094,32 @@ fn anthropic_success_response(success: &ExecutionSuccess) -> Response {
             output_tokens: success.provider_response.usage.output_tokens,
         }),
     };
+    let mut response = Json(payload).into_response();
+    insert_success_headers(
+        &mut response,
+        &success.request_id,
+        &success.trace_id,
+        &success.route_receipt,
+        &success.config_snapshot_id,
+        success.debug_headers.as_ref(),
+    );
+    response
+}
+
+fn responses_success_response(success: &ExecutionSuccess) -> Response {
+    let context = RequestContext {
+        request_id: success.request_id.clone(),
+        trace_id: success.trace_id.clone(),
+        sequence: success.sequence,
+    };
+    let request = NormalizedChatRequest {
+        model_alias: success.provider_response.model.clone(),
+        protocol_family: "openai_responses".to_string(),
+        messages: Vec::new(),
+        estimated_prompt_tokens: success.provider_response.usage.input_tokens,
+    };
+    let payload =
+        map_provider_response_to_responses(&context, &request, &success.provider_response);
     let mut response = Json(payload).into_response();
     insert_success_headers(
         &mut response,
@@ -1811,6 +2212,14 @@ trait ActiveConfigStore: Send + Sync {
 }
 
 #[async_trait]
+trait BudgetProjectionStore: Send + Sync {
+    async fn load_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String>;
+}
+
+#[async_trait]
 trait ApiKeyScopeStore: Send + Sync {
     async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String>;
 }
@@ -1830,12 +2239,26 @@ trait RuntimeEventSink: Send + Sync {
         usage_event: &UsageEvent,
         context: &RequestContext,
     ) -> Result<(), String>;
+
+    async fn publish_audit(
+        &self,
+        action: &str,
+        outcome: &str,
+        context: &RequestContext,
+        details: BTreeMap<String, String>,
+    ) -> Result<(), String>;
 }
 
 #[cfg(test)]
 #[derive(Debug)]
 struct StaticConfigStore {
     config: ActiveGatewayConfig,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct StaticBudgetProjectionStore {
+    response: BalanceProjectionResponse,
 }
 
 #[cfg(test)]
@@ -1853,12 +2276,24 @@ impl ActiveConfigStore for StaticConfigStore {
     }
 }
 
+#[cfg(test)]
+#[async_trait]
+impl BudgetProjectionStore for StaticBudgetProjectionStore {
+    async fn load_budget(
+        &self,
+        _scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        Ok(self.response.clone())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ControlPlaneConfigStore {
     base_url: String,
     cache: Arc<Mutex<Option<CachedActiveConfig>>>,
     cache_ttl: Duration,
     client: reqwest::Client,
+    internal_token: Option<String>,
     snapshot_ref: String,
 }
 
@@ -1876,6 +2311,14 @@ struct ControlPlaneApiKeyStore {
     resolve_path: String,
 }
 
+#[derive(Debug, Clone)]
+struct ControlPlaneBudgetStore {
+    base_url: String,
+    client: reqwest::Client,
+    internal_token: Option<String>,
+    projection_path: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyResolveRequest {
     api_key: String,
@@ -1889,9 +2332,23 @@ struct GatewayApiKeyResolveResponse {
     tenant_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct BudgetProjectionScope {
+    tenant_id: String,
+    project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct InternalGatewayConfigResponse {
+    config_snapshot: ConfigSnapshot,
+    route_policy: RoutePolicy,
+    provider_resources: Vec<ProviderResource>,
+}
+
 #[derive(Debug)]
 struct NatsEventSink {
     client: OnceCell<async_nats::Client>,
+    audit_subject: String,
     route_receipt_subject: String,
     usage_event_subject: String,
     url: String,
@@ -1901,6 +2358,9 @@ impl ControlPlaneConfigStore {
     fn from_env() -> Self {
         let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
+        let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let snapshot_ref = std::env::var("GATEWAY_CONTROL_PLANE_SNAPSHOT_REF")
             .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_SNAPSHOT_REF.to_string());
         let cache_ttl = std::env::var("GATEWAY_CONFIG_CACHE_TTL_MS")
@@ -1908,12 +2368,19 @@ impl ControlPlaneConfigStore {
             .and_then(|value| value.parse::<u64>().ok())
             .map_or_else(|| Duration::from_secs(5), Duration::from_millis);
 
-        Self::new(base_url, snapshot_ref, cache_ttl, reqwest::Client::new())
+        Self::new(
+            base_url,
+            snapshot_ref,
+            internal_token,
+            cache_ttl,
+            reqwest::Client::new(),
+        )
     }
 
     fn new(
         base_url: impl Into<String>,
         snapshot_ref: impl Into<String>,
+        internal_token: Option<String>,
         cache_ttl: Duration,
         client: reqwest::Client,
     ) -> Self {
@@ -1922,43 +2389,33 @@ impl ControlPlaneConfigStore {
             cache: Arc::new(Mutex::new(None)),
             cache_ttl,
             client,
+            internal_token,
             snapshot_ref: snapshot_ref.into(),
         }
     }
 
     async fn fetch_active_config(&self) -> Result<ActiveGatewayConfig, String> {
-        let snapshot = self
-            .get_json::<ConfigSnapshotResponse>(&format!(
-                "/v1/config-snapshots/{}",
-                self.snapshot_ref
-            ))
-            .await?
-            .config_snapshot;
-        let route_policies = self
-            .get_json::<RoutePoliciesResponse>("/v1/route-policies")
-            .await?
-            .data;
-        let provider_resources = self
-            .get_json::<ProviderResourcesResponse>("/v1/provider-resources")
-            .await?
-            .data;
+        let payload = self
+            .get_json::<InternalGatewayConfigResponse>("/internal/gateway/config/current")
+            .await?;
 
-        let route_policy = route_policies
-            .into_iter()
-            .find(|policy| policy.route_policy_id == snapshot.route_policy_id)
-            .ok_or_else(|| {
-                format!(
-                    "route policy {route_policy_id} is missing from control plane",
-                    route_policy_id = snapshot.route_policy_id
-                )
-            })?;
+        if self.snapshot_ref != DEFAULT_CONTROL_PLANE_SNAPSHOT_REF
+            && payload.config_snapshot.config_snapshot_id.as_str() != self.snapshot_ref
+        {
+            return Err(format!(
+                "control plane returned config snapshot `{}` but gateway requested `{}`",
+                payload.config_snapshot.config_snapshot_id, self.snapshot_ref
+            ));
+        }
 
-        let provider_targets = snapshot
+        let provider_targets = payload
+            .config_snapshot
             .provider_resource_ids
             .iter()
             .enumerate()
             .map(|(index, provider_resource_id)| {
-                let resource = provider_resources
+                let resource = payload
+                    .provider_resources
                     .iter()
                     .find(|candidate| &candidate.provider_resource_id == provider_resource_id)
                     .cloned()
@@ -1970,24 +2427,30 @@ impl ControlPlaneConfigStore {
 
                 Ok(ProviderTargetRuntime {
                     target_kind: provider_target_kind(&resource.provider_id),
-                    transit_metadata: transit_metadata_for_target(&resource, &route_policy),
+                    transit_metadata: transit_metadata_for_target(&resource, &payload.route_policy),
                     priority: u32::try_from(index + 1).unwrap_or(u32::MAX),
                     upstream_model: upstream_model_for_target(&resource),
                     api_key: api_key_for_target(&resource),
                     static_latency_score: static_latency_score_for_region(
-                        &route_policy.preferred_regions,
+                        &payload.route_policy.preferred_regions,
                         &resource.region,
                     ),
-                    static_cost_score: static_cost_score_for_target(&route_policy, &resource),
-                    usd_per_1k_tokens: usd_per_1k_tokens_for_target(&route_policy, &resource),
+                    static_cost_score: static_cost_score_for_target(
+                        &payload.route_policy,
+                        &resource,
+                    ),
+                    usd_per_1k_tokens: usd_per_1k_tokens_for_target(
+                        &payload.route_policy,
+                        &resource,
+                    ),
                     resource,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
 
         Ok(ActiveGatewayConfig {
-            config_snapshot: snapshot,
-            route_policy,
+            config_snapshot: payload.config_snapshot,
+            route_policy: payload.route_policy,
             provider_targets,
         })
     }
@@ -1998,9 +2461,11 @@ impl ControlPlaneConfigStore {
     {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{base}{path}");
-        let response = self
-            .client
-            .get(&url)
+        let mut request = self.client.get(&url);
+        if let Some(internal_token) = self.internal_token.as_ref() {
+            request = request.header(AUTHORIZATION, format!("Bearer {internal_token}"));
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| format!("failed to fetch {url}: {error}"))?;
@@ -2099,10 +2564,96 @@ impl ControlPlaneApiKeyStore {
     }
 }
 
+impl ControlPlaneBudgetStore {
+    fn from_env() -> Self {
+        let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
+            .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
+        let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let projection_path = std::env::var("GATEWAY_BILLING_PROJECTION_PATH")
+            .unwrap_or_else(|_| "/internal/gateway/billing-projection".to_string());
+
+        Self::new(
+            base_url,
+            projection_path,
+            internal_token,
+            reqwest::Client::new(),
+        )
+    }
+
+    fn new(
+        base_url: impl Into<String>,
+        projection_path: impl Into<String>,
+        internal_token: Option<String>,
+        client: reqwest::Client,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            client,
+            internal_token,
+            projection_path: projection_path.into(),
+        }
+    }
+
+    async fn fetch_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        let internal_token = self.internal_token.as_ref().ok_or_else(|| {
+            "CONTROL_PLANE_INTERNAL_TOKEN must be configured for gateway budget resolution"
+                .to_string()
+        })?;
+        let base = self.base_url.trim_end_matches('/');
+        let path = if self.projection_path.starts_with('/') {
+            self.projection_path.clone()
+        } else {
+            format!("/{}", self.projection_path)
+        };
+        let url = format!("{base}{path}");
+        let mut request = self
+            .client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {internal_token}"))
+            .query(&[("tenant_id", scope.tenant_id.as_str())]);
+        if let Some(project_id) = scope.project_id.as_deref() {
+            request = request.query(&[("project_id", project_id)]);
+        }
+        let response = request.send().await.map_err(|error| {
+            format!("failed to fetch budget projection via control plane: {error}")
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unable to read response body".to_string());
+            return Err(format!(
+                "control plane rejected budget projection query with HTTP {status}: {body}"
+            ));
+        }
+
+        response
+            .json::<BalanceProjectionResponse>()
+            .await
+            .map_err(|error| format!("failed to decode balance projection payload: {error}"))
+    }
+}
+
 #[async_trait]
 impl ApiKeyScopeStore for ControlPlaneApiKeyStore {
     async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String> {
         self.fetch_scope(api_key).await
+    }
+}
+
+#[async_trait]
+impl BudgetProjectionStore for ControlPlaneBudgetStore {
+    async fn load_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        self.fetch_budget(scope).await
     }
 }
 
@@ -2111,21 +2662,30 @@ impl NatsEventSink {
         let url = std::env::var("GATEWAY_NATS_URL")
             .or_else(|_| std::env::var("NATS_URL"))
             .unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string());
+        let audit_subject = std::env::var("GATEWAY_AUDIT_EVENT_SUBJECT")
+            .unwrap_or_else(|_| "events.audit_event.created".to_string());
         let route_receipt_subject = std::env::var("GATEWAY_ROUTE_RECEIPT_SUBJECT")
             .unwrap_or_else(|_| "events.route_receipt.recorded".to_string());
         let usage_event_subject = std::env::var("GATEWAY_USAGE_EVENT_SUBJECT")
             .unwrap_or_else(|_| "events.usage_event.recorded".to_string());
 
-        Self::new(url, route_receipt_subject, usage_event_subject)
+        Self::new(
+            url,
+            audit_subject,
+            route_receipt_subject,
+            usage_event_subject,
+        )
     }
 
     fn new(
         url: impl Into<String>,
+        audit_subject: impl Into<String>,
         route_receipt_subject: impl Into<String>,
         usage_event_subject: impl Into<String>,
     ) -> Self {
         Self {
             client: OnceCell::new(),
+            audit_subject: audit_subject.into(),
             route_receipt_subject: route_receipt_subject.into(),
             usage_event_subject: usage_event_subject.into(),
             url: url.into(),
@@ -2207,6 +2767,50 @@ impl RuntimeEventSink for NatsEventSink {
             .flush()
             .await
             .map_err(|error| format!("failed to flush usage event publish: {error}"))?;
+        Ok(())
+    }
+
+    async fn publish_audit(
+        &self,
+        action: &str,
+        outcome: &str,
+        context: &RequestContext,
+        details: BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let audit_event = core_domain::AuditEvent {
+            audit_event_id: format!("auditevt_{}", context.sequence),
+            actor: GATEWAY_SERVICE_NAME.to_string(),
+            action: action.to_string(),
+            request_id: Some(context.request_id.clone()),
+            trace_id: context.trace_id.clone(),
+            recorded_at: now_rfc3339(),
+        };
+        let payload = serde_json::json!({
+            "audit_event": audit_event,
+            "outcome": outcome,
+            "details": details,
+        });
+        let envelope = MessageEnvelope::new(
+            format!("msg_audit_{}", context.sequence),
+            MessageType::AuditEventCreated,
+            now_rfc3339(),
+            ServiceName::parse(GATEWAY_SERVICE_NAME).expect("gateway service name should be valid"),
+            format!("audit:{}:{}", action, context.request_id),
+            payload,
+        )
+        .with_request_context(context.trace_id.clone(), context.request_id.clone());
+        let body = serde_json::to_vec(&envelope)
+            .map_err(|error| format!("failed to serialize audit event envelope: {error}"))?;
+        let client = self.client().await?;
+
+        client
+            .publish(self.audit_subject.clone(), body.into())
+            .await
+            .map_err(|error| format!("failed to publish audit event: {error}"))?;
+        client
+            .flush()
+            .await
+            .map_err(|error| format!("failed to flush audit event publish: {error}"))?;
         Ok(())
     }
 }
@@ -2496,8 +3100,10 @@ mod tests {
     use super::{
         ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
         ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
-        GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ProviderTargetRuntime,
-        RequestContext, RuntimeEventSink, StaticConfigStore, app_with_state, evaluate_route,
+        GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState,
+        InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext,
+        ResponsesApiInputContent, ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink,
+        StaticBudgetProjectionStore, StaticConfigStore, app_with_state, evaluate_route,
         normalize_request,
     };
     use axum::{
@@ -2510,14 +3116,11 @@ mod tests {
     };
     use core_domain::{
         AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
-        CredentialOwnerType, DeploymentScope, HealthState, ProjectId, ProvenanceClass,
-        ProviderResource, ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId,
-        RouteReceipt, TenantId, UsageEvent,
+        CredentialOwnerType, DeploymentScope, HealthState, MonetaryAmount, ProjectId,
+        ProvenanceClass, ProviderResource, ProviderResourceId, ProviderResourceStatus, RoutePolicy,
+        RoutePolicyId, RouteReceipt, TenantId, UsageEvent,
     };
-    use protocol_ir::{
-        ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-        RouteReceiptRecorded,
-    };
+    use protocol_ir::{BalanceProjectionResponse, RouteReceiptRecorded};
     use provider_gateway::{
         GatewayAdapter, HttpRequest as GatewayHttpRequest, HttpResponse as GatewayHttpResponse,
         HttpTransport as GatewayHttpTransport,
@@ -2550,11 +3153,54 @@ mod tests {
         }
     }
 
+    fn valid_responses_request() -> ResponsesApiRequest {
+        ResponsesApiRequest {
+            model: "reasoning-fast".to_string(),
+            input: vec![ResponsesApiInputMessage {
+                role: "user".to_string(),
+                content: vec![ResponsesApiInputContent {
+                    kind: "input_text".to_string(),
+                    text: "hello router".to_string(),
+                }],
+            }],
+            stream: false,
+        }
+    }
+
     fn request_context() -> super::RequestContext {
         super::RequestContext {
             request_id: "req_test".to_string(),
             trace_id: "trace_test".to_string(),
             sequence: 42,
+        }
+    }
+
+    fn ok_budget_projection() -> BalanceProjectionResponse {
+        BalanceProjectionResponse {
+            data: protocol_ir::BalanceProjection {
+                tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                project_id: Some(ProjectId::parse("proj_core").unwrap()),
+                currency: "USD".to_string(),
+                provider_cost_total: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.00".to_string(),
+                },
+                billable_total: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "0.00".to_string(),
+                },
+                configured_budget: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "1000.00".to_string(),
+                },
+                remaining_budget: MonetaryAmount {
+                    currency: "USD".to_string(),
+                    amount: "1000.00".to_string(),
+                },
+                threshold_status: "ok".to_string(),
+                last_projected_at: "2026-04-20T00:00:00Z".to_string(),
+                projection_lag_seconds: 0,
+            },
         }
     }
 
@@ -2728,6 +3374,7 @@ mod tests {
     struct RecordingRuntimeEventSink {
         route_receipt_publish_error: Option<String>,
         usage_event_publish_error: Option<String>,
+        published_audit_events: Arc<Mutex<Vec<serde_json::Value>>>,
         published_route_receipts: Arc<Mutex<Vec<RouteReceiptRecorded>>>,
         published_usage_events: Arc<Mutex<Vec<UsageEvent>>>,
     }
@@ -2767,6 +3414,26 @@ mod tests {
                 .push(usage_event.clone());
             Ok(())
         }
+
+        async fn publish_audit(
+            &self,
+            action: &str,
+            outcome: &str,
+            context: &RequestContext,
+            details: BTreeMap<String, String>,
+        ) -> Result<(), String> {
+            self.published_audit_events
+                .lock()
+                .await
+                .push(serde_json::json!({
+                    "action": action,
+                    "outcome": outcome,
+                    "request_id": context.request_id,
+                    "trace_id": context.trace_id,
+                    "details": details,
+                }));
+            Ok(())
+        }
     }
 
     fn test_state(
@@ -2787,6 +3454,9 @@ mod tests {
         Arc::new(AppState {
             config_store: Arc::new(StaticConfigStore::new(build_config(targets))),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled,
             event_sink: Arc::new(RecordingRuntimeEventSink::default()),
@@ -2805,9 +3475,7 @@ mod tests {
 
     #[derive(Clone)]
     struct ControlPlaneFixture {
-        config_snapshot: ConfigSnapshotResponse,
-        provider_resources: ProviderResourcesResponse,
-        route_policies: RoutePoliciesResponse,
+        active_config: InternalGatewayConfigResponse,
     }
 
     #[derive(Clone)]
@@ -2900,50 +3568,26 @@ mod tests {
         ]);
 
         ControlPlaneFixture {
-            config_snapshot: ConfigSnapshotResponse {
+            active_config: InternalGatewayConfigResponse {
                 config_snapshot: config.config_snapshot,
-            },
-            provider_resources: ProviderResourcesResponse {
-                data: config
+                provider_resources: config
                     .provider_targets
                     .iter()
                     .map(|target| target.resource.clone())
                     .collect(),
-            },
-            route_policies: RoutePoliciesResponse {
-                data: vec![config.route_policy],
+                route_policy: config.route_policy,
             },
         }
     }
 
-    async fn control_plane_snapshot(
+    async fn control_plane_active_config(
         State(state): State<FixtureState>,
-    ) -> Result<Json<ConfigSnapshotResponse>, StatusCode> {
+    ) -> Result<Json<InternalGatewayConfigResponse>, StatusCode> {
         state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
         if state.fail {
             return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
-        Ok(Json(state.fixture.config_snapshot))
-    }
-
-    async fn control_plane_route_policies(
-        State(state): State<FixtureState>,
-    ) -> Result<Json<RoutePoliciesResponse>, StatusCode> {
-        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
-        if state.fail {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
-        Ok(Json(state.fixture.route_policies))
-    }
-
-    async fn control_plane_provider_resources(
-        State(state): State<FixtureState>,
-    ) -> Result<Json<ProviderResourcesResponse>, StatusCode> {
-        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
-        if state.fail {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
-        Ok(Json(state.fixture.provider_resources))
+        Ok(Json(state.fixture.active_config))
     }
 
     async fn spawn_control_plane_server(
@@ -2951,11 +3595,9 @@ mod tests {
     ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
         let request_count = Arc::new(AtomicUsize::new(0));
         let app = Router::new()
-            .route("/v1/config-snapshots/active", get(control_plane_snapshot))
-            .route("/v1/route-policies", get(control_plane_route_policies))
             .route(
-                "/v1/provider-resources",
-                get(control_plane_provider_resources),
+                "/internal/gateway/config/current",
+                get(control_plane_active_config),
             )
             .route(
                 "/internal/gateway/api-keys/resolve",
@@ -3154,6 +3796,136 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["error"]["code"], "request_validation_failed");
+    }
+
+    #[tokio::test]
+    async fn rejects_request_when_budget_is_exceeded_before_upstream_call() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("resp_should_not_happen".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "unexpected".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 1,
+                        output_tokens: 1,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let app = app_with_state(Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )]))),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: BalanceProjectionResponse {
+                    data: protocol_ir::BalanceProjection {
+                        threshold_status: "exceeded".to_string(),
+                        remaining_budget: MonetaryAmount {
+                            currency: "USD".to_string(),
+                            amount: "-1.00".to_string(),
+                        },
+                        ..ok_budget_projection().data
+                    },
+                },
+            }),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+        }));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/responses")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_responses_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "budget_exceeded");
+    }
+
+    #[tokio::test]
+    async fn responses_route_returns_response_api_shape() {
+        let adapter = Arc::new(MockAdapter {
+            outcomes: BTreeMap::from([(
+                "prvrsrc_openai_primary".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("resp_test_123".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "hello from responses".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 12,
+                        output_tokens: 8,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            )]),
+        });
+        let mut config = build_config(vec![build_target(
+            "prvrsrc_openai_primary",
+            "us-east-1",
+            0.9,
+            0.6,
+            HealthState::Healthy,
+        )]);
+        config.route_policy.protocol_family = "openai_responses".to_string();
+        let mut registry = ProviderAdapterRegistry::new();
+        registry.register(adapter).unwrap();
+        let app = app_with_state(Arc::new(AppState {
+            config_store: Arc::new(StaticConfigStore::new(config)),
+            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
+            adapter_registry: registry,
+            debug_headers_enabled: false,
+            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+        }));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/responses")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_responses_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["object"], "response");
+        assert_eq!(payload["output_text"], "hello from responses");
+        assert_eq!(payload["output"][0]["type"], "message");
+        assert_eq!(payload["output"][0]["content"][0]["type"], "output_text");
     }
 
     #[tokio::test]
@@ -3500,6 +4272,7 @@ mod tests {
         let store = ControlPlaneConfigStore::new(
             base_url,
             "active",
+            None,
             Duration::from_secs(60),
             reqwest::Client::new(),
         );
@@ -3515,7 +4288,7 @@ mod tests {
             "routepol_default"
         );
         assert_eq!(config.provider_targets.len(), 2);
-        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
+        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 1);
 
         handle.abort();
     }
@@ -3526,6 +4299,7 @@ mod tests {
         let store = ControlPlaneConfigStore::new(
             base_url,
             "active",
+            None,
             Duration::from_secs(60),
             reqwest::Client::new(),
         );
@@ -3533,7 +4307,7 @@ mod tests {
         let _ = store.load().await.unwrap();
         let _ = store.load().await.unwrap();
 
-        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
+        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 1);
         handle.abort();
     }
 
@@ -3543,6 +4317,7 @@ mod tests {
         let store = ControlPlaneConfigStore::new(
             base_url,
             "active",
+            None,
             Duration::from_millis(1),
             reqwest::Client::new(),
         );
@@ -3613,6 +4388,9 @@ mod tests {
                     status: "active".to_string(),
                 },
             }),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: Arc::new(RecordingRuntimeEventSink::default()),
@@ -3676,6 +4454,9 @@ mod tests {
                     status: "active".to_string(),
                 },
             }),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: Arc::new(RecordingRuntimeEventSink::default()),
@@ -3730,6 +4511,9 @@ mod tests {
                 HealthState::Healthy,
             )]))),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: sink.clone(),
@@ -3812,6 +4596,9 @@ mod tests {
                 HealthState::Healthy,
             )]))),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: sink.clone(),
@@ -3885,6 +4672,9 @@ mod tests {
                 HealthState::Healthy,
             )]))),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: Arc::new(RecordingRuntimeEventSink {
@@ -3944,6 +4734,9 @@ mod tests {
                 HealthState::Healthy,
             )]))),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: Arc::new(RecordingRuntimeEventSink {
@@ -4010,6 +4803,9 @@ mod tests {
         let state = Arc::new(AppState {
             config_store: Arc::new(StaticConfigStore::new(config)),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: Arc::new(RecordingRuntimeEventSink::default()),
@@ -4083,6 +4879,9 @@ mod tests {
         let state = Arc::new(AppState {
             config_store: Arc::new(StaticConfigStore::new(config)),
             auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+            budget_store: Arc::new(StaticBudgetProjectionStore {
+                response: ok_budget_projection(),
+            }),
             adapter_registry: registry,
             debug_headers_enabled: false,
             event_sink: Arc::new(RecordingRuntimeEventSink::default()),

@@ -42,6 +42,26 @@ jobs:
         run: |
           pnpm test
           pnpm build
+          cargo test --workspace
+
+      - name: Validate compose topology
+        run: docker compose -f infra/docker/compose.yaml --profile runtime --profile observability config -q
+
+      - name: Build runtime service images
+        run: docker compose -f infra/docker/compose.yaml --profile runtime build control-plane-api gateway-api ledger-worker route-receipt-worker
+
+      - name: Container smoke
+        env:
+          SMOKE_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          SMOKE_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
+          SMOKE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || '' }}
+        run: |
+          if [ -z "${SMOKE_OPENAI_API_KEY}" ]; then
+            echo "OPENAI_API_KEY not configured; skipping container smoke."
+            exit 0
+          fi
+          chmod +x infra/scripts/*.sh infra/scripts/lib/*.sh
+          ./infra/scripts/smoke.sh
 
       - name: Generate changelog
         run: node ./scripts/generate-changelog.mjs > release-notes.md

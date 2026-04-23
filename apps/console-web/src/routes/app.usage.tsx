@@ -70,13 +70,13 @@ function UsagePage() {
     return (
       <Stack>
         <PageHeader
-          description="Inspect token usage, provider/model breakdowns, and current billing-facing usage totals."
+          description="Review persisted token totals, provider and model breakdowns, and billable amounts for the selected window."
           title="Usage"
         />
         <RouteErrorState
           kind={result?.kind}
           message={result?.state === "error" ? result.message : undefined}
-          description="Usage analytics could not be loaded from the control-plane service."
+          description="Persisted usage totals could not be loaded from the control-plane service."
           title="Usage unavailable"
         />
       </Stack>
@@ -88,7 +88,7 @@ function UsagePage() {
   return (
     <Stack>
       <PageHeader
-        description="Inspect token usage, provider/model breakdowns, and current billing-facing usage totals."
+        description="Review persisted token totals, provider and model breakdowns, and billable amounts for the selected window."
         title="Usage"
       />
       <Group justify="space-between" wrap="wrap">
@@ -152,10 +152,7 @@ function UsagePage() {
         />
         <MetricCard label="Events" value={String(data.eventCount)} />
         <MetricCard label="Provider cost" value={`$${data.providerCostUsd}`} />
-        <MetricCard
-          label="Billable price"
-          value={`$${data.billablePriceUsd}`}
-        />
+        <MetricCard label="Billable total" value={`$${data.billablePriceUsd}`} />
       </Group>
       <Group grow>
         <MetricCard label="Input tokens" value={String(data.inputTokens)} />
@@ -167,7 +164,7 @@ function UsagePage() {
       </Group>
       <Card padding="lg" radius="md" shadow="sm">
         <Group justify="space-between" mb="md">
-          <Text fw={700}>Breakdown</Text>
+          <Text fw={700}>Usage breakdown</Text>
           <Badge color="blue" variant="light">
             {data.breakdown.length} rows
           </Badge>

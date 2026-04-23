@@ -14,9 +14,9 @@ record_result() {
 case "${SCENARIO}" in
   gateway-auth-rejection)
     record_result "$(curl -sS -o /dev/null -w "[failure] gateway unauthenticated status=%{http_code}" \
-      -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
+      -X POST "${GATEWAY_BASE_URL}/v1/responses" \
       -H "content-type: application/json" \
-      --data '{"model":"reasoning-fast","messages":[{"role":"user","content":"auth failure probe"}]}')"
+      --data '{"model":"reasoning-fast","input":[{"role":"user","content":[{"type":"input_text","text":"auth failure probe"}]}]}')"
     ;;
   control-plane-missing-tenant)
     record_result "$(curl -sS -o /dev/null -w "[failure] usage summary missing tenant status=%{http_code}" \

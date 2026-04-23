@@ -607,6 +607,28 @@ describe("console routes", () => {
       workspace: "acme-retail",
     });
 
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listRoutePolicies: async () => [
+        ...(await baseService.listRoutePolicies()),
+        {
+          createdAt: "2026-04-22T00:00:00Z",
+          id: "routepol_anthropic_summary",
+          modelAlias: "claude-summary",
+          name: "Anthropic Summary",
+          preferredRegions: ["us-east-1"],
+          protocolFamily: "anthropic_messages",
+          requiredCapabilities: ["json_mode"],
+          selectedProviders: [],
+          tenantId: "tenant_acme",
+          updatedAt: "2026-04-22T00:00:00Z",
+          version: 1,
+        },
+      ],
+    });
+
     await renderRoute("/app/routes");
 
     expect(
@@ -615,12 +637,67 @@ describe("console routes", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("OpenAI Chat").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Preview").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Anthropic Messages").length).toBeGreaterThan(0);
     expect(screen.getByText("Operator diagnostics")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open route receipts" }),
     ).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Inspect" }).length).toBeGreaterThan(0);
     expect(screen.getByText("admitted")).toBeInTheDocument();
+  });
+
+  it("renders route diagnostics with preview protocol labels and persisted fallback text", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getRouteDiagnostics: async (routePolicyId: string) => {
+        const diagnostics = await baseService.getRouteDiagnostics(routePolicyId);
+
+        return {
+          ...diagnostics,
+          diagnostics: {
+            ...diagnostics.diagnostics,
+            recent_receipts: diagnostics.diagnostics.recent_receipts.map((receipt) => ({
+              ...receipt,
+              failure_reason: undefined,
+            })),
+            route_policy: {
+              ...diagnostics.diagnostics.route_policy,
+              display_name: "Anthropic Summary",
+              protocol_family: "anthropic_messages",
+            },
+            targets: diagnostics.diagnostics.targets.map((target, index) => ({
+              ...target,
+              provider_resource: {
+                ...target.provider_resource,
+                health_message:
+                  index === 0 ? undefined : target.provider_resource.health_message,
+                quarantine_reason: undefined,
+              },
+            })),
+          },
+        };
+      },
+    });
+
+    await renderRoute("/app/route-diagnostics/routepol_openai_chat_default");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Anthropic Summary",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Preview")).toBeInTheDocument();
+    expect(screen.getByText(/Anthropic Messages/)).toBeInTheDocument();
+    expect(screen.getByText("No health message recorded.")).toBeInTheDocument();
+    expect(screen.getByText("No failure reason recorded.")).toBeInTheDocument();
   });
 
   it("renders route receipts empty state when no route receipts are available", async () => {
@@ -655,7 +732,8 @@ describe("console routes", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "30d" })).toBeInTheDocument();
-    expect(screen.getByText("Billable price")).toBeInTheDocument();
+    expect(screen.getByText("Billable total")).toBeInTheDocument();
+    expect(screen.getByText("Usage breakdown")).toBeInTheDocument();
     expect(screen.getAllByText("openai").length).toBeGreaterThan(0);
     expect(screen.getAllByText("reasoning-fast").length).toBeGreaterThan(0);
   });
@@ -674,9 +752,9 @@ describe("console routes", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Configured budget")).toBeInTheDocument();
-    expect(screen.getByText("Export jobs")).toBeInTheDocument();
+    expect(screen.getByText("Billing export jobs")).toBeInTheDocument();
     expect(screen.getByText("export_123")).toBeInTheDocument();
-    expect(screen.getByText("ok")).toBeInTheDocument();
+    expect(screen.getByText("Within budget")).toBeInTheDocument();
   });
 
   it("renders billing loading state while dashboard data is pending", async () => {
@@ -714,7 +792,7 @@ describe("console routes", () => {
       thresholdStatus: "ok",
     });
 
-    expect(await screen.findByText("Export jobs")).toBeInTheDocument();
+    expect(await screen.findByText("Billing export jobs")).toBeInTheDocument();
   });
 
   it("renders billing error state when dashboard loading fails", async () => {

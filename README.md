@@ -86,6 +86,9 @@ Convenience commands:
 Quality notes:
 
 - `pnpm test` runs a workspace test-policy audit before package tests so placeholder scripts are called out explicitly instead of looking like real coverage.
+- `pnpm js:lint` also runs a Prettier drift-baseline gate before package lint. This follows Prettier's CI-style `--check` model for newly introduced drift while the repository works down the current formatting backlog tracked in [`scripts/prettier-drift-baseline.json`](scripts/prettier-drift-baseline.json).
+- `pnpm js:lint` now runs a repository-wide file-size budget gate before package lint so new single-file monoliths are blocked while existing oversized files are tracked with explicit legacy caps in [`scripts/verify-file-size-budgets.mjs`](scripts/verify-file-size-budgets.mjs).
+- Rust quality commands now run with a locked dependency graph so CI fails if `Cargo.lock` would need to change during lint, check, or test.
 - Temporary placeholder packages are tracked in [`scripts/workspace-test-policy.json`](scripts/workspace-test-policy.json) until their owning tracks replace them with real tests.
 - GitHub Actions quality gates live in [`.github/workflows/quality.yml`](.github/workflows/quality.yml) and run JavaScript lint, typecheck, test, and build jobs plus Rust format, clippy, check, and test jobs on pull requests and `main`.
 

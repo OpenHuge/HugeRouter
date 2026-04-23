@@ -31,24 +31,12 @@ import {
   splitCommaSeparatedValues,
   SUPPORTED_ROUTE_CAPABILITIES,
 } from "../features/control-plane/workflow-ui";
-
-const protocolLabelByFamily: Record<string, string> = {
-  anthropic_messages: "Anthropic Messages",
-  gemini_generate_content: "Gemini Generate Content",
-  mcp_streamable_http: "MCP Streamable HTTP",
-  openai_chat: "OpenAI Chat",
-  openai_responses: "OpenAI Responses",
-  realtime_webrtc: "Realtime WebRTC",
-};
-
-const protocolColorByFamily: Record<string, string> = {
-  anthropic_messages: "orange",
-  gemini_generate_content: "lime",
-  mcp_streamable_http: "indigo",
-  openai_chat: "blue",
-  openai_responses: "violet",
-  realtime_webrtc: "teal",
-};
+import {
+  getProtocolColor,
+  getProtocolLabel,
+  getProtocolOptionLabel,
+  isPreviewProtocolFamily,
+} from "../features/control-plane/protocol-display";
 
 const protocolOrder = [
   "openai_chat",
@@ -75,11 +63,11 @@ type RoutePolicyFormState = {
 type RoutePolicyFormErrors = Partial<Record<keyof RoutePolicyFormState, string>>;
 
 function protocolDisplay(protocolFamily: string) {
-  return protocolLabelByFamily[protocolFamily] ?? protocolFamily;
+  return getProtocolLabel(protocolFamily);
 }
 
 function protocolColor(protocolFamily: string) {
-  return protocolColorByFamily[protocolFamily] ?? "gray";
+  return getProtocolColor(protocolFamily);
 }
 
 function routePoliciesByProtocol(routePolicies: RoutePolicyView[]) {
@@ -420,7 +408,7 @@ function RoutePoliciesPage() {
             </Group>
             <Select
               data={PROTOCOL_FAMILY_OPTIONS.map((value) => ({
-                label: protocolDisplay(value),
+                label: getProtocolOptionLabel(value),
                 value,
               }))}
               label="Protocol family"
@@ -482,8 +470,13 @@ function RoutePoliciesPage() {
             <Stack key={protocolLabel} gap="sm">
               <Group>
                 <Badge color={protocolColor(protocolLabel)} size="md">
-                  {protocolLabelByFamily[protocolLabel] ?? protocolLabel}
+                  {protocolDisplay(protocolLabel)}
                 </Badge>
+                {isPreviewProtocolFamily(protocolLabel) ? (
+                  <Badge color="yellow" size="md" variant="light">
+                    Preview
+                  </Badge>
+                ) : null}
                 <Text c="dimmed" size="sm">
                   {policies.length} polic{policies.length === 1 ? "y" : "ies"}
                 </Text>
@@ -506,7 +499,16 @@ function RoutePoliciesPage() {
                   {policies.map((policy) => (
                     <Table.Tr key={policy.id}>
                       <Table.Td>{policy.name}</Table.Td>
-                      <Table.Td>{protocolDisplay(policy.protocolFamily)}</Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <Text>{protocolDisplay(policy.protocolFamily)}</Text>
+                          {isPreviewProtocolFamily(policy.protocolFamily) ? (
+                            <Badge color="yellow" size="sm" variant="light">
+                              Preview
+                            </Badge>
+                          ) : null}
+                        </Group>
+                      </Table.Td>
                       <Table.Td>{policy.modelAlias}</Table.Td>
                       <Table.Td>
                         {policy.selectedProviders.length > 0

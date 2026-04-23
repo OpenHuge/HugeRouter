@@ -454,7 +454,7 @@ function MerchantCenterPage() {
               value={shopForm.announcement}
             />
             <Group justify="flex-end">
-              <Button loading={isSubmittingShop} onClick={onCreateShop}>
+              <Button loading={isSubmittingShop} onClick={() => void onCreateShop()}>
                 Create shop
               </Button>
             </Group>
@@ -537,7 +537,10 @@ function MerchantCenterPage() {
               value={trialForm.notes}
             />
             <Group justify="flex-end">
-              <Button loading={isSubmittingTrial} onClick={onCreateTrialConnection}>
+              <Button
+                loading={isSubmittingTrial}
+                onClick={() => void onCreateTrialConnection()}
+              >
                 Save trial relay
               </Button>
             </Group>
@@ -677,7 +680,10 @@ function MerchantCenterPage() {
                 </Stack>
               </Group>
               <Group justify="flex-end">
-                <Button loading={isSubmittingCard} onClick={onCreateCardProduct}>
+                <Button
+                  loading={isSubmittingCard}
+                  onClick={() => void onCreateCardProduct()}
+                >
                   Create card product
                 </Button>
               </Group>
@@ -719,7 +725,7 @@ function MerchantCenterPage() {
               />
               <Button
                 loading={isSubmittingEvaluation}
-                onClick={onRunEvaluation}
+                onClick={() => void onRunEvaluation()}
               >
                 Run evaluation
               </Button>

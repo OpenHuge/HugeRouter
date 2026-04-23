@@ -6,6 +6,10 @@ import {
   RouteErrorState,
   RouteLoadingState,
 } from "../features/control-plane/route-state";
+import {
+  getProtocolLabel,
+  isPreviewProtocolFamily,
+} from "../features/control-plane/protocol-display";
 import { getConsoleDataService } from "../features/control-plane/service";
 
 export const Route = createFileRoute("/app/route-diagnostics/$routePolicyId")({
@@ -27,7 +31,7 @@ function RouteDiagnosticsPage() {
     return (
       <Stack>
         <PageHeader
-          description="Explain why HugeRouter selected or excluded each target for the current route."
+          description="Explain how the active snapshot and recorded receipts affected target selection for this route."
           title="Route diagnostics"
         />
         <RouteErrorState
@@ -44,15 +48,22 @@ function RouteDiagnosticsPage() {
   return (
     <Stack>
       <PageHeader
-        description="Explain why HugeRouter selected or excluded each target for the current route."
+        description="Explain how the active snapshot and recorded receipts affected target selection for this route."
         title={diagnostics.route_policy.display_name}
       />
       <Group justify="space-between">
         <Stack gap={2}>
-          <Text c="dimmed" size="sm">
-            {diagnostics.route_policy.protocol_family} ·{" "}
-            {diagnostics.route_policy.model_alias}
-          </Text>
+          <Group gap="xs">
+            <Text c="dimmed" size="sm">
+              {getProtocolLabel(diagnostics.route_policy.protocol_family)} ·{" "}
+              {diagnostics.route_policy.model_alias}
+            </Text>
+            {isPreviewProtocolFamily(diagnostics.route_policy.protocol_family) ? (
+              <Badge color="yellow" size="sm" variant="light">
+                Preview
+              </Badge>
+            ) : null}
+          </Group>
           <Text c="dimmed" size="sm">
             Required capabilities:{" "}
             {diagnostics.route_policy.required_capabilities.join(", ")}
@@ -137,7 +148,7 @@ function RouteDiagnosticsPage() {
                     <Text c="dimmed" size="sm">
                       {target.provider_resource.quarantine_reason ??
                         target.provider_resource.health_message ??
-                        "No health notes."}
+                        "No health message recorded."}
                     </Text>
                   </Stack>
                 </Table.Td>
@@ -200,7 +211,7 @@ function RouteDiagnosticsPage() {
                   </Badge>
                 </Group>
                 <Text c="dimmed" mt="xs" size="sm">
-                  {receipt.failure_reason ?? "Successful routing receipt."}
+                  {receipt.failure_reason ?? "No failure reason recorded."}
                 </Text>
               </Card>
             ))}

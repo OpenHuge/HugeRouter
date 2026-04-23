@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('core', 'full', 'observability')]
+  [ValidateSet('core', 'runtime', 'full', 'observability')]
   [string]$Mode = $(if ($env:HUGE_ROUTER_STACK_MODE) { $env:HUGE_ROUTER_STACK_MODE } else { 'core' }),
   [int]$TimeoutSeconds = $(if ($env:HUGE_ROUTER_STACK_TIMEOUT_SECONDS) { [int]$env:HUGE_ROUTER_STACK_TIMEOUT_SECONDS } else { 180 })
 )
@@ -12,8 +12,9 @@ function Get-ServiceList {
 
   switch ($RequestedMode) {
     'core' { return @('postgres', 'redis', 'nats') }
-    'observability' { return @('otel-collector', 'prometheus', 'grafana') }
-    'full' { return @('postgres', 'redis', 'nats', 'otel-collector', 'prometheus', 'grafana') }
+    'runtime' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker') }
+    'observability' { return @('otel-collector', 'alertmanager', 'prometheus', 'grafana') }
+    'full' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker', 'otel-collector', 'alertmanager', 'prometheus', 'grafana') }
     default { throw "Unsupported stack mode: $RequestedMode" }
   }
 }
@@ -21,7 +22,10 @@ function Get-ServiceList {
 $composeFile = (Resolve-Path (Join-Path $PSScriptRoot '..\docker\compose.yaml')).Path
 $composeArgs = @('-f', $composeFile)
 
-if ($Mode -ne 'core') {
+if ($Mode -in @('runtime', 'full')) {
+  $composeArgs += @('--profile', 'runtime')
+}
+if ($Mode -in @('observability', 'full')) {
   $composeArgs += @('--profile', 'observability')
 }
 
