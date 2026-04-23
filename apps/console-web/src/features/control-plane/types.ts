@@ -23,6 +23,7 @@ export type OverviewData = {
 };
 
 export type RoutePolicyView = {
+  createdAt: string;
   id: string;
   modelAlias: string;
   name: string;
@@ -30,6 +31,9 @@ export type RoutePolicyView = {
   protocolFamily: string;
   requiredCapabilities: string[];
   selectedProviders: string[];
+  tenantId: string;
+  updatedAt: string;
+  version: number;
 };
 
 export type RouteReceiptDiagnosticFallbackView = {
@@ -133,6 +137,14 @@ export type ApiKeyView = {
   providerResourceId: string;
   tenantId?: string;
   updatedAt: string;
+  version: number;
+};
+
+export type ApiKeyCreateResult = {
+  apiKeyId: string;
+  displayName: string;
+  keyPrefix: string;
+  providerResourceId: string;
   version: number;
 };
 

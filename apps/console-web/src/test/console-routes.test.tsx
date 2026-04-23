@@ -486,6 +486,57 @@ describe("console routes", () => {
     expect(screen.getByText("OpenAI Backup")).toBeInTheDocument();
   });
 
+  it("renders providers loading state while data is pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["listProviderResources"]>>
+      >();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listProviderResources: () => deferred.promise,
+    });
+
+    await renderRoute("/app/providers", {
+      waitForLoad: false,
+    });
+
+    expect(
+      await screen.findByLabelText("Loading providers"),
+    ).toBeInTheDocument();
+
+    deferred.resolve([]);
+
+    expect(await screen.findByText("No providers")).toBeInTheDocument();
+  });
+
+  it("renders providers error state when inventory loading fails", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listProviderResources: () =>
+        Promise.reject(
+          createRequestError(500, "storage_unavailable", "Load failed"),
+        ),
+    });
+
+    await renderRoute("/app/providers");
+
+    expect(await screen.findByText("Providers unavailable")).toBeInTheDocument();
+  });
+
   it("renders routes success state for tenant sessions", async () => {
     signIn({
       email: "tenant@acme.dev",
@@ -503,6 +554,51 @@ describe("console routes", () => {
     expect(
       screen.getByText("OpenAI Primary, OpenAI Backup"),
     ).toBeInTheDocument();
+  });
+
+  it("renders routes loading state while policies are pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<Awaited<ReturnType<ConsoleDataService["listRoutePolicies"]>>>();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listRoutePolicies: () => deferred.promise,
+    });
+
+    await renderRoute("/app/routes", { waitForLoad: false });
+
+    expect(await screen.findByLabelText("Loading routes")).toBeInTheDocument();
+
+    deferred.resolve([]);
+
+    expect(await screen.findByText("No route policies")).toBeInTheDocument();
+  });
+
+  it("renders routes error state when policies fail to load", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      listRoutePolicies: () =>
+        Promise.reject(
+          createRequestError(500, "storage_unavailable", "Load failed"),
+        ),
+    });
+
+    await renderRoute("/app/routes");
+
+    expect(await screen.findByText("Routes unavailable")).toBeInTheDocument();
   });
 
   it("renders protocol-aware route policy groups and route receipts diagnostics", async () => {
@@ -597,6 +693,65 @@ describe("console routes", () => {
     expect(screen.getByText("Export jobs")).toBeInTheDocument();
     expect(screen.getByText("export_123")).toBeInTheDocument();
     expect(screen.getByText("ok")).toBeInTheDocument();
+  });
+
+  it("renders billing loading state while dashboard data is pending", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const deferred =
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["getBillingDashboard"]>>
+      >();
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getBillingDashboard: () => deferred.promise,
+    });
+
+    await renderRoute("/app/billing", { waitForLoad: false });
+
+    expect(await screen.findByLabelText("Loading billing")).toBeInTheDocument();
+
+    deferred.resolve({
+      activeProjectId: undefined,
+      availableProjects: [],
+      billableTotalUsd: "0.000001",
+      configuredBudgetUsd: "1.000000",
+      exportJobs: [],
+      lastProjectedAt: "2026-04-22T00:00:00Z",
+      projectionLagSeconds: 0,
+      providerCostTotalUsd: "0.000001",
+      rangeLabel: "Last 30 days",
+      remainingBudgetUsd: "0.999999",
+      thresholdStatus: "ok",
+    });
+
+    expect(await screen.findByText("Export jobs")).toBeInTheDocument();
+  });
+
+  it("renders billing error state when dashboard loading fails", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getBillingDashboard: () =>
+        Promise.reject(
+          createRequestError(500, "storage_unavailable", "Load failed"),
+        ),
+    });
+
+    await renderRoute("/app/billing");
+
+    expect(await screen.findByText("Billing unavailable")).toBeInTheDocument();
   });
 
   it("renders tenant inventory and links to tenant detail", async () => {

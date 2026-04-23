@@ -144,6 +144,8 @@ const providerResourcesResponse = {
   ],
 };
 
+const providerResourcesInitialState = structuredClone(providerResourcesResponse.data);
+
 const routePoliciesResponse = {
   data: [
     {
@@ -184,6 +186,8 @@ const routePoliciesResponse = {
     },
   ],
 };
+
+const routePoliciesInitialState = structuredClone(routePoliciesResponse.data);
 
 const configSnapshotResponse = {
   config_snapshot: {
@@ -228,6 +232,8 @@ const configSnapshotsResponse = {
     },
   ],
 };
+
+const configSnapshotsInitialState = structuredClone(configSnapshotsResponse.data);
 
 const routeReceiptsResponse = {
   data: [
@@ -400,7 +406,7 @@ const balanceProjectionResponse = {
 const billingExportResponse = {
   data: {
     export_job_id: "export_123",
-    status: "queued",
+    status: "completed",
     format: "csv",
     requested_at: "2026-04-22T13:00:10Z",
     completed_at: "2026-04-22T13:00:20Z",
@@ -408,6 +414,20 @@ const billingExportResponse = {
     project_id: "proj_core",
   },
 };
+
+type BillingExportJobState = {
+  completed_at?: string;
+  export_job_id: string;
+  format: string;
+  project_id?: string;
+  requested_at: string;
+  status: string;
+  tenant_id?: string;
+};
+
+const billingExportInitialState: BillingExportJobState[] = [
+  structuredClone(billingExportResponse.data),
+];
 
 const routeReceiptDiagnosticsById: Record<string, unknown> = {
   routercpt_openai_primary_recent: {
@@ -453,13 +473,11 @@ const routeReceiptDiagnosticsById: Record<string, unknown> = {
   },
 };
 
-const configSnapshotById: Record<
-  string,
-  (typeof configSnapshotsResponse)["data"][number]
-> = {
-  cfgsnap_gateway_v1: configSnapshotsResponse.data[1],
-  cfgsnap_gateway_v2: configSnapshotsResponse.data[0],
-};
+let providerResourcesState = structuredClone(providerResourcesInitialState);
+let routePoliciesState = structuredClone(routePoliciesInitialState);
+let configSnapshotsState = structuredClone(configSnapshotsInitialState);
+let billingExportJobsState = structuredClone(billingExportInitialState);
+let billingExportPollCount = 0;
 
 let apiKeysState = [
   {
@@ -554,8 +572,21 @@ function resolvePath(input: RequestInfo | URL) {
   return new URL(input.url, "http://127.0.0.1").pathname;
 }
 
+function parseRequestBody(init?: RequestInit) {
+  if (!init?.body || typeof init.body !== "string") {
+    return null;
+  }
+
+  return JSON.parse(init.body) as Record<string, unknown>;
+}
+
 export function createControlPlaneFetchMock() {
   apiKeysState = [...apiKeysInitialState];
+  billingExportJobsState = structuredClone(billingExportInitialState);
+  billingExportPollCount = 0;
+  configSnapshotsState = structuredClone(configSnapshotsInitialState);
+  providerResourcesState = structuredClone(providerResourcesInitialState);
+  routePoliciesState = structuredClone(routePoliciesInitialState);
 
   return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = resolvePath(input);
@@ -568,20 +599,283 @@ export function createControlPlaneFetchMock() {
       return Promise.resolve(jsonResponse(200, projectsResponse));
     }
 
-    if (path === "/v1/provider-resources") {
-      return Promise.resolve(jsonResponse(200, providerResourcesResponse));
+    if (path === "/v1/provider-resources" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: providerResourcesState }));
     }
 
-    if (path === "/v1/route-policies") {
-      return Promise.resolve(jsonResponse(200, routePoliciesResponse));
+    if (path === "/v1/provider-resources" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      providerResourcesState = [...providerResourcesState, body as (typeof providerResourcesResponse)["data"][number]];
+      return Promise.resolve(jsonResponse(200, body));
+    }
+
+    if (
+      path.startsWith("/v1/provider-resources/") &&
+      !path.endsWith("/disable") &&
+      init?.method === "PUT"
+    ) {
+      const providerResourceId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const index = providerResourcesState.findIndex(
+        (provider) => provider.provider_resource_id === providerResourceId,
+      );
+
+      if (index < 0) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "provider_resource_not_found",
+              message: "Provider resource not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (providerResourcesState[index]?.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "provider_resource_version_conflict",
+              message: "Provider resource version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      const updated = {
+        ...providerResourcesState[index],
+        ...body,
+        provider_resource_id: providerResourceId,
+        version: expectedVersion + 1,
+      };
+      providerResourcesState[index] = updated;
+      return Promise.resolve(jsonResponse(200, updated));
+    }
+
+    if (
+      path.startsWith("/v1/provider-resources/") &&
+      path.endsWith("/disable") &&
+      init?.method === "POST"
+    ) {
+      const providerResourceId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const index = providerResourcesState.findIndex(
+        (provider) => provider.provider_resource_id === providerResourceId,
+      );
+
+      if (index < 0) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "provider_resource_not_found",
+              message: "Provider resource not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (providerResourcesState[index]?.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "provider_resource_version_conflict",
+              message: "Provider resource version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      const disabled = {
+        ...providerResourcesState[index],
+        status: "disabled",
+        health_state: "disabled",
+        version: expectedVersion + 1,
+      };
+      providerResourcesState[index] = disabled;
+      return Promise.resolve(jsonResponse(200, disabled));
+    }
+
+    if (path === "/v1/route-policies" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: routePoliciesState }));
+    }
+
+    if (path === "/v1/route-policies" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const capabilities = Array.isArray(body.required_capabilities)
+        ? body.required_capabilities
+        : [];
+      const unsupportedCapabilities = capabilities.filter(
+        (capability) =>
+          !["streaming", "tool_calling", "json_mode", "chat_completions"].includes(
+            String(capability),
+          ),
+      );
+
+      if (unsupportedCapabilities.length > 0) {
+        return Promise.resolve(
+          jsonResponse(400, {
+            error: {
+              code: "route_policy_compatibility_invalid",
+              message: "Route policy compatibility validation failed.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      routePoliciesState = [...routePoliciesState, body as (typeof routePoliciesResponse)["data"][number]];
+      return Promise.resolve(jsonResponse(200, body));
+    }
+
+    if (
+      path.startsWith("/v1/route-policies/") &&
+      !path.endsWith("/disable") &&
+      init?.method === "PUT"
+    ) {
+      const routePolicyId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const capabilities = Array.isArray(body.required_capabilities)
+        ? body.required_capabilities
+        : [];
+      const unsupportedCapabilities = capabilities.filter(
+        (capability) =>
+          !["streaming", "tool_calling", "json_mode", "chat_completions"].includes(
+            String(capability),
+          ),
+      );
+      const index = routePoliciesState.findIndex(
+        (policy) => policy.route_policy_id === routePolicyId,
+      );
+
+      if (unsupportedCapabilities.length > 0) {
+        return Promise.resolve(
+          jsonResponse(400, {
+            error: {
+              code: "route_policy_compatibility_invalid",
+              message: "Route policy compatibility validation failed.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (index < 0) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "route_policy_not_found",
+              message: "Route policy not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (routePoliciesState[index]?.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "route_policy_version_conflict",
+              message: "Route policy version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      const updated = {
+        ...routePoliciesState[index],
+        ...body,
+        route_policy_id: routePolicyId,
+        version: expectedVersion + 1,
+      };
+      routePoliciesState[index] = updated;
+      return Promise.resolve(jsonResponse(200, updated));
+    }
+
+    if (
+      path.startsWith("/v1/route-policies/") &&
+      path.endsWith("/disable") &&
+      init?.method === "POST"
+    ) {
+      const routePolicyId = decodeURIComponent(path.split("/")[3] ?? "");
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const current = routePoliciesState.find(
+        (policy) => policy.route_policy_id === routePolicyId,
+      );
+
+      if (!current) {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "route_policy_not_found",
+              message: "Route policy not found.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      if (current.version !== expectedVersion) {
+        return Promise.resolve(
+          jsonResponse(409, {
+            error: {
+              code: "route_policy_version_conflict",
+              message: "Route policy version is stale.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      routePoliciesState = routePoliciesState.filter(
+        (policy) => policy.route_policy_id !== routePolicyId,
+      );
+      return Promise.resolve(
+        jsonResponse(200, {
+          ...current,
+          version: expectedVersion + 1,
+        }),
+      );
     }
 
     if (path === "/v1/config-snapshots/active") {
-      return Promise.resolve(jsonResponse(200, configSnapshotResponse));
+      const activeSnapshot =
+        configSnapshotsState.find((snapshot) => snapshot.status === "active") ??
+        configSnapshotsState[0];
+      return Promise.resolve(
+        jsonResponse(200, {
+          config_snapshot: activeSnapshot ?? configSnapshotResponse.config_snapshot,
+        }),
+      );
     }
 
-    if (path === "/v1/config-snapshots") {
-      return Promise.resolve(jsonResponse(200, configSnapshotsResponse));
+    if (path === "/v1/config-snapshots" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(200, { data: configSnapshotsState }));
+    }
+
+    if (path === "/v1/config-snapshots" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      configSnapshotsState = [...configSnapshotsState, body as (typeof configSnapshotsResponse)["data"][number]];
+      return Promise.resolve(jsonResponse(200, body));
     }
 
     if (
@@ -592,10 +886,27 @@ export function createControlPlaneFetchMock() {
       const snapshotId = decodeURIComponent(
         path.replace("/v1/config-snapshots/", "").replace("/activate", ""),
       );
+      configSnapshotsState = configSnapshotsState.map((snapshot) =>
+        snapshot.config_snapshot_id === snapshotId
+          ? {
+              ...snapshot,
+              status: "active",
+              activated_at: "2026-04-23T00:00:00Z",
+            }
+          : snapshot.status === "active"
+            ? {
+                ...snapshot,
+                status: "superseded",
+              }
+            : snapshot,
+      );
+      const activatedSnapshot = configSnapshotsState.find(
+        (snapshot) => snapshot.config_snapshot_id === snapshotId,
+      );
 
       return Promise.resolve(
         jsonResponse(200, {
-          config_snapshot: configSnapshotById[snapshotId] ?? {
+          config_snapshot: activatedSnapshot ?? {
             ...configSnapshotsResponse.data[0],
             config_snapshot_id: snapshotId,
           },
@@ -603,8 +914,36 @@ export function createControlPlaneFetchMock() {
       );
     }
 
-    if (path === "/v1/api-keys") {
+    if (path === "/v1/api-keys" && (!init?.method || init.method === "GET")) {
       return Promise.resolve(jsonResponse(200, { data: apiKeysState }));
+    }
+
+    if (path === "/v1/api-keys" && init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const displayName =
+        typeof body.display_name === "string"
+          ? body.display_name
+          : "New API Key";
+      const apiKey =
+        typeof body.api_key === "string" ? body.api_key : "akp_new";
+      const providerResourceId =
+        typeof body.provider_resource_id === "string"
+          ? body.provider_resource_id
+          : "prvrsrc_unknown";
+      const nextKey = {
+        api_key_id: `key_${apiKeysState.length + 1}`,
+        can_revoke: true,
+        created_at: "2026-04-23T00:00:00Z",
+        display_name: displayName,
+        is_active: true,
+        key_prefix: `${apiKey.slice(0, 6)}...`,
+        provider_resource_id: providerResourceId,
+        tenant_id: "tenant_acme",
+        updated_at: "2026-04-23T00:00:00Z",
+        version: 1,
+      };
+      apiKeysState = [...apiKeysState, nextKey];
+      return Promise.resolve(jsonResponse(200, nextKey));
     }
 
     if (path.startsWith("/v1/api-keys/") && path.endsWith("/revoke")) {
@@ -647,13 +986,23 @@ export function createControlPlaneFetchMock() {
       return Promise.resolve(jsonResponse(200, balanceProjectionResponse));
     }
 
-    if (
-      path === "/v1/billing/exports" &&
-      (!init?.method || init.method === "GET")
-    ) {
-      return Promise.resolve(
-        jsonResponse(200, { data: [billingExportResponse.data] }),
-      );
+    if (path === "/v1/billing/exports" && (!init?.method || init.method === "GET")) {
+      if (billingExportJobsState.some((job) => job.status === "queued")) {
+        if (billingExportPollCount > 0) {
+          billingExportJobsState = billingExportJobsState.map((job) =>
+            job.status === "queued"
+              ? {
+                  ...job,
+                  completed_at: "2026-04-23T00:11:00Z",
+                  status: "completed",
+                }
+              : job,
+          );
+        } else {
+          billingExportPollCount += 1;
+        }
+      }
+      return Promise.resolve(jsonResponse(200, { data: billingExportJobsState }));
     }
 
     if (path === "/v1/pricing/simulations" && init?.method === "POST") {
@@ -676,7 +1025,51 @@ export function createControlPlaneFetchMock() {
     }
 
     if (path === "/v1/billing/exports" && init?.method === "POST") {
-      return Promise.resolve(jsonResponse(202, billingExportResponse));
+      const nextJob = {
+        completed_at: undefined,
+        export_job_id: `export_${billingExportJobsState.length + 200}`,
+        format: "csv",
+        project_id: "proj_core",
+        requested_at: "2026-04-23T00:10:00Z",
+        status: "queued",
+        tenant_id: "tenant_acme",
+      };
+      billingExportPollCount = 0;
+      billingExportJobsState = [nextJob, ...billingExportJobsState];
+      return Promise.resolve(jsonResponse(202, { data: nextJob }));
+    }
+
+    if (
+      path.startsWith("/v1/billing/exports/") &&
+      path.endsWith("/download") &&
+      (!init?.method || init.method === "GET")
+    ) {
+      const exportJobId = decodeURIComponent(path.split("/")[4] ?? "");
+      const job = billingExportJobsState.find(
+        (candidate) => candidate.export_job_id === exportJobId,
+      );
+
+      if (!job || job.status !== "completed") {
+        return Promise.resolve(
+          jsonResponse(404, {
+            error: {
+              code: "billing_export_not_found",
+              message: "Billing export not ready.",
+              request_id: "req_test",
+              retryable: false,
+            },
+          }),
+        );
+      }
+
+      return Promise.resolve(
+        new Response("date,provider_cost,billable_total\n2026-04-22,1.24,1.54\n", {
+          status: 200,
+          headers: {
+            "content-type": "text/csv",
+          },
+        }),
+      );
     }
     if (
       path.startsWith("/v1/route-receipts/") &&
