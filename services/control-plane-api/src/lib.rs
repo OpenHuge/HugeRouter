@@ -3021,6 +3021,87 @@ mod tests {
         assert_eq!(body["selected_target"], "prvrsrc_openai_primary");
     }
 
+    #[tokio::test]
+    async fn route_simulation_uses_latest_activated_project_snapshot() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/config-snapshots")
+                    .header(COOKIE, &admin_cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "config_snapshot_id":"cfgsnap_gateway_v2",
+                            "tenant_id":"tenant_acme",
+                            "project_id":"proj_core",
+                            "revision":2,
+                            "status":"draft",
+                            "activated_at":null,
+                            "provider_resource_ids":["prvrsrc_openai_backup"],
+                            "route_policy_id":"routepol_acme_support",
+                            "budget_policy_id":"budgetpol_default"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+
+        let activate = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/config-snapshots/cfgsnap_gateway_v2/activate")
+                    .header(COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(activate.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/route-simulations")
+                    .header(COOKIE, &admin_cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "tenant_id": "tenant_acme",
+                            "project_id": "proj_core",
+                            "credential_scope": "cred_demo",
+                            "protocol_family": "openai_chat",
+                            "model_alias": "reasoning-fast",
+                            "required_capabilities": ["json_mode"],
+                            "region": "us-east-1",
+                            "expected_prompt_tokens": 64,
+                            "expected_max_output_tokens": 128,
+                            "traffic_class": "interactive"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["config_snapshot_id"], "cfgsnap_gateway_v2");
+        assert_eq!(body["selected_target"], "prvrsrc_openai_backup");
+    }
+
     fn sample_route_receipt(
         route_receipt_id: &str,
         tenant_id: &str,

@@ -2392,6 +2392,37 @@ impl PostgresStore {
             return Ok(None);
         };
         let mut snapshot = row.get::<Json<ConfigSnapshot>, _>("payload").0;
+        let mut tx = self.pool.begin().await?;
+        let sibling_rows = sqlx::query(
+            "SELECT config_snapshot_id, payload
+             FROM config_snapshots
+             WHERE tenant_id = $1 AND project_id = $2",
+        )
+        .bind(snapshot.tenant_id.as_str())
+        .bind(snapshot.project_id.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for row in sibling_rows {
+            let sibling_id = row.get::<String, _>("config_snapshot_id");
+            if sibling_id == config_snapshot_id {
+                continue;
+            }
+            let mut sibling = row.get::<Json<ConfigSnapshot>, _>("payload").0;
+            if sibling.status == ConfigSnapshotStatus::Active {
+                sibling.status = ConfigSnapshotStatus::Superseded;
+                sqlx::query(
+                    "UPDATE config_snapshots
+                     SET status = 'superseded', payload = $2
+                     WHERE config_snapshot_id = $1",
+                )
+                .bind(&sibling_id)
+                .bind(Json(sibling))
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
         snapshot.status = ConfigSnapshotStatus::Active;
         snapshot.activated_at = Some(now_rfc3339());
         sqlx::query(
@@ -2399,7 +2430,7 @@ impl PostgresStore {
         )
         .bind(config_snapshot_id)
         .bind(Json(snapshot.clone()))
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
         sqlx::query(
             "INSERT INTO active_config_pointers (pointer_key, config_snapshot_id)
@@ -2407,8 +2438,9 @@ impl PostgresStore {
              ON CONFLICT (pointer_key) DO UPDATE SET config_snapshot_id = EXCLUDED.config_snapshot_id",
         )
         .bind(config_snapshot_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(Some(ConfigSnapshotResponse {
             config_snapshot: snapshot,
         }))
@@ -2939,7 +2971,7 @@ impl PostgresStore {
             "SELECT payload
              FROM config_snapshots
              WHERE tenant_id = $1 AND project_id = $2 AND status = 'active'
-             ORDER BY config_snapshot_id
+             ORDER BY activated_at DESC NULLS LAST, config_snapshot_id DESC
              LIMIT 1",
         )
         .bind(tenant_id.as_str())
@@ -3326,6 +3358,17 @@ fn activate_memory_config_snapshot(
         .config_snapshots
         .iter()
         .position(|item| item.config_snapshot_id.as_str() == config_snapshot_id)?;
+    let tenant_id = store.config_snapshots[index].tenant_id.clone();
+    let project_id = store.config_snapshots[index].project_id.clone();
+    for (candidate_index, snapshot) in store.config_snapshots.iter_mut().enumerate() {
+        if candidate_index != index
+            && snapshot.tenant_id == tenant_id
+            && snapshot.project_id == project_id
+            && snapshot.status == ConfigSnapshotStatus::Active
+        {
+            snapshot.status = ConfigSnapshotStatus::Superseded;
+        }
+    }
     let snapshot = &mut store.config_snapshots[index];
     snapshot.status = ConfigSnapshotStatus::Active;
     snapshot.activated_at = Some(now_rfc3339());
@@ -3342,10 +3385,15 @@ fn simulate_memory_route(
     let active_snapshot = store
         .config_snapshots
         .iter()
-        .find(|snapshot| {
+        .filter(|snapshot| {
             snapshot.status == ConfigSnapshotStatus::Active
                 && snapshot.tenant_id == request.tenant_id
                 && snapshot.project_id == request.project_id
+        })
+        .max_by(|left, right| {
+            left.activated_at
+                .cmp(&right.activated_at)
+                .then_with(|| left.config_snapshot_id.cmp(&right.config_snapshot_id))
         })
         .cloned()
         .context("active config snapshot missing for project")?;
@@ -4223,6 +4271,51 @@ mod tests {
             .unwrap()
             .data;
         assert_eq!(protocol_filtered.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn memory_store_activation_supersedes_previous_project_snapshot() {
+        let store = StoreMode::memory();
+        let newer = core_domain::ConfigSnapshot {
+            config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_gateway_v2").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            revision: 2,
+            status: core_domain::ConfigSnapshotStatus::Draft,
+            activated_at: None,
+            provider_resource_ids: vec![
+                ProviderResourceId::parse("prvrsrc_openai_backup").unwrap(),
+            ],
+            route_policy_id: RoutePolicyId::parse("routepol_acme_support").unwrap(),
+            budget_policy_id: core_domain::BudgetPolicyId::parse("budgetpol_default").unwrap(),
+        };
+        let created = store.create_config_snapshot(newer).await.unwrap();
+        assert_eq!(created.config_snapshot_id.as_str(), "cfgsnap_gateway_v2");
+
+        let activated = store
+            .activate_config_snapshot("cfgsnap_gateway_v2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            activated.config_snapshot.config_snapshot_id.as_str(),
+            "cfgsnap_gateway_v2"
+        );
+
+        let snapshots = store.list_config_snapshots().await.unwrap().data;
+        let gateway_v1 = snapshots
+            .iter()
+            .find(|snapshot| snapshot.config_snapshot_id.as_str() == "cfgsnap_gateway_v1")
+            .unwrap();
+        let gateway_v2 = snapshots
+            .iter()
+            .find(|snapshot| snapshot.config_snapshot_id.as_str() == "cfgsnap_gateway_v2")
+            .unwrap();
+        assert_eq!(
+            gateway_v1.status,
+            core_domain::ConfigSnapshotStatus::Superseded
+        );
+        assert_eq!(gateway_v2.status, core_domain::ConfigSnapshotStatus::Active);
     }
 }
 
