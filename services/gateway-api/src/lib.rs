@@ -14,9 +14,9 @@ use axum::{
 use core_domain::{
     AdmissionResult, ConfigSnapshot, ConfigSnapshotId, DeploymentScope, ErrorEnvelope,
     ExcludedTarget, FallbackTransition, HealthState, MonetaryAmount, NormalizedError,
-    ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceStatus, RoutePolicy,
-    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, ServiceName, UsageEvent,
-    UsageEventId, UsageMetrics, UsagePhase, ValidationIssue,
+    ProvenanceClass, ProviderResource, ProviderResourceStatus, RoutePolicy, RoutePolicyId,
+    RouteReceipt, RouteReceiptId, ScoreBreakdown, ServiceName, UsageEvent, UsageEventId,
+    UsageMetrics, UsagePhase, ValidationIssue,
 };
 use openai::OpenAiAdapter;
 use protocol_anthropic::{
@@ -34,10 +34,12 @@ use protocol_ir::{
     RouteReceiptRecordedMessageType, UsageEventRecorded,
 };
 use provider_anthropic::AnthropicAdapter;
+use provider_gateway::GatewayAdapter;
 use provider_gemini::GeminiAdapter;
 use provider_traits::{
     ProviderAdapterRegistry, ProviderEndpoint, ProviderError, ProviderErrorKind,
     ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
+    ProviderTargetKind, TransitGatewayKind, TransitProviderMetadata,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -192,6 +194,8 @@ struct GatewayApiKeyScope {
 #[derive(Debug, Clone)]
 struct ProviderTargetRuntime {
     resource: ProviderResource,
+    target_kind: ProviderTargetKind,
+    transit_metadata: Option<TransitProviderMetadata>,
     priority: u32,
     upstream_model: Option<String>,
     api_key: String,
@@ -242,6 +246,9 @@ fn default_state() -> GatewayState {
         .register(Arc::new(AnthropicAdapter::default()))
         .expect("anthropic adapter registration should succeed");
     adapter_registry
+        .register(Arc::new(GatewayAdapter::default()))
+        .expect("gateway adapter registration should succeed");
+    adapter_registry
         .register(Arc::new(GeminiAdapter::default()))
         .expect("gemini adapter registration should succeed");
 
@@ -266,7 +273,7 @@ async fn chat_completions(
     headers: HeaderMap,
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
-    match process_chat_completion(state, headers.get(AUTHORIZATION), request).await {
+    match process_chat_completion(state, &headers, request).await {
         Ok(success) => success.into_response(),
         Err(error) => error.into_response(),
     }
@@ -283,7 +290,7 @@ async fn anthropic_messages(
         Err(error) => return error.into_response(),
     };
 
-    match process_normalized_request(state, headers.get(AUTHORIZATION), normalized_request).await {
+    match process_normalized_request(state, &headers, normalized_request).await {
         Ok(success) => anthropic_success_response(&success),
         Err(error) => error.into_response(),
     }
@@ -306,7 +313,7 @@ async fn gemini_generate_content(
         Err(error) => return error.into_response(),
     };
 
-    match process_normalized_request(state, headers.get(AUTHORIZATION), normalized_request).await {
+    match process_normalized_request(state, &headers, normalized_request).await {
         Ok(success) => gemini_success_response(&success),
         Err(error) => error.into_response(),
     }
@@ -348,12 +355,11 @@ fn parse_gemini_model_action(
 
 async fn process_chat_completion(
     state: GatewayState,
-    authorization_header: Option<&HeaderValue>,
+    headers: &HeaderMap,
     request: ChatCompletionRequest,
 ) -> Result<GatewaySuccess, GatewayError> {
     let normalized_request = normalize_request(request, &next_request_context())?;
-    let success =
-        process_normalized_request(state, authorization_header, normalized_request.clone()).await?;
+    let success = process_normalized_request(state, headers, normalized_request.clone()).await?;
 
     let context = RequestContext {
         request_id: success.request_id.clone(),
@@ -374,11 +380,13 @@ async fn process_chat_completion(
 
 async fn process_normalized_request(
     state: GatewayState,
-    authorization_header: Option<&HeaderValue>,
+    headers: &HeaderMap,
     normalized_request: NormalizedChatRequest,
 ) -> Result<ExecutionSuccess, GatewayError> {
     let context = next_request_context();
-    let bearer_token = extract_bearer_token(authorization_header, &context)?;
+    let bearer_token = extract_bearer_token(headers.get(AUTHORIZATION), &context)?;
+    let request_headers = normalize_forward_headers(headers);
+    let gateway_origin = infer_gateway_origin(headers);
     let api_key_scope = state
         .auth_store
         .resolve(&bearer_token)
@@ -449,7 +457,40 @@ async fn process_normalized_request(
         ));
     }
 
-    execute_route(state, route, normalized_request, context).await
+    execute_route(
+        state,
+        route,
+        normalized_request,
+        context,
+        request_headers,
+        gateway_origin,
+    )
+    .await
+}
+
+fn normalize_forward_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+        })
+        .collect()
+}
+
+fn infer_gateway_origin(headers: &HeaderMap) -> Option<String> {
+    std::env::var("GATEWAY_PUBLIC_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            let scheme = headers
+                .get("x-forwarded-proto")
+                .and_then(|value| value.to_str().ok())?;
+            let host = headers.get("host").and_then(|value| value.to_str().ok())?;
+            Some(format!("{}://{}/v1", scheme.trim(), host.trim()))
+        })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -458,6 +499,8 @@ async fn execute_route(
     route: RouteEvaluation,
     request: NormalizedChatRequest,
     context: RequestContext,
+    request_headers: BTreeMap<String, String>,
+    gateway_origin: Option<String>,
 ) -> Result<ExecutionSuccess, GatewayError> {
     let mut fallback_transitions = Vec::new();
     let mut provider_attempts = Vec::new();
@@ -523,6 +566,9 @@ async fn execute_route(
         let provider_context = ProviderExecutionContext {
             request_id: context.request_id.clone(),
             trace_id: context.trace_id.clone(),
+            gateway_service_name: GATEWAY_SERVICE_NAME.to_string(),
+            gateway_origin: gateway_origin.clone(),
+            request_headers: request_headers.clone(),
             endpoint: ProviderEndpoint {
                 provider_resource_id: target.resource.provider_resource_id.as_str().to_string(),
                 endpoint_base_url: target.resource.endpoint_base_url.clone(),
@@ -1058,8 +1104,7 @@ fn evaluate_route(
             continue;
         }
 
-        if !route_capabilities_supported(&active_config.route_policy, &target.resource.capabilities)
-        {
+        if !route_capabilities_supported(&active_config.route_policy, target) {
             excluded_targets.push(ExcludedTarget {
                 provider_resource_id: target.resource.provider_resource_id.clone(),
                 reason: "required capabilities are not satisfied by the target".to_string(),
@@ -1109,16 +1154,18 @@ fn evaluate_route(
 
 fn route_capabilities_supported(
     route_policy: &RoutePolicy,
-    capabilities: &ProviderCapabilities,
+    target: &ProviderTargetRuntime,
 ) -> bool {
     route_policy
         .required_capabilities
         .iter()
         .all(|capability| match capability.as_str() {
-            "streaming" => capabilities.supports_streaming,
-            "tool_calling" => capabilities.supports_tool_calling,
-            "json_mode" => capabilities.supports_json_mode,
+            "streaming" => target.resource.capabilities.supports_streaming,
+            "tool_calling" => target.resource.capabilities.supports_tool_calling,
+            "json_mode" => target.resource.capabilities.supports_json_mode,
             "chat_completions" => true,
+            "transit_gateway" => target.target_kind == ProviderTargetKind::TransitGateway,
+            "native_provider" => target.target_kind == ProviderTargetKind::Native,
             _ => false,
         })
 }
@@ -1137,12 +1184,18 @@ fn score_target(
     } else {
         (target.static_latency_score * 0.7).max(0.1)
     };
+    let latency = target
+        .transit_metadata
+        .as_ref()
+        .map_or(latency, |metadata| {
+            (latency - (f32::from(metadata.transit_hops) * 0.05)).max(0.1)
+        });
     let health = match target.resource.health_state {
         HealthState::Healthy => 1.0,
         HealthState::Degraded => 0.55,
         HealthState::Quarantined | HealthState::Draining | HealthState::Disabled => 0.0,
     };
-    let trust = match target.resource.provenance_class {
+    let trust: f32 = match target.resource.provenance_class {
         ProvenanceClass::OfficialApi => 1.0,
         ProvenanceClass::OfficialGateway => 0.95,
         ProvenanceClass::DedicatedManagedAccount => 0.85,
@@ -1150,6 +1203,14 @@ fn score_target(
         ProvenanceClass::SharedBrokeredPool => 0.6,
         ProvenanceClass::UnofficialClientChannel => 0.2,
     };
+    let trust = target.transit_metadata.as_ref().map_or(trust, |metadata| {
+        let penalty = if metadata.preserves_error_diagnostics {
+            0.92
+        } else {
+            0.85
+        };
+        (trust * penalty).max(0.1_f32)
+    });
 
     ScoreBreakdown {
         latency,
@@ -1451,7 +1512,13 @@ fn map_provider_response(
 fn map_provider_error(error: &ProviderError, context: &RequestContext) -> ErrorEnvelope {
     let code = match error.kind {
         ProviderErrorKind::Auth | ProviderErrorKind::Unavailable => "provider_unavailable",
-        ProviderErrorKind::InvalidRequest => "request_validation_failed",
+        ProviderErrorKind::InvalidRequest => {
+            if error.details.contains_key("loop_guard") {
+                "transit_loop_detected"
+            } else {
+                "request_validation_failed"
+            }
+        }
         ProviderErrorKind::RateLimited => "rate_limited",
         ProviderErrorKind::Timeout => "upstream_timeout",
         ProviderErrorKind::Protocol => "upstream_protocol_error",
@@ -1563,6 +1630,7 @@ fn status_for_error_code(code: &str) -> StatusCode {
         "auth_invalid" => StatusCode::UNAUTHORIZED,
         "auth_forbidden" => StatusCode::FORBIDDEN,
         "request_validation_failed" => StatusCode::BAD_REQUEST,
+        "transit_loop_detected" => StatusCode::BAD_REQUEST,
         "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
         "upstream_timeout" => StatusCode::GATEWAY_TIMEOUT,
         "upstream_protocol_error" => StatusCode::BAD_GATEWAY,
@@ -1877,15 +1945,17 @@ impl ControlPlaneConfigStore {
                     })?;
 
                 Ok(ProviderTargetRuntime {
+                    target_kind: provider_target_kind(&resource.provider_id),
+                    transit_metadata: transit_metadata_for_target(&resource, &route_policy),
                     priority: u32::try_from(index + 1).unwrap_or(u32::MAX),
-                    upstream_model: upstream_model_for_provider(&resource.provider_id),
-                    api_key: api_key_for_provider(&resource.provider_id),
+                    upstream_model: upstream_model_for_target(&resource),
+                    api_key: api_key_for_target(&resource),
                     static_latency_score: static_latency_score_for_region(
                         &route_policy.preferred_regions,
                         &resource.region,
                     ),
-                    static_cost_score: static_cost_score_for_scope(resource.deployment_scope),
-                    usd_per_1k_tokens: usd_per_1k_tokens_for_provider(&resource.provider_id),
+                    static_cost_score: static_cost_score_for_target(&route_policy, &resource),
+                    usd_per_1k_tokens: usd_per_1k_tokens_for_target(&route_policy, &resource),
                     resource,
                 })
             })
@@ -2138,24 +2208,71 @@ impl ActiveConfigStore for ControlPlaneConfigStore {
     }
 }
 
-fn api_key_for_provider(provider_id: &str) -> String {
-    match provider_id {
-        "openai" => std::env::var("GATEWAY_OPENAI_API_KEY")
-            .or_else(|_| std::env::var("OPENAI_API_KEY"))
-            .unwrap_or_default(),
-        "anthropic" => std::env::var("GATEWAY_ANTHROPIC_API_KEY")
-            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-            .unwrap_or_default(),
-        "gemini" => std::env::var("GATEWAY_GEMINI_API_KEY")
-            .or_else(|_| std::env::var("GEMINI_API_KEY"))
-            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
-            .unwrap_or_default(),
-        _ => String::new(),
+fn provider_resource_env_prefix(provider_resource_id: &str) -> String {
+    provider_resource_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn provider_target_kind(provider_id: &str) -> ProviderTargetKind {
+    if provider_id == "gateway" {
+        ProviderTargetKind::TransitGateway
+    } else {
+        ProviderTargetKind::Native
     }
 }
 
-fn upstream_model_for_provider(provider_id: &str) -> Option<String> {
-    match provider_id {
+fn transit_metadata_for_target(
+    resource: &ProviderResource,
+    route_policy: &RoutePolicy,
+) -> Option<TransitProviderMetadata> {
+    (resource.provider_id == "gateway").then(|| TransitProviderMetadata {
+        gateway_kind: TransitGatewayKind::OpenAiCompatible,
+        gateway_name: reqwest::Url::parse(&resource.endpoint_base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(ToString::to_string))
+            .unwrap_or_else(|| "openai-compatible-gateway".to_string()),
+        route_cost_scope: route_policy.protocol_family.clone(),
+        transit_hops: 1,
+        preserves_error_diagnostics: true,
+    })
+}
+
+fn api_key_for_target(resource: &ProviderResource) -> String {
+    let resource_prefix = provider_resource_env_prefix(resource.provider_resource_id.as_str());
+    std::env::var(format!("PROVIDER_RESOURCE_{resource_prefix}_API_KEY"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| match resource.provider_id.as_str() {
+            "openai" => std::env::var("GATEWAY_OPENAI_API_KEY")
+                .or_else(|_| std::env::var("OPENAI_API_KEY"))
+                .unwrap_or_default(),
+            "anthropic" => std::env::var("GATEWAY_ANTHROPIC_API_KEY")
+                .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+                .unwrap_or_default(),
+            "gateway" => std::env::var("GATEWAY_TRANSIT_API_KEY").unwrap_or_default(),
+            "gemini" => std::env::var("GATEWAY_GEMINI_API_KEY")
+                .or_else(|_| std::env::var("GEMINI_API_KEY"))
+                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+                .unwrap_or_default(),
+            _ => String::new(),
+        })
+}
+
+fn upstream_model_for_target(resource: &ProviderResource) -> Option<String> {
+    let resource_prefix = provider_resource_env_prefix(resource.provider_resource_id.as_str());
+    if let Ok(model) = std::env::var(format!("PROVIDER_RESOURCE_{resource_prefix}_MODEL")) {
+        return Some(model);
+    }
+
+    match resource.provider_id.as_str() {
         "openai" => Some(
             std::env::var("GATEWAY_OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
         ),
@@ -2163,6 +2280,7 @@ fn upstream_model_for_provider(provider_id: &str) -> Option<String> {
             std::env::var("GATEWAY_ANTHROPIC_MODEL")
                 .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string()),
         ),
+        "gateway" => std::env::var("GATEWAY_TRANSIT_MODEL").ok(),
         "gemini" => Some(
             std::env::var("GATEWAY_GEMINI_MODEL")
                 .unwrap_or_else(|_| "gemini-1.5-flash-latest".to_string()),
@@ -2171,8 +2289,29 @@ fn upstream_model_for_provider(provider_id: &str) -> Option<String> {
     }
 }
 
-fn usd_per_1k_tokens_for_provider(provider_id: &str) -> f64 {
-    match provider_id {
+fn transit_usd_per_1k_tokens_for_route(route_policy: &RoutePolicy) -> f64 {
+    match route_policy.protocol_family.as_str() {
+        "anthropic_messages" => std::env::var("GATEWAY_TRANSIT_ANTHROPIC_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.018),
+        "gemini_generate_content" => std::env::var("GATEWAY_TRANSIT_GEMINI_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.011),
+        _ => std::env::var("GATEWAY_TRANSIT_OPENAI_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.014),
+    }
+}
+
+fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderResource) -> f64 {
+    if resource.provider_id == "gateway" {
+        return transit_usd_per_1k_tokens_for_route(route_policy);
+    }
+
+    match resource.provider_id.as_str() {
         "openai" => std::env::var("GATEWAY_OPENAI_USD_PER_1K_TOKENS")
             .ok()
             .and_then(|value| value.parse::<f64>().ok())
@@ -2187,6 +2326,13 @@ fn usd_per_1k_tokens_for_provider(provider_id: &str) -> f64 {
             .unwrap_or(0.008),
         _ => 0.02,
     }
+}
+
+fn static_cost_score_for_target(route_policy: &RoutePolicy, resource: &ProviderResource) -> f32 {
+    let rate = usd_per_1k_tokens_for_target(route_policy, resource);
+    let bounded_rate = (rate / 0.05).clamp(0.0, 1.0) as f32;
+    let price_score = (1.0 - bounded_rate).max(0.1);
+    ((price_score * 0.7) + (static_cost_score_for_scope(resource.deployment_scope) * 0.3)).max(0.1)
 }
 
 fn static_latency_score_for_region(preferred_regions: &[String], region: &str) -> f32 {
@@ -2340,12 +2486,16 @@ mod tests {
     use core_domain::{
         AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
         CredentialOwnerType, DeploymentScope, HealthState, ProjectId, ProvenanceClass,
-        ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
-        RoutePolicy, RoutePolicyId, RouteReceipt, TenantId, UsageEvent,
+        ProviderResource, ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId,
+        RouteReceipt, TenantId, UsageEvent,
     };
     use protocol_ir::{
         ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse,
         RouteReceiptRecorded,
+    };
+    use provider_gateway::{
+        GatewayAdapter, HttpRequest as GatewayHttpRequest, HttpResponse as GatewayHttpResponse,
+        HttpTransport as GatewayHttpTransport,
     };
     use provider_traits::{
         AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
@@ -2383,12 +2533,11 @@ mod tests {
         }
     }
 
-    fn build_config(targets: Vec<ProviderTargetRuntime>) -> ActiveGatewayConfig {
+    fn default_route_policy() -> RoutePolicy {
         let tenant_id = TenantId::parse("tenant_acme").unwrap();
-        let project_id = ProjectId::parse("proj_core").unwrap();
-        let route_policy = RoutePolicy {
+        RoutePolicy {
             route_policy_id: RoutePolicyId::parse("routepol_default").unwrap(),
-            tenant_id: tenant_id.clone(),
+            tenant_id,
             display_name: "default".to_string(),
             protocol_family: "openai_chat".to_string(),
             model_alias: "reasoning-fast".to_string(),
@@ -2397,7 +2546,13 @@ mod tests {
             version: 1,
             created_at: "2026-04-20T00:00:00Z".to_string(),
             updated_at: "2026-04-20T00:00:00Z".to_string(),
-        };
+        }
+    }
+
+    fn build_config(targets: Vec<ProviderTargetRuntime>) -> ActiveGatewayConfig {
+        let tenant_id = TenantId::parse("tenant_acme").unwrap();
+        let project_id = ProjectId::parse("proj_core").unwrap();
+        let route_policy = default_route_policy();
 
         ActiveGatewayConfig {
             config_snapshot: ConfigSnapshot {
@@ -2426,31 +2581,35 @@ mod tests {
         cost: f32,
         health_state: HealthState,
     ) -> ProviderTargetRuntime {
-        ProviderTargetRuntime {
-            resource: ProviderResource {
-                provider_resource_id: ProviderResourceId::parse(provider_resource_id).unwrap(),
-                tenant_id: TenantId::parse("tenant_acme").unwrap(),
-                project_id: Some(ProjectId::parse("proj_core").unwrap()),
-                provider_id: "openai".to_string(),
-                name: provider_resource_id.to_string(),
-                status: ProviderResourceStatus::Active,
-                provenance_class: ProvenanceClass::OfficialApi,
-                credential_owner_type: CredentialOwnerType::Platform,
-                deployment_scope: DeploymentScope::Shared,
-                region: region.to_string(),
-                endpoint_base_url: "https://api.openai.example/v1".to_string(),
-                auth_kind: AuthKind::ApiKey,
-                health_state,
-                budget_policy_id: None,
-                capabilities: ProviderCapabilities {
-                    supports_streaming: true,
-                    supports_tool_calling: true,
-                    supports_json_mode: true,
-                },
-                version: 1,
-                created_at: "2026-04-20T00:00:00Z".to_string(),
-                updated_at: "2026-04-20T00:00:00Z".to_string(),
+        let resource = ProviderResource {
+            provider_resource_id: ProviderResourceId::parse(provider_resource_id).unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            provider_id: "openai".to_string(),
+            name: provider_resource_id.to_string(),
+            status: ProviderResourceStatus::Active,
+            provenance_class: ProvenanceClass::OfficialApi,
+            credential_owner_type: CredentialOwnerType::Platform,
+            deployment_scope: DeploymentScope::Shared,
+            region: region.to_string(),
+            endpoint_base_url: "https://api.openai.example/v1".to_string(),
+            auth_kind: AuthKind::ApiKey,
+            health_state,
+            budget_policy_id: None,
+            capabilities: core_domain::ProviderCapabilities {
+                supports_streaming: true,
+                supports_tool_calling: true,
+                supports_json_mode: true,
             },
+            version: 1,
+            created_at: "2026-04-20T00:00:00Z".to_string(),
+            updated_at: "2026-04-20T00:00:00Z".to_string(),
+        };
+
+        ProviderTargetRuntime {
+            target_kind: super::provider_target_kind(&resource.provider_id),
+            transit_metadata: None,
+            resource,
             priority: 1,
             upstream_model: Some("gpt-4.1-mini".to_string()),
             api_key: "secret".to_string(),
@@ -2470,7 +2629,40 @@ mod tests {
     ) -> ProviderTargetRuntime {
         let mut target = build_target(provider_resource_id, region, latency, cost, health_state);
         target.resource.provider_id = provider_id.to_string();
+        target.target_kind = super::provider_target_kind(provider_id);
+        target.transit_metadata =
+            super::transit_metadata_for_target(&target.resource, &default_route_policy());
         target
+    }
+
+    fn build_gateway_target(provider_resource_id: &str) -> ProviderTargetRuntime {
+        let mut target = build_target_with_provider(
+            provider_resource_id,
+            "gateway",
+            "us-east-1",
+            0.96,
+            0.92,
+            HealthState::Healthy,
+        );
+        target.resource.endpoint_base_url = "https://gateway.example.com/v1".to_string();
+        target.resource.provenance_class = ProvenanceClass::OfficialGateway;
+        target
+    }
+
+    struct MockGatewayTransport {
+        requests: Arc<Mutex<Vec<GatewayHttpRequest>>>,
+        response: Mutex<Result<GatewayHttpResponse, provider_gateway::HttpTransportError>>,
+    }
+
+    #[async_trait::async_trait]
+    impl GatewayHttpTransport for MockGatewayTransport {
+        async fn post_json(
+            &self,
+            request: GatewayHttpRequest,
+        ) -> Result<GatewayHttpResponse, provider_gateway::HttpTransportError> {
+            self.requests.lock().await.push(request);
+            self.response.lock().await.clone()
+        }
     }
 
     #[derive(Debug)]
@@ -2793,6 +2985,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn route_scoring_can_target_transit_provider() {
+        let mut config = build_config(vec![
+            build_target(
+                "prvrsrc_openai_native",
+                "us-east-1",
+                0.88,
+                0.45,
+                HealthState::Healthy,
+            ),
+            build_gateway_target("prvrsrc_gateway_primary"),
+        ]);
+        config.route_policy.required_capabilities =
+            vec!["json_mode".to_string(), "transit_gateway".to_string()];
+
+        let route = evaluate_route(
+            &config,
+            &normalize_request(valid_http_request(), &request_context()).unwrap(),
+            &request_context(),
+        );
+
+        assert_eq!(route.ranked_targets.len(), 1);
+        assert_eq!(
+            route.ranked_targets[0]
+                .target
+                .resource
+                .provider_resource_id
+                .as_str(),
+            "prvrsrc_gateway_primary"
+        );
+        assert!(route.ranked_targets[0].target.transit_metadata.is_some());
+    }
+
     #[tokio::test]
     async fn healthz_returns_ok() {
         let app = app_with_state(test_state(
@@ -2895,6 +3120,122 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["error"]["code"], "request_validation_failed");
+    }
+
+    #[tokio::test]
+    async fn gateway_target_routes_successfully_through_provider_chain() {
+        let transport = Arc::new(MockGatewayTransport {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            response: Mutex::new(Ok(GatewayHttpResponse {
+                status: 200,
+                headers: BTreeMap::new(),
+                body: Some(
+                    serde_json::json!({
+                        "id": "chatcmpl_gateway_ok",
+                        "model": "gpt-4.1-mini",
+                        "choices": [{
+                            "message": {"content": "transit success"},
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 6,
+                            "prompt_tokens_details": {"cached_tokens": 1}
+                        }
+                    })
+                    .to_string(),
+                ),
+            })),
+        });
+        let app = app_with_state(test_state(
+            Arc::new(GatewayAdapter::new(transport.clone())),
+            vec![build_gateway_target("prvrsrc_gateway_primary")],
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-proto", "https")
+                    .header("host", "router.example.com")
+                    .header("idempotency-key", "idem-route-1")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["choices"][0]["message"]["content"],
+            "transit success"
+        );
+
+        let outbound_requests = transport.requests.lock().await;
+        let outbound_headers = outbound_requests[0]
+            .headers
+            .iter()
+            .cloned()
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            outbound_headers.get("idempotency-key"),
+            Some(&"idem-route-1".to_string())
+        );
+        assert_eq!(
+            outbound_headers.get("x-hugerouter-transit-via"),
+            Some(&"gateway-api".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn transit_loop_prevention_returns_normalized_error() {
+        let transport = Arc::new(MockGatewayTransport {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            response: Mutex::new(Ok(GatewayHttpResponse {
+                status: 200,
+                headers: BTreeMap::new(),
+                body: Some("{}".to_string()),
+            })),
+        });
+        let app = app_with_state(test_state(
+            Arc::new(GatewayAdapter::new(transport.clone())),
+            vec![build_gateway_target("prvrsrc_gateway_primary")],
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer test")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-proto", "https")
+                    .header("host", "router.example.com")
+                    .header("x-hugerouter-transit-hop", "1")
+                    .body(Body::from(
+                        serde_json::to_vec(&valid_http_request()).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "transit_loop_detected");
+        assert_eq!(
+            payload["error"]["details"]["loop_guard"],
+            "transit_header_present"
+        );
+        assert!(transport.requests.lock().await.is_empty());
     }
 
     #[tokio::test]

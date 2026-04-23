@@ -753,6 +753,7 @@ dependencies = [
  "protocol-gemini",
  "protocol-ir",
  "provider-anthropic",
+ "provider-gateway",
  "provider-gemini",
  "provider-traits",
  "reqwest",
@@ -1675,6 +1676,18 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "protocol-anthropic",
+ "provider-traits",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "provider-gateway"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
  "provider-traits",
  "reqwest",
  "serde",
