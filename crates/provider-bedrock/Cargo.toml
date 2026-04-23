@@ -1,0 +1,21 @@
+[package]
+name = "provider-bedrock"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1.89"
+aws-config.workspace = true
+aws-sdk-bedrockruntime.workspace = true
+provider-traits = { path = "../provider-traits" }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

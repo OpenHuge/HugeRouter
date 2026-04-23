@@ -33,6 +33,7 @@ use protocol_ir::{
     RouteReceiptRecordedMessage, RouteReceiptRecordedMessageType, UsageEventRecorded,
 };
 use provider_anthropic::AnthropicAdapter;
+use provider_bedrock::BedrockConverseAdapter;
 use provider_gateway::GatewayAdapter;
 use provider_gemini::GeminiAdapter;
 use provider_traits::{
@@ -294,6 +295,9 @@ fn default_state() -> GatewayState {
     adapter_registry
         .register(Arc::new(AnthropicAdapter::default()))
         .expect("anthropic adapter registration should succeed");
+    adapter_registry
+        .register(Arc::new(BedrockConverseAdapter::default()))
+        .expect("bedrock adapter registration should succeed");
     adapter_registry
         .register(Arc::new(GatewayAdapter::default()))
         .expect("gateway adapter registration should succeed");
@@ -703,6 +707,7 @@ async fn execute_route(
                 provider_resource_id: target.resource.provider_resource_id.as_str().to_string(),
                 endpoint_base_url: target.resource.endpoint_base_url.clone(),
                 api_key: target.api_key.clone(),
+                region: Some(target.resource.region.clone()),
             },
         };
         let attempt_started_at = now_rfc3339();
@@ -2908,6 +2913,7 @@ fn upstream_model_for_target(resource: &ProviderResource) -> Option<String> {
             std::env::var("GATEWAY_ANTHROPIC_MODEL")
                 .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string()),
         ),
+        "bedrock" => std::env::var("GATEWAY_BEDROCK_MODEL").ok(),
         "gateway" => std::env::var("GATEWAY_TRANSIT_MODEL").ok(),
         "gemini" => Some(
             std::env::var("GATEWAY_GEMINI_MODEL")
@@ -2945,6 +2951,10 @@ fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderR
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.01),
         "anthropic" => std::env::var("GATEWAY_ANTHROPIC_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.012),
+        "bedrock" => std::env::var("GATEWAY_BEDROCK_USD_PER_1K_TOKENS")
             .ok()
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.012),
@@ -3103,8 +3113,8 @@ mod tests {
         GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState,
         InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext,
         ResponsesApiInputContent, ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink,
-        StaticBudgetProjectionStore, StaticConfigStore, app_with_state, evaluate_route,
-        normalize_request,
+        StaticBudgetProjectionStore, StaticConfigStore, app_with_state, default_state,
+        evaluate_route, normalize_request,
     };
     use axum::{
         Json, Router,
@@ -3631,6 +3641,13 @@ mod tests {
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.envelope.error.validation_issues[0].field, "stream");
+    }
+
+    #[test]
+    fn default_registry_registers_bedrock_adapter() {
+        let state = default_state();
+
+        assert!(state.adapter_registry.resolve("bedrock").is_some());
     }
 
     #[test]

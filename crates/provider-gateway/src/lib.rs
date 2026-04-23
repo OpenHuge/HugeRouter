@@ -626,6 +626,7 @@ mod tests {
                 provider_resource_id: "prvrsrc_gateway_primary".to_string(),
                 endpoint_base_url: "https://gateway.example.com/v1".to_string(),
                 api_key: "gateway-secret".to_string(),
+                region: None,
             },
         }
     }

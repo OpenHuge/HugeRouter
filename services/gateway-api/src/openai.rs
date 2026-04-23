@@ -612,6 +612,7 @@ mod tests {
                 provider_resource_id: "prvrsrc_openai_primary".to_string(),
                 endpoint_base_url: "https://api.openai.example/v1".to_string(),
                 api_key: "secret".to_string(),
+                region: None,
             },
         }
     }
