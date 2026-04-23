@@ -158,13 +158,25 @@ pub struct PreparedTransitHeaders {
     pub report: HeaderPolicyReport,
 }
 
+/// Prepares the outbound header set for a transit-gateway provider request.
+///
+/// # Errors
+///
+/// Returns [`ProviderError`] when the incoming request already carries
+/// transit-loop headers and forwarding would recurse through another gateway hop.
 pub fn prepare_transit_headers(
     context: &ProviderExecutionContext,
 ) -> Result<PreparedTransitHeaders, ProviderError> {
     ensure_no_transit_loop(context)?;
 
-    let allowlist = BTreeSet::from_iter(PASSTHROUGH_HEADER_ALLOWLIST.iter().copied());
-    let denylist = BTreeSet::from_iter(STRIP_HEADER_DENYLIST.iter().copied());
+    let allowlist = PASSTHROUGH_HEADER_ALLOWLIST
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let denylist = STRIP_HEADER_DENYLIST
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let mut headers = BTreeMap::new();
     let mut forwarded_headers = Vec::new();
     let mut stripped_headers = Vec::new();
@@ -429,8 +441,10 @@ impl ReqwestTransport {
         let timeout = std::env::var("GATEWAY_TRANSIT_TIMEOUT_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_millis)
-            .unwrap_or_else(|| Duration::from_millis(DEFAULT_TRANSIT_TIMEOUT_MS));
+            .map_or_else(
+                || Duration::from_millis(DEFAULT_TRANSIT_TIMEOUT_MS),
+                Duration::from_millis,
+            );
         let client = reqwest::Client::builder()
             .use_native_tls()
             .timeout(timeout)
@@ -656,9 +670,14 @@ mod tests {
         assert_eq!(response.output_text, "forwarded ok");
         assert_eq!(response.usage.cached_input_tokens, 2);
 
-        let captured = transport.captured.lock().await;
-        let outbound = &captured[0];
-        let headers = outbound.headers.iter().cloned().collect::<BTreeMap<_, _>>();
+        let headers = {
+            let captured = transport.captured.lock().await;
+            captured[0]
+                .headers
+                .iter()
+                .cloned()
+                .collect::<BTreeMap<_, _>>()
+        };
         assert_eq!(
             headers.get("authorization"),
             Some(&"Bearer gateway-secret".to_string())
