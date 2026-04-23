@@ -3624,15 +3624,17 @@ impl PostgresStore {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         let user_id = format!("user_{subject_hash}");
-        let primary_email = email
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("{subject}@{}.login.local", auth_provider_slug(provider)));
+        let primary_email = email.map_or_else(
+            || format!("{subject}@{}.login.local", auth_provider_slug(provider)),
+            str::to_string,
+        );
         let user = UserIdentity {
             user_id: UserId::parse(user_id.clone()).unwrap(),
             primary_email: Some(primary_email.clone()),
-            display_name: display_name
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("{} user", auth_provider_slug(provider))),
+            display_name: display_name.map_or_else(
+                || format!("{} user", auth_provider_slug(provider)),
+                str::to_string,
+            ),
             avatar_url: None,
             created_at: now.to_string(),
             last_login_at: Some(now.to_string()),
@@ -3945,15 +3947,17 @@ fn upsert_memory_provider_user(
         .find(|tenant| tenant.slug == workspace_slug)
         .cloned()
         .context("workspace not found for oauth login")?;
-    let primary_email = email
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{subject}@{}.login.local", auth_provider_slug(provider)));
+    let primary_email = email.map_or_else(
+        || format!("{subject}@{}.login.local", auth_provider_slug(provider)),
+        str::to_string,
+    );
     let user = UserIdentity {
         user_id: UserId::parse(user_id.clone()).unwrap(),
         primary_email: Some(primary_email.clone()),
-        display_name: display_name
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("{} user", auth_provider_slug(provider))),
+        display_name: display_name.map_or_else(
+            || format!("{} user", auth_provider_slug(provider)),
+            str::to_string,
+        ),
         avatar_url: None,
         created_at: now.to_string(),
         last_login_at: Some(now.to_string()),
@@ -5594,15 +5598,12 @@ fn resolve_active_tenant_id(
 }
 
 fn env_flag_enabled(name: &str, default: bool) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(default)
+    std::env::var(name).ok().map_or(default, |value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 pub fn mock_auth_enabled() -> bool {

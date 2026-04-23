@@ -203,7 +203,7 @@ jobs:
           key: rust-clippy
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   rust-check:
     name: Rust Check
@@ -221,7 +221,7 @@ jobs:
           key: rust-check
 
       - name: Run cargo check
-        run: cargo check --workspace
+        run: cargo check --workspace --locked
 
   rust-test:
     name: Rust Test
@@ -239,7 +239,7 @@ jobs:
           key: rust-test
 
       - name: Run cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   contract-drift:
     name: Contract Drift Check
@@ -257,7 +257,20 @@ jobs:
           key: contract-drift
 
       - name: Verify checked-in protocol contracts match generated contracts
-        run: cargo test -p protocol-ir checked_in_artifacts_match_generated_contracts -- --exact
+        run: cargo test -p protocol-ir --locked checked_in_artifacts_match_generated_contracts -- --exact
+
+  runtime-image-build:
+    name: Runtime Image Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose topology
+        run: docker compose -f infra/docker/compose.yaml --profile runtime --profile observability config -q
+
+      - name: Build runtime service images
+        run: docker compose -f infra/docker/compose.yaml --profile runtime build control-plane-api gateway-api ledger-worker route-receipt-worker
 
   infrastructure-smoke:
     name: Infrastructure Smoke
@@ -276,8 +289,8 @@ jobs:
         with:
           key: infra-smoke
 
-      - name: Make smoke helper executable
-        run: chmod +x infra/scripts/smoke.sh
+      - name: Make infra helpers executable
+        run: chmod +x infra/scripts/*.sh infra/scripts/lib/*.sh
 
       - name: Run full smoke path
         env:

@@ -22,6 +22,16 @@ import {
   useProviderLoginMutation
 } from './auth-queries'
 
+function getSignInCopy(
+  configuredProviderCount: number
+) {
+  if (configuredProviderCount === 0) {
+    return 'No sign-in methods are currently configured for this workspace.'
+  }
+
+  return 'Use a configured sign-in method below. Only providers enabled for this workspace are shown.'
+}
+
 type LoginPageProps = {
   onAuthenticated?: (
     state: Extract<AuthSessionState, { kind: 'authenticated' }>
@@ -107,12 +117,26 @@ export function LoginPage({
   const providerLoginMutation = useProviderLoginMutation()
 
   const loginStatus = getLoginStatusCopy(search, sessionEnvelope)
-  const visibleProviders = sessionEnvelope.state.availableProviders.filter(
-    (provider) => !provider.hidden && provider.provider !== 'email'
+  const configuredProviders = sessionEnvelope.state.availableProviders.filter(
+    (provider) => !provider.hidden
+  )
+  const emailProvider = configuredProviders.find((provider) => provider.provider === 'email')
+  const visibleProviders = configuredProviders.filter(
+    (provider) => provider.provider !== 'email'
   )
 
   async function handleEmailLogin() {
     setLocalError(null)
+
+    if (!emailProvider) {
+      setLocalError('Email sign-in is not configured for this workspace.')
+      return
+    }
+
+    if (!emailProvider.enabled) {
+      setLocalError(emailProvider.reason ?? 'Email sign-in is currently unavailable.')
+      return
+    }
 
     if (!email.trim()) {
       setLocalError('Email is required.')
@@ -189,8 +213,7 @@ export function LoginPage({
         <Stack>
           <Title order={1}>Sign in</Title>
           <Text c="dimmed" size="sm">
-            Use email, GitHub, Google, or WeChat. Third-party login still creates a
-            HugeRouter-managed session.
+            {getSignInCopy(configuredProviders.length)}
           </Text>
           {loginStatus ? (
             <Alert color={loginStatus.tone} variant="light">
@@ -218,73 +241,95 @@ export function LoginPage({
               ) : null}
             </Alert>
           ) : null}
-          <TextInput
-            description="Optional workspace hint used for email and provider start requests."
-            label="Workspace"
-            onChange={(event) => setWorkspaceSlug(event.currentTarget.value)}
-            placeholder="platform-admin"
-            value={workspaceSlug}
-          />
-          <TextInput
-            label="Email"
-            onChange={(event) => setEmail(event.currentTarget.value)}
-            placeholder="ops@huge-router.dev"
-            type="email"
-            value={email}
-          />
-          <Button
-            fullWidth
-            loading={emailLoginMutation.isPending}
-            onClick={() => void handleEmailLogin()}
-            variant="filled"
-          >
-            Continue with Email
-          </Button>
-          {emailFlowId ? (
-            <Stack gap="xs">
-              <Text fw={700} size="sm">
-                Enter verification code
-              </Text>
+          {configuredProviders.length > 0 ? (
+            <>
               <TextInput
-                label="Verification code"
-                onChange={(event) => setEmailCode(event.currentTarget.value)}
-                placeholder="111111"
-                value={emailCode}
+                description="Optional workspace hint used for email and provider start requests."
+                label="Workspace"
+                onChange={(event) => setWorkspaceSlug(event.currentTarget.value)}
+                placeholder="platform-admin"
+                value={workspaceSlug}
               />
-              <Button
-                fullWidth
-                loading={emailCompleteMutation.isPending}
-                onClick={() => void handleEmailVerification()}
-                variant="light"
-              >
-                Complete Email Sign-In
-              </Button>
-            </Stack>
-          ) : null}
-          <Divider label="or" labelPosition="center" />
-          <Stack gap="xs">
-            {visibleProviders.map((provider) => (
-              <div key={provider.provider}>
-                <Button
-                  disabled={!provider.enabled}
-                  fullWidth
-                  loading={
-                    providerLoginMutation.isPending &&
-                    providerLoginMutation.variables?.provider === provider.provider
-                  }
-                  onClick={() => void handleProviderLogin(provider.provider)}
-                  variant="default"
-                >
-                  Continue with {getAuthProviderLabel(provider.provider)}
-                </Button>
-                {!provider.enabled && provider.reason ? (
-                  <Text c="dimmed" mt={4} size="xs">
-                    {provider.reason}
-                  </Text>
-                ) : null}
-              </div>
-            ))}
-          </Stack>
+              {emailProvider ? (
+                <>
+                  <TextInput
+                    label="Email"
+                    onChange={(event) => setEmail(event.currentTarget.value)}
+                    placeholder="ops@huge-router.dev"
+                    type="email"
+                    value={email}
+                  />
+                  <Button
+                    disabled={!emailProvider.enabled}
+                    fullWidth
+                    loading={emailLoginMutation.isPending}
+                    onClick={() => void handleEmailLogin()}
+                    variant="filled"
+                  >
+                    Continue with Email
+                  </Button>
+                  {!emailProvider.enabled && emailProvider.reason ? (
+                    <Text c="dimmed" size="xs">
+                      {emailProvider.reason}
+                    </Text>
+                  ) : null}
+                  {emailFlowId ? (
+                    <Stack gap="xs">
+                      <Text fw={700} size="sm">
+                        Enter verification code
+                      </Text>
+                      <TextInput
+                        label="Verification code"
+                        onChange={(event) => setEmailCode(event.currentTarget.value)}
+                        placeholder="111111"
+                        value={emailCode}
+                      />
+                      <Button
+                        fullWidth
+                        loading={emailCompleteMutation.isPending}
+                        onClick={() => void handleEmailVerification()}
+                        variant="light"
+                      >
+                        Complete Email Sign-In
+                      </Button>
+                    </Stack>
+                  ) : null}
+                </>
+              ) : null}
+              {emailProvider && visibleProviders.length > 0 ? (
+                <Divider label="or" labelPosition="center" />
+              ) : null}
+              {visibleProviders.length > 0 ? (
+                <Stack gap="xs">
+                  {visibleProviders.map((provider) => (
+                    <div key={provider.provider}>
+                      <Button
+                        disabled={!provider.enabled}
+                        fullWidth
+                        loading={
+                          providerLoginMutation.isPending &&
+                          providerLoginMutation.variables?.provider === provider.provider
+                        }
+                        onClick={() => void handleProviderLogin(provider.provider)}
+                        variant="default"
+                      >
+                        Continue with {getAuthProviderLabel(provider.provider)}
+                      </Button>
+                      {!provider.enabled && provider.reason ? (
+                        <Text c="dimmed" mt={4} size="xs">
+                          {provider.reason}
+                        </Text>
+                      ) : null}
+                    </div>
+                  ))}
+                </Stack>
+              ) : null}
+            </>
+          ) : (
+            <Alert color="orange" variant="light">
+              Contact your workspace administrator to configure at least one sign-in method.
+            </Alert>
+          )}
           <Group gap="xs" justify="space-between">
             <Text c="dimmed" size="xs">
               Provider selection is separate from tenant resolution.

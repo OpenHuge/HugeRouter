@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { renderWithProviders } from '@huge-router/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ConsoleAuthClient } from '../features/auth/auth-client'
+import type { ProviderAvailability } from '../features/auth/auth-contract'
 import { getDefaultProviderAvailability } from '../features/auth/auth-contract'
 import { setAuthClientForTests } from '../features/auth/auth-queries'
 import { LoginPage } from '../features/auth/LoginPage'
@@ -92,6 +93,12 @@ function createAuthClientStub(
   }
 }
 
+function configuredProviders(
+  providers: ProviderAvailability[]
+) {
+  return providers
+}
+
 describe('LoginPage', () => {
   beforeEach(() => {
     redirectToExternalMock.mockReset()
@@ -107,7 +114,7 @@ describe('LoginPage', () => {
         search={{}}
         sessionEnvelope={{
           state: {
-            availableProviders: getDefaultProviderAvailability(),
+            availableProviders: configuredProviders(getDefaultProviderAvailability()),
             kind: 'anonymous'
           }
         }}
@@ -130,7 +137,7 @@ describe('LoginPage', () => {
         search={{ redirect: '/admin/tenants' }}
         sessionEnvelope={{
           state: {
-            availableProviders: getDefaultProviderAvailability(),
+            availableProviders: configuredProviders(getDefaultProviderAvailability()),
             kind: 'anonymous'
           }
         }}
@@ -168,7 +175,7 @@ describe('LoginPage', () => {
         search={{ redirect: '/app/overview' }}
         sessionEnvelope={{
           state: {
-            availableProviders: getDefaultProviderAvailability(),
+            availableProviders: configuredProviders(getDefaultProviderAvailability()),
             kind: 'anonymous'
           }
         }}
@@ -191,5 +198,34 @@ describe('LoginPage', () => {
     }
 
     expect(redirectToExternalMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('only renders configured providers and hides unconfigured entry points', () => {
+    const { client } = createAuthClientStub()
+    setAuthClientForTests(client)
+
+    renderWithProviders(
+      <LoginPage
+        search={{}}
+        sessionEnvelope={{
+          state: {
+            availableProviders: configuredProviders([
+              {
+                enabled: true,
+                hidden: false,
+                provider: 'github'
+              }
+            ]),
+            kind: 'anonymous'
+          }
+        }}
+      />
+    )
+
+    expect(screen.getByLabelText('Workspace')).toHaveValue('platform-admin')
+    expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue with Email' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue with Google' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue with WeChat' })).not.toBeInTheDocument()
   })
 })

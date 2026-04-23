@@ -11,7 +11,10 @@ fi
 
 timeout_seconds="${1:-${HUGE_ROUTER_STACK_TIMEOUT_SECONDS:-180}}"
 
-mapfile -t services < <(stack_services_for_mode "${mode}")
+declare -a services=()
+while IFS= read -r service; do
+  services+=("${service}")
+done < <(stack_services_for_mode "${mode}")
 deadline=$((SECONDS + timeout_seconds))
 
 while ((SECONDS < deadline)); do

@@ -23,6 +23,23 @@ pub enum IngestionOutcome {
 }
 
 #[derive(Debug, Clone)]
+pub struct BudgetThresholdEventRecord {
+    pub budget_threshold_event_id: String,
+    pub tenant_id: String,
+    pub project_id: String,
+    pub currency: String,
+    pub threshold_status: String,
+    pub billable_cost_micros: i64,
+    pub configured_budget_micros: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UsagePersistenceOutcome {
+    pub ingestion: IngestionOutcome,
+    pub budget_threshold_event: Option<BudgetThresholdEventRecord>,
+}
+
+#[derive(Debug, Clone)]
 pub struct PendingLedgerEntry {
     pub ledger_entry_id: String,
     pub usage_event_id: UsageEventId,
@@ -342,12 +359,12 @@ async fn maybe_record_budget_threshold_event(
     next_status: &str,
     new_billable_cost_micros: i64,
     configured_budget_micros: i64,
-) -> Result<()> {
+) -> Result<Option<BudgetThresholdEventRecord>> {
     let crossed =
         previous_status != Some(next_status) && matches!(next_status, "warning" | "exceeded");
 
     if !crossed {
-        return Ok(());
+        return Ok(None);
     }
 
     let event_id = format!(
@@ -370,7 +387,7 @@ async fn maybe_record_budget_threshold_event(
         ON CONFLICT (budget_threshold_event_id) DO NOTHING
         "#,
     )
-    .bind(event_id)
+    .bind(&event_id)
     .bind(&entry.tenant_id)
     .bind(&entry.project_id)
     .bind(&entry.currency)
@@ -381,13 +398,21 @@ async fn maybe_record_budget_threshold_event(
     .await
     .context("recording budget threshold event failed")?;
 
-    Ok(())
+    Ok(Some(BudgetThresholdEventRecord {
+        budget_threshold_event_id: event_id,
+        tenant_id: entry.tenant_id.clone(),
+        project_id: entry.project_id.clone(),
+        currency: entry.currency.clone(),
+        threshold_status: next_status.to_string(),
+        billable_cost_micros: new_billable_cost_micros,
+        configured_budget_micros,
+    }))
 }
 
 async fn update_balance_projection(
     tx: &mut Transaction<'_, Postgres>,
     entry: &PendingLedgerEntry,
-) -> Result<()> {
+) -> Result<Option<BudgetThresholdEventRecord>> {
     let current = sqlx::query(
         r#"
         SELECT provider_cost_micros, billable_cost_micros, threshold_status
@@ -484,9 +509,7 @@ async fn update_balance_projection(
         new_billable_cost_micros,
         configured_budget_micros,
     )
-    .await?;
-
-    Ok(())
+    .await
 }
 
 #[allow(dead_code)]
@@ -594,7 +617,7 @@ pub async fn rebuild_projections(pool: &PgPool) -> Result<()> {
 pub async fn persist_usage_event(
     pool: &PgPool,
     event: &UsageEventRecordedMessage,
-) -> Result<IngestionOutcome> {
+) -> Result<UsagePersistenceOutcome> {
     let entry = build_pending_entry(pool, event).await?;
     let mut tx = pool
         .begin()
@@ -666,10 +689,13 @@ pub async fn persist_usage_event(
             idempotency_key = entry.idempotency_key,
             "skipping duplicate usage event ledger entry"
         );
-        Ok(IngestionOutcome::Duplicate)
+        Ok(UsagePersistenceOutcome {
+            ingestion: IngestionOutcome::Duplicate,
+            budget_threshold_event: None,
+        })
     } else {
         update_usage_daily_projection(&mut tx, &entry).await?;
-        update_balance_projection(&mut tx, &entry).await?;
+        let budget_threshold_event = update_balance_projection(&mut tx, &entry).await?;
         tx.commit()
             .await
             .context("committing ledger transaction failed")?;
@@ -681,14 +707,17 @@ pub async fn persist_usage_event(
             amount_micros = entry.amount_micros,
             "inserted ledger entry"
         );
-        Ok(IngestionOutcome::Inserted)
+        Ok(UsagePersistenceOutcome {
+            ingestion: IngestionOutcome::Inserted,
+            budget_threshold_event,
+        })
     }
 }
 
 pub async fn handle_usage_event_recorded(
     pool: &PgPool,
     payload: &[u8],
-) -> Result<IngestionOutcome> {
+) -> Result<UsagePersistenceOutcome> {
     let envelope: UsageEventRecordedMessage = serde_json::from_slice(payload)
         .context("failed to deserialize UsageEventRecordedMessage")?;
     persist_usage_event(pool, &envelope).await

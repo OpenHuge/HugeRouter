@@ -22,12 +22,6 @@ CONTROL_PLANE_COOKIE_JAR=""
 
 cleanup() {
   local code=$?
-  for pid in "${SERVICE_PIDS[@]:-}"; do
-    if kill -0 "${pid}" >/dev/null 2>&1; then
-      kill "${pid}" >/dev/null 2>&1 || true
-    fi
-  done
-
   if [[ "${DOCKER_STACK_STARTED:-false}" == "true" ]]; then
     docker compose "${COMPOSE_ARGS[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
@@ -56,19 +50,35 @@ wait_for_http() {
   return 1
 }
 
-wait_for_container_log() {
-  local file="$1"
-  local pattern="$2"
+wait_for_compose_service_state() {
+  local service="$1"
+  local expected_state="${2:-running}"
   local timeout="${3:-90}"
   local attempt=0
+
   while ((attempt < timeout)); do
-    if grep -qF "${pattern}" "${file}" 2>/dev/null; then
+    local container_id
+    local state
+
+    container_id="$(docker compose "${COMPOSE_ARGS[@]}" ps -q "${service}")"
+    container_id="${container_id//$'\n'/}"
+
+    if [[ -n "${container_id}" ]]; then
+      state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}" 2>/dev/null || true)"
+      if [[ "${state}" == "${expected_state}" ]]; then
+        return 0
+      fi
+    fi
+
+    if [[ "${expected_state}" == "running" && "${state:-}" == "healthy" ]]; then
       return 0
     fi
+
     attempt=$((attempt + 1))
     sleep 1
   done
-  log "timeout waiting for log pattern '${pattern}' in ${file}"
+
+  log "timeout waiting for ${service} to reach state ${expected_state}"
   return 1
 }
 
@@ -313,10 +323,10 @@ run_gateway_smoke_request() {
 
   while :; do
     http_status="$(curl -sS -o "${output_file}" -w "%{http_code}" \
-      -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
+      -X POST "${GATEWAY_BASE_URL}/v1/responses" \
       -H "authorization: Bearer ${SMOKE_API_KEY}" \
       -H "content-type: application/json" \
-      --data "{\"model\":\"${SMOKE_OPENAI_MODEL_ALIAS}\",\"messages\":[{\"role\":\"user\",\"content\":\"smoke\"}],\"stream\":false}")"
+      --data "{\"model\":\"${SMOKE_OPENAI_MODEL_ALIAS}\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"smoke\"}]}],\"stream\":false}")"
 
     if [[ "${http_status}" == "${SMOKE_EXPECT_GATEWAY_STATUS}" ]]; then
       echo "${http_status}"
@@ -377,7 +387,7 @@ fi
 export SMOKE_OPENAI_API_KEY
 export SMOKE_OPENAI_BASE_URL="${SMOKE_OPENAI_BASE_URL:-https://api.openai.com/v1}"
 export SMOKE_OPENAI_MODEL_ALIAS="${SMOKE_OPENAI_MODEL_ALIAS:-reasoning-fast}"
-export SMOKE_OPENAI_WIRE_API="${SMOKE_OPENAI_WIRE_API:-chat_completions}"
+export SMOKE_OPENAI_WIRE_API="${SMOKE_OPENAI_WIRE_API:-responses}"
 export SMOKE_EXPECT_GATEWAY_STATUS="${SMOKE_EXPECT_GATEWAY_STATUS:-200}"
 export GATEWAY_OPENAI_API_KEY="${SMOKE_OPENAI_API_KEY}"
 export GATEWAY_OPENAI_MODEL="${GATEWAY_OPENAI_MODEL:-${SMOKE_OPENAI_MODEL_ALIAS}}"
@@ -396,6 +406,7 @@ COMPOSE_ARGS=(
   -p "${COMPOSE_PROJECT_NAME}"
   -f "${COMPOSE_FILE}"
   -f "${COMPOSE_SMOKE_FILE}"
+  --profile runtime
 )
 for file in \
   "${COMPOSE_FILE}" \
@@ -407,10 +418,9 @@ for file in \
 done
 
 DOCKER_STACK_STARTED=false
-SERVICE_PIDS=()
 
-log "starting infra services (compose profile: smoke)"
-docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" --profile smoke up -d
+log "starting smoke dependencies"
+docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" up -d postgres redis nats
 DOCKER_STACK_STARTED=true
 
 wait_for_http "http://127.0.0.1:${NATS_MONITOR_PORT}/healthz" 120 "nats monitor"
@@ -418,65 +428,29 @@ until docker compose "${COMPOSE_ARGS[@]}" exec -T postgres pg_isready -U "${POST
   sleep 1
 done
 
-log "compiling runtime services"
-cargo build -p control-plane-api -p gateway-api -p ledger-worker -p route-receipt-worker
+log "building runtime service images"
+docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" build \
+  control-plane-api \
+  gateway-api \
+  ledger-worker \
+  route-receipt-worker
 
-(
-  cd "${REPO_ROOT}"
-  export CONTROL_PLANE_API_ADDR
-  export CONTROL_PLANE_DATABASE_URL
-  export CONTROL_PLANE_INTERNAL_TOKEN
-  cargo run -p control-plane-api
-) >"${LOG_ROOT}/control-plane-api.log" 2>&1 &
-SERVICE_PIDS+=("$!")
-CONTROL_PLANE_PID="$!"
-log "control-plane started (pid ${CONTROL_PLANE_PID})"
+log "applying runtime schema and bootstrap"
+"${REPO_ROOT}/infra/scripts/migrate.sh" runtime
+"${REPO_ROOT}/infra/scripts/bootstrap.sh" runtime
 
-(
-  cd "${REPO_ROOT}"
-  export GATEWAY_API_ADDR
-  export CONTROL_PLANE_BASE_URL
-  export GATEWAY_NATS_URL
-  export GATEWAY_OPENAI_API_KEY
-  export CONTROL_PLANE_INTERNAL_TOKEN
-  export OPENAI_API_KEY
-  cargo run -p gateway-api
-) >"${LOG_ROOT}/gateway-api.log" 2>&1 &
-SERVICE_PIDS+=("$!")
-GATEWAY_PID="$!"
-log "gateway started (pid ${GATEWAY_PID})"
-
-(
-  cd "${REPO_ROOT}"
-  export LEDGER_WORKER_DATABASE_URL
-  export LEDGER_WORKER_NATS_URL
-  cargo run -p ledger-worker
-) >"${LOG_ROOT}/ledger-worker.log" 2>&1 &
-SERVICE_PIDS+=("$!")
-LEDGER_WORKER_PID="$!"
-log "ledger-worker started (pid ${LEDGER_WORKER_PID})"
-
-(
-  cd "${REPO_ROOT}"
-  export ROUTE_RECEIPT_WORKER_DATABASE_URL
-  export ROUTE_RECEIPT_WORKER_NATS_URL
-  cargo run -p route-receipt-worker
-) >"${LOG_ROOT}/route-receipt-worker.log" 2>&1 &
-SERVICE_PIDS+=("$!")
-ROUTE_RECEIPT_WORKER_PID="$!"
-log "route-receipt-worker started (pid ${ROUTE_RECEIPT_WORKER_PID})"
+log "starting runtime services"
+docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" up -d \
+  control-plane-api \
+  gateway-api \
+  ledger-worker \
+  route-receipt-worker
 
 wait_for_http "${CONTROL_PLANE_BASE_URL}/healthz" 180 "control-plane healthz"
 wait_for_http "${GATEWAY_BASE_URL}/healthz" 180 "gateway healthz"
-sleep 3
+wait_for_compose_service_state "ledger-worker" "running" 180
+wait_for_compose_service_state "route-receipt-worker" "running" 180
 login_platform_admin
-
-for pid in "${CONTROL_PLANE_PID}" "${GATEWAY_PID}" "${LEDGER_WORKER_PID}" "${ROUTE_RECEIPT_WORKER_PID}"; do
-  if ! kill -0 "${pid}" >/dev/null 2>&1; then
-    log "service failed during startup, pid=${pid}"
-    exit 1
-  fi
-done
 
 log "running smoke openai setup"
 provider_resource_id="prvrsrc_smoke_openai"
@@ -519,7 +493,7 @@ route_receipt_diagnostics_after="$(
   wait_for_route_receipt_diagnostics_increment "${route_receipt_diagnostics_before}"
 )"
 if [[ "${SMOKE_EXPECT_GATEWAY_STATUS}" == "200" ]]; then
-  if ! jq -e '.usage.total_tokens' "${LOG_ROOT}/gateway_request.json" >/dev/null 2>&1; then
+  if ! jq -e '.usage.total_tokens and .output_text' "${LOG_ROOT}/gateway_request.json" >/dev/null 2>&1; then
     log "gateway response missing usage block: $(cat "${LOG_ROOT}/gateway_request.json")"
     exit 1
   fi

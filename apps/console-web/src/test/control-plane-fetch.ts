@@ -589,7 +589,74 @@ let apiKeysState = [
 
 const apiKeysInitialState = [...apiKeysState];
 
-const merchantShopsInitialState: any[] = [
+type MerchantShopFixture = {
+  announcement?: string;
+  created_at: string;
+  display_name: string;
+  fulfillment_mode: string;
+  merchant_shop_id: string;
+  slug: string;
+  status: string;
+  tenant_id: string;
+  updated_at: string;
+  version: number;
+};
+
+type CardProductFixture = {
+  card_product_id: string;
+  created_at: string;
+  delivery_kind: string;
+  description: string;
+  face_value_usd: string;
+  inventory_count: number;
+  merchant_shop_id: string;
+  retail_price_usd: string;
+  status: string;
+  supports_trial: boolean;
+  tenant_id: string;
+  title: string;
+  updated_at: string;
+  version: number;
+};
+
+type TrialConnectionFixture = {
+  api_key_masked: string;
+  created_at: string;
+  endpoint_base_url: string;
+  last_verified_at?: string;
+  notes?: string;
+  provider_label: string;
+  status: string;
+  target_model: string;
+  tenant_id: string;
+  trial_connection_id: string;
+  updated_at: string;
+  version: number;
+};
+
+type RelayEvaluationFixture = {
+  created_at: string;
+  detected_channel?: string;
+  endpoint_base_url: string;
+  estimated_tokens_saved: number;
+  fingerprint_status: string;
+  multimodal_status: string;
+  overall_score: number;
+  protocol_status: string;
+  provider_label: string;
+  relay_evaluation_id: string;
+  replay_capsule_id: string;
+  runner_mode: string;
+  sample_request_count: number;
+  summary: string;
+  target_model: string;
+  tenant_id: string;
+  token_status: string;
+  trial_connection_id: string;
+  verdict: string;
+};
+
+const merchantShopsInitialState: MerchantShopFixture[] = [
   {
     merchant_shop_id: "mshop_acme",
     tenant_id: "tenant_acme",
@@ -604,7 +671,7 @@ const merchantShopsInitialState: any[] = [
   },
 ];
 
-const cardProductsInitialState: any[] = [
+const cardProductsInitialState: CardProductFixture[] = [
   {
     card_product_id: "cardprod_acme_trial",
     tenant_id: "tenant_acme",
@@ -623,7 +690,7 @@ const cardProductsInitialState: any[] = [
   },
 ];
 
-const trialConnectionsInitialState: any[] = [
+const trialConnectionsInitialState: TrialConnectionFixture[] = [
   {
     trial_connection_id: "trialconn_acme_relay",
     tenant_id: "tenant_acme",
@@ -640,7 +707,7 @@ const trialConnectionsInitialState: any[] = [
   },
 ];
 
-const relayEvaluationsInitialState: any[] = [
+const relayEvaluationsInitialState: RelayEvaluationFixture[] = [
   {
     relay_evaluation_id: "reval_acme_relay",
     tenant_id: "tenant_acme",
@@ -769,7 +836,7 @@ export function createControlPlaneFetchMock() {
 
     if (path === "/v1/merchant/shops" && init?.method === "POST") {
       const body = parseRequestBody(init) ?? {};
-      const nextShop = {
+      const nextShop: MerchantShopFixture = {
         announcement:
           typeof body.announcement === "string" ? body.announcement : undefined,
         created_at: "2026-04-23T00:00:00Z",
@@ -797,7 +864,7 @@ export function createControlPlaneFetchMock() {
 
     if (path === "/v1/merchant/card-products" && init?.method === "POST") {
       const body = parseRequestBody(init) ?? {};
-      const nextProduct = {
+      const nextProduct: CardProductFixture = {
         card_product_id:
           typeof body.card_product_id === "string"
             ? body.card_product_id
@@ -837,7 +904,7 @@ export function createControlPlaneFetchMock() {
       const body = parseRequestBody(init) ?? {};
       const apiKey =
         typeof body.api_key === "string" ? body.api_key.trim() : "sk-trial-default";
-      const nextConnection = {
+      const nextConnection: TrialConnectionFixture = {
         api_key_masked: `${apiKey.slice(0, 7)}...${apiKey.slice(-4)}`,
         created_at: "2026-04-23T00:00:00Z",
         endpoint_base_url:
@@ -876,7 +943,7 @@ export function createControlPlaneFetchMock() {
       const connection = trialConnectionsState.find(
         (item) => item.trial_connection_id === trialConnectionId,
       );
-      const nextEvaluation = {
+      const nextEvaluation: RelayEvaluationFixture = {
         created_at: "2026-04-23T00:00:00Z",
         detected_channel: connection?.endpoint_base_url.includes("vertex")
           ? "vertex"

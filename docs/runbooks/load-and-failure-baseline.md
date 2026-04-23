@@ -8,7 +8,7 @@ This runbook defines the lightweight PI-3 performance and failure-injection base
 
 - `infra/scripts/load-baseline.sh usage-summary`
 - `infra/scripts/load-baseline.sh usage-breakdown`
-- `GATEWAY_API_KEY=... infra/scripts/load-baseline.sh gateway-chat`
+- `GATEWAY_API_KEY=... infra/scripts/load-baseline.sh gateway-responses`
 - `SOAK_SECONDS=300 infra/scripts/load-baseline.sh soak-usage-summary`
 - `SOAK_SECONDS=300 infra/scripts/load-baseline.sh soak-usage-breakdown`
 

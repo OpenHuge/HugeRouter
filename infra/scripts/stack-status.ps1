@@ -1,7 +1,6 @@
 param(
   [ValidateSet('core', 'runtime', 'full', 'observability')]
-  [string]$Mode = $(if ($env:HUGE_ROUTER_STACK_MODE) { $env:HUGE_ROUTER_STACK_MODE } else { 'core' }),
-  [string[]]$Service = @()
+  [string]$Mode = $(if ($env:HUGE_ROUTER_STACK_MODE) { $env:HUGE_ROUTER_STACK_MODE } else { 'core' })
 )
 
 Set-StrictMode -Version Latest
@@ -29,27 +28,17 @@ if ($Mode -in @('observability', 'full')) {
   $composeArgs += @('--profile', 'observability')
 }
 
-$serviceArgs =
-  if ($Service.Count -gt 0) {
-    $Service
-  } else {
-    Get-ServiceList -RequestedMode $Mode
+$services = Get-ServiceList -RequestedMode $Mode
+docker compose @composeArgs ps @services
+Write-Host ''
+
+foreach ($service in $services) {
+  $containerId = (docker compose @composeArgs ps -q $service).Trim()
+  if (-not $containerId) {
+    Write-Host "${service}: not started"
+    continue
   }
 
-if ($Service.Count -gt 0 -or $Mode -in @('core', 'observability')) {
-  docker compose @composeArgs up -d --remove-orphans @serviceArgs
-  exit 0
+  $status = (docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $containerId 2>$null).Trim()
+  Write-Host "${service}: $status"
 }
-
-docker compose @composeArgs up -d --remove-orphans postgres redis nats
-
-if ($Mode -eq 'full') {
-  docker compose @composeArgs up -d --remove-orphans otel-collector alertmanager prometheus grafana
-}
-
-if ($env:HUGE_ROUTER_STACK_SKIP_INIT -ne 'true') {
-  & (Join-Path $PSScriptRoot 'migrate.ps1') -Mode $Mode
-  & (Join-Path $PSScriptRoot 'bootstrap.ps1') -Mode $Mode
-}
-
-docker compose @composeArgs up -d --remove-orphans control-plane-api gateway-api ledger-worker route-receipt-worker

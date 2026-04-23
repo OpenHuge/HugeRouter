@@ -267,7 +267,7 @@ describe("control-plane operational workflows", () => {
     const queuedRow = screen.getByRole("row", { name: /export_201/ });
     expect(within(queuedRow).getByText("Pending")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh exports" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
 
     await waitFor(() => {
       const completedRow = screen.getByRole("row", { name: /export_201/ });

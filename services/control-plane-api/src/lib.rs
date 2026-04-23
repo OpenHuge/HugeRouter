@@ -363,7 +363,7 @@ impl ControlPlaneAuthorizer {
             .session
             .active_tenant_id
             .as_ref()
-            .map(|tenant_id| tenant_id.as_str())
+            .map(core_domain::TenantId::as_str)
             .or_else(|| {
                 self.session
                     .session
@@ -497,6 +497,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/config/current",
             get(get_internal_gateway_config),
+        )
+        .route(
+            "/internal/gateway/billing-projection",
+            get(get_internal_gateway_balance_projection),
         )
         .route("/v1/usage/summary", get(get_usage_summary))
         .route("/v1/usage/breakdown", get(get_usage_breakdown))
@@ -1959,6 +1963,36 @@ async fn get_internal_gateway_config(
     }))
 }
 
+async fn get_internal_gateway_balance_projection(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<BalanceProjectionQuery>,
+) -> Result<Json<BalanceProjectionResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let tenant_id = query.tenant_id.ok_or_else(|| {
+        ApiError::bad_request(
+            "tenant_id_required",
+            "tenant_id is required for internal balance projection queries".to_string(),
+            &context,
+        )
+    })?;
+
+    let response = state
+        .store
+        .get_balance_projection(&tenant_id, query.project_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load balance projection: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
 async fn get_config_snapshot(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -2759,13 +2793,12 @@ fn issue_email_verification_code(sequence: u64) -> String {
 fn email_code_hint(code: &str) -> Option<String> {
     if std::env::var("CONTROL_PLANE_EMAIL_DEBUG_CODE_HINTS")
         .ok()
-        .map(|value| {
+        .is_some_and(|value| {
             matches!(
                 value.to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes" | "on"
             )
         })
-        .unwrap_or(false)
     {
         Some(format!("Use verification code {code}."))
     } else {
@@ -3282,17 +3315,19 @@ fn build_session_cookie(session_id: &str) -> String {
 fn secure_cookies_enabled() -> bool {
     std::env::var("CONTROL_PLANE_SECURE_COOKIES")
         .ok()
-        .map(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or_else(|| {
-            std::env::var("CONSOLE_WEB_BASE_URL")
-                .map(|url| url.starts_with("https://"))
-                .unwrap_or(false)
-        })
+        .map_or_else(
+            || {
+                std::env::var("CONSOLE_WEB_BASE_URL")
+                    .map(|url| url.starts_with("https://"))
+                    .unwrap_or(false)
+            },
+            |value| {
+                matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            },
+        )
 }
 
 fn next_request_context() -> RequestContext {

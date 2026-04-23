@@ -1559,7 +1559,7 @@ mod tests {
             description: "Starter inventory".to_string(),
             status: CardProductStatus::Active,
             inventory_count: 10,
-            face_value_usd: "".to_string(),
+            face_value_usd: String::new(),
             retail_price_usd: "0.99".to_string(),
             delivery_kind: CardDeliveryKind::DirectSecret,
             supports_trial: true,

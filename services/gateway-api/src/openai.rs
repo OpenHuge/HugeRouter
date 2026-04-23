@@ -48,7 +48,10 @@ impl ProviderAdapter for OpenAiAdapter {
                 OpenAiWireApi::ChatCompletions => "OpenAI Chat Completions",
                 OpenAiWireApi::Responses => "OpenAI Responses",
             },
-            protocol_family: "openai_chat",
+            protocol_family: match self.wire_api {
+                OpenAiWireApi::ChatCompletions => "openai_chat",
+                OpenAiWireApi::Responses => "openai_responses",
+            },
             streaming_support: StreamingSupport::ServerSentEvents,
         }
     }

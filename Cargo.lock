@@ -1181,6 +1181,8 @@ name = "ledger-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats 0.39.0",
+ "chrono",
  "core-domain",
  "metering",
  "protocol-ir",

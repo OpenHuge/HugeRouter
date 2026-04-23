@@ -1,0 +1,11 @@
+groups:
+  - name: huge-router-observability
+    rules:
+      - alert: HugeRouterObservabilityTargetDown
+        expr: up{job=~"prometheus|otel-collector|alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is unreachable"
+          description: "Prometheus has not been able to scrape {{ $labels.instance }} for 2 minutes."
