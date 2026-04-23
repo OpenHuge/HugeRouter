@@ -43,7 +43,14 @@ Recent priority docs for the source-backed spec deepening pass:
 
 - [Development, CI/CD, and Testing](runbooks/development-cicd-testing.md)
 - [Development Readiness and Bootstrap](runbooks/development-readiness-and-bootstrap.md)
+- [Maintainer Triage](runbooks/maintainer-triage.md)
 - [Monorepo Boundaries and Bootstrap Contracts](runbooks/monorepo-boundaries-and-bootstrap-contracts.md)
+
+## Contributor Operations
+
+- [Contributing Guide](../CONTRIBUTING.md)
+- [Support Guide](../SUPPORT.md)
+- [Security Policy](../SECURITY.md)
 
 ## Product
 

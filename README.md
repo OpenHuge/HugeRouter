@@ -30,6 +30,7 @@ Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway
 - [Development, CI/CD, and Testing](docs/runbooks/development-cicd-testing.md)
 - [Development Readiness and Bootstrap](docs/runbooks/development-readiness-and-bootstrap.md)
 - [Monorepo Boundaries and Bootstrap Contracts](docs/runbooks/monorepo-boundaries-and-bootstrap-contracts.md)
+- [Maintainer Triage](docs/runbooks/maintainer-triage.md)
 - [Control Plane API](docs/api/control-plane-api.md)
 - [Public Gateway API](docs/api/public-gateway-api.md)
 - [Roadmap and Delivery Plan](docs/product/roadmap-and-delivery-plan.md)
@@ -62,6 +63,12 @@ The repository now includes a working bootstrap baseline:
 - `just` as the human-friendly entry point that wraps Rust, `pnpm`, and `turbo` tasks
 
 ## Quick Start
+
+Contributor process:
+
+- [Contributing Guide](CONTRIBUTING.md)
+- [Support Guide](SUPPORT.md)
+- [Security Policy](SECURITY.md)
 
 Local development:
 
@@ -120,6 +127,7 @@ Recommended entry documents before starting implementation:
 - [Development, CI/CD, and Testing](docs/runbooks/development-cicd-testing.md)
 - [Development Readiness and Bootstrap](docs/runbooks/development-readiness-and-bootstrap.md)
 - [Monorepo Boundaries and Bootstrap Contracts](docs/runbooks/monorepo-boundaries-and-bootstrap-contracts.md)
+- [Maintainer Triage](docs/runbooks/maintainer-triage.md)
 - [ADR Index](docs/adr/README.md)
 
 ## Source
