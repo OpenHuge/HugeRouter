@@ -21,11 +21,10 @@ use core_domain::{
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
-    BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse,
-    PricingSimulationRequest, PricingSimulationResponse,
-    ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse, RouteReceiptResponse,
-    RouteSimulationRequest, RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse,
-    UsageSummaryResponse,
+    BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse, PricingSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
+    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
+    UsageBreakdownResponse, UsageSummaryResponse,
 };
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
@@ -286,8 +285,14 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route("/v1/billing/projection", get(get_balance_projection))
         .route("/v1/pricing/catalog", get(get_pricing_catalog))
         .route("/v1/pricing/simulations", post(create_pricing_simulation))
-        .route("/v1/billing/exports", get(list_billing_exports).post(create_billing_export))
-        .route("/v1/billing/exports/{export_job_id}", get(get_billing_export))
+        .route(
+            "/v1/billing/exports",
+            get(list_billing_exports).post(create_billing_export),
+        )
+        .route(
+            "/v1/billing/exports/{export_job_id}",
+            get(get_billing_export),
+        )
         .route(
             "/v1/billing/exports/{export_job_id}/download",
             get(download_billing_export),
@@ -580,13 +585,15 @@ async fn complete_oauth_login(
                 groups: oidc_groups_from_env(),
             }
         } else {
-            exchange_oidc_identity(&request.code).await.map_err(|error| {
-                ApiError::unauthorized(
-                    "auth_invalid_code",
-                    format!("oidc callback exchange failed: {error}"),
-                    &context,
-                )
-            })?
+            exchange_oidc_identity(&request.code)
+                .await
+                .map_err(|error| {
+                    ApiError::unauthorized(
+                        "auth_invalid_code",
+                        format!("oidc callback exchange failed: {error}"),
+                        &context,
+                    )
+                })?
         };
 
         let (resolved_workspace_slug, resolved_role) =
@@ -1722,7 +1729,11 @@ fn resolve_oidc_membership(
     requested_workspace_slug: &str,
 ) -> (String, core_domain::TenantMembershipRole) {
     if let Ok(mapping) = std::env::var("CONTROL_PLANE_OIDC_GROUP_ROLE_MAP") {
-        for mapping_entry in mapping.split(',').map(str::trim).filter(|entry| !entry.is_empty()) {
+        for mapping_entry in mapping
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+        {
             let Some((group_name, assignment)) = mapping_entry.split_once('=') else {
                 continue;
             };
@@ -1742,19 +1753,28 @@ fn resolve_oidc_membership(
 
     let admin_groups = std::env::var("CONTROL_PLANE_OIDC_PLATFORM_ADMIN_GROUPS")
         .ok()
-        .map_or_else(|| vec!["platform-admins".to_string()], |value| {
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|entry| !entry.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        });
+        .map_or_else(
+            || vec!["platform-admins".to_string()],
+            |value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            },
+        );
 
     if groups.iter().any(|group| admin_groups.contains(group)) {
-        ("platform-admin".to_string(), core_domain::TenantMembershipRole::Admin)
+        (
+            "platform-admin".to_string(),
+            core_domain::TenantMembershipRole::Admin,
+        )
     } else {
-        (requested_workspace_slug.to_string(), core_domain::TenantMembershipRole::Member)
+        (
+            requested_workspace_slug.to_string(),
+            core_domain::TenantMembershipRole::Member,
+        )
     }
 }
 

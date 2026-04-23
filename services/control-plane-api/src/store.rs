@@ -32,15 +32,17 @@ use core_domain::{
     TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
     TenantSummary, UnlinkAuthProviderResponse, UserId, UserIdentity,
 };
-use metering::{AdditionalUsageDimensions, PricingCatalog, PricingSource, default_budget_micros, default_catalog, quote_usage_with_additions};
+use metering::{
+    AdditionalUsageDimensions, PricingCatalog, PricingSource, default_budget_micros,
+    default_catalog, quote_usage_with_additions,
+};
 use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
     BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, PricingCatalogEntry,
     PricingCatalogResponse, PricingSimulationLineItem, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse,
-    ProviderResourcesResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteSimulationRequest,
-    RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow,
-    UsageSummary, UsageSummaryResponse,
+    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RoutePoliciesResponse,
+    RouteReceiptResponse, RouteSimulationRequest, RouteSimulationResponse, TenantsResponse,
+    UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1358,7 +1360,10 @@ impl StoreMode {
         match self {
             Self::Memory(store) => Ok(BillingExportJobsResponse {
                 data: filter_billing_export_jobs(
-                    store.read().expect("memory store read lock").billing_export_jobs
+                    store
+                        .read()
+                        .expect("memory store read lock")
+                        .billing_export_jobs
                         .iter()
                         .map(|record| record.job.clone())
                         .collect(),
@@ -1382,13 +1387,19 @@ impl StoreMode {
                 .iter()
                 .find(|record| record.job.export_job_id == export_job_id)
                 .map(|record| BillingExportJobResponse {
-                    data: maybe_complete_memory_export_job(record.job.clone(), record.content.is_some()),
+                    data: maybe_complete_memory_export_job(
+                        record.job.clone(),
+                        record.content.is_some(),
+                    ),
                 })),
             Self::Postgres(store) => store.get_billing_export(export_job_id).await,
         }
     }
 
-    pub async fn download_billing_export(&self, export_job_id: &str) -> Result<Option<(String, String)>> {
+    pub async fn download_billing_export(
+        &self,
+        export_job_id: &str,
+    ) -> Result<Option<(String, String)>> {
         match self {
             Self::Memory(store) => Ok(store
                 .read()
@@ -1680,14 +1691,12 @@ impl PostgresStore {
     ) -> Result<AuthLoginResult> {
         let user = match self.lookup_user(identity_key).await? {
             Some(user) => user,
-            None if provider == AuthProvider::Oidc => {
-                match identity_key {
-                    IdentityLookup::ProviderSubject(AuthProvider::Oidc, subject) => {
-                        self.ensure_oidc_user(subject, workspace_slug, now).await?
-                    }
-                    _ => anyhow::bail!("identity not found"),
+            None if provider == AuthProvider::Oidc => match identity_key {
+                IdentityLookup::ProviderSubject(AuthProvider::Oidc, subject) => {
+                    self.ensure_oidc_user(subject, workspace_slug, now).await?
                 }
-            }
+                _ => anyhow::bail!("identity not found"),
+            },
             None => anyhow::bail!("identity not found"),
         };
         let memberships = self.list_memberships(&user.user_id).await?;
@@ -1817,11 +1826,7 @@ impl PostgresStore {
         .execute(&self.pool)
         .await?;
 
-        let membership = membership(
-            &format!("tmemb_oidc_{subject_hash}"),
-            &tenant,
-            role,
-        );
+        let membership = membership(&format!("tmemb_oidc_{subject_hash}"), &tenant, role);
         let membership_id = membership.membership_id.to_string();
         let membership_tenant_id = membership.tenant.id.to_string();
         sqlx::query(
@@ -2432,8 +2437,7 @@ impl PostgresStore {
         window_start: Option<String>,
         window_end: Option<String>,
     ) -> Result<UsageSummaryResponse> {
-        let window_start_value =
-            window_start.unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+        let window_start_value = window_start.unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
         let window_end_value = window_end.unwrap_or_else(now_rfc3339);
         let row = sqlx::query(
             r#"
@@ -2469,7 +2473,8 @@ impl PostgresStore {
                 currency: currency.clone(),
                 event_count: u64::try_from(row.get::<i64, _>("event_count")).unwrap_or_default(),
                 input_tokens: u64::try_from(row.get::<i64, _>("input_tokens")).unwrap_or_default(),
-                output_tokens: u64::try_from(row.get::<i64, _>("output_tokens")).unwrap_or_default(),
+                output_tokens: u64::try_from(row.get::<i64, _>("output_tokens"))
+                    .unwrap_or_default(),
                 cached_input_tokens: u64::try_from(row.get::<i64, _>("cached_input_tokens"))
                     .unwrap_or_default(),
                 provider_cost: format_monetary_amount(
@@ -2496,8 +2501,7 @@ impl PostgresStore {
     ) -> Result<UsageBreakdownResponse> {
         let offset = parse_cursor_offset(cursor.as_deref());
         let limit = limit.unwrap_or(50).max(1);
-        let window_start_value =
-            window_start.unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+        let window_start_value = window_start.unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
         let window_end_value = window_end.unwrap_or_else(now_rfc3339);
         let (bucket_select, provider_select, model_select, group_expr) = match group_by {
             UsageBreakdownGroupBy::Provider => (
@@ -2672,8 +2676,14 @@ impl PostgresStore {
         let requested_at = now_rfc3339();
         let export_content = render_billing_export_csv(
             self,
-            request.tenant_id.as_ref().map(core_domain::TenantId::as_str),
-            request.project_id.as_ref().map(core_domain::ProjectId::as_str),
+            request
+                .tenant_id
+                .as_ref()
+                .map(core_domain::TenantId::as_str),
+            request
+                .project_id
+                .as_ref()
+                .map(core_domain::ProjectId::as_str),
             &request.window_start,
             &request.window_end,
         )
@@ -2695,8 +2705,18 @@ impl PostgresStore {
             "#,
         )
         .bind(&export_job_id)
-        .bind(request.tenant_id.as_ref().map(core_domain::TenantId::as_str))
-        .bind(request.project_id.as_ref().map(core_domain::ProjectId::as_str))
+        .bind(
+            request
+                .tenant_id
+                .as_ref()
+                .map(core_domain::TenantId::as_str),
+        )
+        .bind(
+            request
+                .project_id
+                .as_ref()
+                .map(core_domain::ProjectId::as_str),
+        )
         .bind(&request.window_start)
         .bind(&request.window_end)
         .bind(&request.format)
@@ -2738,7 +2758,7 @@ impl PostgresStore {
                 export_content
             FROM billing_export_jobs
             ORDER BY requested_at DESC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -2771,7 +2791,7 @@ impl PostgresStore {
                 export_content
             FROM billing_export_jobs
             WHERE export_job_id = $1
-            "#
+            "#,
         )
         .bind(export_job_id)
         .fetch_optional(&self.pool)
@@ -2795,7 +2815,7 @@ impl PostgresStore {
             SELECT content_type, export_content
             FROM billing_export_jobs
             WHERE export_job_id = $1
-            "#
+            "#,
         )
         .bind(export_job_id)
         .fetch_optional(&self.pool)
@@ -2895,26 +2915,24 @@ fn issue_memory_session(
     };
     let user_id = match user_id {
         Some(user_id) => user_id,
-        None if provider == AuthProvider::Oidc => {
-            match identity_key {
-                IdentityLookup::ProviderSubject(AuthProvider::Oidc, subject) => {
-                    upsert_memory_oidc_user(
-                        store,
-                        subject,
-                        None,
-                        None,
-                        workspace_slug,
-                        if workspace_slug == "platform-admin" {
-                            TenantMembershipRole::Admin
-                        } else {
-                            TenantMembershipRole::Member
-                        },
-                        now,
-                    )?
-                }
-                _ => anyhow::bail!("identity not found"),
+        None if provider == AuthProvider::Oidc => match identity_key {
+            IdentityLookup::ProviderSubject(AuthProvider::Oidc, subject) => {
+                upsert_memory_oidc_user(
+                    store,
+                    subject,
+                    None,
+                    None,
+                    workspace_slug,
+                    if workspace_slug == "platform-admin" {
+                        TenantMembershipRole::Admin
+                    } else {
+                        TenantMembershipRole::Member
+                    },
+                    now,
+                )?
             }
-        }
+            _ => anyhow::bail!("identity not found"),
+        },
         None => anyhow::bail!("identity not found"),
     };
 
@@ -3016,11 +3034,7 @@ fn upsert_memory_oidc_user(
         format!("{}:{}", auth_provider_slug(AuthProvider::Oidc), subject),
         user_id.clone(),
     );
-    let membership = membership(
-        &format!("tmemb_oidc_{subject_hash}"),
-        &tenant,
-        role,
-    );
+    let membership = membership(&format!("tmemb_oidc_{subject_hash}"), &tenant, role);
     store
         .memberships_by_user
         .entry(user_id.clone())
@@ -3028,7 +3042,12 @@ fn upsert_memory_oidc_user(
         .push(membership);
     store.provider_links_by_user.insert(
         user_id.clone(),
-        vec![link(AuthProvider::Oidc, subject, Some(&primary_email), false)],
+        vec![link(
+            AuthProvider::Oidc,
+            subject,
+            Some(&primary_email),
+            false,
+        )],
     );
 
     Ok(user_id)
@@ -3287,7 +3306,8 @@ fn projection_lag_seconds(timestamp: &str) -> u64 {
     chrono::DateTime::parse_from_rfc3339(timestamp)
         .ok()
         .and_then(|parsed| {
-            let duration = chrono::Utc::now().signed_duration_since(parsed.with_timezone(&chrono::Utc));
+            let duration =
+                chrono::Utc::now().signed_duration_since(parsed.with_timezone(&chrono::Utc));
             duration.num_seconds().try_into().ok()
         })
         .unwrap_or_default()
@@ -3344,12 +3364,8 @@ fn sample_usage_summary_response(
         data: UsageSummary {
             tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
             project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
-            window_start: window_start
-                .unwrap_or("2026-04-01T00:00:00Z")
-                .to_string(),
-            window_end: window_end
-                .unwrap_or("2026-04-30T23:59:59Z")
-                .to_string(),
+            window_start: window_start.unwrap_or("2026-04-01T00:00:00Z").to_string(),
+            window_end: window_end.unwrap_or("2026-04-30T23:59:59Z").to_string(),
             currency: "USD".to_string(),
             event_count: 14,
             input_tokens: 18_420,
@@ -3426,7 +3442,11 @@ fn sample_usage_breakdown_response(
     };
     let offset = parse_cursor_offset(cursor.as_deref());
     let limit = usize::try_from(limit.unwrap_or(50)).unwrap_or(50);
-    let paged = rows.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+    let paged = rows
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
     let next_cursor = if paged.len() == limit {
         Some((offset + paged.len()).to_string())
     } else {
@@ -3522,7 +3542,10 @@ fn pricing_source_slug(source: PricingSource) -> String {
     }
 }
 
-fn maybe_complete_memory_export_job(mut job: BillingExportJob, has_content: bool) -> BillingExportJob {
+fn maybe_complete_memory_export_job(
+    mut job: BillingExportJob,
+    has_content: bool,
+) -> BillingExportJob {
     if job.status == "queued" && has_content {
         job.status = "completed".to_string();
         job.completed_at = Some(now_rfc3339());

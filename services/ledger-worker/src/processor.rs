@@ -217,13 +217,12 @@ pub fn ledger_entry_id(idempotency_key: &str) -> String {
 }
 
 async fn resolve_provider_id(pool: &PgPool, provider_resource_id: &str) -> Result<String> {
-    let row = sqlx::query(
-        "SELECT provider_id FROM provider_resources WHERE provider_resource_id = $1",
-    )
-    .bind(provider_resource_id)
-    .fetch_optional(pool)
-    .await
-    .context("loading provider resource for pricing failed")?;
+    let row =
+        sqlx::query("SELECT provider_id FROM provider_resources WHERE provider_resource_id = $1")
+            .bind(provider_resource_id)
+            .fetch_optional(pool)
+            .await
+            .context("loading provider resource for pricing failed")?;
 
     Ok(row
         .and_then(|row| row.try_get::<String, _>("provider_id").ok())
@@ -239,8 +238,11 @@ pub async fn build_pending_entry(
         anyhow::bail!("envelope idempotency key does not match usage event idempotency key");
     }
 
-    let provider_id =
-        resolve_provider_id(pool, event.payload.usage_event.provider_resource_id.as_str()).await?;
+    let provider_id = resolve_provider_id(
+        pool,
+        event.payload.usage_event.provider_resource_id.as_str(),
+    )
+    .await?;
     let quote = quote_usage(&provider_id, &event.payload.usage_event.usage);
 
     Ok(PendingLedgerEntry {
@@ -341,8 +343,8 @@ async fn maybe_record_budget_threshold_event(
     new_billable_cost_micros: i64,
     configured_budget_micros: i64,
 ) -> Result<()> {
-    let crossed = previous_status != Some(next_status)
-        && matches!(next_status, "warning" | "exceeded");
+    let crossed =
+        previous_status != Some(next_status) && matches!(next_status, "warning" | "exceeded");
 
     if !crossed {
         return Ok(());
@@ -575,7 +577,10 @@ pub async fn rebuild_projections(pool: &PgPool) -> Result<()> {
             usage_phase: row.try_get("usage_phase")?,
         };
 
-        let mut tx = pool.begin().await.context("opening projection rebuild transaction failed")?;
+        let mut tx = pool
+            .begin()
+            .await
+            .context("opening projection rebuild transaction failed")?;
         update_usage_daily_projection(&mut tx, &entry).await?;
         update_balance_projection(&mut tx, &entry).await?;
         tx.commit()
@@ -591,7 +596,10 @@ pub async fn persist_usage_event(
     event: &UsageEventRecordedMessage,
 ) -> Result<IngestionOutcome> {
     let entry = build_pending_entry(pool, event).await?;
-    let mut tx = pool.begin().await.context("opening ledger transaction failed")?;
+    let mut tx = pool
+        .begin()
+        .await
+        .context("opening ledger transaction failed")?;
     let result = sqlx::query(
         r#"
         INSERT INTO ledger_entries (

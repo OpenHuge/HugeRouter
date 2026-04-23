@@ -157,7 +157,9 @@ fn micros_for_dimension(
         PricingDimension::ImageGenerations => {
             i64::from(units) * rate_card.image_generation_micros_per_unit
         }
-        PricingDimension::AudioSeconds => i64::from(units) * rate_card.audio_seconds_micros_per_unit,
+        PricingDimension::AudioSeconds => {
+            i64::from(units) * rate_card.audio_seconds_micros_per_unit
+        }
     }
 }
 
@@ -232,8 +234,14 @@ pub fn quote_usage_with_additions(
     let dimensions = [
         (PricingDimension::InputTokens, usage.input_tokens),
         (PricingDimension::OutputTokens, usage.output_tokens),
-        (PricingDimension::CachedInputTokens, usage.cached_input_tokens),
-        (PricingDimension::ImageGenerations, additions.image_generation_units),
+        (
+            PricingDimension::CachedInputTokens,
+            usage.cached_input_tokens,
+        ),
+        (
+            PricingDimension::ImageGenerations,
+            additions.image_generation_units,
+        ),
         (PricingDimension::AudioSeconds, additions.audio_seconds),
     ];
 
@@ -241,6 +249,9 @@ pub fn quote_usage_with_additions(
     let mut billable_cost_micros = 0_i64;
 
     for (dimension, units) in dimensions {
+        if units == 0 {
+            continue;
+        }
         let line_provider_cost = micros_for_dimension(dimension, units, rate_card);
         let line_billable_cost =
             billable_from_provider_cost(line_provider_cost, rate_card.billable_markup_bps);
@@ -321,14 +332,18 @@ mod tests {
     #[test]
     fn exposes_catalog_entries_for_modal_dimensions() {
         let catalog = default_catalog();
-        assert!(catalog
-            .entries
-            .iter()
-            .any(|entry| entry.dimension == PricingDimension::ImageGenerations));
-        assert!(catalog
-            .entries
-            .iter()
-            .any(|entry| entry.dimension == PricingDimension::AudioSeconds));
+        assert!(
+            catalog
+                .entries
+                .iter()
+                .any(|entry| entry.dimension == PricingDimension::ImageGenerations)
+        );
+        assert!(
+            catalog
+                .entries
+                .iter()
+                .any(|entry| entry.dimension == PricingDimension::AudioSeconds)
+        );
     }
 
     #[test]
@@ -362,7 +377,7 @@ mod tests {
         );
 
         assert!(quote.provider_cost_micros > 0);
-        assert_eq!(quote.line_items.len(), 5);
+        assert_eq!(quote.line_items.len(), 2);
     }
 
     #[test]
