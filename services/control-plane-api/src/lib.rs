@@ -1284,10 +1284,17 @@ async fn get_replay_capsule(
         )
     })?;
     authz.ensure_read_tenant(tenant_id, &context)?;
+    let tenant_id = core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
+        bad_request_error(
+            "tenant_required",
+            format!("invalid active tenant id: {error}"),
+            &context,
+        )
+    })?;
 
     let response = state
         .store
-        .get_replay_capsule(&replay_capsule_id)
+        .get_replay_capsule(&tenant_id, &replay_capsule_id)
         .await
         .map_err(|error| {
             internal_error(
@@ -3542,6 +3549,12 @@ mod tests {
             .find(|tenant| tenant.tenant_id.as_str() == "tenant_acme")
             .unwrap()
             .clone();
+        let tenant_northstar = seed
+            .tenants
+            .iter()
+            .find(|tenant| tenant.tenant_id.as_str() == "tenant_northstar")
+            .unwrap()
+            .clone();
 
         seed.users.push(user_seed(
             "user_acme_admin",
@@ -3560,6 +3573,16 @@ mod tests {
             vec![membership_seed(
                 "tmemb_acme_member",
                 &tenant_acme,
+                TenantMembershipRole::Member,
+            )],
+        ));
+        seed.users.push(user_seed(
+            "user_northstar_member",
+            "northstar-member@huge-router.dev",
+            "Northstar Member",
+            vec![membership_seed(
+                "tmemb_northstar_member",
+                &tenant_northstar,
                 TenantMembershipRole::Member,
             )],
         ));
@@ -5173,6 +5196,47 @@ mod tests {
             body["data"]["recent_evaluations"][0]["estimated_tokens_saved"],
             2400
         );
+    }
+
+    #[tokio::test]
+    async fn tenant_cannot_read_another_tenants_replay_capsule_by_id() {
+        let state = authz_test_state();
+        let acme_cookie = issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state);
+
+        let acme_capsule = response_json(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/replay-capsules/replay_acme_relay_eval",
+                    Some(&acme_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            acme_capsule["replay_capsule"]["replay_capsule_id"],
+            "replay_acme_relay_eval"
+        );
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/replay-capsules/replay_acme_relay_eval",
+                    Some(&northstar_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        )
+        .await;
     }
 
     #[tokio::test]
