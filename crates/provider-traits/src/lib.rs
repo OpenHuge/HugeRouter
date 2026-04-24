@@ -312,7 +312,7 @@ impl ProviderAdapterRegistry {
         let manifest = adapter.manifest();
         manifest.validate()?;
 
-        let provider_kind = manifest.provider_kind.to_string();
+        let provider_kind = normalize_provider_kind(manifest.provider_kind);
         let adapter_id = manifest.adapter_id.to_string();
 
         if self.adapters.contains_key(&provider_kind) {
@@ -332,7 +332,9 @@ impl ProviderAdapterRegistry {
 
     #[must_use]
     pub fn resolve(&self, provider_kind: &str) -> Option<Arc<dyn ProviderAdapter>> {
-        self.adapters.get(provider_kind).cloned()
+        self.adapters
+            .get(&normalize_provider_kind(provider_kind))
+            .cloned()
     }
 
     #[must_use]
@@ -357,6 +359,10 @@ impl ProviderAdapterRegistry {
             .map(|adapter| adapter.manifest())
             .collect()
     }
+}
+
+fn normalize_provider_kind(provider_kind: &str) -> String {
+    provider_kind.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -468,6 +474,16 @@ mod tests {
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.provider_kinds(), vec!["openai"]);
         assert_eq!(registry.manifests()[0].adapter_id, "fake-openai");
+    }
+
+    #[test]
+    fn registry_resolves_provider_kind_with_case_and_whitespace_drift() {
+        let mut registry = ProviderAdapterRegistry::new();
+
+        registry.register(Arc::new(FakeAdapter)).unwrap();
+
+        assert!(registry.resolve(" OpenAI ").is_some());
+        assert_eq!(registry.provider_kinds(), vec!["openai"]);
     }
 
     #[test]
