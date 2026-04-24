@@ -428,7 +428,9 @@ mod tests {
     #[test]
     fn registry_rejects_invalid_adapter_manifest() {
         let mut registry = ProviderAdapterRegistry::new();
-        let error = registry.register(Arc::new(InvalidManifestAdapter)).unwrap_err();
+        let error = registry
+            .register(Arc::new(InvalidManifestAdapter))
+            .unwrap_err();
 
         assert_eq!(
             error.to_string(),
