@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use provider_traits::{
     AdapterLifecycleFamily, AdapterManifest, AdapterStability,
     CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
-    ProviderExecutionContext, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    ProviderExecutionContext, ProviderImageData, ProviderImageRequest, ProviderImageResponse,
+    ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -54,7 +55,7 @@ impl ProviderAdapter for OpenAiAdapter {
                 OpenAiWireApi::ChatCompletions => "openai_chat",
                 OpenAiWireApi::Responses => "openai_responses",
             },
-            supported_protocol_families: &["openai_chat", "openai_responses"],
+            supported_protocol_families: &["openai_chat", "openai_responses", "openai_images"],
             lifecycle_family: AdapterLifecycleFamily::Inference,
             stability: AdapterStability::Stable,
             streaming_support: StreamingSupport::ServerSentEvents,
@@ -158,6 +159,82 @@ impl ProviderAdapter for OpenAiAdapter {
                 parse_responses_api_response(body, request, &context.endpoint.provider_resource_id)
             }
         }
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        let mut body = serde_json::Map::from_iter([
+            (
+                "model".to_string(),
+                Value::String(normalize_openai_image_model(&request.model).to_string()),
+            ),
+            ("prompt".to_string(), Value::String(request.prompt.clone())),
+        ]);
+        insert_optional_u32(&mut body, "n", request.n);
+        insert_optional_string(&mut body, "size", request.size.as_deref());
+        insert_optional_string(&mut body, "quality", request.quality.as_deref());
+        insert_optional_string(
+            &mut body,
+            "response_format",
+            request.response_format.as_deref(),
+        );
+
+        let response = self
+            .transport
+            .post_json(HttpRequest {
+                url: format!(
+                    "{}/images/generations",
+                    context.endpoint.endpoint_base_url.trim_end_matches('/')
+                ),
+                headers: vec![
+                    (
+                        AUTHORIZATION.as_str().to_string(),
+                        format!("Bearer {}", context.endpoint.api_key),
+                    ),
+                    (
+                        CONTENT_TYPE.as_str().to_string(),
+                        "application/json".to_string(),
+                    ),
+                ],
+                body: Value::Object(body),
+            })
+            .await
+            .map_err(|error| {
+                let kind = match error.kind {
+                    HttpTransportErrorKind::Timeout => ProviderErrorKind::Timeout,
+                    HttpTransportErrorKind::Network => ProviderErrorKind::Unavailable,
+                };
+
+                ProviderError::new(kind, error.message, error.retryable).with_detail(
+                    "provider_resource_id",
+                    &context.endpoint.provider_resource_id,
+                )
+            })?;
+
+        if response.status >= 400 {
+            return Err(map_error_response(
+                response.status,
+                response.body.as_deref(),
+                &context.endpoint.provider_resource_id,
+            ));
+        }
+
+        let body = response.body.as_deref().ok_or_else(|| {
+            ProviderError::new(
+                ProviderErrorKind::Protocol,
+                "OpenAI returned an empty image generation response body",
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                &context.endpoint.provider_resource_id,
+            )
+        })?;
+
+        parse_image_generation_response(body, request, &context.endpoint.provider_resource_id)
     }
 }
 
@@ -276,6 +353,73 @@ fn parse_responses_api_response(
                 .unwrap_or_default(),
         },
     })
+}
+
+fn parse_image_generation_response(
+    body: &str,
+    request: &ProviderImageRequest,
+    provider_resource_id: &str,
+) -> Result<ProviderImageResponse, ProviderError> {
+    let payload: OpenAiImageGenerationResponse = serde_json::from_str(body).map_err(|error| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            format!("failed to decode OpenAI image generation response: {error}"),
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+
+    if payload.data.is_empty() {
+        return Err(ProviderError::new(
+            ProviderErrorKind::Protocol,
+            "OpenAI image generation response did not include any images",
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id));
+    }
+
+    Ok(ProviderImageResponse {
+        response_id: payload.id,
+        model: payload.model.unwrap_or_else(|| request.model.clone()),
+        created: payload.created,
+        images: payload
+            .data
+            .into_iter()
+            .map(|image| ProviderImageData {
+                b64_json: image.b64_json,
+                url: image.url,
+                revised_prompt: image.revised_prompt,
+            })
+            .collect(),
+        usage: ProviderUsage {
+            input_tokens: payload.usage.input_tokens(),
+            output_tokens: payload.usage.output_tokens(),
+            cached_input_tokens: payload.usage.cached_input_tokens(),
+        },
+    })
+}
+
+fn normalize_openai_image_model(model: &str) -> &str {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "chatgpt image 2" | "chatgpt-image-2" | "chatgpt_image_2" => "chatgpt-image-latest",
+        _ => model,
+    }
+}
+
+fn insert_optional_string(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        body.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_optional_u32(body: &mut serde_json::Map<String, Value>, key: &str, value: Option<u32>) {
+    if let Some(value) = value {
+        body.insert(key.to_string(), Value::from(value));
+    }
 }
 
 fn map_error_response(
@@ -500,6 +644,66 @@ struct OpenAiResponsesApiResponse {
     status: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenAiImageGenerationResponse {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    created: Option<u64>,
+    #[serde(default)]
+    data: Vec<OpenAiImageData>,
+    #[serde(default)]
+    usage: OpenAiImageUsage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiImageData {
+    #[serde(default)]
+    b64_json: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpenAiImageUsage {
+    #[serde(default)]
+    input_tokens: Option<u32>,
+    #[serde(default)]
+    output_tokens: Option<u32>,
+    #[serde(default)]
+    total_tokens: Option<u32>,
+    #[serde(default)]
+    prompt_tokens: Option<u32>,
+    #[serde(default)]
+    input_tokens_details: Option<OpenAiPromptTokenDetails>,
+}
+
+impl OpenAiImageUsage {
+    fn input_tokens(&self) -> u32 {
+        self.input_tokens.or(self.prompt_tokens).unwrap_or_default()
+    }
+
+    fn output_tokens(&self) -> u32 {
+        self.output_tokens
+            .or_else(|| {
+                self.total_tokens
+                    .map(|total| total.saturating_sub(self.input_tokens()))
+            })
+            .unwrap_or_default()
+    }
+
+    fn cached_input_tokens(&self) -> u32 {
+        self.input_tokens_details
+            .as_ref()
+            .and_then(|details| details.cached_tokens)
+            .unwrap_or_default()
+    }
+}
+
 impl OpenAiResponsesApiResponse {
     fn output_text(&self) -> Option<String> {
         let text = self
@@ -576,7 +780,7 @@ mod tests {
     use async_trait::async_trait;
     use provider_traits::{
         ProviderAdapter, ProviderEndpoint, ProviderErrorKind, ProviderExecutionContext,
-        ProviderMessage, ProviderRequest,
+        ProviderImageRequest, ProviderMessage, ProviderRequest,
     };
     use serde_json::json;
     use std::sync::{Arc, Mutex};
@@ -631,6 +835,17 @@ mod tests {
                 content: "hello".to_string(),
             }],
             stream: false,
+        }
+    }
+
+    fn image_request() -> ProviderImageRequest {
+        ProviderImageRequest {
+            model: "chatgpt-image-2".to_string(),
+            prompt: "draw a router".to_string(),
+            n: Some(1),
+            size: Some("1024x1024".to_string()),
+            quality: Some("auto".to_string()),
+            response_format: Some("b64_json".to_string()),
         }
     }
 
@@ -727,6 +942,62 @@ mod tests {
         assert_eq!(request_url, "https://api.openai.example/v1/responses");
         assert_eq!(request_role, "user");
         assert_eq!(content_type, "input_text");
+    }
+
+    #[tokio::test]
+    async fn image_generation_uses_images_endpoint_and_chatgpt_image_alias() {
+        let transport = MockTransport::new(vec![Ok(HttpResponse {
+            status: 200,
+            body: Some(
+                json!({
+                    "id": "img_123",
+                    "model": "chatgpt-image-latest",
+                    "created": 1_777_000_000_u64,
+                    "data": [{
+                        "b64_json": "aW1hZ2U=",
+                        "revised_prompt": "Draw a precise network router"
+                    }],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 40,
+                        "input_tokens_details": {
+                            "cached_tokens": 2
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+        })]);
+        let adapter = OpenAiAdapter::new(Arc::new(transport.clone()));
+
+        let response = adapter
+            .execute_image_generation(&image_request(), &context())
+            .await
+            .unwrap();
+
+        assert_eq!(response.response_id.as_deref(), Some("img_123"));
+        assert_eq!(response.model, "chatgpt-image-latest");
+        assert_eq!(response.images[0].b64_json.as_deref(), Some("aW1hZ2U="));
+        assert_eq!(response.usage.input_tokens, 10);
+        assert_eq!(response.usage.output_tokens, 40);
+        assert_eq!(response.usage.cached_input_tokens, 2);
+
+        let (request_url, model, prompt, response_format) = {
+            let recorded_requests = transport.requests.lock().unwrap();
+            (
+                recorded_requests[0].url.clone(),
+                recorded_requests[0].body["model"].clone(),
+                recorded_requests[0].body["prompt"].clone(),
+                recorded_requests[0].body["response_format"].clone(),
+            )
+        };
+        assert_eq!(
+            request_url,
+            "https://api.openai.example/v1/images/generations"
+        );
+        assert_eq!(model, "chatgpt-image-latest");
+        assert_eq!(prompt, "draw a router");
+        assert_eq!(response_format, "b64_json");
     }
 
     #[tokio::test]

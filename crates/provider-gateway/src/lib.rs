@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use provider_traits::{
     AdapterLifecycleFamily, AdapterManifest, AdapterStability,
     CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
-    ProviderExecutionContext, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    ProviderExecutionContext, ProviderImageData, ProviderImageRequest, ProviderImageResponse,
+    ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
@@ -60,6 +61,11 @@ pub struct GatewayAdapter {
     transport: Arc<dyn HttpTransport>,
 }
 
+#[derive(Clone)]
+pub struct ChatGptWebAdapter {
+    inner: GatewayAdapter,
+}
+
 impl GatewayAdapter {
     #[must_use]
     pub fn new(transport: Arc<dyn HttpTransport>) -> Self {
@@ -68,6 +74,21 @@ impl GatewayAdapter {
 }
 
 impl Default for GatewayAdapter {
+    fn default() -> Self {
+        Self::new(Arc::new(ReqwestTransport::from_env()))
+    }
+}
+
+impl ChatGptWebAdapter {
+    #[must_use]
+    pub fn new(transport: Arc<dyn HttpTransport>) -> Self {
+        Self {
+            inner: GatewayAdapter::new(transport),
+        }
+    }
+}
+
+impl Default for ChatGptWebAdapter {
     fn default() -> Self {
         Self::new(Arc::new(ReqwestTransport::from_env()))
     }
@@ -85,6 +106,7 @@ impl ProviderAdapter for GatewayAdapter {
             supported_protocol_families: &[
                 "openai_chat",
                 "openai_responses",
+                "openai_images",
                 "anthropic_messages",
                 "gemini_generate_content",
             ],
@@ -153,6 +175,100 @@ impl ProviderAdapter for GatewayAdapter {
         })?;
 
         parse_chat_completion_response(body, request, context)
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        let headers = build_transit_headers(context)?;
+        let mut body = serde_json::Map::from_iter([
+            ("model".to_string(), Value::String(request.model.clone())),
+            ("prompt".to_string(), Value::String(request.prompt.clone())),
+        ]);
+        insert_optional_u32(&mut body, "n", request.n);
+        insert_optional_string(&mut body, "size", request.size.as_deref());
+        insert_optional_string(&mut body, "quality", request.quality.as_deref());
+        insert_optional_string(
+            &mut body,
+            "response_format",
+            request.response_format.as_deref(),
+        );
+
+        let response = self
+            .transport
+            .post_json(HttpRequest {
+                url: format!(
+                    "{}/images/generations",
+                    context.endpoint.endpoint_base_url.trim_end_matches('/')
+                ),
+                headers,
+                body: Value::Object(body),
+            })
+            .await
+            .map_err(|error| {
+                base_error(
+                    match error.kind {
+                        HttpTransportErrorKind::Timeout => ProviderErrorKind::Timeout,
+                        HttpTransportErrorKind::Network => ProviderErrorKind::Unavailable,
+                    },
+                    error.message,
+                    error.retryable,
+                    context,
+                )
+                .with_detail("target_kind", "transit_gateway")
+                .with_detail("transit_gateway", "openai_compatible")
+            })?;
+
+        if response.status >= 400 {
+            return Err(map_error_response(&response, context));
+        }
+
+        let body = response.body.as_deref().ok_or_else(|| {
+            base_error(
+                ProviderErrorKind::Protocol,
+                "transit gateway returned an empty image generation response body",
+                false,
+                context,
+            )
+        })?;
+
+        parse_image_generation_response(body, request, context)
+    }
+}
+
+#[async_trait]
+impl ProviderAdapter for ChatGptWebAdapter {
+    fn manifest(&self) -> AdapterManifest {
+        AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
+            adapter_id: "chatgpt-web-openai-compatible-v1",
+            provider_kind: "chatgpt_web",
+            display_name: "ChatGPT Web OpenAI-Compatible Reverse Proxy",
+            protocol_family: "openai_images",
+            supported_protocol_families: &["openai_chat", "openai_responses", "openai_images"],
+            lifecycle_family: AdapterLifecycleFamily::TransitGateway,
+            stability: AdapterStability::Experimental,
+            streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("env:GATEWAY_CHATGPT_WEB_*"),
+        }
+    }
+
+    async fn execute_chat(
+        &self,
+        request: &ProviderRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderResponse, ProviderError> {
+        self.inner.execute_chat(request, context).await
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        self.inner.execute_image_generation(request, context).await
     }
 }
 
@@ -258,6 +374,22 @@ fn build_transit_headers(
     Ok(prepare_transit_headers(context)?.headers)
 }
 
+fn insert_optional_string(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        body.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_optional_u32(body: &mut serde_json::Map<String, Value>, key: &str, value: Option<u32>) {
+    if let Some(value) = value {
+        body.insert(key.to_string(), Value::from(value));
+    }
+}
+
 fn ensure_no_transit_loop(context: &ProviderExecutionContext) -> Result<(), ProviderError> {
     for header in [
         TRANSIT_HEADER_HOP,
@@ -348,6 +480,50 @@ fn parse_chat_completion_response(
             input_tokens: usage.prompt_tokens,
             output_tokens: usage.completion_tokens,
             cached_input_tokens,
+        },
+    })
+}
+
+fn parse_image_generation_response(
+    body: &str,
+    request: &ProviderImageRequest,
+    context: &ProviderExecutionContext,
+) -> Result<ProviderImageResponse, ProviderError> {
+    let payload: OpenAiImageGenerationResponse = serde_json::from_str(body).map_err(|error| {
+        base_error(
+            ProviderErrorKind::Protocol,
+            format!("failed to decode transit gateway image generation response: {error}"),
+            false,
+            context,
+        )
+    })?;
+
+    if payload.data.is_empty() {
+        return Err(base_error(
+            ProviderErrorKind::Protocol,
+            "transit gateway image generation response did not include any images",
+            false,
+            context,
+        ));
+    }
+
+    Ok(ProviderImageResponse {
+        response_id: payload.id,
+        model: payload.model.unwrap_or_else(|| request.model.clone()),
+        created: payload.created,
+        images: payload
+            .data
+            .into_iter()
+            .map(|image| ProviderImageData {
+                b64_json: image.b64_json,
+                url: image.url,
+                revised_prompt: image.revised_prompt,
+            })
+            .collect(),
+        usage: ProviderUsage {
+            input_tokens: payload.usage.input_tokens(),
+            output_tokens: payload.usage.output_tokens(),
+            cached_input_tokens: payload.usage.cached_input_tokens(),
         },
     })
 }
@@ -554,6 +730,55 @@ struct OpenAiPromptTokenDetails {
     cached_tokens: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAiImageGenerationResponse {
+    id: Option<String>,
+    model: Option<String>,
+    created: Option<u64>,
+    #[serde(default)]
+    data: Vec<OpenAiImageData>,
+    #[serde(default)]
+    usage: OpenAiImageUsage,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAiImageData {
+    b64_json: Option<String>,
+    url: Option<String>,
+    revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct OpenAiImageUsage {
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
+    total_tokens: Option<u32>,
+    prompt_tokens: Option<u32>,
+    input_tokens_details: Option<OpenAiPromptTokenDetails>,
+}
+
+impl OpenAiImageUsage {
+    fn input_tokens(&self) -> u32 {
+        self.input_tokens.or(self.prompt_tokens).unwrap_or_default()
+    }
+
+    fn output_tokens(&self) -> u32 {
+        self.output_tokens
+            .or_else(|| {
+                self.total_tokens
+                    .map(|total| total.saturating_sub(self.input_tokens()))
+            })
+            .unwrap_or_default()
+    }
+
+    fn cached_input_tokens(&self) -> u32 {
+        self.input_tokens_details
+            .as_ref()
+            .and_then(|details| details.cached_tokens)
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 struct OpenAiChatMessage {
     role: String,
@@ -572,9 +797,9 @@ impl From<&provider_traits::ProviderMessage> for OpenAiChatMessage {
 #[cfg(test)]
 mod tests {
     use super::{
-        GatewayAdapter, HttpRequest, HttpResponse, HttpTransport, HttpTransportError,
-        HttpTransportErrorKind, TRANSIT_HEADER_HOP, TRANSIT_HEADER_ORIGIN, TRANSIT_HEADER_PROVIDER,
-        TRANSIT_HEADER_VIA, prepare_transit_headers,
+        ChatGptWebAdapter, GatewayAdapter, HttpRequest, HttpResponse, HttpTransport,
+        HttpTransportError, HttpTransportErrorKind, TRANSIT_HEADER_HOP, TRANSIT_HEADER_ORIGIN,
+        TRANSIT_HEADER_PROVIDER, TRANSIT_HEADER_VIA, prepare_transit_headers,
     };
     use provider_traits::{
         ProviderAdapter, ProviderEndpoint, ProviderErrorKind, ProviderExecutionContext,
@@ -851,5 +1076,16 @@ mod tests {
                 .rewritten_headers
                 .contains(&TRANSIT_HEADER_PROVIDER.to_string())
         );
+    }
+
+    #[test]
+    fn chatgpt_web_adapter_declares_openai_compatible_image_transit() {
+        let adapter = ChatGptWebAdapter::new(Arc::new(MockTransport::default()));
+        let manifest = adapter.manifest();
+
+        assert_eq!(manifest.provider_kind, "chatgpt_web");
+        assert_eq!(manifest.protocol_family, "openai_images");
+        assert!(manifest.supports_protocol_family("openai_images"));
+        assert!(manifest.supports_protocol_family("openai_chat"));
     }
 }
