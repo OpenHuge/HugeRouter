@@ -492,6 +492,12 @@ pub struct RouteReceiptProviderAttempt {
     pub provider_resource_id: ProviderResourceId,
     pub attempt: u8,
     pub status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason_code: String,
+    #[serde(default)]
+    pub retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_target: Option<ProviderResourceId>,
     pub started_at: String,
     pub finished_at: String,
     pub latency_ms: u32,
@@ -2160,7 +2166,10 @@ fn sample_route_receipt_diagnostics() -> RouteReceiptDiagnosticsResponse {
         provider_attempts: vec![RouteReceiptProviderAttempt {
             provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
             attempt: 1,
-            status: "succeeded".to_string(),
+            status: "success".to_string(),
+            reason_code: "provider_success".to_string(),
+            retryable: false,
+            fallback_target: None,
             started_at: "2026-04-21T12:16:01Z".to_string(),
             finished_at: "2026-04-21T12:16:03Z".to_string(),
             latency_ms: 1100,
@@ -2765,7 +2774,7 @@ mod tests {
         );
         assert_eq!(
             value["payload"]["provider_attempts"][0]["status"],
-            "succeeded"
+            "success"
         );
     }
 }

@@ -2150,6 +2150,16 @@
             "format": "int32",
             "minimum": 0
           },
+          "fallback_target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResourceId"
+              }
+            ]
+          },
           "finished_at": {
             "type": "string"
           },
@@ -2163,6 +2173,12 @@
           },
           "reason": {
             "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
           },
           "started_at": {
             "type": "string"
