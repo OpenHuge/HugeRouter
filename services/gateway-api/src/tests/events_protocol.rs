@@ -192,7 +192,7 @@ async fn publishes_route_receipt_event_for_successful_request() {
     assert_eq!(receipt_count, 1);
     assert_eq!(selected_target, "prvrsrc_openai_primary");
     assert_eq!(provider_attempt_count, 1);
-    assert_eq!(first_attempt_status, "succeeded");
+    assert_eq!(first_attempt_status, "success");
     assert_eq!(first_stage, "admission");
 
     let usage_event_count = {
@@ -270,7 +270,121 @@ async fn publishes_route_receipt_event_for_failed_request() {
     assert_eq!(receipt_count, 1);
     assert_eq!(normalized_error_code, "provider_unavailable");
     assert_eq!(provider_attempt_count, 1);
-    assert_eq!(first_attempt_status, "failed");
+    assert_eq!(first_attempt_status, "non_retryable_failure");
+}
+
+#[tokio::test]
+#[allow(clippy::significant_drop_tightening, clippy::too_many_lines)]
+async fn route_receipt_attempts_explain_retryable_fallback_chain() {
+    let adapter = Arc::new(MockAdapter {
+        outcomes: BTreeMap::from([
+            (
+                "prvrsrc_openai_primary".to_string(),
+                Err(ProviderError::new(
+                    ProviderErrorKind::RateLimited,
+                    "primary rate limited",
+                    true,
+                )
+                .with_upstream_status(Some(429))),
+            ),
+            (
+                "prvrsrc_openai_backup".to_string(),
+                Ok(ProviderResponse {
+                    response_id: Some("chatcmpl_fallback".to_string()),
+                    model: "gpt-4.1-mini".to_string(),
+                    output_text: "ok".to_string(),
+                    finish_reason: "stop".to_string(),
+                    usage: ProviderUsage {
+                        input_tokens: 9,
+                        output_tokens: 6,
+                        cached_input_tokens: 0,
+                    },
+                }),
+            ),
+        ]),
+    });
+    let sink = Arc::new(RecordingRuntimeEventSink::default());
+    let mut registry = ProviderAdapterRegistry::new();
+    registry.register(adapter).unwrap();
+    let state = Arc::new(AppState {
+        config_store: Arc::new(StaticConfigStore::new(build_config(vec![
+            build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.95,
+                0.8,
+                HealthState::Healthy,
+            ),
+            build_target(
+                "prvrsrc_openai_backup",
+                "us-east-1",
+                0.85,
+                0.75,
+                HealthState::Healthy,
+            ),
+        ]))),
+        auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        budget_store: Arc::new(StaticBudgetProjectionStore {
+            response: ok_budget_projection(),
+        }),
+        adapter_registry: registry,
+        debug_headers_enabled: false,
+        event_sink: sink.clone(),
+    });
+    let app = app_with_state(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("authorization", "Bearer test")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&valid_http_request()).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let (provider_attempts, fallback_transitions, selected_target) = {
+        let receipts = sink.published_route_receipts.lock().await;
+        let receipt = &receipts[0];
+        (
+            receipt.provider_attempts.clone(),
+            receipt.route_receipt.fallback_transitions.clone(),
+            receipt.route_receipt.selected_target.clone(),
+        )
+    };
+    assert_eq!(provider_attempts.len(), 2);
+    assert_eq!(provider_attempts[0].status, "retryable_failure");
+    assert_eq!(provider_attempts[0].reason_code, "rate_limited");
+    assert!(provider_attempts[0].retryable);
+    assert_eq!(
+        provider_attempts[0]
+            .fallback_target
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "prvrsrc_openai_backup"
+    );
+    assert_eq!(provider_attempts[1].status, "success");
+    assert_eq!(provider_attempts[1].reason_code, "provider_success");
+    assert_eq!(fallback_transitions.len(), 1);
+    assert_eq!(
+        fallback_transitions[0].from_provider_resource_id.as_str(),
+        "prvrsrc_openai_primary"
+    );
+    assert_eq!(
+        fallback_transitions[0].to_provider_resource_id.as_str(),
+        "prvrsrc_openai_backup"
+    );
+    assert_eq!(
+        selected_target.as_ref().unwrap().as_str(),
+        "prvrsrc_openai_backup"
+    );
 }
 
 #[tokio::test]

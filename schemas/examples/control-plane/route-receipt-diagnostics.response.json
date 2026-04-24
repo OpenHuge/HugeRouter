@@ -56,7 +56,9 @@
     {
       "provider_resource_id": "prvrsrc_openai_primary",
       "attempt": 1,
-      "status": "succeeded",
+      "status": "success",
+      "reason_code": "provider_success",
+      "retryable": false,
       "started_at": "2026-04-21T12:16:01Z",
       "finished_at": "2026-04-21T12:16:03Z",
       "latency_ms": 1100,

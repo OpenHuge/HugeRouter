@@ -225,6 +225,7 @@ mod tests {
         RouteReceiptRecorded, RouteReceiptRecordedMessageType,
     };
 
+    #[allow(clippy::too_many_lines)]
     fn sample_route_receipt_recorded_message(
         normalized_error_code: Option<&str>,
     ) -> RouteReceiptRecordedMessage {
@@ -302,10 +303,17 @@ mod tests {
                 .unwrap(),
                 attempt: 1,
                 status: if normalized_error_code.is_some() {
-                    "failed".to_string()
+                    "non_retryable_failure".to_string()
                 } else {
-                    "succeeded".to_string()
+                    "success".to_string()
                 },
+                reason_code: if normalized_error_code.is_some() {
+                    "provider_unavailable".to_string()
+                } else {
+                    "provider_success".to_string()
+                },
+                retryable: false,
+                fallback_target: None,
                 started_at: "2026-04-23T10:00:00Z".to_string(),
                 finished_at: "2026-04-23T10:00:01Z".to_string(),
                 latency_ms: 1000,
@@ -348,7 +356,11 @@ mod tests {
             pending.route_receipt_payload["selected_target"],
             "prvrsrc_openai_primary"
         );
-        assert_eq!(pending.provider_attempts[0]["status"], "succeeded");
+        assert_eq!(pending.provider_attempts[0]["status"], "success");
+        assert_eq!(
+            pending.provider_attempts[0]["reason_code"],
+            "provider_success"
+        );
         assert_eq!(pending.source_message_id, "msg_routercpt_123");
     }
 
@@ -361,7 +373,14 @@ mod tests {
             pending.route_receipt_payload["normalized_error"]["code"],
             "provider_unavailable"
         );
-        assert_eq!(pending.provider_attempts[0]["status"], "failed");
+        assert_eq!(
+            pending.provider_attempts[0]["status"],
+            "non_retryable_failure"
+        );
+        assert_eq!(
+            pending.provider_attempts[0]["reason_code"],
+            "provider_unavailable"
+        );
     }
 
     #[test]
@@ -402,6 +421,9 @@ mod tests {
         );
         assert_eq!(stored.decision_timeline[0]["stage"], "admission");
         assert_eq!(stored.policy_checks[0]["status"], "passed");
-        assert_eq!(stored.provider_attempts[0]["status"], "failed");
+        assert_eq!(
+            stored.provider_attempts[0]["status"],
+            "non_retryable_failure"
+        );
     }
 }
