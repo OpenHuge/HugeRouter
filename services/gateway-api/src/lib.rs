@@ -215,6 +215,7 @@ pub struct ProviderAdapterManifestDto {
     pub display_name: &'static str,
     pub protocol_family: &'static str,
     pub supported_protocol_families: Vec<&'static str>,
+    pub capability_hints: Vec<&'static str>,
     pub lifecycle_family: &'static str,
     pub stability: &'static str,
     pub streaming_support: &'static str,
@@ -417,10 +418,43 @@ fn provider_adapter_manifest_dto(manifest: &AdapterManifest) -> ProviderAdapterM
         display_name: manifest.display_name,
         protocol_family: manifest.protocol_family,
         supported_protocol_families: manifest.supported_protocol_families.to_vec(),
+        capability_hints: adapter_capability_hints(manifest),
         lifecycle_family: lifecycle_family_slug(manifest.lifecycle_family),
         stability: adapter_stability_slug(manifest.stability),
         streaming_support: streaming_support_slug(manifest.streaming_support),
         configuration_schema_ref: manifest.configuration_schema_ref,
+    }
+}
+
+fn adapter_capability_hints(manifest: &AdapterManifest) -> Vec<&'static str> {
+    let mut hints = Vec::new();
+
+    for protocol_family in manifest.supported_protocol_families {
+        match *protocol_family {
+            "openai_chat" => push_unique(&mut hints, "chat_completions"),
+            "openai_responses" => push_unique(&mut hints, "responses_api"),
+            "openai_images" => push_unique(&mut hints, "image_generation"),
+            "anthropic_messages" => push_unique(&mut hints, "anthropic_messages"),
+            "gemini_generate_content" => push_unique(&mut hints, "gemini_generate_content"),
+            "mcp_streamable_http" => push_unique(&mut hints, "mcp_streamable_http"),
+            "realtime_webrtc" => push_unique(&mut hints, "realtime_webrtc"),
+            _ => {}
+        }
+    }
+
+    if manifest.streaming_support != StreamingSupport::Unsupported {
+        push_unique(&mut hints, "streaming");
+    }
+    if manifest.lifecycle_family == AdapterLifecycleFamily::TransitGateway {
+        push_unique(&mut hints, "transit_gateway");
+    }
+
+    hints
+}
+
+fn push_unique(values: &mut Vec<&'static str>, value: &'static str) {
+    if !values.contains(&value) {
+        values.push(value);
     }
 }
 
