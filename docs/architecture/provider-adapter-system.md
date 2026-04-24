@@ -22,6 +22,8 @@ Unknown provider IDs and empty compositions fail during bootstrap so configurati
 
 The running gateway exposes loaded adapter manifests at `GET /internal/provider-adapters`. This is an internal discovery surface for diagnostics and future control-plane compatibility checks. Runtime route execution also treats the adapter manifest as a hard boundary: a selected provider target is skipped if its loaded adapter does not declare support for the normalized request protocol family.
 
+Provider kind registration and lookup are normalized with trim plus lowercase rules. Control-plane payloads should still emit canonical lowercase provider IDs, but the runtime lookup is defensive against harmless case or whitespace drift.
+
 ### 12.0.1 Reference-Informed Architecture Notes
 
 The next implementation slices should follow patterns already proven in mature gateway and platform systems:
