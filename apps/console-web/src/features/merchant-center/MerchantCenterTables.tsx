@@ -1,8 +1,9 @@
-import { Card, Stack, Table, Text } from "@mantine/core";
+import { Badge, Button, Card, Group, Stack, Table, Text } from "@mantine/core";
 import type {
   CardProductView,
   MerchantShopView,
   MerchantWorkspaceData,
+  ReplayCapsuleView,
   TrialConnectionView,
 } from "../control-plane/types";
 import { EmptyCollectionState } from "../control-plane/route-state";
@@ -144,8 +145,14 @@ export function TrialConnectionTable({
 }
 
 export function RelayEvaluationTable({
+  isLoadingReplayCapsule,
+  onViewReplayCapsule,
+  selectedReplayCapsuleId,
   workspace,
 }: {
+  isLoadingReplayCapsule: boolean;
+  onViewReplayCapsule: (replayCapsuleId: string) => Promise<void>;
+  selectedReplayCapsuleId: string | null;
   workspace: MerchantWorkspaceData;
 }) {
   return (
@@ -166,6 +173,7 @@ export function RelayEvaluationTable({
                 <Table.Th>Score</Table.Th>
                 <Table.Th>Replay Capsule</Table.Th>
                 <Table.Th>Saved Tokens</Table.Th>
+                <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -186,10 +194,109 @@ export function RelayEvaluationTable({
                     </Text>
                   </Table.Td>
                   <Table.Td>{evaluation.estimatedTokensSaved}</Table.Td>
+                  <Table.Td>
+                    <Button
+                      loading={
+                        isLoadingReplayCapsule &&
+                        selectedReplayCapsuleId === evaluation.replayCapsuleId
+                      }
+                      onClick={() =>
+                        void onViewReplayCapsule(evaluation.replayCapsuleId)
+                      }
+                      size="xs"
+                      variant="light"
+                    >
+                      View replay
+                    </Button>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
           </Table>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
+export function ReplayCapsuleDetailCard({
+  replayCapsule,
+}: {
+  replayCapsule: ReplayCapsuleView | null;
+}) {
+  return (
+    <Card padding="lg" radius="md" shadow="sm">
+      <Stack>
+        <Group justify="space-between">
+          <Text fw={700}>Replay Capsule</Text>
+          {replayCapsule ? (
+            <Badge color="teal" variant="light">
+              {replayCapsule.redactionTier}
+            </Badge>
+          ) : null}
+        </Group>
+        {!replayCapsule ? (
+          <EmptyCollectionState
+            description="Open a replay capsule from the evaluation table to inspect the redacted request shape and upstream error hint."
+            title="No replay capsule selected"
+          />
+        ) : (
+          <>
+            <Group grow>
+              <Stack gap={0}>
+                <Text c="dimmed" size="sm">
+                  Replay Capsule ID
+                </Text>
+                <Text fw={600}>{replayCapsule.replayCapsuleId}</Text>
+              </Stack>
+              <Stack gap={0}>
+                <Text c="dimmed" size="sm">
+                  Request / Trace
+                </Text>
+                <Text fw={600}>{replayCapsule.requestId}</Text>
+                <Text c="dimmed" size="sm">
+                  {replayCapsule.traceId}
+                </Text>
+              </Stack>
+              <Stack gap={0}>
+                <Text c="dimmed" size="sm">
+                  Config Snapshot
+                </Text>
+                <Text fw={600}>{replayCapsule.configSnapshotId}</Text>
+              </Stack>
+            </Group>
+            <Table striped withRowBorders>
+              <Table.Tbody>
+                <Table.Tr>
+                  <Table.Th>Protocol family</Table.Th>
+                  <Table.Td>
+                    {replayCapsule.normalizedRequestSummary.protocolFamily}
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Model alias</Table.Th>
+                  <Table.Td>
+                    {replayCapsule.normalizedRequestSummary.modelAlias}
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Estimated prompt tokens</Table.Th>
+                  <Table.Td>
+                    {
+                      replayCapsule.normalizedRequestSummary
+                        .estimatedPromptTokens
+                    }
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Upstream error hint</Table.Th>
+                  <Table.Td>
+                    {replayCapsule.upstreamErrorCode ?? "none"}
+                  </Table.Td>
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </>
         )}
       </Stack>
     </Card>

@@ -65,6 +65,23 @@ export type RelayEvaluationRecord = {
   verdict: string;
 };
 
+export type ReplayCapsuleRecord = {
+  config_snapshot_id: string;
+  normalized_request_summary: {
+    estimated_prompt_tokens: number;
+    model_alias: string;
+    protocol_family: string;
+  };
+  redaction_tier: string;
+  replay_capsule_id: string;
+  request_id: string;
+  route_receipt_id: string;
+  trace_id: string;
+  upstream_error_summary?: {
+    code: string;
+  };
+};
+
 export const merchantShopsInitialState: MerchantShopRecord[] = [
   {
     merchant_shop_id: "mshop_acme",
@@ -139,5 +156,24 @@ export const relayEvaluationsInitialState: RelayEvaluationRecord[] = [
     summary:
       "Replay capsule captured; protocol and token behavior still need manual follow-up.",
     created_at: "2026-04-22T00:00:00Z",
+  },
+];
+
+export const replayCapsulesInitialState: ReplayCapsuleRecord[] = [
+  {
+    replay_capsule_id: "replay_acme_relay_eval",
+    request_id: "req_merchant_eval_acme",
+    trace_id: "trace_merchant_eval_acme",
+    route_receipt_id: "routercpt_acme_relay_eval",
+    config_snapshot_id: "cfgsnap_gateway_v1",
+    redaction_tier: "structured_redacted",
+    normalized_request_summary: {
+      protocol_family: "openai_chat",
+      model_alias: "claude-sonnet",
+      estimated_prompt_tokens: 480,
+    },
+    upstream_error_summary: {
+      code: "provider_signature_mismatch",
+    },
   },
 ];

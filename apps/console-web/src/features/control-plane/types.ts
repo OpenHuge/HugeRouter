@@ -300,3 +300,21 @@ export type MerchantWorkspaceData = {
   trialConnections: TrialConnectionView[];
   recentEvaluations: RelayEvaluationView[];
 };
+
+export type ReplayCapsuleView = {
+  replayCapsuleId: string;
+  requestId: string;
+  traceId: string;
+  routeReceiptId: string;
+  configSnapshotId: string;
+  redactionTier:
+    | "metadata_only"
+    | "structured_redacted"
+    | "full_payload_retention";
+  normalizedRequestSummary: {
+    protocolFamily: string;
+    modelAlias: string;
+    estimatedPromptTokens: number;
+  };
+  upstreamErrorCode?: string;
+};

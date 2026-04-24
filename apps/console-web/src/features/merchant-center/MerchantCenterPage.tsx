@@ -6,7 +6,10 @@ import {
   getConsoleDataService,
   getControlPlaneActionErrorMessage,
 } from "../control-plane/service";
-import type { MerchantWorkspaceData } from "../control-plane/types";
+import type {
+  MerchantWorkspaceData,
+  ReplayCapsuleView,
+} from "../control-plane/types";
 import { RouteErrorState } from "../control-plane/route-state";
 import { MerchantCenterIntro, ShopAndTrialCards } from "./MerchantCenterForms";
 import {
@@ -17,6 +20,7 @@ import {
   CardProductTable,
   MerchantShopTable,
   RelayEvaluationTable,
+  ReplayCapsuleDetailCard,
   TrialConnectionTable,
 } from "./MerchantCenterTables";
 import {
@@ -80,6 +84,12 @@ export function MerchantCenterPage({
   const [isSubmittingCard, setIsSubmittingCard] = useState(false);
   const [isSubmittingTrial, setIsSubmittingTrial] = useState(false);
   const [isSubmittingEvaluation, setIsSubmittingEvaluation] = useState(false);
+  const [isLoadingReplayCapsule, setIsLoadingReplayCapsule] = useState(false);
+  const [selectedReplayCapsule, setSelectedReplayCapsule] =
+    useState<ReplayCapsuleView | null>(null);
+  const [selectedReplayCapsuleId, setSelectedReplayCapsuleId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     setWorkspace(result.data);
@@ -232,6 +242,25 @@ export function MerchantCenterPage({
     }
   }
 
+  async function onViewReplayCapsule(replayCapsuleId: string) {
+    setIsLoadingReplayCapsule(true);
+    setSelectedReplayCapsuleId(replayCapsuleId);
+    setStatusError(null);
+
+    try {
+      const replayCapsule =
+        await getConsoleDataService().getReplayCapsule(replayCapsuleId);
+      setSelectedReplayCapsule(replayCapsule);
+    } catch (error) {
+      setSelectedReplayCapsule(null);
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "relay-evaluation-create"),
+      );
+    } finally {
+      setIsLoadingReplayCapsule(false);
+    }
+  }
+
   return (
     <Stack>
       <PageHeader
@@ -286,7 +315,13 @@ export function MerchantCenterPage({
       <MerchantShopTable shops={workspace.shops} />
       <CardProductTable products={workspace.cardProducts} />
       <TrialConnectionTable connections={workspace.trialConnections} />
-      <RelayEvaluationTable workspace={workspace} />
+      <RelayEvaluationTable
+        isLoadingReplayCapsule={isLoadingReplayCapsule}
+        onViewReplayCapsule={onViewReplayCapsule}
+        selectedReplayCapsuleId={selectedReplayCapsuleId}
+        workspace={workspace}
+      />
+      <ReplayCapsuleDetailCard replayCapsule={selectedReplayCapsule} />
     </Stack>
   );
 }

@@ -160,7 +160,51 @@ export function handleMerchantRequest(
       verdict: "warning",
     };
     state.relayEvaluations = [nextEvaluation, ...state.relayEvaluations];
+    state.replayCapsules = [
+      {
+        replay_capsule_id: nextEvaluation.replay_capsule_id,
+        request_id: `req_${nextEvaluation.replay_capsule_id}`,
+        trace_id: `trace_${nextEvaluation.replay_capsule_id}`,
+        route_receipt_id: `routercpt_${nextEvaluation.replay_capsule_id}`,
+        config_snapshot_id: "cfgsnap_gateway_v1",
+        redaction_tier: "structured_redacted",
+        normalized_request_summary: {
+          protocol_family: "openai_chat",
+          model_alias: nextEvaluation.target_model,
+          estimated_prompt_tokens: 480,
+        },
+        upstream_error_summary: {
+          code: "protocol_shape_warning",
+        },
+      },
+      ...state.replayCapsules,
+    ];
     return jsonResponse(200, nextEvaluation);
+  }
+
+  if (
+    path.startsWith("/v1/replay-capsules/") &&
+    (!init?.method || init.method === "GET")
+  ) {
+    const replayCapsuleId = decodeURIComponent(path.split("/")[3] ?? "");
+    const capsule = state.replayCapsules.find(
+      (item) => item.replay_capsule_id === replayCapsuleId,
+    );
+
+    if (!capsule) {
+      return jsonResponse(404, {
+        error: {
+          code: "not_found",
+          message: "Replay capsule not found.",
+          request_id: "req_test",
+          retryable: false,
+        },
+      });
+    }
+
+    return jsonResponse(200, {
+      replay_capsule: capsule,
+    });
   }
 
   return null;

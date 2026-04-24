@@ -138,6 +138,22 @@ describe("console data service", () => {
     expect(workspace.recentEvaluations[0]?.estimatedTokensSaved).toBe(2400);
   });
 
+  it("loads a replay capsule detail for merchant review", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const replay = await getConsoleDataService().getReplayCapsule(
+      "replay_acme_relay_eval",
+    );
+
+    expect(replay.replayCapsuleId).toBe("replay_acme_relay_eval");
+    expect(replay.redactionTier).toBe("structured_redacted");
+    expect(replay.normalizedRequestSummary.protocolFamily).toBe("openai_chat");
+    expect(replay.upstreamErrorCode).toBe("provider_signature_mismatch");
+  });
+
   it("revokes an API key without throwing", async () => {
     signIn({
       email: "admin@huge-router.dev",
@@ -235,6 +251,21 @@ describe("console data service", () => {
           cardProducts: [],
           trialConnections: [],
           recentEvaluations: [],
+        });
+      },
+      getReplayCapsule() {
+        return Promise.resolve({
+          replayCapsuleId: "replay_override",
+          requestId: "req_override",
+          traceId: "trace_override",
+          routeReceiptId: "routercpt_override",
+          configSnapshotId: "cfgsnap_override",
+          redactionTier: "structured_redacted",
+          normalizedRequestSummary: {
+            protocolFamily: "openai_chat",
+            modelAlias: "claude-sonnet",
+            estimatedPromptTokens: 256,
+          },
         });
       },
       getTenantDetail() {
