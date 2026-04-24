@@ -3512,7 +3512,7 @@ mod tests {
                 &IdentityLookup::Email("ops@huge-router.dev".to_string()),
                 "platform-admin",
                 "2026-04-23T00:00:00Z",
-                "2026-04-24T08:00:00Z",
+                "2026-04-25T00:00:00Z",
             )
             .await
             .expect("platform admin session should issue");
@@ -3536,7 +3536,7 @@ mod tests {
                 &IdentityLookup::Email(email.to_string()),
                 workspace_slug,
                 "2026-04-23T00:00:00Z",
-                "2026-04-24T08:00:00Z",
+                "2026-04-25T00:00:00Z",
             )
             .await
             .expect("test session should issue");
