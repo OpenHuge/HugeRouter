@@ -129,6 +129,16 @@ pub struct ProviderRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderImageRequest {
+    pub model: String,
+    pub prompt: String,
+    pub n: Option<u32>,
+    pub size: Option<String>,
+    pub quality: Option<String>,
+    pub response_format: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -141,6 +151,22 @@ pub struct ProviderResponse {
     pub model: String,
     pub output_text: String,
     pub finish_reason: String,
+    pub usage: ProviderUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderImageData {
+    pub b64_json: Option<String>,
+    pub url: Option<String>,
+    pub revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderImageResponse {
+    pub response_id: Option<String>,
+    pub model: String,
+    pub created: Option<u64>,
+    pub images: Vec<ProviderImageData>,
     pub usage: ProviderUsage,
 }
 
@@ -243,6 +269,23 @@ pub trait ProviderAdapter: Send + Sync {
         request: &ProviderRequest,
         context: &ProviderExecutionContext,
     ) -> Result<ProviderResponse, ProviderError>;
+
+    async fn execute_image_generation(
+        &self,
+        _request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        Err(ProviderError::new(
+            ProviderErrorKind::InvalidRequest,
+            "image generation is not supported by this provider adapter",
+            false,
+        )
+        .with_detail(
+            "provider_resource_id",
+            &context.endpoint.provider_resource_id,
+        )
+        .with_detail("adapter_boundary", "image_generation_unsupported"))
+    }
 }
 
 #[derive(Clone, Default)]
@@ -269,7 +312,7 @@ impl ProviderAdapterRegistry {
         let manifest = adapter.manifest();
         manifest.validate()?;
 
-        let provider_kind = manifest.provider_kind.to_string();
+        let provider_kind = normalize_provider_kind(manifest.provider_kind);
         let adapter_id = manifest.adapter_id.to_string();
 
         if self.adapters.contains_key(&provider_kind) {
@@ -289,7 +332,9 @@ impl ProviderAdapterRegistry {
 
     #[must_use]
     pub fn resolve(&self, provider_kind: &str) -> Option<Arc<dyn ProviderAdapter>> {
-        self.adapters.get(provider_kind).cloned()
+        self.adapters
+            .get(&normalize_provider_kind(provider_kind))
+            .cloned()
     }
 
     #[must_use]
@@ -314,6 +359,10 @@ impl ProviderAdapterRegistry {
             .map(|adapter| adapter.manifest())
             .collect()
     }
+}
+
+fn normalize_provider_kind(provider_kind: &str) -> String {
+    provider_kind.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -425,6 +474,16 @@ mod tests {
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.provider_kinds(), vec!["openai"]);
         assert_eq!(registry.manifests()[0].adapter_id, "fake-openai");
+    }
+
+    #[test]
+    fn registry_resolves_provider_kind_with_case_and_whitespace_drift() {
+        let mut registry = ProviderAdapterRegistry::new();
+
+        registry.register(Arc::new(FakeAdapter)).unwrap();
+
+        assert!(registry.resolve(" OpenAI ").is_some());
+        assert_eq!(registry.provider_kinds(), vec!["openai"]);
     }
 
     #[test]

@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use provider_traits::{
     AdapterLifecycleFamily, AdapterManifest, AdapterStability,
     CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
-    ProviderExecutionContext, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    ProviderExecutionContext, ProviderImageData, ProviderImageRequest, ProviderImageResponse,
+    ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
@@ -60,6 +61,11 @@ pub struct GatewayAdapter {
     transport: Arc<dyn HttpTransport>,
 }
 
+#[derive(Clone)]
+pub struct ChatGptWebAdapter {
+    inner: GatewayAdapter,
+}
+
 impl GatewayAdapter {
     #[must_use]
     pub fn new(transport: Arc<dyn HttpTransport>) -> Self {
@@ -68,6 +74,21 @@ impl GatewayAdapter {
 }
 
 impl Default for GatewayAdapter {
+    fn default() -> Self {
+        Self::new(Arc::new(ReqwestTransport::from_env()))
+    }
+}
+
+impl ChatGptWebAdapter {
+    #[must_use]
+    pub fn new(transport: Arc<dyn HttpTransport>) -> Self {
+        Self {
+            inner: GatewayAdapter::new(transport),
+        }
+    }
+}
+
+impl Default for ChatGptWebAdapter {
     fn default() -> Self {
         Self::new(Arc::new(ReqwestTransport::from_env()))
     }
@@ -85,6 +106,7 @@ impl ProviderAdapter for GatewayAdapter {
             supported_protocol_families: &[
                 "openai_chat",
                 "openai_responses",
+                "openai_images",
                 "anthropic_messages",
                 "gemini_generate_content",
             ],
@@ -153,6 +175,100 @@ impl ProviderAdapter for GatewayAdapter {
         })?;
 
         parse_chat_completion_response(body, request, context)
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        let headers = build_transit_headers(context)?;
+        let mut body = serde_json::Map::from_iter([
+            ("model".to_string(), Value::String(request.model.clone())),
+            ("prompt".to_string(), Value::String(request.prompt.clone())),
+        ]);
+        insert_optional_u32(&mut body, "n", request.n);
+        insert_optional_string(&mut body, "size", request.size.as_deref());
+        insert_optional_string(&mut body, "quality", request.quality.as_deref());
+        insert_optional_string(
+            &mut body,
+            "response_format",
+            request.response_format.as_deref(),
+        );
+
+        let response = self
+            .transport
+            .post_json(HttpRequest {
+                url: format!(
+                    "{}/images/generations",
+                    context.endpoint.endpoint_base_url.trim_end_matches('/')
+                ),
+                headers,
+                body: Value::Object(body),
+            })
+            .await
+            .map_err(|error| {
+                base_error(
+                    match error.kind {
+                        HttpTransportErrorKind::Timeout => ProviderErrorKind::Timeout,
+                        HttpTransportErrorKind::Network => ProviderErrorKind::Unavailable,
+                    },
+                    error.message,
+                    error.retryable,
+                    context,
+                )
+                .with_detail("target_kind", "transit_gateway")
+                .with_detail("transit_gateway", "openai_compatible")
+            })?;
+
+        if response.status >= 400 {
+            return Err(map_error_response(&response, context));
+        }
+
+        let body = response.body.as_deref().ok_or_else(|| {
+            base_error(
+                ProviderErrorKind::Protocol,
+                "transit gateway returned an empty image generation response body",
+                false,
+                context,
+            )
+        })?;
+
+        parse_image_generation_response(body, request, context)
+    }
+}
+
+#[async_trait]
+impl ProviderAdapter for ChatGptWebAdapter {
+    fn manifest(&self) -> AdapterManifest {
+        AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
+            adapter_id: "chatgpt-web-openai-compatible-v1",
+            provider_kind: "chatgpt_web",
+            display_name: "ChatGPT Web OpenAI-Compatible Reverse Proxy",
+            protocol_family: "openai_images",
+            supported_protocol_families: &["openai_chat", "openai_responses", "openai_images"],
+            lifecycle_family: AdapterLifecycleFamily::TransitGateway,
+            stability: AdapterStability::Experimental,
+            streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("env:GATEWAY_CHATGPT_WEB_*"),
+        }
+    }
+
+    async fn execute_chat(
+        &self,
+        request: &ProviderRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderResponse, ProviderError> {
+        self.inner.execute_chat(request, context).await
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        self.inner.execute_image_generation(request, context).await
     }
 }
 
@@ -258,6 +374,22 @@ fn build_transit_headers(
     Ok(prepare_transit_headers(context)?.headers)
 }
 
+fn insert_optional_string(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        body.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_optional_u32(body: &mut serde_json::Map<String, Value>, key: &str, value: Option<u32>) {
+    if let Some(value) = value {
+        body.insert(key.to_string(), Value::from(value));
+    }
+}
+
 fn ensure_no_transit_loop(context: &ProviderExecutionContext) -> Result<(), ProviderError> {
     for header in [
         TRANSIT_HEADER_HOP,
@@ -348,6 +480,50 @@ fn parse_chat_completion_response(
             input_tokens: usage.prompt_tokens,
             output_tokens: usage.completion_tokens,
             cached_input_tokens,
+        },
+    })
+}
+
+fn parse_image_generation_response(
+    body: &str,
+    request: &ProviderImageRequest,
+    context: &ProviderExecutionContext,
+) -> Result<ProviderImageResponse, ProviderError> {
+    let payload: OpenAiImageGenerationResponse = serde_json::from_str(body).map_err(|error| {
+        base_error(
+            ProviderErrorKind::Protocol,
+            format!("failed to decode transit gateway image generation response: {error}"),
+            false,
+            context,
+        )
+    })?;
+
+    if payload.data.is_empty() {
+        return Err(base_error(
+            ProviderErrorKind::Protocol,
+            "transit gateway image generation response did not include any images",
+            false,
+            context,
+        ));
+    }
+
+    Ok(ProviderImageResponse {
+        response_id: payload.id,
+        model: payload.model.unwrap_or_else(|| request.model.clone()),
+        created: payload.created,
+        images: payload
+            .data
+            .into_iter()
+            .map(|image| ProviderImageData {
+                b64_json: image.b64_json,
+                url: image.url,
+                revised_prompt: image.revised_prompt,
+            })
+            .collect(),
+        usage: ProviderUsage {
+            input_tokens: payload.usage.input_tokens(),
+            output_tokens: payload.usage.output_tokens(),
+            cached_input_tokens: payload.usage.cached_input_tokens(),
         },
     })
 }
@@ -554,6 +730,55 @@ struct OpenAiPromptTokenDetails {
     cached_tokens: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAiImageGenerationResponse {
+    id: Option<String>,
+    model: Option<String>,
+    created: Option<u64>,
+    #[serde(default)]
+    data: Vec<OpenAiImageData>,
+    #[serde(default)]
+    usage: OpenAiImageUsage,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAiImageData {
+    b64_json: Option<String>,
+    url: Option<String>,
+    revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct OpenAiImageUsage {
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
+    total_tokens: Option<u32>,
+    prompt_tokens: Option<u32>,
+    input_tokens_details: Option<OpenAiPromptTokenDetails>,
+}
+
+impl OpenAiImageUsage {
+    fn input_tokens(&self) -> u32 {
+        self.input_tokens.or(self.prompt_tokens).unwrap_or_default()
+    }
+
+    fn output_tokens(&self) -> u32 {
+        self.output_tokens
+            .or_else(|| {
+                self.total_tokens
+                    .map(|total| total.saturating_sub(self.input_tokens()))
+            })
+            .unwrap_or_default()
+    }
+
+    fn cached_input_tokens(&self) -> u32 {
+        self.input_tokens_details
+            .as_ref()
+            .and_then(|details| details.cached_tokens)
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 struct OpenAiChatMessage {
     role: String,
@@ -570,286 +795,4 @@ impl From<&provider_traits::ProviderMessage> for OpenAiChatMessage {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        GatewayAdapter, HttpRequest, HttpResponse, HttpTransport, HttpTransportError,
-        HttpTransportErrorKind, TRANSIT_HEADER_HOP, TRANSIT_HEADER_ORIGIN, TRANSIT_HEADER_PROVIDER,
-        TRANSIT_HEADER_VIA, prepare_transit_headers,
-    };
-    use provider_traits::{
-        ProviderAdapter, ProviderEndpoint, ProviderErrorKind, ProviderExecutionContext,
-        ProviderMessage, ProviderRequest,
-    };
-    use std::{collections::BTreeMap, sync::Arc};
-    use tokio::sync::Mutex;
-
-    #[derive(Default)]
-    struct MockTransport {
-        captured: Arc<Mutex<Vec<HttpRequest>>>,
-        response: Mutex<Option<Result<HttpResponse, HttpTransportError>>>,
-    }
-
-    impl MockTransport {
-        fn success(response: HttpResponse) -> Arc<Self> {
-            Arc::new(Self {
-                captured: Arc::new(Mutex::new(Vec::new())),
-                response: Mutex::new(Some(Ok(response))),
-            })
-        }
-
-        fn failure(error: HttpTransportError) -> Arc<Self> {
-            Arc::new(Self {
-                captured: Arc::new(Mutex::new(Vec::new())),
-                response: Mutex::new(Some(Err(error))),
-            })
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl HttpTransport for MockTransport {
-        async fn post_json(
-            &self,
-            request: HttpRequest,
-        ) -> Result<HttpResponse, HttpTransportError> {
-            self.captured.lock().await.push(request);
-            self.response
-                .lock()
-                .await
-                .take()
-                .expect("transport response should exist")
-        }
-    }
-
-    fn context() -> ProviderExecutionContext {
-        ProviderExecutionContext {
-            request_id: "req_test".to_string(),
-            trace_id: "trace_test".to_string(),
-            gateway_service_name: "gateway-api".to_string(),
-            gateway_origin: Some("https://router.example.com/v1".to_string()),
-            request_headers: BTreeMap::from([
-                ("accept".to_string(), "application/json".to_string()),
-                ("authorization".to_string(), "Bearer caller".to_string()),
-                ("idempotency-key".to_string(), "idem-123".to_string()),
-                ("x-request-id".to_string(), "client-req".to_string()),
-                ("x-forwarded-for".to_string(), "203.0.113.1".to_string()),
-            ]),
-            endpoint: ProviderEndpoint {
-                provider_resource_id: "prvrsrc_gateway_primary".to_string(),
-                endpoint_base_url: "https://gateway.example.com/v1".to_string(),
-                api_key: "gateway-secret".to_string(),
-                region: None,
-            },
-        }
-    }
-
-    fn request() -> ProviderRequest {
-        ProviderRequest {
-            model: "gpt-4.1-mini".to_string(),
-            messages: vec![ProviderMessage {
-                role: "user".to_string(),
-                content: "hello transit".to_string(),
-            }],
-            stream: false,
-        }
-    }
-
-    #[tokio::test]
-    async fn forwards_successful_request_with_header_policy() {
-        let transport = MockTransport::success(HttpResponse {
-            status: 200,
-            headers: BTreeMap::new(),
-            body: Some(
-                serde_json::json!({
-                    "id": "chatcmpl_gateway",
-                    "model": "gpt-4.1-mini",
-                    "choices": [{
-                        "message": {"content": "forwarded ok"},
-                        "finish_reason": "stop"
-                    }],
-                    "usage": {
-                        "prompt_tokens": 12,
-                        "completion_tokens": 7,
-                        "prompt_tokens_details": {"cached_tokens": 2}
-                    }
-                })
-                .to_string(),
-            ),
-        });
-        let adapter = GatewayAdapter::new(transport.clone());
-
-        let response = adapter.execute_chat(&request(), &context()).await.unwrap();
-
-        assert_eq!(response.output_text, "forwarded ok");
-        assert_eq!(response.usage.cached_input_tokens, 2);
-
-        let headers = {
-            let captured = transport.captured.lock().await;
-            captured[0]
-                .headers
-                .iter()
-                .cloned()
-                .collect::<BTreeMap<_, _>>()
-        };
-        assert_eq!(
-            headers.get("authorization"),
-            Some(&"Bearer gateway-secret".to_string())
-        );
-        assert_eq!(
-            headers.get("idempotency-key"),
-            Some(&"idem-123".to_string())
-        );
-        assert_eq!(headers.get(TRANSIT_HEADER_HOP), Some(&"1".to_string()));
-        assert_eq!(
-            headers.get(TRANSIT_HEADER_VIA),
-            Some(&"gateway-api".to_string())
-        );
-        assert_eq!(
-            headers.get(TRANSIT_HEADER_PROVIDER),
-            Some(&"prvrsrc_gateway_primary".to_string())
-        );
-        assert_eq!(
-            headers.get(TRANSIT_HEADER_ORIGIN),
-            Some(&"https://router.example.com/v1".to_string())
-        );
-        assert!(!headers.contains_key("x-forwarded-for"));
-    }
-
-    #[tokio::test]
-    async fn preserves_upstream_4xx_diagnostics() {
-        let adapter = GatewayAdapter::new(MockTransport::success(HttpResponse {
-            status: 429,
-            headers: BTreeMap::from([("x-request-id".to_string(), "upstream-req-1".to_string())]),
-            body: Some(
-                serde_json::json!({
-                    "error": {
-                        "message": "too many requests",
-                        "code": "rate_limit_exceeded",
-                        "type": "rate_limit_error"
-                    }
-                })
-                .to_string(),
-            ),
-        }));
-
-        let error = adapter
-            .execute_chat(&request(), &context())
-            .await
-            .unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::RateLimited);
-        assert_eq!(error.upstream_status_code, Some(429));
-        assert_eq!(error.upstream_code.as_deref(), Some("rate_limit_exceeded"));
-        assert_eq!(
-            error.details.get("upstream_request_id"),
-            Some(&"upstream-req-1".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn preserves_upstream_5xx_diagnostics() {
-        let adapter = GatewayAdapter::new(MockTransport::success(HttpResponse {
-            status: 503,
-            headers: BTreeMap::from([("request-id".to_string(), "gw-503".to_string())]),
-            body: Some(
-                serde_json::json!({
-                    "error": {
-                        "message": "upstream overloaded",
-                        "code": "gateway_overloaded"
-                    }
-                })
-                .to_string(),
-            ),
-        }));
-
-        let error = adapter
-            .execute_chat(&request(), &context())
-            .await
-            .unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::Unavailable);
-        assert!(error.retryable);
-        assert_eq!(
-            error.details.get("upstream_request_id"),
-            Some(&"gw-503".to_string())
-        );
-        assert_eq!(
-            error.details.get("target_kind"),
-            Some(&"transit_gateway".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn maps_transport_timeouts_to_retryable_timeout() {
-        let adapter = GatewayAdapter::new(MockTransport::failure(HttpTransportError {
-            kind: HttpTransportErrorKind::Timeout,
-            message: "deadline exceeded".to_string(),
-            retryable: true,
-        }));
-
-        let error = adapter
-            .execute_chat(&request(), &context())
-            .await
-            .unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::Timeout);
-        assert!(error.retryable);
-        assert_eq!(
-            error.details.get("provider_resource_id"),
-            Some(&"prvrsrc_gateway_primary".to_string())
-        );
-    }
-
-    #[test]
-    fn rejects_existing_transit_headers_to_prevent_loops() {
-        let mut context = context();
-        context
-            .request_headers
-            .insert(TRANSIT_HEADER_HOP.to_string(), "3".to_string());
-
-        let error = prepare_transit_headers(&context).unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::InvalidRequest);
-        assert_eq!(
-            error.details.get("loop_guard"),
-            Some(&"transit_header_present".to_string())
-        );
-    }
-
-    #[test]
-    fn rejects_self_targeted_gateway_origin() {
-        let mut context = context();
-        context.gateway_origin = Some("https://gateway.example.com/v1".to_string());
-
-        let error = prepare_transit_headers(&context).unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::InvalidRequest);
-        assert_eq!(
-            error.details.get("loop_guard"),
-            Some(&"self_target".to_string())
-        );
-    }
-
-    #[test]
-    fn header_policy_reports_forwarded_and_stripped_headers() {
-        let prepared = prepare_transit_headers(&context()).unwrap();
-
-        assert!(
-            prepared
-                .report
-                .forwarded_headers
-                .contains(&"accept".to_string())
-        );
-        assert!(
-            prepared
-                .report
-                .stripped_headers
-                .contains(&"authorization".to_string())
-        );
-        assert!(
-            prepared
-                .report
-                .rewritten_headers
-                .contains(&TRANSIT_HEADER_PROVIDER.to_string())
-        );
-    }
-}
+mod tests;

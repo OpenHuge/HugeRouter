@@ -34,7 +34,8 @@ use protocol_ir::{
 };
 use provider_traits::{
     AdapterLifecycleFamily, AdapterManifest, AdapterStability, ProviderAdapterRegistry,
-    ProviderEndpoint, ProviderError, ProviderErrorKind, ProviderExecutionContext, ProviderMessage,
+    ProviderEndpoint, ProviderError, ProviderErrorKind, ProviderExecutionContext,
+    ProviderImageData, ProviderImageRequest, ProviderImageResponse, ProviderMessage,
     ProviderRequest, ProviderResponse, ProviderTargetKind, StreamingSupport, TransitGatewayKind,
     TransitProviderMetadata,
 };
@@ -94,6 +95,20 @@ pub struct ResponsesApiInputContent {
     #[serde(rename = "type")]
     pub kind: String,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ImageGenerationRequest {
+    pub model: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub n: Option<u32>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub quality: Option<String>,
+    #[serde(default)]
+    pub response_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -159,6 +174,26 @@ pub struct ResponsesApiOutputContent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ImageGenerationResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub created: u64,
+    pub model: String,
+    pub data: Vec<ImageGenerationData>,
+    pub usage: UsageSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageGenerationData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub b64_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthResponse {
     pub service: &'static str,
     pub status: &'static str,
@@ -203,6 +238,16 @@ struct ExecutionSuccess {
     route_receipt: RouteReceipt,
     usage_event: UsageEvent,
     provider_response: ProviderResponse,
+    debug_headers: Option<GatewayDebugHeaders>,
+}
+
+#[derive(Debug, Clone)]
+struct ImageExecutionSuccess {
+    request_id: String,
+    trace_id: String,
+    config_snapshot_id: ConfigSnapshotId,
+    route_receipt: RouteReceipt,
+    image_response: ProviderImageResponse,
     debug_headers: Option<GatewayDebugHeaders>,
 }
 
@@ -291,6 +336,7 @@ pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/internal/provider-adapters", get(provider_adapters))
+        .route("/v1/images/generations", post(image_generations))
         .route("/v1/responses", post(responses))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(anthropic_messages))
@@ -406,6 +452,17 @@ async fn responses(
     }
 }
 
+async fn image_generations(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    Json(request): Json<ImageGenerationRequest>,
+) -> Response {
+    match process_image_generation_request(state, &headers, request).await {
+        Ok(success) => image_generation_success_response(&success),
+        Err(error) => error.into_response(),
+    }
+}
+
 async fn anthropic_messages(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -512,6 +569,18 @@ async fn process_responses_request(
 ) -> Result<ExecutionSuccess, GatewayError> {
     let normalized_request = normalize_responses_request(request, &next_request_context())?;
     process_normalized_request(state, headers, normalized_request).await
+}
+
+async fn process_image_generation_request(
+    state: GatewayState,
+    headers: &HeaderMap,
+    request: ImageGenerationRequest,
+) -> Result<ImageExecutionSuccess, GatewayError> {
+    let context = next_request_context();
+    let (normalized_request, provider_image_request) =
+        normalize_image_generation_request(request, &context)?;
+    process_normalized_image_request(state, headers, normalized_request, provider_image_request)
+        .await
 }
 
 #[allow(clippy::too_many_lines)]
@@ -664,6 +733,114 @@ async fn process_normalized_request(
     result
 }
 
+#[allow(clippy::too_many_lines)]
+async fn process_normalized_image_request(
+    state: GatewayState,
+    headers: &HeaderMap,
+    normalized_request: NormalizedChatRequest,
+    image_request: ProviderImageRequest,
+) -> Result<ImageExecutionSuccess, GatewayError> {
+    let context = next_request_context();
+    let bearer_token = extract_bearer_token(headers.get(AUTHORIZATION), &context)?;
+    let request_headers = normalize_forward_headers(headers);
+    let gateway_origin = infer_gateway_origin(headers);
+    let api_key_scope = state
+        .auth_store
+        .resolve(&bearer_token)
+        .await
+        .map_err(|message| {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.rejected",
+                "auth_invalid",
+                &context,
+                BTreeMap::from([("reason".to_string(), message.clone())]),
+            );
+            GatewayError::new(
+                StatusCode::UNAUTHORIZED,
+                normalized_error("auth_invalid", message, &context, false),
+                &context,
+            )
+        })?;
+
+    let active_config = state.config_store.load().await.map_err(|error| {
+        GatewayError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            normalized_error(
+                "route_not_available",
+                format!("active configuration is unavailable: {error}"),
+                &context,
+                true,
+            ),
+            &context,
+        )
+    })?;
+    ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
+    ensure_budget_allows_request(
+        &state,
+        &api_key_scope,
+        &active_config,
+        &normalized_request,
+        &context,
+    )
+    .await?;
+    let route = evaluate_route(&active_config, &normalized_request, &context);
+
+    if route.ranked_targets.is_empty() {
+        let normalized = normalized_error(
+            "route_not_available",
+            "no active provider targets can satisfy the image generation request".to_string(),
+            &context,
+            true,
+        )
+        .error;
+        let route_receipt = build_route_receipt(
+            &route,
+            &context,
+            &normalized_request,
+            None,
+            Some(normalized.clone()),
+            Vec::new(),
+        );
+        let debug_headers = maybe_debug_headers(
+            state.debug_headers_enabled,
+            &active_config.route_policy.route_policy_id,
+            None,
+            AdmissionResult::RejectedNoCandidate,
+            0,
+        );
+        publish_route_receipt_or_error(
+            &state,
+            &route,
+            &route_receipt,
+            Vec::new(),
+            &context,
+            debug_headers.clone(),
+        )
+        .await?;
+
+        return Err(GatewayError::with_route_receipt(
+            StatusCode::SERVICE_UNAVAILABLE,
+            route_receipt,
+            normalized,
+            &context,
+            Some(active_config.config_snapshot.config_snapshot_id.clone()),
+            debug_headers,
+        ));
+    }
+
+    execute_image_route(
+        state,
+        route,
+        normalized_request,
+        image_request,
+        context,
+        request_headers,
+        gateway_origin,
+    )
+    .await
+}
+
 fn normalize_forward_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
     headers
         .iter()
@@ -687,6 +864,267 @@ fn infer_gateway_origin(headers: &HeaderMap) -> Option<String> {
             let host = headers.get("host").and_then(|value| value.to_str().ok())?;
             Some(format!("{}://{}/v1", scheme.trim(), host.trim()))
         })
+}
+
+#[allow(clippy::too_many_lines)]
+async fn execute_image_route(
+    state: GatewayState,
+    route: RouteEvaluation,
+    request: NormalizedChatRequest,
+    image_request: ProviderImageRequest,
+    context: RequestContext,
+    request_headers: BTreeMap<String, String>,
+    gateway_origin: Option<String>,
+) -> Result<ImageExecutionSuccess, GatewayError> {
+    let mut fallback_transitions = Vec::new();
+    let mut provider_attempts = Vec::new();
+    let mut last_error = None;
+
+    for (index, ranked_target) in route.ranked_targets.iter().enumerate() {
+        let target = &ranked_target.target;
+        let Some(adapter) = state.adapter_registry.resolve(&target.resource.provider_id) else {
+            let provider_error = ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                format!(
+                    "no provider adapter registered for `{}`",
+                    target.resource.provider_id
+                ),
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                target.resource.provider_resource_id.as_str(),
+            );
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
+            last_error = Some((ranked_target.clone(), provider_error));
+            continue;
+        };
+        let adapter_manifest = adapter.manifest();
+        if !adapter_manifest.supports_protocol_family(&request.protocol_family) {
+            let provider_error = ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                format!(
+                    "provider adapter `{}` does not support protocol `{}`",
+                    adapter_manifest.adapter_id, request.protocol_family
+                ),
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                target.resource.provider_resource_id.as_str(),
+            )
+            .with_detail("adapter_id", adapter_manifest.adapter_id)
+            .with_detail("provider_kind", adapter_manifest.provider_kind)
+            .with_detail("protocol_family", request.protocol_family.as_str())
+            .with_detail("manifest_boundary", "protocol_family_unsupported");
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
+            last_error = Some((ranked_target.clone(), provider_error));
+            continue;
+        }
+
+        let provider_image_request = ProviderImageRequest {
+            model: target
+                .upstream_model
+                .clone()
+                .unwrap_or_else(|| image_request.model.clone()),
+            prompt: image_request.prompt.clone(),
+            n: image_request.n,
+            size: image_request.size.clone(),
+            quality: image_request.quality.clone(),
+            response_format: image_request.response_format.clone(),
+        };
+        let provider_context = ProviderExecutionContext {
+            request_id: context.request_id.clone(),
+            trace_id: context.trace_id.clone(),
+            gateway_service_name: GATEWAY_SERVICE_NAME.to_string(),
+            gateway_origin: gateway_origin.clone(),
+            request_headers: request_headers.clone(),
+            endpoint: ProviderEndpoint {
+                provider_resource_id: target.resource.provider_resource_id.as_str().to_string(),
+                endpoint_base_url: target.resource.endpoint_base_url.clone(),
+                api_key: target.api_key.clone(),
+                region: Some(target.resource.region.clone()),
+            },
+        };
+        let attempt_started_at = now_rfc3339();
+        let attempt_started = Instant::now();
+
+        match adapter
+            .execute_image_generation(&provider_image_request, &provider_context)
+            .await
+        {
+            Ok(image_response) => {
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    "succeeded",
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    "provider returned image output".to_string(),
+                ));
+                let fallback_count = fallback_transitions.len();
+                let route_receipt = build_route_receipt(
+                    &route,
+                    &context,
+                    &request,
+                    Some(ranked_target),
+                    None,
+                    fallback_transitions,
+                );
+                let debug_headers = maybe_debug_headers(
+                    state.debug_headers_enabled,
+                    &route.config_snapshot.route_policy_id,
+                    Some(target.resource.provider_resource_id.as_str()),
+                    AdmissionResult::Admitted,
+                    fallback_count,
+                );
+                publish_route_receipt_or_error(
+                    &state,
+                    &route,
+                    &route_receipt,
+                    provider_attempts.clone(),
+                    &context,
+                    debug_headers.clone(),
+                )
+                .await?;
+                let usage_event =
+                    build_image_usage_event(&route_receipt, target, &request, &image_response);
+                state
+                    .event_sink
+                    .publish(&route_receipt, &usage_event, &context)
+                    .await
+                    .map_err(|message| {
+                        GatewayError::with_route_receipt(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            route_receipt.clone(),
+                            normalized_error("usage_event_publish_failed", message, &context, true)
+                                .error,
+                            &context,
+                            Some(route.config_snapshot.config_snapshot_id.clone()),
+                            debug_headers.clone(),
+                        )
+                    })?;
+
+                publish_audit_best_effort(
+                    &state,
+                    "gateway.image_generation.succeeded",
+                    "admitted",
+                    &context,
+                    BTreeMap::from([(
+                        "route_receipt_id".to_string(),
+                        route_receipt.route_receipt_id.to_string(),
+                    )]),
+                );
+
+                return Ok(ImageExecutionSuccess {
+                    request_id: context.request_id.clone(),
+                    trace_id: context.trace_id.clone(),
+                    config_snapshot_id: route.config_snapshot.config_snapshot_id.clone(),
+                    route_receipt,
+                    image_response,
+                    debug_headers,
+                });
+            }
+            Err(error) => {
+                warn!(
+                    request_id = context.request_id,
+                    trace_id = context.trace_id,
+                    provider_resource_id = %target.resource.provider_resource_id,
+                    message = error.message,
+                    "provider image generation failed"
+                );
+
+                if let Some(next_target) = route.ranked_targets.get(index + 1)
+                    && error.retryable
+                {
+                    fallback_transitions.push(FallbackTransition {
+                        from_provider_resource_id: target.resource.provider_resource_id.clone(),
+                        to_provider_resource_id: next_target
+                            .target
+                            .resource
+                            .provider_resource_id
+                            .clone(),
+                        reason: format!("{}; retrying next ranked candidate", error.message),
+                    });
+                }
+
+                let has_more_candidates = index + 1 < route.ranked_targets.len();
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    if error.retryable && has_more_candidates {
+                        "retryable_failure"
+                    } else {
+                        "failed"
+                    },
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    error.message.clone(),
+                ));
+                last_error = Some((ranked_target.clone(), error.clone()));
+                if !error.retryable || !has_more_candidates {
+                    break;
+                }
+            }
+        }
+    }
+
+    let (ranked_target, provider_error) = last_error.expect("at least one target was evaluated");
+    let normalized = map_provider_error(&provider_error, &context);
+    let fallback_count = fallback_transitions.len();
+    let route_receipt = build_route_receipt(
+        &route,
+        &context,
+        &request,
+        Some(&ranked_target),
+        Some(normalized.error.clone()),
+        fallback_transitions,
+    );
+    let debug_headers = maybe_debug_headers(
+        state.debug_headers_enabled,
+        &route.config_snapshot.route_policy_id,
+        Some(ranked_target.target.resource.provider_resource_id.as_str()),
+        route.admission_result,
+        fallback_count,
+    );
+    publish_route_receipt_or_error(
+        &state,
+        &route,
+        &route_receipt,
+        provider_attempts,
+        &context,
+        debug_headers.clone(),
+    )
+    .await?;
+
+    Err(GatewayError::with_route_receipt(
+        status_for_error_code(&normalized.error.code),
+        route_receipt,
+        normalized.error,
+        &context,
+        Some(route.config_snapshot.config_snapshot_id.clone()),
+        debug_headers,
+    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1279,6 +1717,70 @@ fn normalize_responses_request(
 }
 
 #[allow(clippy::result_large_err)]
+fn normalize_image_generation_request(
+    request: ImageGenerationRequest,
+    context: &RequestContext,
+) -> Result<(NormalizedChatRequest, ProviderImageRequest), GatewayError> {
+    let mut validation_issues = Vec::new();
+
+    if request.model.trim().is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "model".to_string(),
+            message: "model must not be empty".to_string(),
+        });
+    }
+
+    if request.prompt.trim().is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "prompt".to_string(),
+            message: "prompt must not be empty".to_string(),
+        });
+    }
+
+    if request.n.is_some_and(|value| value == 0) {
+        validation_issues.push(ValidationIssue {
+            field: "n".to_string(),
+            message: "n must be greater than zero when provided".to_string(),
+        });
+    }
+
+    if !validation_issues.is_empty() {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            validation_error(
+                "image generation request validation failed",
+                validation_issues,
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    let model_alias = normalize_image_model_alias(&request.model);
+    let prompt = request.prompt.trim().to_string();
+    let normalized = NormalizedChatRequest {
+        model_alias: model_alias.clone(),
+        protocol_family: "openai_images".to_string(),
+        estimated_prompt_tokens: estimate_text_tokens(&prompt),
+        messages: vec![ProviderMessage {
+            role: "user".to_string(),
+            content: prompt.clone(),
+        }],
+    };
+    let provider_request = ProviderImageRequest {
+        model: model_alias,
+        prompt,
+        n: request.n,
+        size: request.size,
+        quality: request.quality,
+        response_format: request.response_format,
+    };
+
+    Ok((normalized, provider_request))
+}
+
+#[allow(clippy::result_large_err)]
 fn normalize_anthropic_request(
     request: AnthropicMessageRequest,
     context: &RequestContext,
@@ -1387,7 +1889,11 @@ fn evaluate_route(
     let mut ranked_targets = Vec::new();
 
     if active_config.route_policy.protocol_family != request.protocol_family
-        || active_config.route_policy.model_alias != request.model_alias
+        || !model_alias_matches(
+            &active_config.route_policy.protocol_family,
+            &active_config.route_policy.model_alias,
+            &request.model_alias,
+        )
     {
         return RouteEvaluation {
             config_snapshot: active_config.config_snapshot.clone(),
@@ -1515,6 +2021,14 @@ fn protocol_family_exclusion(
     }
 }
 
+fn model_alias_matches(protocol_family: &str, route_alias: &str, request_alias: &str) -> bool {
+    if protocol_family == "openai_images" {
+        normalize_image_model_alias(route_alias) == normalize_image_model_alias(request_alias)
+    } else {
+        route_alias == request_alias
+    }
+}
+
 fn route_capabilities_supported(
     route_policy: &RoutePolicy,
     target: &ProviderTargetRuntime,
@@ -1526,7 +2040,7 @@ fn route_capabilities_supported(
             "streaming" => target.resource.capabilities.supports_streaming,
             "tool_calling" | "tool_related" => target.resource.capabilities.supports_tool_calling,
             "json_mode" => target.resource.capabilities.supports_json_mode,
-            "chat_completions" => true,
+            "chat_completions" | "image_generation" => true,
             "realtime" => target.resource.capabilities.supports_realtime,
             "response_model_metadata" => {
                 target
@@ -1656,6 +2170,52 @@ fn build_usage_event(
     };
     let total_tokens = f64::from(usage.input_tokens + usage.output_tokens);
     let estimated_cost = (total_tokens / 1_000.0) * target.usd_per_1k_tokens;
+
+    UsageEvent {
+        usage_event_id: UsageEventId::parse(format!(
+            "usageevt_{}",
+            route_receipt
+                .route_receipt_id
+                .as_str()
+                .trim_start_matches("routercpt_")
+        ))
+        .expect("usage event id should be valid"),
+        route_receipt_id: route_receipt.route_receipt_id.clone(),
+        tenant_id: route_receipt.tenant_id.clone(),
+        project_id: route_receipt.project_id.clone(),
+        provider_resource_id: target.resource.provider_resource_id.clone(),
+        model_alias: request.model_alias.clone(),
+        phase: UsagePhase::Final,
+        idempotency_key: format!("{}:final", route_receipt.route_receipt_id),
+        usage,
+        estimated_cost: MonetaryAmount {
+            currency: "USD".to_string(),
+            amount: format!("{estimated_cost:.6}"),
+        },
+        recorded_at: now_rfc3339(),
+    }
+}
+
+fn build_image_usage_event(
+    route_receipt: &RouteReceipt,
+    target: &ProviderTargetRuntime,
+    request: &NormalizedChatRequest,
+    response: &ProviderImageResponse,
+) -> UsageEvent {
+    let usage = UsageMetrics {
+        input_tokens: response
+            .usage
+            .input_tokens
+            .max(request.estimated_prompt_tokens),
+        output_tokens: response.usage.output_tokens,
+        cached_input_tokens: response.usage.cached_input_tokens,
+    };
+    let total_tokens = f64::from(usage.input_tokens + usage.output_tokens);
+    let image_units = f64::from(u32::try_from(response.images.len().max(1)).unwrap_or(u32::MAX));
+    let estimated_cost = (total_tokens / 1_000.0).mul_add(
+        target.usd_per_1k_tokens,
+        image_units * image_usd_per_generation_for_target(target),
+    );
 
     UsageEvent {
         usage_event_id: UsageEventId::parse(format!(
@@ -2004,25 +2564,31 @@ fn next_request_context() -> RequestContext {
 fn estimate_prompt_tokens(messages: &[ChatMessage]) -> u32 {
     messages
         .iter()
-        .map(|message| {
-            u32::try_from(message.content.split_whitespace().count())
-                .unwrap_or(u32::MAX)
-                .max(1)
-                + 4
-        })
+        .map(|message| estimate_text_tokens(&message.content))
         .sum()
 }
 
 fn estimate_provider_messages_tokens(messages: &[ProviderMessage]) -> u32 {
     messages
         .iter()
-        .map(|message| {
-            u32::try_from(message.content.split_whitespace().count())
-                .unwrap_or(u32::MAX)
-                .max(1)
-                + 4
-        })
+        .map(|message| estimate_text_tokens(&message.content))
         .sum()
+}
+
+fn estimate_text_tokens(text: &str) -> u32 {
+    u32::try_from(text.split_whitespace().count())
+        .unwrap_or(u32::MAX)
+        .max(1)
+        + 4
+}
+
+fn normalize_image_model_alias(model: &str) -> String {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "chatgpt image 2" | "chatgpt-image-2" | "chatgpt_image_2" => {
+            "chatgpt-image-latest".to_string()
+        }
+        _ => model.trim().to_string(),
+    }
 }
 
 async fn ensure_budget_allows_request(
@@ -2286,6 +2852,48 @@ fn gemini_success_response(success: &ExecutionSuccess) -> Response {
         success.debug_headers.as_ref(),
     );
     response
+}
+
+fn image_generation_success_response(success: &ImageExecutionSuccess) -> Response {
+    let input_tokens = success.image_response.usage.input_tokens;
+    let output_tokens = success.image_response.usage.output_tokens;
+    let payload = ImageGenerationResponse {
+        id: success.image_response.response_id.clone(),
+        created: success
+            .image_response
+            .created
+            .unwrap_or_else(unix_timestamp_seconds),
+        model: success.image_response.model.clone(),
+        data: success
+            .image_response
+            .images
+            .iter()
+            .map(image_generation_data)
+            .collect(),
+        usage: UsageSummary {
+            prompt_tokens: input_tokens,
+            completion_tokens: output_tokens,
+            total_tokens: input_tokens + output_tokens,
+        },
+    };
+    let mut response = Json(payload).into_response();
+    insert_success_headers(
+        &mut response,
+        &success.request_id,
+        &success.trace_id,
+        &success.route_receipt,
+        &success.config_snapshot_id,
+        success.debug_headers.as_ref(),
+    );
+    response
+}
+
+fn image_generation_data(image: &ProviderImageData) -> ImageGenerationData {
+    ImageGenerationData {
+        b64_json: image.b64_json.clone(),
+        url: image.url.clone(),
+        revised_prompt: image.revised_prompt.clone(),
+    }
 }
 
 fn insert_success_headers(
@@ -2570,7 +3178,7 @@ impl ControlPlaneConfigStore {
                     target_kind: provider_target_kind(&resource.provider_id),
                     transit_metadata: transit_metadata_for_target(&resource, &payload.route_policy),
                     priority: u32::try_from(index + 1).unwrap_or(u32::MAX),
-                    upstream_model: upstream_model_for_target(&resource),
+                    upstream_model: upstream_model_for_target(&resource, &payload.route_policy),
                     api_key: api_key_for_target(&resource),
                     static_latency_score: static_latency_score_for_region(
                         &payload.route_policy.preferred_regions,
@@ -2991,7 +3599,7 @@ fn provider_resource_env_prefix(provider_resource_id: &str) -> String {
 }
 
 fn provider_target_kind(provider_id: &str) -> ProviderTargetKind {
-    if provider_id == "gateway" {
+    if matches!(provider_id, "gateway" | "chatgpt_web") {
         ProviderTargetKind::TransitGateway
     } else {
         ProviderTargetKind::Native
@@ -3002,15 +3610,23 @@ fn transit_metadata_for_target(
     resource: &ProviderResource,
     route_policy: &RoutePolicy,
 ) -> Option<TransitProviderMetadata> {
-    (resource.provider_id == "gateway").then(|| TransitProviderMetadata {
-        gateway_kind: TransitGatewayKind::OpenAiCompatible,
-        gateway_name: reqwest::Url::parse(&resource.endpoint_base_url)
-            .ok()
-            .and_then(|url| url.host_str().map(ToString::to_string))
-            .unwrap_or_else(|| "openai-compatible-gateway".to_string()),
-        route_cost_scope: route_policy.protocol_family.clone(),
-        transit_hops: 1,
-        preserves_error_diagnostics: true,
+    matches!(resource.provider_id.as_str(), "gateway" | "chatgpt_web").then(|| {
+        TransitProviderMetadata {
+            gateway_kind: TransitGatewayKind::OpenAiCompatible,
+            gateway_name: reqwest::Url::parse(&resource.endpoint_base_url)
+                .ok()
+                .and_then(|url| url.host_str().map(ToString::to_string))
+                .unwrap_or_else(|| {
+                    if resource.provider_id == "chatgpt_web" {
+                        "chatgpt-web-reverse-proxy".to_string()
+                    } else {
+                        "openai-compatible-gateway".to_string()
+                    }
+                }),
+            route_cost_scope: route_policy.protocol_family.clone(),
+            transit_hops: 1,
+            preserves_error_diagnostics: true,
+        }
     })
 }
 
@@ -3027,6 +3643,9 @@ fn api_key_for_target(resource: &ProviderResource) -> String {
                 .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
                 .unwrap_or_default(),
             "gateway" => std::env::var("GATEWAY_TRANSIT_API_KEY").unwrap_or_default(),
+            "chatgpt_web" => std::env::var("GATEWAY_CHATGPT_WEB_API_KEY")
+                .or_else(|_| std::env::var("GATEWAY_TRANSIT_API_KEY"))
+                .unwrap_or_default(),
             "gemini" => std::env::var("GATEWAY_GEMINI_API_KEY")
                 .or_else(|_| std::env::var("GEMINI_API_KEY"))
                 .or_else(|_| std::env::var("GOOGLE_API_KEY"))
@@ -3035,13 +3654,20 @@ fn api_key_for_target(resource: &ProviderResource) -> String {
         })
 }
 
-fn upstream_model_for_target(resource: &ProviderResource) -> Option<String> {
+fn upstream_model_for_target(
+    resource: &ProviderResource,
+    route_policy: &RoutePolicy,
+) -> Option<String> {
     let resource_prefix = provider_resource_env_prefix(resource.provider_resource_id.as_str());
     if let Ok(model) = std::env::var(format!("PROVIDER_RESOURCE_{resource_prefix}_MODEL")) {
         return Some(model);
     }
 
     match resource.provider_id.as_str() {
+        "openai" if route_policy.protocol_family == "openai_images" => Some(
+            std::env::var("GATEWAY_OPENAI_IMAGE_MODEL")
+                .unwrap_or_else(|_| "chatgpt-image-latest".to_string()),
+        ),
         "openai" => Some(
             std::env::var("GATEWAY_OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
         ),
@@ -3050,7 +3676,17 @@ fn upstream_model_for_target(resource: &ProviderResource) -> Option<String> {
                 .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string()),
         ),
         "bedrock" => std::env::var("GATEWAY_BEDROCK_MODEL").ok(),
+        "gateway" if route_policy.protocol_family == "openai_images" => {
+            std::env::var("GATEWAY_TRANSIT_IMAGE_MODEL").ok()
+        }
         "gateway" => std::env::var("GATEWAY_TRANSIT_MODEL").ok(),
+        "chatgpt_web" if route_policy.protocol_family == "openai_images" => Some(
+            std::env::var("GATEWAY_CHATGPT_WEB_IMAGE_MODEL")
+                .unwrap_or_else(|_| "chatgpt-image-latest".to_string()),
+        ),
+        "chatgpt_web" => std::env::var("GATEWAY_CHATGPT_WEB_MODEL")
+            .or_else(|_| std::env::var("GATEWAY_TRANSIT_MODEL"))
+            .ok(),
         "gemini" => Some(
             std::env::var("GATEWAY_GEMINI_MODEL")
                 .unwrap_or_else(|_| "gemini-1.5-flash-latest".to_string()),
@@ -3080,6 +3716,12 @@ fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderR
     if resource.provider_id == "gateway" {
         return transit_usd_per_1k_tokens_for_route(route_policy);
     }
+    if resource.provider_id == "chatgpt_web" {
+        return std::env::var("GATEWAY_CHATGPT_WEB_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| transit_usd_per_1k_tokens_for_route(route_policy));
+    }
 
     match resource.provider_id.as_str() {
         "openai" => std::env::var("GATEWAY_OPENAI_USD_PER_1K_TOKENS")
@@ -3099,6 +3741,29 @@ fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderR
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.008),
         _ => 0.02,
+    }
+}
+
+fn image_usd_per_generation_for_target(target: &ProviderTargetRuntime) -> f64 {
+    if target.resource.provider_id == "gateway" {
+        return std::env::var("GATEWAY_TRANSIT_OPENAI_IMAGE_USD_PER_GENERATION")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.04);
+    }
+    if target.resource.provider_id == "chatgpt_web" {
+        return std::env::var("GATEWAY_CHATGPT_WEB_IMAGE_USD_PER_GENERATION")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.04);
+    }
+
+    match target.resource.provider_id.as_str() {
+        "openai" => std::env::var("GATEWAY_OPENAI_IMAGE_USD_PER_GENERATION")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.04),
+        _ => 0.05,
     }
 }
 

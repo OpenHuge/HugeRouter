@@ -28,6 +28,9 @@ pub enum ProtocolFamily {
     #[serde(rename = "openai_responses")]
     #[schema(rename = "openai_responses")]
     OpenAiResponses,
+    #[serde(rename = "openai_images")]
+    #[schema(rename = "openai_images")]
+    OpenAiImages,
     #[serde(rename = "mcp_streamable_http")]
     #[schema(rename = "mcp_streamable_http")]
     McpStreamableHttp,
@@ -1554,7 +1557,7 @@ export const COMPATIBILITY_RULES = [\n\
   'Serialization key changes are always breaking for v1 contracts.',\n\
   'Checked-in schemas, examples, and generated package metadata must be regenerated together.',\n\
 ] as const;\n\
-export const PROTOCOL_FAMILIES = ['openai_chat', 'openai_responses', 'mcp_streamable_http', 'realtime_webrtc', 'anthropic_messages', 'gemini_generate_content'] as const;\n\
+export const PROTOCOL_FAMILIES = ['openai_chat', 'openai_responses', 'openai_images', 'mcp_streamable_http', 'realtime_webrtc', 'anthropic_messages', 'gemini_generate_content'] as const;\n\
 export const ADMISSION_RESULTS = ['admitted', 'rejected_budget', 'rejected_rate_limit', 'rejected_concurrency', 'rejected_policy', 'rejected_no_candidate'] as const;\n\
 export const PROVIDER_RESOURCE_STATUSES = ['active', 'disabled', 'draining', 'quarantined', 'deleted'] as const;\n\
 export const USAGE_PHASES = ['reserve', 'partial', 'final', 'release'] as const;\n",
@@ -2612,13 +2615,15 @@ mod tests {
     #[test]
     fn request_envelope_supports_new_protocol_families() {
         let families = serde_json::to_value(vec![
+            ProtocolFamily::OpenAiImages,
             ProtocolFamily::AnthropicMessages,
             ProtocolFamily::GeminiGenerateContent,
         ])
         .unwrap();
 
-        assert_eq!(families[0], "anthropic_messages");
-        assert_eq!(families[1], "gemini_generate_content");
+        assert_eq!(families[0], "openai_images");
+        assert_eq!(families[1], "anthropic_messages");
+        assert_eq!(families[2], "gemini_generate_content");
     }
 
     #[test]
