@@ -39,7 +39,7 @@ use core_domain::{
 };
 use metering::{
     AdditionalUsageDimensions, PricingCatalog, PricingSource, default_budget_micros,
-    default_catalog, quote_usage_with_additions,
+    default_catalog, quote_usage_for_catalog, quote_usage_with_additions,
 };
 use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
@@ -1890,14 +1890,20 @@ impl StoreMode {
     }
 
     pub async fn get_pricing_catalog(&self) -> Result<PricingCatalogResponse> {
-        Ok(sample_pricing_catalog_response())
+        match self {
+            Self::Memory(_) => Ok(pricing_catalog_response(default_catalog())),
+            Self::Postgres(store) => store.get_pricing_catalog().await,
+        }
     }
 
     pub async fn create_pricing_simulation(
         &self,
         request: PricingSimulationRequest,
     ) -> Result<PricingSimulationResponse> {
-        Ok(simulate_pricing(request))
+        match self {
+            Self::Memory(_) => Ok(simulate_pricing(request)),
+            Self::Postgres(store) => store.create_pricing_simulation(request).await,
+        }
     }
 
     pub async fn create_billing_export(
@@ -2203,6 +2209,8 @@ impl PostgresStore {
         .bind(seed.active_config_snapshot_id)
         .execute(&self.pool)
         .await?;
+
+        seed_pricing_catalog(&self.pool, &default_catalog()).await?;
 
         for user_seed in seed.users {
             let user_id = user_seed.user.user_id.as_str().to_string();
@@ -3362,6 +3370,72 @@ impl PostgresStore {
         Ok(UsageBreakdownResponse { data, next_cursor })
     }
 
+    async fn get_pricing_catalog(&self) -> Result<PricingCatalogResponse> {
+        Ok(pricing_catalog_response(self.load_pricing_catalog().await?))
+    }
+
+    async fn create_pricing_simulation(
+        &self,
+        request: PricingSimulationRequest,
+    ) -> Result<PricingSimulationResponse> {
+        let catalog = self.load_pricing_catalog().await?;
+        Ok(simulate_pricing_with_catalog(&catalog, request))
+    }
+
+    async fn load_pricing_catalog(&self) -> Result<PricingCatalog> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                catalog_id,
+                catalog_version,
+                currency,
+                dimension,
+                provider_id,
+                model_alias,
+                region,
+                micros_per_unit,
+                billable_micros_per_unit,
+                unit_denominator,
+                source
+            FROM pricing_catalog_entries
+            ORDER BY provider_id, model_alias NULLS FIRST, region NULLS FIRST, dimension
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        if rows.is_empty() {
+            return Ok(default_catalog());
+        }
+
+        let catalog_id = rows[0].get::<String, _>("catalog_id");
+        let catalog_version = u32::try_from(rows[0].get::<i32, _>("catalog_version"))?;
+        let currency = rows[0].get::<String, _>("currency");
+        let mut entries = Vec::with_capacity(rows.len());
+
+        for row in rows {
+            entries.push(metering::PricingCatalogEntry {
+                catalog_id: row.get("catalog_id"),
+                catalog_version: u32::try_from(row.get::<i32, _>("catalog_version"))?,
+                dimension: parse_pricing_dimension(row.get::<String, _>("dimension").as_str())?,
+                provider_id: row.get("provider_id"),
+                model_alias: row.get("model_alias"),
+                region: row.get("region"),
+                micros_per_unit: row.get("micros_per_unit"),
+                billable_micros_per_unit: row.get("billable_micros_per_unit"),
+                unit_denominator: u64::try_from(row.get::<i64, _>("unit_denominator"))?,
+                source: parse_pricing_source(row.get::<String, _>("source").as_str())?,
+            });
+        }
+
+        Ok(PricingCatalog {
+            catalog_id,
+            catalog_version,
+            currency,
+            entries,
+        })
+    }
+
     async fn get_balance_projection(
         &self,
         tenant_id: &str,
@@ -4500,6 +4574,48 @@ fn simulate_pricing(request: PricingSimulationRequest) -> PricingSimulationRespo
     }
 }
 
+fn simulate_pricing_with_catalog(
+    catalog: &PricingCatalog,
+    request: PricingSimulationRequest,
+) -> PricingSimulationResponse {
+    let quote = quote_usage_for_catalog(
+        catalog,
+        &request.provider_id,
+        request.model_alias.as_str().into(),
+        request.region.as_deref(),
+        &request.usage,
+        AdditionalUsageDimensions {
+            image_generation_units: request.image_generation_units.unwrap_or_default(),
+            audio_seconds: request.audio_seconds.unwrap_or_default(),
+        },
+    );
+
+    PricingSimulationResponse {
+        catalog_id: quote.catalog_id,
+        catalog_version: quote.catalog_version,
+        currency: quote.currency.clone(),
+        provider_cost: format_monetary_amount(&quote.currency, quote.provider_cost_micros),
+        billable_price: format_monetary_amount(&quote.currency, quote.billable_cost_micros),
+        line_items: quote
+            .line_items
+            .into_iter()
+            .map(|line_item| PricingSimulationLineItem {
+                dimension: pricing_dimension_slug(line_item.dimension),
+                units: line_item.units,
+                provider_cost: format_monetary_amount(
+                    &quote.currency,
+                    line_item.provider_cost_micros,
+                ),
+                billable_price: format_monetary_amount(
+                    &quote.currency,
+                    line_item.billable_cost_micros,
+                ),
+                rate_source: line_item.rate_source,
+            })
+            .collect(),
+    }
+}
+
 fn sample_usage_summary_response(
     tenant_id: &str,
     project_id: Option<&str>,
@@ -4646,8 +4762,7 @@ fn sample_billing_export_job_response(
     }
 }
 
-fn sample_pricing_catalog_response() -> PricingCatalogResponse {
-    let catalog: PricingCatalog = default_catalog();
+fn pricing_catalog_response(catalog: PricingCatalog) -> PricingCatalogResponse {
     PricingCatalogResponse {
         catalog_id: catalog.catalog_id,
         catalog_version: catalog.catalog_version,
@@ -4686,6 +4801,74 @@ fn pricing_source_slug(source: PricingSource) -> String {
         PricingSource::TenantOverride => "tenant_override".to_string(),
         PricingSource::Promotional => "promotional".to_string(),
     }
+}
+
+fn parse_pricing_dimension(value: &str) -> Result<metering::PricingDimension> {
+    match value {
+        "input_tokens" => Ok(metering::PricingDimension::InputTokens),
+        "output_tokens" => Ok(metering::PricingDimension::OutputTokens),
+        "cached_input_tokens" => Ok(metering::PricingDimension::CachedInputTokens),
+        "image_generations" => Ok(metering::PricingDimension::ImageGenerations),
+        "audio_seconds" => Ok(metering::PricingDimension::AudioSeconds),
+        _ => Err(anyhow!("unknown pricing dimension `{value}`")),
+    }
+}
+
+fn parse_pricing_source(value: &str) -> Result<PricingSource> {
+    match value {
+        "platform_catalog" => Ok(PricingSource::PlatformCatalog),
+        "provider_native" => Ok(PricingSource::ProviderNative),
+        "contract_override" => Ok(PricingSource::ContractOverride),
+        "tenant_override" => Ok(PricingSource::TenantOverride),
+        "promotional" => Ok(PricingSource::Promotional),
+        _ => Err(anyhow!("unknown pricing source `{value}`")),
+    }
+}
+
+async fn seed_pricing_catalog(pool: &Pool<Postgres>, catalog: &PricingCatalog) -> Result<()> {
+    for entry in &catalog.entries {
+        sqlx::query(
+            r#"
+            INSERT INTO pricing_catalog_entries (
+                catalog_id,
+                catalog_version,
+                currency,
+                dimension,
+                provider_id,
+                model_alias,
+                region,
+                micros_per_unit,
+                billable_micros_per_unit,
+                unit_denominator,
+                source
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (catalog_id, catalog_version, dimension, provider_id, model_alias_key, region_key)
+            DO UPDATE SET
+                currency = EXCLUDED.currency,
+                micros_per_unit = EXCLUDED.micros_per_unit,
+                billable_micros_per_unit = EXCLUDED.billable_micros_per_unit,
+                unit_denominator = EXCLUDED.unit_denominator,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&entry.catalog_id)
+        .bind(i32::try_from(entry.catalog_version)?)
+        .bind(&catalog.currency)
+        .bind(pricing_dimension_slug(entry.dimension))
+        .bind(&entry.provider_id)
+        .bind(entry.model_alias.as_deref())
+        .bind(entry.region.as_deref())
+        .bind(entry.micros_per_unit)
+        .bind(entry.billable_micros_per_unit)
+        .bind(i64::try_from(entry.unit_denominator)?)
+        .bind(pricing_source_slug(entry.source))
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
 }
 
 fn maybe_complete_memory_export_job(
@@ -5764,6 +5947,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "login_flows",
     "route_receipts",
     "billing_export_jobs",
+    "pricing_catalog_entries",
 ];
 
 const MIGRATIONS: &[&str] = &[
@@ -5873,5 +6057,30 @@ const MIGRATIONS: &[&str] = &[
         error_message TEXT NULL,
         export_content TEXT NULL,
         content_type TEXT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
+        catalog_id TEXT NOT NULL,
+        catalog_version INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        dimension TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        model_alias TEXT NULL,
+        model_alias_key TEXT GENERATED ALWAYS AS (COALESCE(model_alias, '')) STORED,
+        region TEXT NULL,
+        region_key TEXT GENERATED ALWAYS AS (COALESCE(region, '')) STORED,
+        micros_per_unit BIGINT NOT NULL,
+        billable_micros_per_unit BIGINT NOT NULL,
+        unit_denominator BIGINT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (
+            catalog_id,
+            catalog_version,
+            dimension,
+            provider_id,
+            model_alias_key,
+            region_key
+        )
     )",
 ];
