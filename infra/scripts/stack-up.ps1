@@ -12,9 +12,9 @@ function Get-ServiceList {
 
   switch ($RequestedMode) {
     'core' { return @('postgres', 'redis', 'nats') }
-    'runtime' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker') }
+    'runtime' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker', 'routing-worker', 'edge-probe', 'audit-worker', 'notification-worker') }
     'observability' { return @('otel-collector', 'alertmanager', 'prometheus', 'grafana') }
-    'full' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker', 'otel-collector', 'alertmanager', 'prometheus', 'grafana') }
+    'full' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker', 'routing-worker', 'edge-probe', 'audit-worker', 'notification-worker', 'otel-collector', 'alertmanager', 'prometheus', 'grafana') }
     default { throw "Unsupported stack mode: $RequestedMode" }
   }
 }
@@ -52,4 +52,4 @@ if ($env:HUGE_ROUTER_STACK_SKIP_INIT -ne 'true') {
   & (Join-Path $PSScriptRoot 'bootstrap.ps1') -Mode $Mode
 }
 
-docker compose @composeArgs up -d --remove-orphans control-plane-api gateway-api ledger-worker route-receipt-worker
+docker compose @composeArgs up -d --remove-orphans control-plane-api gateway-api ledger-worker route-receipt-worker routing-worker edge-probe audit-worker notification-worker

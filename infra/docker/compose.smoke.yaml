@@ -19,3 +19,15 @@ services:
 
   route-receipt-worker:
     restart: "no"
+
+  routing-worker:
+    restart: "no"
+
+  edge-probe:
+    restart: "no"
+
+  audit-worker:
+    restart: "no"
+
+  notification-worker:
+    restart: "no"

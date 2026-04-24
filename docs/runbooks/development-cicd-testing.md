@@ -118,6 +118,8 @@ just stack-up-full  -> core services plus the `observability` profile
 just stack-wait     -> wait for the selected stack mode to report healthy containers
 ```
 
+The runtime Compose profile includes `routing-worker`, `edge-probe`, `audit-worker`, and `notification-worker` alongside the gateway, control plane, ledger, and route receipt workers. `EDGE_PROBE_PROBE_MODE=cheap_health` emits non-billable health observations by default; switch it to `billable_synthetic` only for explicit paid synthetic checks. Routing incidents include the probe mode so later alerting and cost controls can distinguish the source of health changes.
+
 The exact command names can evolve, but the repository should preserve the principle that developers can discover one canonical entry point per workflow.
 
 `pnpm js:test` and `pnpm test` must run `scripts/verify-workspace-tests.mjs` before package tests. Placeholder packages remain listed in `scripts/workspace-test-policy.json` and are reported as explicitly not counted as coverage.
