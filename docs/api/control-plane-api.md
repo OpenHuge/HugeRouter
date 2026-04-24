@@ -117,6 +117,35 @@ POST   /v1/config-snapshots/:configSnapshotId/activate
 }
 ```
 
+Bedrock provider resources use the same payload shape with `provider_id="bedrock"` and a regional Bedrock Runtime endpoint:
+
+```json
+{
+  "provider_resource_id": "prvrsrc_bedrock_claude",
+  "provider_id": "bedrock",
+  "name": "Bedrock Claude",
+  "status": "active",
+  "provenance_class": "official_api",
+  "credential_owner_type": "platform",
+  "deployment_scope": "shared",
+  "region": "us-east-1",
+  "endpoint_base_url": "https://bedrock-runtime.us-east-1.amazonaws.com",
+  "auth_kind": "api_key",
+  "health_state": "healthy",
+  "capabilities": {
+    "supports_streaming": false,
+    "supports_tool_calling": false,
+    "supports_json_mode": false,
+    "supports_realtime": false,
+    "supports_response_model_metadata": true
+  },
+  "supported_protocol_families": ["openai_chat"],
+  "is_transit_gateway": false
+}
+```
+
+The native Bedrock adapter ignores the generic provider API key and uses the AWS SDK credential chain for credentials and SigV4 signing.
+
 ### 21.3.3 Route Simulation Request and Response
 
 `POST /v1/route-simulations`

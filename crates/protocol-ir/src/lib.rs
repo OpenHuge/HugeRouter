@@ -1371,6 +1371,7 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let tenant = sample_tenant();
     let project = sample_project();
     let provider_resource = sample_provider_resource();
+    let bedrock_provider_resource = sample_bedrock_provider_resource();
     let route_policy = sample_route_policy();
     let config_snapshot = sample_config_snapshot();
     let route_receipt = sample_route_receipt();
@@ -1419,7 +1420,7 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         example_artifact(
             "schemas/examples/control-plane/provider-resources.response.json",
             &ProviderResourcesResponse {
-                data: vec![provider_resource],
+                data: vec![provider_resource, bedrock_provider_resource],
             },
         )?,
         example_artifact(
@@ -1809,6 +1810,39 @@ fn sample_provider_resource() -> ProviderResource {
         version: 7,
         created_at: "2026-04-20T00:00:00Z".to_string(),
         updated_at: "2026-04-21T11:15:00Z".to_string(),
+    }
+}
+
+fn sample_bedrock_provider_resource() -> ProviderResource {
+    ProviderResource {
+        provider_resource_id: ProviderResourceId::parse("prvrsrc_bedrock_claude").unwrap(),
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: Some(ProjectId::parse("proj_acme_ops").unwrap()),
+        provider_id: "bedrock".to_string(),
+        name: "Bedrock Claude".to_string(),
+        status: core_domain::ProviderResourceStatus::Active,
+        provenance_class: core_domain::ProvenanceClass::OfficialApi,
+        credential_owner_type: core_domain::CredentialOwnerType::Platform,
+        deployment_scope: core_domain::DeploymentScope::Shared,
+        region: "us-east-1".to_string(),
+        endpoint_base_url: "https://bedrock-runtime.us-east-1.amazonaws.com".to_string(),
+        auth_kind: core_domain::AuthKind::ApiKey,
+        health_state: core_domain::HealthState::Healthy,
+        health_message: Some("aws credential chain available".to_string()),
+        quarantine_reason: None,
+        budget_policy_id: None,
+        capabilities: core_domain::ProviderCapabilities {
+            supports_streaming: false,
+            supports_tool_calling: false,
+            supports_json_mode: false,
+            supports_realtime: false,
+            supports_response_model_metadata: true,
+        },
+        supported_protocol_families: vec!["openai_chat".to_string()],
+        is_transit_gateway: false,
+        version: 1,
+        created_at: "2026-04-22T00:00:00Z".to_string(),
+        updated_at: "2026-04-22T00:00:00Z".to_string(),
     }
 }
 
@@ -2297,6 +2331,24 @@ fn sample_pricing_catalog_response() -> PricingCatalogResponse {
                 region: Some("global".to_string()),
                 micros_per_unit: 1_500,
                 unit_denominator: 1,
+                source: "provider_native".to_string(),
+            },
+            PricingCatalogEntry {
+                dimension: "input_tokens".to_string(),
+                provider_id: "bedrock".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 6_000,
+                unit_denominator: 1_000,
+                source: "provider_native".to_string(),
+            },
+            PricingCatalogEntry {
+                dimension: "output_tokens".to_string(),
+                provider_id: "bedrock".to_string(),
+                model_alias: None,
+                region: Some("global".to_string()),
+                micros_per_unit: 30_000,
+                unit_denominator: 1_000,
                 source: "provider_native".to_string(),
             },
         ],

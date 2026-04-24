@@ -3895,6 +3895,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn route_simulation_can_select_bedrock_provider() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/route-simulations")
+                    .header(COOKIE, &admin_cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "tenant_id": "tenant_acme",
+                            "project_id": "proj_acme_ops",
+                            "credential_scope": "cred_demo",
+                            "protocol_family": "openai_chat",
+                            "model_alias": "claude-sonnet",
+                            "required_capabilities": ["chat_completions"],
+                            "region": "us-east-1",
+                            "expected_prompt_tokens": 64,
+                            "expected_max_output_tokens": 128,
+                            "traffic_class": "interactive"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["admission_result"], "admitted");
+        assert_eq!(body["config_snapshot_id"], "cfgsnap_bedrock_ops_v1");
+        assert_eq!(body["selected_target"], "prvrsrc_bedrock_claude");
+        assert_eq!(
+            body["eligible_candidates"][0]["provider_resource_id"],
+            "prvrsrc_bedrock_claude"
+        );
+        assert!(body["excluded_candidates"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn route_simulation_uses_latest_activated_project_snapshot() {
         let (_state, admin_cookie, app) = platform_admin_app().await;
 
@@ -5021,7 +5067,11 @@ mod tests {
         .await;
         assert_eq!(
             ids(&provider_resources["data"], "provider_resource_id"),
-            vec!["prvrsrc_openai_primary", "prvrsrc_openai_backup"]
+            vec![
+                "prvrsrc_openai_primary",
+                "prvrsrc_openai_backup",
+                "prvrsrc_bedrock_claude"
+            ]
         );
 
         let route_policies = response_json(
@@ -5038,7 +5088,11 @@ mod tests {
         .await;
         assert_eq!(
             ids(&route_policies["data"], "route_policy_id"),
-            vec!["routepol_openai_chat_default", "routepol_acme_support"]
+            vec![
+                "routepol_openai_chat_default",
+                "routepol_acme_support",
+                "routepol_bedrock_claude_text"
+            ]
         );
 
         let snapshots = response_json(
@@ -5055,7 +5109,7 @@ mod tests {
         .await;
         assert_eq!(
             ids(&snapshots["data"], "config_snapshot_id"),
-            vec!["cfgsnap_gateway_v1"]
+            vec!["cfgsnap_gateway_v1", "cfgsnap_bedrock_ops_v1"]
         );
 
         let route_receipts = response_json(
@@ -5442,7 +5496,7 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        assert_eq!(ids(&providers["data"], "provider_resource_id").len(), 3);
+        assert_eq!(ids(&providers["data"], "provider_resource_id").len(), 4);
 
         let route_policies = response_json(
             app.clone()
@@ -5456,7 +5510,7 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        assert_eq!(ids(&route_policies["data"], "route_policy_id").len(), 3);
+        assert_eq!(ids(&route_policies["data"], "route_policy_id").len(), 4);
 
         let route_receipts = response_json(
             app.clone()

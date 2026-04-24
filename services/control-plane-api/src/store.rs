@@ -463,6 +463,36 @@ impl SeedData {
             created_at: now.clone(),
             updated_at: now.clone(),
         };
+        let bedrock_claude = ProviderResource {
+            provider_resource_id: ProviderResourceId::parse("prvrsrc_bedrock_claude").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            project_id: Some(proj_ops.project_id.clone()),
+            provider_id: "bedrock".to_string(),
+            name: "Bedrock Claude".to_string(),
+            status: ProviderResourceStatus::Active,
+            provenance_class: ProvenanceClass::OfficialApi,
+            credential_owner_type: CredentialOwnerType::Platform,
+            deployment_scope: DeploymentScope::Shared,
+            region: "us-east-1".to_string(),
+            endpoint_base_url: "https://bedrock-runtime.us-east-1.amazonaws.com".to_string(),
+            auth_kind: AuthKind::ApiKey,
+            health_state: HealthState::Healthy,
+            health_message: Some("aws credential chain available".to_string()),
+            quarantine_reason: None,
+            budget_policy_id: None,
+            capabilities: ProviderCapabilities {
+                supports_streaming: false,
+                supports_tool_calling: false,
+                supports_json_mode: false,
+                supports_realtime: false,
+                supports_response_model_metadata: true,
+            },
+            supported_protocol_families: vec!["openai_chat".to_string()],
+            is_transit_gateway: false,
+            version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
         let northstar_openai = ProviderResource {
             provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_research").unwrap(),
             tenant_id: tenant_northstar.tenant_id.clone(),
@@ -518,6 +548,18 @@ impl SeedData {
             created_at: now.clone(),
             updated_at: now.clone(),
         };
+        let route_bedrock = RoutePolicy {
+            route_policy_id: RoutePolicyId::parse("routepol_bedrock_claude_text").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            display_name: "Acme Bedrock Claude Text".to_string(),
+            protocol_family: "openai_chat".to_string(),
+            model_alias: "claude-sonnet".to_string(),
+            required_capabilities: vec!["chat_completions".to_string()],
+            preferred_regions: vec!["us-east-1".to_string()],
+            version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
         let route_research = RoutePolicy {
             route_policy_id: RoutePolicyId::parse("routepol_northstar_research").unwrap(),
             tenant_id: tenant_northstar.tenant_id.clone(),
@@ -543,6 +585,17 @@ impl SeedData {
                 openai_backup.provider_resource_id.clone(),
             ],
             route_policy_id: route_default.route_policy_id.clone(),
+            budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
+        };
+        let config_bedrock = ConfigSnapshot {
+            config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_bedrock_ops_v1").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            project_id: proj_ops.project_id.clone(),
+            revision: 1,
+            status: ConfigSnapshotStatus::Active,
+            activated_at: Some(now.clone()),
+            provider_resource_ids: vec![bedrock_claude.provider_resource_id.clone()],
+            route_policy_id: route_bedrock.route_policy_id.clone(),
             budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
         };
         let config_research = ConfigSnapshot {
@@ -694,9 +747,14 @@ impl SeedData {
         Self {
             tenants: vec![tenant_platform, tenant_acme, tenant_northstar],
             projects: vec![proj_core, proj_ops, proj_support, proj_research],
-            provider_resources: vec![openai_primary, openai_backup, northstar_openai],
-            route_policies: vec![route_default, route_support, route_research],
-            config_snapshots: vec![config_active.clone(), config_research],
+            provider_resources: vec![
+                openai_primary,
+                openai_backup,
+                bedrock_claude,
+                northstar_openai,
+            ],
+            route_policies: vec![route_default, route_support, route_bedrock, route_research],
+            config_snapshots: vec![config_active.clone(), config_bedrock, config_research],
             merchant_shops: vec![merchant_shop],
             card_products: vec![card_product],
             trial_connections: vec![trial_connection],
@@ -1959,6 +2017,7 @@ impl StoreMode {
                 resource.provider_id = provider_id.to_string();
                 resource.supported_protocol_families = match provider_id {
                     "anthropic" => vec!["anthropic_messages".to_string()],
+                    "bedrock" => vec!["openai_chat".to_string()],
                     "gemini" => vec!["gemini_generate_content".to_string()],
                     _ => vec!["openai_chat".to_string(), "openai_responses".to_string()],
                 };
