@@ -48,13 +48,13 @@ const BUILTIN_PROVIDER_PLUGINS: &[ProviderAdapterPlugin] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProviderRegistryConfig {
+pub struct ProviderRegistryConfig {
     enabled_provider_kinds: Option<BTreeSet<String>>,
     disabled_provider_kinds: BTreeSet<String>,
 }
 
 impl ProviderRegistryConfig {
-    pub(crate) fn from_env() -> Self {
+    pub fn from_env() -> Self {
         Self {
             enabled_provider_kinds: read_first_csv_env(ENABLED_PROVIDER_ENV_KEYS),
             disabled_provider_kinds: read_all_csv_env(DISABLED_PROVIDER_ENV_KEYS),
@@ -62,7 +62,7 @@ impl ProviderRegistryConfig {
     }
 
     #[cfg(test)]
-    pub(crate) fn all_enabled() -> Self {
+    pub const fn all_enabled() -> Self {
         Self {
             enabled_provider_kinds: None,
             disabled_provider_kinds: BTreeSet::new(),
@@ -95,7 +95,7 @@ impl ProviderRegistryConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ProviderCompositionError {
+pub enum ProviderCompositionError {
     UnknownProviderKind {
         provider_kind: String,
         available_provider_kinds: Vec<String>,
@@ -136,11 +136,11 @@ impl From<ProviderRegistryError> for ProviderCompositionError {
 
 type ProviderCompositionResult<T> = Result<T, ProviderCompositionError>;
 
-pub(crate) fn default_provider_registry() -> ProviderCompositionResult<ProviderAdapterRegistry> {
+pub fn default_provider_registry() -> ProviderCompositionResult<ProviderAdapterRegistry> {
     provider_registry_from_config(&ProviderRegistryConfig::from_env())
 }
 
-pub(crate) fn provider_registry_from_config(
+pub fn provider_registry_from_config(
     config: &ProviderRegistryConfig,
 ) -> ProviderCompositionResult<ProviderAdapterRegistry> {
     validate_provider_config(config)?;
