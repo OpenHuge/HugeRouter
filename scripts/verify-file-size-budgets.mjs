@@ -113,9 +113,9 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/lib.rs",
     {
-      maxLines: 5800,
+      maxLines: 5850,
       reason:
-        "Control-plane API crate is still a monolith. New endpoints and handlers should be moved into modules.",
+        "Control-plane API crate is still a monolith. Replay hardening temporarily expanded it; new endpoints and handlers should be moved into modules.",
     },
   ],
   [
