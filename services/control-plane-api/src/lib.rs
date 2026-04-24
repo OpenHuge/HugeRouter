@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_lines, clippy::uninlined_format_args)]
 
+mod pricing_catalog;
 mod store;
 
 use anyhow::{Context, Result};
