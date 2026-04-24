@@ -51,6 +51,7 @@ pub struct ProviderEndpoint {
     pub provider_resource_id: String,
     pub endpoint_base_url: String,
     pub api_key: String,
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +291,7 @@ mod tests {
                 provider_resource_id: "prvrsrc_openai_primary".to_string(),
                 endpoint_base_url: "https://api.example.com/v1".to_string(),
                 api_key: "secret".to_string(),
+                region: None,
             },
         };
 

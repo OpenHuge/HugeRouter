@@ -38,6 +38,8 @@ Recent priority docs for the source-backed spec deepening pass:
 
 - [Control Plane API](api/control-plane-api.md)
 - [Public Gateway API](api/public-gateway-api.md)
+- [AWS Bedrock Provider Adapter](provider-bedrock.md)
+- [Provider Gateway Adapter](provider-gateway.md)
 
 ## Runbooks
 

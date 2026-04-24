@@ -8,7 +8,7 @@ The provider layer should be explicitly designed for **pluggability** and **comp
 
 The repository should currently be described this way:
 
-- `implemented`: one adapter trait and registry model plus one real OpenAI adapter
+- `implemented`: one adapter trait and registry model plus OpenAI, Anthropic, Gemini, Bedrock Converse, and upstream gateway adapters
 - `bootstrap-only`: much of the broader provider, control-plane discovery, and diagnostics integration is specified but not yet runtime-complete
 - `planned`: MCP adapters, A2A adapters, realtime bidirectional adapters, manifest exposure to the control plane, and compatibility gating against snapshot versions
 

@@ -366,6 +366,7 @@ mod tests {
                 provider_resource_id: "prvrsrc_gemini_primary".to_string(),
                 endpoint_base_url: "https://generativelanguage.googleapis.com/".to_string(),
                 api_key: "secret".to_string(),
+                region: None,
             },
         }
     }

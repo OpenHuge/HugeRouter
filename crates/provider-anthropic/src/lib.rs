@@ -370,6 +370,7 @@ mod tests {
                 provider_resource_id: "prvrsrc_anthropic_primary".to_string(),
                 endpoint_base_url: "https://api.anthropic.example/v1".to_string(),
                 api_key: "secret".to_string(),
+                region: None,
             },
         }
     }
