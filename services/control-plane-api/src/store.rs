@@ -30,16 +30,16 @@ use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
     AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId,
     CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
-    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, ExcludedTarget,
-    HealthState, LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId,
-    MerchantShopStatus, MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project,
-    ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
-    ProviderResourceStatus, RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId,
-    RelayEvaluationRunnerMode, RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy,
-    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, Tenant, TenantId,
-    TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
-    TenantSummary, TrialConnection, TrialConnectionId, TrialConnectionStatus,
-    UnlinkAuthProviderResponse, UpstreamErrorSummary, UserId, UserIdentity,
+    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, HealthState,
+    LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus,
+    MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project, ProjectId, ProvenanceClass,
+    ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
+    RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode,
+    RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy, RoutePolicyId,
+    RouteReceipt, RouteReceiptId, Tenant, TenantId, TenantMembership, TenantMembershipId,
+    TenantMembershipRole, TenantMembershipStatus, TenantSummary, TrialConnection,
+    TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary,
+    UserId, UserIdentity,
 };
 use metering::{PricingCatalog, default_budget_micros};
 use protocol_ir::{
@@ -50,6 +50,11 @@ use protocol_ir::{
     RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteReceiptSummary,
     RouteSimulationRequest, RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse,
     UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
+};
+use routing_engine::{
+    ProviderTargetKind, ProviderTargetRuntime, RoutingConfig, RoutingRequest, health_state_slug,
+    is_health_blocked, provider_capability_gaps, provider_supports_capability,
+    provider_supports_protocol_family, route_capability_supported_by_provider_capabilities,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -4785,105 +4790,30 @@ fn build_route_simulation_response(
         ));
     }
 
-    let candidates = provider_resources
-        .iter()
-        .filter(|resource| {
-            active_snapshot
-                .provider_resource_ids
+    let route = routing_engine::evaluate_route(
+        &RoutingConfig {
+            config_snapshot: active_snapshot.clone(),
+            route_policy,
+            provider_targets: provider_resources
                 .iter()
-                .any(|id| id == &resource.provider_resource_id)
+                .enumerate()
+                .map(|(index, resource)| provider_resource_to_route_target(index, resource))
+                .collect(),
+        },
+        &RoutingRequest {
+            protocol_family: request_protocol_family.to_string(),
+            model_alias: request.model_alias.clone(),
+        },
+    );
+
+    let eligible_candidates = route
+        .ranked_targets
+        .iter()
+        .map(|candidate| protocol_ir::EligibleCandidate {
+            provider_resource_id: candidate.target.resource.provider_resource_id.clone(),
+            score_breakdown: candidate.score_breakdown.clone(),
         })
-        .cloned()
         .collect::<Vec<_>>();
-
-    let mut excluded_candidates = Vec::new();
-    let mut eligible_candidates = Vec::new();
-
-    for candidate in candidates {
-        if candidate.status != ProviderResourceStatus::Active {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: "provider_inactive".to_string(),
-                reason: format!("provider status is {:?}", candidate.status),
-            });
-            continue;
-        }
-        if !provider_supports_protocol_family(&candidate, &route_policy.protocol_family) {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: "protocol_family_unsupported".to_string(),
-                reason: format!(
-                    "provider does not advertise protocol family `{}`",
-                    route_policy.protocol_family
-                ),
-            });
-            continue;
-        }
-
-        let capability_gaps =
-            provider_capability_gaps(&candidate, &route_policy.required_capabilities);
-        if !capability_gaps.is_empty() {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: format!("capability_gap_{}", capability_gaps[0]),
-                reason: format!(
-                    "required capabilities are not satisfied: {}",
-                    capability_gaps.join(", ")
-                ),
-            });
-            continue;
-        }
-
-        if is_health_blocked(candidate.health_state) {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: format!("health_{}", health_state_slug(candidate.health_state)),
-                reason: candidate
-                    .health_message
-                    .clone()
-                    .unwrap_or_else(|| "provider health state blocks routing".to_string()),
-            });
-            continue;
-        }
-
-        let preferred = route_policy
-            .preferred_regions
-            .iter()
-            .any(|region| region == &candidate.region);
-        let score_breakdown = ScoreBreakdown {
-            latency: if preferred { 0.95 } else { 0.7 },
-            cost: if candidate.deployment_scope == DeploymentScope::Shared {
-                0.8
-            } else {
-                0.7
-            },
-            health: match candidate.health_state {
-                HealthState::Healthy => 1.0,
-                HealthState::Degraded => 0.6,
-                HealthState::Quarantined | HealthState::Draining | HealthState::Disabled => 0.0,
-            },
-            trust: 1.0,
-        };
-        eligible_candidates.push(protocol_ir::EligibleCandidate {
-            provider_resource_id: candidate.provider_resource_id.clone(),
-            score_breakdown,
-        });
-    }
-
-    eligible_candidates.sort_by(|left, right| {
-        let left_score = left.score_breakdown.latency
-            + left.score_breakdown.cost
-            + left.score_breakdown.health
-            + left.score_breakdown.trust;
-        let right_score = right.score_breakdown.latency
-            + right.score_breakdown.cost
-            + right.score_breakdown.health
-            + right.score_breakdown.trust;
-        right_score
-            .partial_cmp(&left_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
     let selected_target = eligible_candidates
         .first()
         .map(|candidate| candidate.provider_resource_id.clone());
@@ -4891,13 +4821,9 @@ fn build_route_simulation_response(
     Ok(RouteSimulationResponse {
         simulation_id: format!("sim_{}", request.model_alias),
         config_snapshot_id: active_snapshot.config_snapshot_id.clone(),
-        admission_result: if selected_target.is_some() {
-            AdmissionResult::Admitted
-        } else {
-            AdmissionResult::RejectedNoCandidate
-        },
+        admission_result: route.admission_result,
         eligible_candidates,
-        excluded_candidates,
+        excluded_candidates: route.excluded_targets,
         selected_target,
         estimated_cost: MonetaryAmount {
             currency: "USD".to_string(),
@@ -4918,71 +4844,28 @@ const fn protocol_family_slug(protocol_family: &ProtocolFamily) -> &'static str 
     }
 }
 
-fn route_capability_supported_by_provider_capabilities(capability: &str) -> bool {
-    matches!(
-        capability,
-        "streaming"
-            | "tool_calling"
-            | "tool_related"
-            | "json_mode"
-            | "chat_completions"
-            | "image_generation"
-            | "realtime"
-            | "response_model_metadata"
-    )
-}
-
-fn route_capability_supported(capability: &str, target: &ProviderCapabilities) -> bool {
-    match capability {
-        "streaming" => target.supports_streaming,
-        "tool_calling" | "tool_related" => target.supports_tool_calling,
-        "json_mode" => target.supports_json_mode,
-        "chat_completions" | "image_generation" => true,
-        "realtime" => target.supports_realtime,
-        "response_model_metadata" => target.supports_response_model_metadata,
-        _ => false,
-    }
-}
-
-fn provider_supports_protocol_family(
-    provider_resource: &ProviderResource,
-    protocol_family: &str,
-) -> bool {
-    provider_resource
-        .supported_protocol_families
-        .iter()
-        .any(|candidate| candidate == protocol_family)
-}
-
-fn provider_supports_capability(provider_resource: &ProviderResource, capability: &str) -> bool {
-    route_capability_supported(capability, &provider_resource.capabilities)
-}
-
-fn provider_capability_gaps(
-    provider_resource: &ProviderResource,
-    required_capabilities: &[String],
-) -> Vec<String> {
-    required_capabilities
-        .iter()
-        .filter(|capability| !provider_supports_capability(provider_resource, capability))
-        .cloned()
-        .collect()
-}
-
-const fn is_health_blocked(health_state: HealthState) -> bool {
-    matches!(
-        health_state,
-        HealthState::Quarantined | HealthState::Draining | HealthState::Disabled
-    )
-}
-
-const fn health_state_slug(health_state: HealthState) -> &'static str {
-    match health_state {
-        HealthState::Healthy => "healthy",
-        HealthState::Degraded => "degraded",
-        HealthState::Quarantined => "quarantined",
-        HealthState::Draining => "draining",
-        HealthState::Disabled => "disabled",
+fn provider_resource_to_route_target(
+    index: usize,
+    resource: &ProviderResource,
+) -> ProviderTargetRuntime {
+    ProviderTargetRuntime {
+        resource: resource.clone(),
+        target_kind: if resource.is_transit_gateway {
+            ProviderTargetKind::TransitGateway
+        } else {
+            ProviderTargetKind::Native
+        },
+        transit_metadata: None,
+        priority: u32::try_from(index).unwrap_or(u32::MAX),
+        upstream_model: None,
+        api_key: String::new(),
+        static_latency_score: 0.95,
+        static_cost_score: if resource.deployment_scope == DeploymentScope::Shared {
+            0.8
+        } else {
+            0.7
+        },
+        usd_per_1k_tokens: 0.0,
     }
 }
 
@@ -5291,11 +5174,11 @@ fn link(
 #[cfg(test)]
 mod tests {
     use super::{
-        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ExcludedTarget, ProjectId,
-        ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt,
-        RouteReceiptFilters, ScoreBreakdown, StoreMode, TenantId,
+        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ProjectId, ProviderResource,
+        ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptFilters,
+        StoreMode, TenantId,
     };
-    use core_domain::RouteReceiptId;
+    use core_domain::{ExcludedTarget, RouteReceiptId, ScoreBreakdown};
 
     fn sample_route_receipt(
         route_receipt_id: &str,

@@ -20,6 +20,7 @@ provider-gateway = { path = "../../crates/provider-gateway" }
 provider-gemini = { path = "../../crates/provider-gemini" }
 provider-traits = { path = "../../crates/provider-traits" }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "native-tls"] }
+routing-engine = { path = "../../crates/routing-engine" }
 runtime-composition = { path = "../../crates/runtime-composition" }
 serde.workspace = true
 serde_json.workspace = true

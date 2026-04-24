@@ -3987,7 +3987,7 @@ mod tests {
                             "status":"draft",
                             "activated_at":null,
                             "provider_resource_ids":["prvrsrc_openai_backup"],
-                            "route_policy_id":"routepol_acme_support",
+                            "route_policy_id":"routepol_openai_chat_default",
                             "budget_policy_id":"budgetpol_default"
                         })
                         .to_string(),
