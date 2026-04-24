@@ -20,7 +20,7 @@ The gateway process loads all built-in adapter plugins by default. Operators can
 
 Unknown provider IDs and empty compositions fail during bootstrap so configuration drift is caught before request handling.
 
-The running gateway exposes loaded adapter manifests at `GET /internal/provider-adapters`. This is an internal discovery surface for diagnostics and future control-plane compatibility checks. Route evaluation first excludes provider resources whose `supported_protocol_families` do not include the normalized request protocol family. Runtime route execution also treats the adapter manifest as a hard boundary: a selected provider target is skipped if its loaded adapter does not declare support for that protocol family.
+The running gateway exposes loaded adapter manifests at `GET /internal/provider-adapters`, and a single loaded adapter manifest at `GET /internal/provider-adapters/{provider_kind}`. These are internal discovery surfaces for diagnostics and future control-plane compatibility checks. Route evaluation first excludes provider resources whose `supported_protocol_families` do not include the normalized request protocol family. Runtime route execution also treats the adapter manifest as a hard boundary: a selected provider target is skipped if its loaded adapter does not declare support for that protocol family.
 
 Provider kind registration and lookup are normalized with trim plus lowercase rules. Control-plane payloads should still emit canonical lowercase provider IDs, but the runtime lookup is defensive against harmless case or whitespace drift.
 
