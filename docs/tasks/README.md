@@ -1,14 +1,16 @@
 # Parallel Development Tracks
 
-This directory is the execution-ready version of the project plan. The existing material under `docs/execution` and `docs/product` is still useful for roadmap context, but agents should treat the files in `docs/tasks` as the active implementation backlog because they reflect the repository's actual state on 2026-04-22.
+This directory is the execution-ready version of the project plan. The existing material under `docs/execution` and `docs/product` is still useful for roadmap context, but agents should treat the files in `docs/tasks` as the active implementation backlog because they reflect the repository's actual state on `origin/main` as of 2026-04-24 (`e4c76e0`).
 
 ## Repository Snapshot
 
-- The TypeScript workspace is real and usable, but still shallow. `apps/console-web` has a working TanStack Start shell, login page, overview page, admin tenants page, and one meaningful Vitest test. `packages/ui-kit`, `packages/ts-api-client`, and `packages/ts-shared-schema` exist, but they are still minimal.
-- The Rust workspace has meaningful domain and protocol scaffolding in `crates/core-domain` and `crates/protocol-ir`, plus a bootstrap `gateway-api` flow that returns an OpenAI-shaped placeholder response. Most other Rust services are startup placeholders only.
-- The workspace now targets Rust `1.94.1`, matching the current local toolchain and avoiding the previous bootstrap failure caused by a higher pinned version.
-- Test coverage is not yet representative. Several packages still use no-op test scripts, and there are no backend integration tests yet.
-- Auth work is only partially represented in the backlog today. The architecture now expects human console sign-in via email, GitHub, Google, and WeChat, so the active task docs must treat identity, session, and provider-login work as first-class scope rather than a future placeholder.
+- The TypeScript workspace is real and data-backed. `apps/console-web` has authenticated routes, login and callback screens, tenant/admin areas, provider/resource management, route policy management, config snapshots, API keys, route receipts, usage, billing, and merchant relay evaluation surfaces. `packages/ts-api-client` and `packages/ts-shared-schema` now contain meaningful contract-backed code and tests rather than pure mock placeholders.
+- The Rust workspace has real control-plane and gateway slices. `gateway-api` talks to `control-plane-api` for API key scope, active config, and budget projection; routes OpenAI-compatible chat/responses/images, Anthropic messages, and Gemini generateContent traffic; uses typed provider adapters; publishes route receipt, usage, and audit events.
+- `control-plane-api` now exposes persisted tenant, project, provider resource, route policy, config snapshot, API key, usage, billing, route receipt, auth, and merchant endpoints with memory and Postgres-backed paths.
+- `ledger-worker` and `route-receipt-worker` process real event payloads into ledger/projection and route diagnostic tables. `audit-worker`, `notification-worker`, `routing-worker`, and parts of `edge-probe` still need stronger operational behavior beyond the first runtime scaffolding.
+- The workspace targets Rust `1.94.1`, Node `24.15.0`, and pnpm `10.33.0`. GitHub Actions quality and release workflows are present.
+- Test coverage is meaningful in several core paths but still uneven. The next phase should increase integration coverage around pricing, budget admission, route health, fallback diagnostics, and console workflows.
+- The product direction is now an AI traffic control plane, not a cheap-key forwarding panel. Upcoming work should prioritize cost governance, routing reliability, observability, guardrails, and enterprise controls before broad provider expansion.
 
 ## Global Rules For Every Agent
 
@@ -17,6 +19,8 @@ This directory is the execution-ready version of the project plan. The existing 
 3. Every PR must include rigorous automated tests for the behavior it adds or changes.
 4. Prefer small, mergeable PRs inside the track rather than one giant branch that tries to solve the whole stream.
 5. If a track depends on another track's merged contract, rebase onto `main` after that dependency lands instead of inventing a parallel contract.
+6. Distinguish shipped, bootstrap, simulated, and planned behavior in docs and PR notes. Do not describe sample projections, default pricing, or replay simulations as production-complete capabilities.
+7. Treat provider provenance as a product and safety boundary. Routes backed by unofficial or opaque upstream capacity must be visible, diagnosable, and lower trust than official or customer-owned capacity.
 
 ## Required Engineering Bar
 
@@ -46,23 +50,34 @@ This directory is the execution-ready version of the project plan. The existing 
 
 ## Track Matrix
 
-| Track | Focus | Primary Ownership | Depends On |
-|---|---|---|---|
-| `00` | Foundation, toolchain, CI, and quality gates | root configs, `turbo.json`, `justfile`, `.devcontainer`, `.github`, `infra/*` | none |
-| `01` | Domain contracts, schema pipeline, and shared auth contracts | `crates/core-domain`, `crates/protocol-ir`, `schemas/*`, `packages/ts-api-client`, `packages/ts-shared-schema` | `00` recommended |
-| `02` | Control plane, config activation, and auth backend flows | `services/control-plane-api`, new backend support crates owned by this track | `01` |
-| `03` | Gateway, routing, and provider adapters | `services/gateway-api`, `crates/provider-traits`, new gateway/provider crates | `01`, `02` partially |
-| `04` | Metering, ledger, and operational workers | `services/ledger-worker`, `services/audit-worker`, `services/notification-worker`, `services/routing-worker`, `crates/runtime-composition` | `01`, `03` |
-| `05` | Console app experience and auth UX | `apps/console-web` | `01`, `02`, `06` partially |
-| `06` | UI system, Storybook, and frontend quality | `packages/ui-kit`, `packages/test-utils`, `apps/storybook` | none |
+| Track | Focus                                                        | Primary Ownership                                                                                                                          | Depends On                 |
+| ----- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| `00`  | Foundation, toolchain, CI, and quality gates                 | root configs, `turbo.json`, `justfile`, `.devcontainer`, `.github`, `infra/*`                                                              | none                       |
+| `01`  | Domain contracts, schema pipeline, and shared auth contracts | `crates/core-domain`, `crates/protocol-ir`, `schemas/*`, `packages/ts-api-client`, `packages/ts-shared-schema`                             | `00` recommended           |
+| `02`  | Control plane, config activation, and auth backend flows     | `services/control-plane-api`, new backend support crates owned by this track                                                               | `01`                       |
+| `03`  | Gateway, routing, and provider adapters                      | `services/gateway-api`, `crates/provider-traits`, new gateway/provider crates                                                              | `01`, `02` partially       |
+| `04`  | Metering, ledger, and operational workers                    | `services/ledger-worker`, `services/audit-worker`, `services/notification-worker`, `services/routing-worker`, `crates/runtime-composition` | `01`, `03`                 |
+| `05`  | Console app experience and auth UX                           | `apps/console-web`                                                                                                                         | `01`, `02`, `06` partially |
+| `06`  | UI system, Storybook, and frontend quality                   | `packages/ui-kit`, `packages/test-utils`, `apps/storybook`                                                                                 | none                       |
+
+## Next Implementation Loop
+
+The next PR sequence should move the product from a working gateway MVP to an operator-ready control plane:
+
+1. Phase 1: documentation and backlog calibration against current `main`.
+2. Phase 2: cost and budget governance, including persistent pricing catalog, request pre-admission estimates, reserve accounting, and richer margin reporting.
+3. Phase 3: routing reliability, including live health score ingestion, rate-limit and latency aware routing, circuit breaking, and explicit fallback policy.
+4. Phase 4: model capability matrix, including per-model capabilities, structured-output suitability, multimodal support, and routing-time compatibility checks.
+5. Phase 5: redaction-first observability and guardrails, including payload capture policy, PII redaction, prompt-injection checks, output validation, and audit trails.
+6. Phase 6: enterprise and channel governance, including RBAC depth, SSO hardening, tenant data-retention policy, channel pricing, and role-specific dashboards.
 
 ## Recommended Merge Order
 
-1. Track `00` should land first because it removes toolchain and CI ambiguity.
-2. Track `01` should land next because it stabilizes contracts other tracks consume.
-3. Tracks `02`, `03`, and `06` can move in parallel after `01` is underway, but should rebase frequently.
-4. Track `05` can start immediately against placeholders, but should hold final integration until `02` and `06` have merged the contracts and shared components it depends on.
-5. Track `04` should begin after `03` has established real event emission and routing outputs.
+1. Keep Track `01` contract changes ahead of backend and frontend consumers.
+2. Land cost/budget changes through Tracks `01`, `02`, `03`, `04`, and `05` in that order when schema, admission, worker, and console work all change.
+3. Land routing reliability changes through Tracks `03`, `04`, and `05`, with Track `01` used only when public receipt or policy shapes change.
+4. Land guardrails through explicit contracts first, then gateway pipeline stages, then console/audit surfaces.
+5. Keep UI-system changes in Track `06` only when multiple console surfaces need the primitive.
 
 ## Track Documents
 

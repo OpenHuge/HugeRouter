@@ -2,14 +2,16 @@
 
 ## Mission
 
-Turn the current worker placeholders into a real background-processing layer for usage ingestion, ledger persistence, audit capture, and shared runtime conventions.
+Make background workers the durable operations layer for usage ingestion, ledger projections, route receipt diagnostics, provider health, notifications, audits, and routing intelligence.
 
 ## Current Baseline
 
-- `services/ledger-worker`, `services/audit-worker`, `services/notification-worker`, and `services/routing-worker` currently only initialize tracing and announce startup.
-- `crates/runtime-composition` currently provides only a startup log helper.
-- `core-domain` already contains `UsageEvent`, `LedgerEntry`, `AuditEvent`, `ReplayCapsule`, and related IDs.
-- `protocol-ir` already has a `UsageEventRecorded` envelope type, but nothing consumes it yet.
+- `ledger-worker` consumes `UsageEventRecordedMessage`, writes idempotent ledger entries, updates `usage_daily_projections`, updates `balance_projections`, and records budget threshold events.
+- `route-receipt-worker` consumes `RouteReceiptRecordedMessage`, writes route receipts, and stores diagnostic timelines, policy checks, and provider attempts.
+- `edge-probe` has a probe runtime shape and cheap-health mode, but health score feedback still needs stronger persistence and routing integration.
+- `runtime-composition` provides shared startup conventions but still needs reusable worker configuration, NATS subscription helpers, tracing setup, shutdown handling, and health semantics.
+- `audit-worker`, `notification-worker`, and `routing-worker` still need real operational responsibilities beyond the first scaffolding.
+- Pricing and budget projections still rely on default catalog logic and should move toward control-plane managed policies.
 
 ## Owned Paths
 
@@ -32,43 +34,48 @@ This track should consume emitted events and shared contracts, not redefine them
 
 ## Deliverables
 
-1. A reusable runtime bootstrap layer for worker configuration, tracing, shutdown, and health semantics.
-2. Real usage-event ingestion in `ledger-worker` with idempotent processing.
-3. Real audit-event handling in `audit-worker`.
-4. A clear boundary for notifications and routing health work, even if their first version is intentionally small.
-5. Tests proving event handling and worker logic are deterministic.
+1. A reusable runtime bootstrap layer for worker configuration, NATS subscription, tracing, shutdown, and health semantics.
+2. Ledger ingestion that uses control-plane managed pricing and supports reserve/finalize/release usage phases.
+3. Audit ingestion that persists security, admin, budget, guardrail, and payload-access events with tenant scoping.
+4. Routing-worker aggregation for provider latency, error rate, rate-limit, and circuit-breaker state.
+5. Notification-worker fanout for budget thresholds, provider incidents, anomalous spend, and security events.
+6. Edge-probe feedback that updates provider health/quarantine inputs consumed by route evaluation.
 
 ## Ordered Plan
 
 1. Expand `runtime-composition`.
    - Add shared configuration loading, tracing setup, graceful shutdown, and worker bootstrap helpers.
    - Keep the runtime crate generic so multiple services can adopt it without hidden globals.
-2. Implement ledger ingestion first.
-   - Build the pipeline from `UsageEventRecorded` to persisted ledger state.
-   - Handle duplicates, malformed payloads, and replay safety explicitly.
-3. Implement audit processing next.
-   - Define the first useful audit events and persistence or fanout behavior.
-   - Preserve request and trace correlation metadata from the incoming envelopes.
-4. Right-size notification and routing workers.
-   - Give them explicit first responsibilities instead of empty startup binaries.
-   - Prefer narrow, tested behavior over speculative framework code.
-5. Add local integration wiring.
+2. Upgrade ledger ingestion.
+   - Replace default pricing assumptions with catalog lookups once Track `02` exposes managed catalog data.
+   - Support reserve, partial, final, and release phases without double counting.
+   - Preserve idempotency for retries and replay.
+3. Implement audit processing.
+   - Persist admin changes, auth events, budget rejections, provider failures, guardrail decisions, and sealed payload access.
+   - Preserve request and trace correlation metadata from incoming envelopes.
+4. Implement routing intelligence.
+   - Aggregate route receipt and probe data into provider health, latency, error-rate, rate-limit, and quarantine signals.
+   - Publish or persist those signals for gateway route evaluation.
+5. Implement notification fanout.
+   - Send budget threshold, provider incident, anomalous spend, and security events to configured webhook/email targets.
+   - Deduplicate noisy alerts and record delivery attempts.
+6. Add local integration wiring.
    - Use the existing local stack where appropriate.
    - Provide deterministic fixtures so later tracks can verify worker side effects.
 
 ## Required Tests
 
 - Unit tests for runtime bootstrap helpers, handler logic, deduplication, and envelope validation.
-- Integration tests for ledger ingestion and audit ingestion using real persistence boundaries or realistic test doubles.
+- Integration tests for ledger ingestion, route receipt ingestion, audit ingestion, notification delivery attempts, and routing-health aggregation using real persistence boundaries or realistic test doubles.
 - Tests for graceful shutdown and failure handling where shared runtime behavior is added.
 - Event-contract tests proving worker inputs still match Track `01` envelope expectations.
 
 ## Definition Of Done
 
-- At least one worker path processes real events end-to-end instead of only logging startup.
+- Ledger and route receipt workers continue to process real events end-to-end.
 - Shared runtime code exists and is reused by more than one service.
 - Idempotency and malformed-event behavior are covered by tests.
-- Worker responsibilities are explicit and documented rather than implied by placeholder service names.
+- Audit, notification, routing, and probe responsibilities are explicit and documented rather than implied by service names.
 - Future operational work can build on these workers without replacing their startup model from scratch.
 
 ## Branch And PR Convention

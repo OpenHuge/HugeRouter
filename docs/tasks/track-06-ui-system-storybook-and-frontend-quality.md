@@ -7,9 +7,9 @@ Build the shared frontend layer that the console can rely on: reusable UI primit
 ## Current Baseline
 
 - `packages/ui-kit` currently exposes a small but real shell layer: `AppShellFrame`, `PageHeader`, and `EmptyState`.
-- `packages/test-utils` provides shared React testing helpers but has no direct tests.
+- `packages/test-utils` provides shared React testing helpers and now runs Vitest rather than a no-op script.
 - `apps/storybook` is configured and contains a single story for shell components.
-- Most frontend package `test` scripts still print placeholder messages instead of running assertions.
+- `ui-kit`, `test-utils`, `ts-api-client`, and `ts-shared-schema` have real test commands. `design-tokens` still has an explicit no-test placeholder and should stay tracked by the workspace test policy until it gains assertions.
 
 ## Owned Paths
 
@@ -28,7 +28,7 @@ This track exists so the app track can consume a stable shared layer instead of 
 
 ## Deliverables
 
-1. A richer shared component set for tables, forms, loading states, error states, and data display.
+1. A richer shared component set for dense operator tables, filters, forms, loading states, error states, data display, audit timelines, and status badges.
 2. Storybook stories that document shared component behavior and edge states.
 3. Real package-level tests for `ui-kit` and `test-utils`.
 4. Frontend verification patterns that Track `05` can reuse instead of redefining locally.
@@ -39,12 +39,14 @@ This track exists so the app track can consume a stable shared layer instead of 
 1. Expand `ui-kit` intentionally.
    - Add only components that solve repeated console problems.
    - Keep app-specific business logic out of the package.
+   - Prioritize dense operational surfaces over marketing-style cards.
 2. Strengthen test utilities.
    - Make provider wrappers, query helpers, and common assertions reusable.
    - Keep the API ergonomic enough that app tests naturally adopt it.
 3. Grow Storybook coverage.
    - Add stories for normal, loading, empty, and error states.
    - Include fixtures that match real schema shapes from Track `01`.
+   - Cover compact table/form states used by pricing, budgets, route diagnostics, guardrails, and audit pages.
 4. Replace no-op tests.
    - Add meaningful package tests for rendering, accessibility basics, and interactions where applicable.
    - Ensure the test command fails on regressions instead of printing a placeholder message.
@@ -62,7 +64,7 @@ This track exists so the app track can consume a stable shared layer instead of 
 ## Definition Of Done
 
 - `ui-kit` provides enough reusable surface that Track `05` does not need to create parallel app-local primitives.
-- Storybook demonstrates the important shared states instead of a single shell snapshot.
+- Storybook demonstrates the important shared operator states instead of a single shell snapshot.
 - Package test scripts in this track run real assertions.
 - Shared test utilities reduce boilerplate in downstream app tests.
 - Public exports are intentional, documented by stories or tests, and stable enough for follow-on work.

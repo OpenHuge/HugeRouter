@@ -2,15 +2,16 @@
 
 ## Mission
 
-Turn `apps/console-web` from a polished shell with placeholder content into a data-driven console that exercises the real control-plane surface and shared frontend contracts.
+Turn `apps/console-web` from a data-backed gateway console into an operator-ready control plane for cost governance, route reliability, model capability selection, guardrails, auditability, and enterprise/channel administration.
 
 ## Current Baseline
 
-- The app already has a TanStack Start router, Mantine providers, shared navigation, login page, overview page, admin layout, and admin tenants page.
-- The current request context in `src/start.ts` is placeholder-only.
-- `app.overview` and `admin.tenants` are still wired to placeholder data and copy.
-- There is only one meaningful UI test today: `src/test/login-page.test.tsx`.
-- The login page now signals email, GitHub, Google, and WeChat sign-in options, but those buttons are still presentation-only and do not exercise real callback, session, or tenant-resolution logic.
+- The app has a TanStack Start router, Mantine providers, authenticated shell, login and callback flow, tenant routes, admin tenant routes, provider resources, route policies, config snapshots, API keys, route diagnostics, route receipts, usage, billing, and merchant relay evaluation pages.
+- Data access goes through `@huge-router/ts-api-client` and shared schemas, with route loaders and control-plane fetch test fixtures.
+- Auth screens exercise email and OAuth-oriented flows against backend-owned session contracts, with provider-disabled and callback states covered in tests.
+- Usage and billing screens are data-backed, but they still present basic summaries rather than the richer financial/operator views needed for cost governance.
+- Route receipt and diagnostics screens expose important signals, but they do not yet show the full fallback chain, reserve/finalize lifecycle, live health source, guardrail findings, or redaction policy.
+- The next console gaps are pricing/budget authoring, model capability matrix, strategy-aware route policy authoring, guardrail policy authoring, audit/payload access review, channel settlement, and role-specific dashboards.
 
 ## Owned Paths
 
@@ -28,31 +29,29 @@ If a needed UI primitive or client contract is missing, consume the public surfa
 
 ## Deliverables
 
-1. Real route-level data loading using the typed client from Track `01`.
-2. Auth/session handling appropriate to the current platform maturity, without leaking bootstrap placeholders into page code.
-3. Data-backed overview, tenant, provider, and route-management surfaces for the first control-plane slice.
-4. Loading, empty, error, and success states that use shared frontend patterns.
-5. Frontend tests that prove behavior at the route and component level.
-6. A real login UX for email, GitHub, Google, and WeChat backed by Track `02` auth APIs.
+1. Pricing catalog, budget policy, and cost attribution surfaces.
+2. Route strategy, fallback, circuit breaker, and live health diagnostics surfaces.
+3. Model capability matrix and downgrade guidance for route authoring.
+4. Guardrail, redaction, and sealed payload access policy surfaces.
+5. Role-specific dashboards for engineering, finance, operations, security, and channel operators.
+6. Frontend tests that prove important workflows, errors, optimistic states, and access controls.
 
 ## Ordered Plan
 
-1. Replace placeholder app bootstrap.
-   - Move request and session context setup behind one explicit boundary.
-   - Keep the auth model intentionally simple if Track `02` has not yet delivered full identity support, but do not invent a parallel auth contract in app code.
-2. Wire real data access.
-   - Replace placeholder arrays and mock project summaries with typed client calls.
-   - Use route loaders or query hooks consistently instead of page-local ad hoc fetching.
-3. Implement the real login and session flow.
-   - Wire email login start and completion UI.
-   - Wire GitHub, Google, and WeChat sign-in buttons to backend-owned start and callback paths.
-   - Add callback completion, cancellation, and failure states.
-   - Fetch the current HugeRouter session and tenant membership before rendering authenticated routes.
-   - Support provider-disabled and tenant-access-denied states without dropping into generic transport errors.
-4. Build the first real feature surfaces.
-   - Expand overview beyond static cards.
-   - Turn admin tenancy into a real list and detail flow.
-   - Add providers and routes surfaces only after the necessary APIs exist.
+1. Build cost governance screens.
+   - Add pricing catalog list/edit flows once Track `02` exposes managed catalogs.
+   - Add budget policy authoring by tenant, project, key, user/app, day, and month.
+   - Add spend, provider cost, billable price, gross margin, high-cost requests, and anomaly views.
+2. Upgrade route authoring and diagnostics.
+   - Add strategy controls for cost, latency, quality, availability, region, and customer tier.
+   - Show live health/rate-limit/circuit-breaker inputs and the full fallback chain.
+   - Surface reserve/finalize budget decisions next to route receipts.
+3. Add model capability matrix.
+   - Show per-provider and per-model support for streaming, tools, JSON schema, long context, vision, images, audio, embeddings, rerank, batch, and realtime.
+   - Use the matrix inside route policy forms to prevent incompatible selections.
+4. Add guardrail and redaction UX.
+   - Configure PII redaction, prompt-injection checks, output validation, content safety, retention, and sealed payload capture.
+   - Provide audit views for policy changes and payload access.
 5. Make state transitions explicit.
    - Add empty, loading, optimistic, and failure states.
    - Avoid rendering raw transport errors directly into the UI.
@@ -62,19 +61,17 @@ If a needed UI primitive or client contract is missing, consume the public surfa
 
 ## Required Tests
 
-- Route and component tests for the login flow, overview, and admin tenancy surfaces.
+- Route and component tests for pricing, budget, route policy, route diagnostics, guardrail, audit, usage, billing, and admin surfaces.
 - Tests for loading, empty, success, and error states using deterministic client mocks or request handlers.
 - Tests for navigation behavior and route guards where auth/session logic changes.
 - Accessibility checks for key screens and forms where practical.
-- Tests that cover all supported login entry points: email, GitHub, Google, and WeChat.
-- Tests for callback success, callback failure, logout, expired session handling, and tenant-selection or tenant-denied states where applicable.
+- Regression tests for existing login entry points, callback success/failure, logout, expired session handling, and tenant-denied states.
 
 ## Definition Of Done
 
-- The main console pages are driven by typed client calls rather than placeholder literals.
-- Placeholder bootstrap data is removed from page implementations.
-- `/login` and authenticated route entry no longer stop at presentation-only auth placeholders.
-- Tests cover the major state transitions of the first real screens.
+- Operator workflows for pricing, budgets, route strategies, diagnostics, capabilities, guardrails, and audit are driven by typed client calls.
+- Existing login and authenticated route entry continue to use backend-owned session contracts.
+- Tests cover the major state transitions of the new operator screens.
 - The app consumes shared packages instead of redefining contracts or primitives locally.
 - Future UI work can add features by extending established data and state patterns.
 
