@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use provider_traits::{
-    AdapterManifest, ProviderAdapter, ProviderError, ProviderErrorKind, ProviderExecutionContext,
-    ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+    CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
+    ProviderExecutionContext, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
@@ -76,11 +77,21 @@ impl Default for GatewayAdapter {
 impl ProviderAdapter for GatewayAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
             adapter_id: "gateway-openai-compatible-v1",
             provider_kind: "gateway",
             display_name: "OpenAI-Compatible Transit Gateway",
             protocol_family: "openai_chat",
+            supported_protocol_families: &[
+                "openai_chat",
+                "openai_responses",
+                "anthropic_messages",
+                "gemini_generate_content",
+            ],
+            lifecycle_family: AdapterLifecycleFamily::TransitGateway,
+            stability: AdapterStability::Beta,
             streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("env:GATEWAY_TRANSIT_*"),
         }
     }
 
