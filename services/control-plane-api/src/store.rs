@@ -5308,6 +5308,9 @@ fn link(
 }
 
 #[cfg(test)]
+mod parity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ProjectId, ProviderResource,
