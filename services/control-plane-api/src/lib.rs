@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_lines, clippy::uninlined_format_args)]
 
 mod pricing_catalog;
+mod route_receipts;
 mod store;
 
 use anyhow::{Context, Result};
@@ -27,7 +28,7 @@ use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
     BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse, PricingSimulationRequest,
     PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse,
-    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteSimulationRequest,
+    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteSimulationRequest,
     RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageSummaryResponse,
 };
 use reqwest::Client as HttpClient;
@@ -36,9 +37,9 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
     ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, IdentityLookup,
-    MerchantWorkspaceEnvelope, ProviderResourceFilters, ReplayCapsuleResponse, RouteReceiptFilters,
-    RouteReceiptsResponse, SESSION_TTL_SECONDS, StoreMode, auth_provider_enabled, expires_at,
-    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
+    MerchantWorkspaceEnvelope, ProviderResourceFilters, ReplayCapsuleResponse, SESSION_TTL_SECONDS,
+    StoreMode, auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339,
+    oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -521,10 +522,14 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             get(download_billing_export),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
-        .route("/v1/route-receipts", get(list_route_receipts))
+        .route("/v1/route-receipts", get(route_receipts::list))
+        .route(
+            "/v1/route-receipts/{route_receipt_id}/diagnostics",
+            get(route_receipts::get_diagnostics),
+        )
         .route(
             "/v1/route-receipts/{route_receipt_id}",
-            get(get_route_receipt),
+            get(route_receipts::get),
         )
         .route(
             "/v1/route-diagnostics/{route_policy_id}",
@@ -2423,67 +2428,6 @@ async fn create_route_simulation(
     )?))
 }
 
-async fn get_route_receipt(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Path(route_receipt_id): Path<String>,
-) -> Result<Json<RouteReceiptResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let receipt = state
-        .store
-        .get_route_receipt(&route_receipt_id)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "storage_unavailable",
-                format!("failed to load route receipt: {error}"),
-                &context,
-            )
-        })?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "route_receipt_not_found",
-                format!("route receipt `{route_receipt_id}` was not found"),
-                &context,
-            )
-        })?;
-    authz.ensure_read_tenant(receipt.route_receipt.tenant_id.as_str(), &context)?;
-    Ok(Json(receipt))
-}
-
-async fn list_route_receipts(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Query(filters): Query<RouteReceiptFilters>,
-) -> Result<Json<RouteReceiptsResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    if let Some(project_id) = filters.project_id.as_deref() {
-        let project = load_project(&state, project_id, &context).await?;
-        if let Some(tenant_id) = filters.tenant_id.as_deref() {
-            ensure_project_matches_tenant(&project, tenant_id, &context)?;
-            authz.ensure_read_tenant(tenant_id, &context)?;
-        }
-        authz.ensure_read_project(&project, &context)?;
-    } else if let Some(tenant_id) = filters.tenant_id.as_deref() {
-        authz.ensure_read_tenant(tenant_id, &context)?;
-    }
-    let mut response = state
-        .store
-        .list_route_receipts(&filters)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "storage_unavailable",
-                format!("failed to load route receipts: {error}"),
-                &context,
-            )
-        })?;
-    response.data = authz.filter_route_receipts(response.data);
-    Ok(Json(response))
-}
-
 async fn get_route_diagnostics(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -4142,6 +4086,31 @@ mod tests {
         assert_eq!(
             receipt_ids,
             vec!["routercpt_cp_b", "routercpt_cp_c", "routercpt_cp_a"]
+        );
+
+        let diagnostics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/route-receipts/routercpt_cp_b/diagnostics")
+                    .header(COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(diagnostics.status(), StatusCode::OK);
+        let diagnostics: Value =
+            serde_json::from_slice(&to_bytes(diagnostics.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            diagnostics["route_receipt"]["route_receipt_id"],
+            "routercpt_cp_b"
+        );
+        assert_eq!(diagnostics["metadata"]["source"], "memory_store");
+        assert_eq!(
+            diagnostics["decision_timeline"][0]["stage"],
+            "route_receipt"
         );
 
         let filtered = app
