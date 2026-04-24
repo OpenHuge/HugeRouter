@@ -43,12 +43,14 @@ pub struct AdapterManifest {
 impl AdapterManifest {
     #[must_use]
     pub fn supports_protocol_family(&self, protocol_family: &str) -> bool {
-        self.supported_protocol_families
-            .iter()
-            .any(|candidate| *candidate == protocol_family)
+        self.supported_protocol_families.contains(&protocol_family)
     }
 
-    #[must_use]
+    /// # Errors
+    ///
+    /// Returns [`AdapterManifestError`] when the manifest uses an unsupported
+    /// schema version, omits required identity fields, or does not declare its
+    /// primary protocol in the supported protocol list.
     pub fn validate(&self) -> Result<(), AdapterManifestError> {
         if self.manifest_schema_version != CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION {
             return Err(AdapterManifestError::UnsupportedSchemaVersion {
