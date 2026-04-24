@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint . --config ../../eslint.config.mjs",
+    "lint": "pnpm --dir ../.. exec oxlint apps/console-web --deny-warnings",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run --config vite.config.ts",
     "test:watch": "vitest --config vite.config.ts",

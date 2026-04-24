@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "lint": "eslint . --config ../../eslint.config.mjs",
+    "lint": "pnpm --dir ../.. exec oxlint packages/ui-kit --deny-warnings",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "../../apps/console-web/node_modules/.bin/vitest run --environment jsdom --globals",
     "generate": "node -e \"console.log('No generated assets for ui-kit yet')\""

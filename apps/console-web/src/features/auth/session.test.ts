@@ -15,6 +15,20 @@ describe('session', () => {
     resetSessionForTests()
   })
 
+  const captureRedirect = (callback: () => void) => {
+    try {
+      callback()
+    } catch (error) {
+      if (isRedirect(error)) {
+        return error
+      }
+
+      throw error
+    }
+
+    throw new Error('expected redirect')
+  }
+
   it('returns anonymous when there is no stored session', () => {
     expect(getSessionSnapshot()).toEqual({
       authState: 'anonymous'
@@ -96,19 +110,14 @@ describe('session', () => {
   })
 
   it('redirects anonymous access to login and preserves redirect target', () => {
-    try {
+    const redirect = captureRedirect(() =>
       requireSession('tenant', '/app/providers')
-      throw new Error('expected redirect')
-    } catch (error) {
-      expect(isRedirect(error)).toBe(true)
+    )
 
-      if (isRedirect(error)) {
-        expect(error.options.to).toBe('/login')
-        expect(error.options.search).toEqual({
-          redirect: '/app/providers'
-        })
-      }
-    }
+    expect(redirect.options.to).toBe('/login')
+    expect(redirect.options.search).toEqual({
+      redirect: '/app/providers'
+    })
   })
 
   it('redirects authenticated users to the correct shell when role does not match', () => {
@@ -117,16 +126,9 @@ describe('session', () => {
       workspace: 'acme-retail'
     })
 
-    try {
-      requireSession('admin')
-      throw new Error('expected redirect')
-    } catch (error) {
-      expect(isRedirect(error)).toBe(true)
+    const redirect = captureRedirect(() => requireSession('admin'))
 
-      if (isRedirect(error)) {
-        expect(error.options.to).toBe('/app/overview')
-      }
-    }
+    expect(redirect.options.to).toBe('/app/overview')
   })
 
   it('redirects authenticated sessions away from login', () => {
@@ -135,15 +137,8 @@ describe('session', () => {
       workspace: 'platform-admin'
     })
 
-    try {
-      redirectAuthenticatedSession()
-      throw new Error('expected redirect')
-    } catch (error) {
-      expect(isRedirect(error)).toBe(true)
+    const redirect = captureRedirect(() => redirectAuthenticatedSession())
 
-      if (isRedirect(error)) {
-        expect(error.options.to).toBe('/admin/tenants')
-      }
-    }
+    expect(redirect.options.to).toBe('/admin/tenants')
   })
 })

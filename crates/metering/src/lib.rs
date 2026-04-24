@@ -116,6 +116,16 @@ const RATE_CARDS: &[ProviderRateCard] = &[
         source: PricingSource::ProviderNative,
     },
     ProviderRateCard {
+        provider_id: "bedrock",
+        input_micros_per_1k: 6_000,
+        output_micros_per_1k: 30_000,
+        cached_input_micros_per_1k: 600,
+        image_generation_micros_per_unit: 20_000,
+        audio_seconds_micros_per_unit: 1_600,
+        billable_markup_bps: 2_200,
+        source: PricingSource::ProviderNative,
+    },
+    ProviderRateCard {
         provider_id: "gemini",
         input_micros_per_1k: 1_800,
         output_micros_per_1k: 5_500,
@@ -343,6 +353,60 @@ mod tests {
                 .entries
                 .iter()
                 .any(|entry| entry.dimension == PricingDimension::AudioSeconds)
+        );
+    }
+
+    #[test]
+    fn quotes_provider_cost_and_billable_cost_for_bedrock() {
+        let quote = quote_usage(
+            "bedrock",
+            &UsageMetrics {
+                input_tokens: 1_000,
+                output_tokens: 500,
+                cached_input_tokens: 250,
+            },
+        );
+
+        assert_eq!(quote.provider_cost_micros, 21_150);
+        assert_eq!(quote.billable_cost_micros, 25_803);
+        assert_eq!(quote.line_items.len(), 3);
+        assert!(
+            quote
+                .line_items
+                .iter()
+                .all(|line_item| line_item.rate_source == "providernative")
+        );
+    }
+
+    #[test]
+    fn exposes_catalog_entries_for_bedrock() {
+        let catalog = default_catalog();
+        let bedrock_entries = catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.provider_id == "bedrock")
+            .collect::<Vec<_>>();
+
+        assert_eq!(bedrock_entries.len(), 5);
+        assert!(
+            bedrock_entries
+                .iter()
+                .any(|entry| entry.dimension == PricingDimension::InputTokens)
+        );
+        assert!(
+            bedrock_entries
+                .iter()
+                .any(|entry| entry.dimension == PricingDimension::OutputTokens)
+        );
+        assert!(
+            bedrock_entries
+                .iter()
+                .all(|entry| entry.source == PricingSource::ProviderNative)
+        );
+        assert!(
+            bedrock_entries
+                .iter()
+                .all(|entry| entry.region.as_deref() == Some("global"))
         );
     }
 

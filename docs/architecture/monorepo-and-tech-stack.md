@@ -110,7 +110,6 @@ ai-traffic-os/
 |-- packages/
 |   |-- ts-api-client/               # Generated TypeScript client for control plane API
 |   |-- ts-shared-schema/            # Shared Zod/TypeScript schemas for frontend
-|   |-- eslint-config/               # Shared lint config
 |   |-- typescript-config/           # Shared tsconfig presets
 |   |-- ui-kit/                      # Mantine-wrapped shared React component library
 |   |-- design-tokens/               # Mantine theme, semantic tokens, typography, spacing
@@ -194,7 +193,7 @@ ai-traffic-os/
 - **JS package manager:** pnpm
 - **Task orchestration:** Turbo
 - **Task runner:** just
-- **Linting:** Clippy for Rust, ESLint for TypeScript
+- **Linting:** Clippy for Rust, Oxlint for TypeScript
 - **Formatting:** rustfmt + Prettier
 - **Commit hooks:** lefthook or Husky
 - **Code generation:** OpenAPI-based TS client generation, JSON Schema generation, Rust-to-TS schema generation where applicable

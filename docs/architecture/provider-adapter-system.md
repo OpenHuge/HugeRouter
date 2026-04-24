@@ -8,9 +8,31 @@ The provider layer should be explicitly designed for **pluggability** and **comp
 
 The repository should currently be described this way:
 
-- `implemented`: one adapter trait and registry model plus one real OpenAI adapter
+- `implemented`: one adapter trait and registry model plus OpenAI, Anthropic, Gemini, Bedrock Converse, and upstream gateway adapters
+- `implemented`: gateway provider composition is centralized in `services/gateway-api/src/composition.rs`, where each built-in adapter is exposed as a factory-backed plugin entry
 - `bootstrap-only`: much of the broader provider, control-plane discovery, and diagnostics integration is specified but not yet runtime-complete
 - `planned`: MCP adapters, A2A adapters, realtime bidirectional adapters, manifest exposure to the control plane, and compatibility gating against snapshot versions
+
+The gateway process loads all built-in adapter plugins by default. Operators can constrain runtime composition with comma-separated provider IDs:
+
+- `GATEWAY_PROVIDER_ADAPTERS=openai,gateway` loads only the listed adapters
+- `GATEWAY_DISABLED_PROVIDER_ADAPTERS=bedrock` loads every built-in adapter except the listed adapters
+
+Unknown provider IDs and empty compositions fail during bootstrap so configuration drift is caught before request handling.
+
+The running gateway exposes loaded adapter manifests at `GET /internal/provider-adapters`, and a single loaded adapter manifest at `GET /internal/provider-adapters/{provider_kind}`. These are internal discovery surfaces for diagnostics and future control-plane compatibility checks. Route evaluation first excludes provider resources whose `supported_protocol_families` do not include the normalized request protocol family. Runtime route execution also treats the adapter manifest as a hard boundary: a selected provider target is skipped if its loaded adapter does not declare support for that protocol family.
+
+Provider kind registration and lookup are normalized with trim plus lowercase rules. Control-plane payloads should still emit canonical lowercase provider IDs, but the runtime lookup is defensive against harmless case or whitespace drift.
+
+### 12.0.1 Reference-Informed Architecture Notes
+
+The next implementation slices should follow patterns already proven in mature gateway and platform systems:
+
+- [Envoy xDS and ECDS](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/dynamic_configuration) separate runtime discovery from request handling. HugeRouter should keep static compile-time plugins first, while making configuration snapshots and extension manifests independently discoverable.
+- [Envoy extension configuration](https://www.envoyproxy.io/docs/envoy/latest/configuration/overview/extension) treats an extension name as a resource identifier and reports missing or failed extension config explicitly. HugeRouter should continue failing closed when an adapter manifest or selected provider protocol is incompatible.
+- [Kong Gateway plugins](https://developer.konghq.com/gateway/entities/plugin/) expose lifecycle entry points outside and inside the request path. HugeRouter should model provider execution, policy stages, metering, and audit as explicit phases instead of hiding them inside provider crates.
+- [LiteLLM Proxy](https://docs.litellm.ai/) demonstrates why AI gateways need provider normalization, retries/fallbacks, auth hooks, logging hooks, cost tracking, and rate limiting in one operational surface. HugeRouter should keep these concerns composable and observable rather than coupled to a single provider abstraction.
+- [Backstage architecture](https://backstage.io/docs/next/overview/architecture-overview/) separates core, app composition, plugins, and plugin-backed services. HugeRouter should mirror this at the backend layer: contract crates define ports, provider crates implement them, and services own composition.
 
 ### 12.1 Adapter Responsibilities
 

@@ -1,5 +1,5 @@
 export const CONTRACT_VERSION = "v1" as const;
-export const CONTRACT_DIGEST = "f992dd64147e93f465e0d5a7701800bed08b1e1008fe649c6432ba0610739661" as const;
+export const CONTRACT_DIGEST = "7a5b1498c203949271aaef30fa8a86cc07e407f730335054ffb4432551e7a8cd" as const;
 export const CONTROL_PLANE_OPERATIONS = [
 { id: 'listTenants', method: 'GET', path: '/v1/tenants' },
 { id: 'listProjects', method: 'GET', path: '/v1/projects' },

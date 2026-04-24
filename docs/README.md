@@ -38,12 +38,21 @@ Recent priority docs for the source-backed spec deepening pass:
 
 - [Control Plane API](api/control-plane-api.md)
 - [Public Gateway API](api/public-gateway-api.md)
+- [AWS Bedrock Provider Adapter](provider-bedrock.md)
+- [Provider Gateway Adapter](provider-gateway.md)
 
 ## Runbooks
 
 - [Development, CI/CD, and Testing](runbooks/development-cicd-testing.md)
 - [Development Readiness and Bootstrap](runbooks/development-readiness-and-bootstrap.md)
+- [Maintainer Triage](runbooks/maintainer-triage.md)
 - [Monorepo Boundaries and Bootstrap Contracts](runbooks/monorepo-boundaries-and-bootstrap-contracts.md)
+
+## Contributor Operations
+
+- [Contributing Guide](../CONTRIBUTING.md)
+- [Support Guide](../SUPPORT.md)
+- [Security Policy](../SECURITY.md)
 
 ## Product
 

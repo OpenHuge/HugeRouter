@@ -15,6 +15,7 @@ protocol-anthropic = { path = "../../crates/protocol-anthropic" }
 protocol-gemini = { path = "../../crates/protocol-gemini" }
 protocol-ir = { path = "../../crates/protocol-ir" }
 provider-anthropic = { path = "../../crates/provider-anthropic" }
+provider-bedrock = { path = "../../crates/provider-bedrock" }
 provider-gateway = { path = "../../crates/provider-gateway" }
 provider-gemini = { path = "../../crates/provider-gemini" }
 provider-traits = { path = "../../crates/provider-traits" }

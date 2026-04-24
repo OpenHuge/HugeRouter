@@ -199,6 +199,7 @@ export type RoutePolicyMutationInput = {
   protocolFamily:
     | "openai_chat"
     | "openai_responses"
+    | "openai_images"
     | "mcp_streamable_http"
     | "realtime_webrtc"
     | "anthropic_messages"

@@ -28,8 +28,10 @@ The public gateway API is the request ingress for customer workloads.
 ### 22.3 Supported Ingress Endpoints
 
 1. **REST / HTTP Streaming:** `https://api.gateway.local/v1/chat/completions` (OpenAI compatible)
-2. **WebSocket / Realtime:** `wss://api.gateway.local/v1/realtime` (for voice/audio and continuous agent interactions)
-3. **Ephemeral Token Generation:** `POST /v1/realtime/client_secrets` (to allow secure browser WebRTC/WS connections without exposing master keys)
+2. **Responses API:** `POST /v1/responses` (OpenAI Responses-compatible text ingress)
+3. **Images API:** `POST /v1/images/generations` (OpenAI Images-compatible generation ingress using `openai_images` route policies)
+4. **WebSocket / Realtime:** `wss://api.gateway.local/v1/realtime` (for voice/audio and continuous agent interactions)
+5. **Ephemeral Token Generation:** `POST /v1/realtime/client_secrets` (to allow secure browser WebRTC/WS connections without exposing master keys)
 
 ### 22.4 Preferred Response Metadata
 

@@ -1,0 +1,32 @@
+# Default ownership.
+* @byoungd
+
+# Runtime services and Rust domain contracts.
+/Cargo.toml @byoungd
+/Cargo.lock @byoungd
+/crates/ @byoungd
+/services/ @byoungd
+
+# Gateway and protocol-sensitive paths.
+/services/gateway-api/ @byoungd
+/services/realtime-gateway/ @byoungd
+/crates/protocol-*/ @byoungd
+/crates/provider-*/ @byoungd
+/schemas/ @byoungd
+
+# Console and TypeScript packages.
+/apps/ @byoungd
+/packages/ @byoungd
+/pnpm-lock.yaml @byoungd
+/package.json @byoungd
+
+# Runtime, CI, and operations.
+/.github/ @byoungd
+/Dockerfile.rust-service @byoungd
+/infra/ @byoungd
+/justfile @byoungd
+/scripts/ @byoungd
+
+# Documentation and planning.
+/docs/ @byoungd
+/README.md @byoungd
