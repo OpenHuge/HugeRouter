@@ -1,9 +1,21 @@
 services:
   postgres:
-    profiles: ["smoke"]
+    restart: "no"
 
   redis:
-    profiles: ["smoke"]
+    restart: "no"
 
   nats:
-    profiles: ["smoke"]
+    restart: "no"
+
+  control-plane-api:
+    restart: "no"
+
+  gateway-api:
+    restart: "no"
+
+  ledger-worker:
+    restart: "no"
+
+  route-receipt-worker:
+    restart: "no"

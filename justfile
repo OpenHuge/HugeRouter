@@ -5,6 +5,10 @@ stack_up_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-up.p
 stack_down_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-down.ps1" } else { "./infra/scripts/stack-down.sh" }
 stack_logs_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-logs.ps1" } else { "./infra/scripts/stack-logs.sh" }
 stack_wait_command := if os_family() == "windows" { ".\\infra\\scripts\\wait-for-stack.ps1" } else { "./infra/scripts/wait-for-stack.sh" }
+stack_status_command := if os_family() == "windows" { ".\\infra\\scripts\\stack-status.ps1" } else { "./infra/scripts/stack-status.sh" }
+stack_migrate_command := if os_family() == "windows" { ".\\infra\\scripts\\migrate.ps1" } else { "./infra/scripts/migrate.sh" }
+stack_bootstrap_command := if os_family() == "windows" { ".\\infra\\scripts\\bootstrap.ps1" } else { "./infra/scripts/bootstrap.sh" }
+smoke_command := if os_family() == "windows" { "bash ./infra/scripts/smoke.sh" } else { "./infra/scripts/smoke.sh" }
 default_stack_mode := env_var_or_default("HUGE_ROUTER_STACK_MODE", "core")
 
 bootstrap:
@@ -54,6 +58,9 @@ stack-up mode=default_stack_mode:
 stack-up-full:
   {{stack_up_command}} full
 
+stack-up-runtime:
+  {{stack_up_command}} runtime
+
 stack-up-observability:
   {{stack_up_command}} observability
 
@@ -65,3 +72,15 @@ stack-logs mode=default_stack_mode:
 
 stack-wait mode=default_stack_mode:
   {{stack_wait_command}} {{mode}}
+
+migrate mode="runtime":
+  {{stack_migrate_command}} {{mode}}
+
+stack-bootstrap mode="runtime":
+  {{stack_bootstrap_command}} {{mode}}
+
+status mode=default_stack_mode:
+  {{stack_status_command}} {{mode}}
+
+smoke:
+  {{smoke_command}}

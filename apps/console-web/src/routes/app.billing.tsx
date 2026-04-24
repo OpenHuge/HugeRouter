@@ -54,6 +54,19 @@ function triggerExportDownload(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function thresholdStatusLabel(status: string) {
+  switch (status) {
+    case "ok":
+      return "Within budget";
+    case "warning":
+      return "Approaching budget";
+    case "exceeded":
+      return "Budget exceeded";
+    default:
+      return status;
+  }
+}
+
 export const Route = createFileRoute("/app/billing")({
   validateSearch: parseBillingSearch,
   loaderDeps: ({ search }) => search,
@@ -79,13 +92,13 @@ function BillingPage() {
     return (
       <Stack>
         <PageHeader
-          description="Track balance projections, threshold status, and the latest billing export jobs."
+          description="Review persisted spend totals, budget threshold state, and recorded billing export jobs."
           title="Billing"
         />
         <RouteErrorState
           kind={result?.kind}
           message={result?.state === "error" ? result.message : undefined}
-          description="Billing projections could not be loaded from the control-plane service."
+          description="Persisted billing totals could not be loaded from the control-plane service."
           title="Billing unavailable"
         />
       </Stack>
@@ -156,7 +169,7 @@ function BillingPage() {
   return (
     <Stack>
       <PageHeader
-        description="Track balance projections, threshold status, and the latest billing export jobs."
+        description="Review persisted spend totals, budget threshold state, and recorded billing export jobs."
         title="Billing"
       />
       <ActionStatusNotice
@@ -247,11 +260,11 @@ function BillingPage() {
             }
             variant="light"
           >
-            {data.thresholdStatus}
+            {thresholdStatusLabel(data.thresholdStatus)}
           </Badge>
         </Group>
         <Stack gap="xs">
-          <Text>Last projected at: {data.lastProjectedAt}</Text>
+          <Text>Projection updated at: {data.lastProjectedAt}</Text>
           <Group>
             <Button
               loading={queueingExport}
@@ -265,14 +278,14 @@ function BillingPage() {
               onClick={() => void refreshBillingExports()}
               variant="subtle"
             >
-              Refresh exports
+              Refresh jobs
             </Button>
           </Group>
         </Stack>
       </Card>
       <Card padding="lg" radius="md" shadow="sm">
         <Group justify="space-between" mb="md">
-          <Text fw={700}>Export jobs</Text>
+          <Text fw={700}>Billing export jobs</Text>
           <Badge color="blue" variant="light">
             {effectiveExportJobs.length}
           </Badge>

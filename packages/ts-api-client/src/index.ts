@@ -278,6 +278,21 @@ const defaultFetch = (): FetchLike => {
   return globalThis.fetch.bind(globalThis)
 }
 
+const buildHeaders = (
+  defaults: Record<string, string>,
+  headers?: HeadersInit
+) => {
+  const merged = new Headers(defaults)
+
+  if (headers) {
+    new Headers(headers).forEach((value, key) => {
+      merged.set(key, value)
+    })
+  }
+
+  return merged
+}
+
 const requestJson = async <T>({
   baseUrl,
   fetchImpl,
@@ -301,11 +316,13 @@ const requestJson = async <T>({
 }) => {
   const response = await fetchImpl(buildUrl(baseUrl, path, params, query), {
     method,
-    headers: {
-      Accept: 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(headers ?? {})
-    },
+    headers: buildHeaders(
+      {
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      headers
+    ),
     body: body ? JSON.stringify(body) : undefined
   })
 
@@ -339,11 +356,13 @@ const requestAuthJson = async <T>({
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'include',
     method,
-    headers: {
-      Accept: 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(headers ?? {})
-    }
+    headers: buildHeaders(
+      {
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      headers
+    )
   })
 
   const payload: unknown = await response.json()
@@ -733,10 +752,10 @@ export const createControlPlaneClient = (
         }),
         {
           method: 'GET',
-          headers: {
-            Accept: 'text/csv, text/plain, */*',
-            ...(options.headers ?? {})
-          }
+          headers: buildHeaders(
+            { Accept: 'text/csv, text/plain, */*' },
+            options.headers
+          )
         }
       )
 

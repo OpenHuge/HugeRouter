@@ -13,7 +13,9 @@ declare -a services=()
 if (($# > 0)); then
   services=("$@")
 else
-  mapfile -t services < <(stack_services_for_mode "${mode}")
+  while IFS= read -r service; do
+    services+=("${service}")
+  done < <(stack_services_for_mode "${mode}")
 fi
 
 stack_compose "${mode}" logs -f --tail=200 "${services[@]}"

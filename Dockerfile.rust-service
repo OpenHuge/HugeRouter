@@ -1,0 +1,34 @@
+ARG RUST_VERSION=1.94.1
+
+FROM rust:${RUST_VERSION}-bookworm AS builder
+
+ARG SERVICE_NAME
+ARG BIN_NAME
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+COPY services ./services
+
+RUN cargo build --locked --release --package "${SERVICE_NAME}" --bin "${BIN_NAME}"
+
+FROM debian:bookworm-slim AS runtime
+
+ARG BIN_NAME
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /workspace/target/release/${BIN_NAME} /usr/local/bin/service
+
+ENV RUST_LOG=info
+
+ENTRYPOINT ["/usr/local/bin/service"]

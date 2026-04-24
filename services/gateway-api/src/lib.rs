@@ -1,3 +1,4 @@
+mod composition;
 mod openai;
 
 use async_trait::async_trait;
@@ -18,7 +19,6 @@ use core_domain::{
     RouteReceipt, RouteReceiptId, ScoreBreakdown, ServiceName, UsageEvent, UsageEventId,
     UsageMetrics, UsagePhase, ValidationIssue,
 };
-use openai::OpenAiAdapter;
 use protocol_anthropic::{
     AnthropicMessageRequest, AnthropicMessageResponse, AnthropicResponseContentBlock,
     AnthropicUsage, MappingError as AnthropicMappingError,
@@ -28,18 +28,16 @@ use protocol_gemini::{
     GenerateContentResponse, from_provider_response as gemini_from_provider_response,
 };
 use protocol_ir::{
-    ConfigSnapshotResponse, MessageEnvelope, MessageType, ProviderResourcesResponse,
-    RoutePoliciesResponse, RouteReceiptDecisionTraceStep, RouteReceiptPolicyCheck,
-    RouteReceiptProviderAttempt, RouteReceiptRecorded, RouteReceiptRecordedMessage,
-    RouteReceiptRecordedMessageType, UsageEventRecorded,
+    BalanceProjectionResponse, MessageEnvelope, MessageType, RouteReceiptDecisionTraceStep,
+    RouteReceiptPolicyCheck, RouteReceiptProviderAttempt, RouteReceiptRecorded,
+    RouteReceiptRecordedMessage, RouteReceiptRecordedMessageType, UsageEventRecorded,
 };
-use provider_anthropic::AnthropicAdapter;
-use provider_gateway::GatewayAdapter;
-use provider_gemini::GeminiAdapter;
 use provider_traits::{
-    ProviderAdapterRegistry, ProviderEndpoint, ProviderError, ProviderErrorKind,
-    ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
-    ProviderTargetKind, TransitGatewayKind, TransitProviderMetadata,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability, ProviderAdapterRegistry,
+    ProviderEndpoint, ProviderError, ProviderErrorKind, ProviderExecutionContext,
+    ProviderImageData, ProviderImageRequest, ProviderImageResponse, ProviderMessage,
+    ProviderRequest, ProviderResponse, ProviderTargetKind, StreamingSupport, TransitGatewayKind,
+    TransitProviderMetadata,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -57,6 +55,7 @@ use tracing::{info, warn};
 const GATEWAY_SERVICE_NAME: &str = "gateway-api";
 const DEFAULT_CONTROL_PLANE_BASE_URL: &str = "http://127.0.0.1:8081";
 const DEFAULT_CONTROL_PLANE_SNAPSHOT_REF: &str = "active";
+const DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT_MS: u64 = 2_000;
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1_000);
 
 pub type GatewayState = Arc<AppState>;
@@ -64,6 +63,7 @@ pub type GatewayState = Arc<AppState>;
 pub struct AppState {
     config_store: Arc<dyn ActiveConfigStore>,
     auth_store: Arc<dyn ApiKeyScopeStore>,
+    budget_store: Arc<dyn BudgetProjectionStore>,
     adapter_registry: ProviderAdapterRegistry,
     debug_headers_enabled: bool,
     event_sink: Arc<dyn RuntimeEventSink>,
@@ -75,6 +75,41 @@ pub struct ChatCompletionRequest {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
     pub stream: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsesApiRequest {
+    pub model: String,
+    pub input: Vec<ResponsesApiInputMessage>,
+    #[serde(default)]
+    pub stream: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsesApiInputMessage {
+    pub role: String,
+    pub content: Vec<ResponsesApiInputContent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsesApiInputContent {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ImageGenerationRequest {
+    pub model: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub n: Option<u32>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub quality: Option<String>,
+    #[serde(default)]
+    pub response_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,9 +149,82 @@ pub struct UsageSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ResponsesApiResponse {
+    pub id: String,
+    pub object: &'static str,
+    pub model: String,
+    pub output: Vec<ResponsesApiOutputItem>,
+    pub output_text: String,
+    pub usage: UsageSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResponsesApiOutputItem {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub role: &'static str,
+    pub content: Vec<ResponsesApiOutputContent>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResponsesApiOutputContent {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub text: String,
+    pub annotations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageGenerationResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub created: u64,
+    pub model: String,
+    pub data: Vec<ImageGenerationData>,
+    pub usage: UsageSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageGenerationData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub b64_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthResponse {
     pub service: &'static str,
     pub status: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderAdapterManifestsResponse {
+    pub adapters: Vec<ProviderAdapterManifestDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderAdapterManifestDto {
+    pub manifest_schema_version: u16,
+    pub adapter_id: &'static str,
+    pub provider_kind: &'static str,
+    pub display_name: &'static str,
+    pub protocol_family: &'static str,
+    pub supported_protocol_families: Vec<&'static str>,
+    pub lifecycle_family: &'static str,
+    pub stability: &'static str,
+    pub streaming_support: &'static str,
+    pub configuration_schema_ref: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderAdapterManifestLookupError {
+    pub code: &'static str,
+    pub message: String,
+    pub provider_kind: String,
+    pub available_provider_kinds: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +247,16 @@ struct ExecutionSuccess {
     route_receipt: RouteReceipt,
     usage_event: UsageEvent,
     provider_response: ProviderResponse,
+    debug_headers: Option<GatewayDebugHeaders>,
+}
+
+#[derive(Debug, Clone)]
+struct ImageExecutionSuccess {
+    request_id: String,
+    trace_id: String,
+    config_snapshot_id: ConfigSnapshotId,
+    route_receipt: RouteReceipt,
+    image_response: ProviderImageResponse,
     debug_headers: Option<GatewayDebugHeaders>,
 }
 
@@ -226,6 +344,13 @@ pub fn app() -> Router {
 pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
+        .route("/internal/provider-adapters", get(provider_adapters))
+        .route(
+            "/internal/provider-adapters/{provider_kind}",
+            get(provider_adapter),
+        )
+        .route("/v1/images/generations", post(image_generations))
+        .route("/v1/responses", post(responses))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(anthropic_messages))
         .route(
@@ -238,23 +363,14 @@ pub fn app_with_state(state: GatewayState) -> Router {
 fn default_state() -> GatewayState {
     let config_store = Arc::new(ControlPlaneConfigStore::from_env());
     let auth_store = Arc::new(ControlPlaneApiKeyStore::from_env());
-    let mut adapter_registry = ProviderAdapterRegistry::new();
-    adapter_registry
-        .register(Arc::new(OpenAiAdapter::default()))
-        .expect("openai adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(AnthropicAdapter::default()))
-        .expect("anthropic adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(GatewayAdapter::default()))
-        .expect("gateway adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(GeminiAdapter::default()))
-        .expect("gemini adapter registration should succeed");
+    let budget_store = Arc::new(ControlPlaneBudgetStore::from_env());
+    let adapter_registry = composition::default_provider_registry()
+        .expect("provider adapter composition should succeed");
 
     Arc::new(AppState {
         config_store,
         auth_store,
+        budget_store,
         adapter_registry,
         debug_headers_enabled: debug_headers_enabled_from_env(),
         event_sink: Arc::new(NatsEventSink::from_env()),
@@ -268,6 +384,97 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
+async fn provider_adapters(
+    State(state): State<GatewayState>,
+) -> Json<ProviderAdapterManifestsResponse> {
+    Json(provider_adapter_manifests_response(&state.adapter_registry))
+}
+
+async fn provider_adapter(
+    State(state): State<GatewayState>,
+    Path(provider_kind): Path<String>,
+) -> Response {
+    let provider_kind = provider_kind.trim().to_ascii_lowercase();
+
+    state.adapter_registry.resolve(&provider_kind).map_or_else(
+        || {
+            let available_provider_kinds = state
+                .adapter_registry
+                .provider_kinds()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            (
+                StatusCode::NOT_FOUND,
+                Json(ProviderAdapterManifestLookupError {
+                    code: "provider_adapter_not_found",
+                    message: format!("provider adapter `{provider_kind}` is not loaded"),
+                    provider_kind,
+                    available_provider_kinds,
+                }),
+            )
+                .into_response()
+        },
+        |adapter| {
+            let manifest = adapter.manifest();
+            Json(provider_adapter_manifest_dto(&manifest)).into_response()
+        },
+    )
+}
+
+fn provider_adapter_manifests_response(
+    registry: &ProviderAdapterRegistry,
+) -> ProviderAdapterManifestsResponse {
+    let manifests = registry.manifests();
+
+    ProviderAdapterManifestsResponse {
+        adapters: manifests
+            .iter()
+            .map(provider_adapter_manifest_dto)
+            .collect(),
+    }
+}
+
+fn provider_adapter_manifest_dto(manifest: &AdapterManifest) -> ProviderAdapterManifestDto {
+    ProviderAdapterManifestDto {
+        manifest_schema_version: manifest.manifest_schema_version,
+        adapter_id: manifest.adapter_id,
+        provider_kind: manifest.provider_kind,
+        display_name: manifest.display_name,
+        protocol_family: manifest.protocol_family,
+        supported_protocol_families: manifest.supported_protocol_families.to_vec(),
+        lifecycle_family: lifecycle_family_slug(manifest.lifecycle_family),
+        stability: adapter_stability_slug(manifest.stability),
+        streaming_support: streaming_support_slug(manifest.streaming_support),
+        configuration_schema_ref: manifest.configuration_schema_ref,
+    }
+}
+
+const fn lifecycle_family_slug(lifecycle_family: AdapterLifecycleFamily) -> &'static str {
+    match lifecycle_family {
+        AdapterLifecycleFamily::Inference => "inference",
+        AdapterLifecycleFamily::TransitGateway => "transit_gateway",
+        AdapterLifecycleFamily::Realtime => "realtime",
+        AdapterLifecycleFamily::Tool => "tool",
+        AdapterLifecycleFamily::Agent => "agent",
+    }
+}
+
+const fn adapter_stability_slug(stability: AdapterStability) -> &'static str {
+    match stability {
+        AdapterStability::Stable => "stable",
+        AdapterStability::Beta => "beta",
+        AdapterStability::Experimental => "experimental",
+    }
+}
+
+const fn streaming_support_slug(streaming_support: StreamingSupport) -> &'static str {
+    match streaming_support {
+        StreamingSupport::Unsupported => "unsupported",
+        StreamingSupport::ServerSentEvents => "server_sent_events",
+    }
+}
+
 async fn chat_completions(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -275,6 +482,28 @@ async fn chat_completions(
 ) -> Response {
     match process_chat_completion(state, &headers, request).await {
         Ok(success) => success.into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn responses(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    Json(request): Json<ResponsesApiRequest>,
+) -> Response {
+    match process_responses_request(state, &headers, request).await {
+        Ok(success) => responses_success_response(&success),
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn image_generations(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    Json(request): Json<ImageGenerationRequest>,
+) -> Response {
+    match process_image_generation_request(state, &headers, request).await {
+        Ok(success) => image_generation_success_response(&success),
         Err(error) => error.into_response(),
     }
 }
@@ -378,6 +607,28 @@ async fn process_chat_completion(
     })
 }
 
+async fn process_responses_request(
+    state: GatewayState,
+    headers: &HeaderMap,
+    request: ResponsesApiRequest,
+) -> Result<ExecutionSuccess, GatewayError> {
+    let normalized_request = normalize_responses_request(request, &next_request_context())?;
+    process_normalized_request(state, headers, normalized_request).await
+}
+
+async fn process_image_generation_request(
+    state: GatewayState,
+    headers: &HeaderMap,
+    request: ImageGenerationRequest,
+) -> Result<ImageExecutionSuccess, GatewayError> {
+    let context = next_request_context();
+    let (normalized_request, provider_image_request) =
+        normalize_image_generation_request(request, &context)?;
+    process_normalized_image_request(state, headers, normalized_request, provider_image_request)
+        .await
+}
+
+#[allow(clippy::too_many_lines)]
 async fn process_normalized_request(
     state: GatewayState,
     headers: &HeaderMap,
@@ -392,6 +643,13 @@ async fn process_normalized_request(
         .resolve(&bearer_token)
         .await
         .map_err(|message| {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.rejected",
+                "auth_invalid",
+                &context,
+                BTreeMap::from([("reason".to_string(), message.clone())]),
+            );
             GatewayError::new(
                 StatusCode::UNAUTHORIZED,
                 normalized_error("auth_invalid", message, &context, false),
@@ -412,6 +670,14 @@ async fn process_normalized_request(
         )
     })?;
     ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
+    ensure_budget_allows_request(
+        &state,
+        &api_key_scope,
+        &active_config,
+        &normalized_request,
+        &context,
+    )
+    .await?;
     let route = evaluate_route(&active_config, &normalized_request, &context);
 
     if route.ranked_targets.is_empty() {
@@ -457,10 +723,162 @@ async fn process_normalized_request(
         ));
     }
 
-    execute_route(
+    let result = execute_route(
+        state.clone(),
+        route,
+        normalized_request,
+        context.clone(),
+        request_headers,
+        gateway_origin,
+    )
+    .await;
+    match &result {
+        Ok(success) => {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.succeeded",
+                "admitted",
+                &context,
+                BTreeMap::from([
+                    (
+                        "route_receipt_id".to_string(),
+                        success.route_receipt.route_receipt_id.to_string(),
+                    ),
+                    (
+                        "provider_resource_id".to_string(),
+                        success
+                            .route_receipt
+                            .selected_target
+                            .as_ref()
+                            .map_or_else(String::new, ToString::to_string),
+                    ),
+                ]),
+            );
+        }
+        Err(error) => {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.failed",
+                &error.envelope.error.code,
+                &context,
+                BTreeMap::from([
+                    ("message".to_string(), error.envelope.error.message.clone()),
+                    (
+                        "route_receipt_id".to_string(),
+                        error
+                            .route_receipt_id
+                            .as_ref()
+                            .map_or_else(String::new, ToString::to_string),
+                    ),
+                ]),
+            );
+        }
+    }
+
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+async fn process_normalized_image_request(
+    state: GatewayState,
+    headers: &HeaderMap,
+    normalized_request: NormalizedChatRequest,
+    image_request: ProviderImageRequest,
+) -> Result<ImageExecutionSuccess, GatewayError> {
+    let context = next_request_context();
+    let bearer_token = extract_bearer_token(headers.get(AUTHORIZATION), &context)?;
+    let request_headers = normalize_forward_headers(headers);
+    let gateway_origin = infer_gateway_origin(headers);
+    let api_key_scope = state
+        .auth_store
+        .resolve(&bearer_token)
+        .await
+        .map_err(|message| {
+            publish_audit_best_effort(
+                &state,
+                "gateway.request.rejected",
+                "auth_invalid",
+                &context,
+                BTreeMap::from([("reason".to_string(), message.clone())]),
+            );
+            GatewayError::new(
+                StatusCode::UNAUTHORIZED,
+                normalized_error("auth_invalid", message, &context, false),
+                &context,
+            )
+        })?;
+
+    let active_config = state.config_store.load().await.map_err(|error| {
+        GatewayError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            normalized_error(
+                "route_not_available",
+                format!("active configuration is unavailable: {error}"),
+                &context,
+                true,
+            ),
+            &context,
+        )
+    })?;
+    ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
+    ensure_budget_allows_request(
+        &state,
+        &api_key_scope,
+        &active_config,
+        &normalized_request,
+        &context,
+    )
+    .await?;
+    let route = evaluate_route(&active_config, &normalized_request, &context);
+
+    if route.ranked_targets.is_empty() {
+        let normalized = normalized_error(
+            "route_not_available",
+            "no active provider targets can satisfy the image generation request".to_string(),
+            &context,
+            true,
+        )
+        .error;
+        let route_receipt = build_route_receipt(
+            &route,
+            &context,
+            &normalized_request,
+            None,
+            Some(normalized.clone()),
+            Vec::new(),
+        );
+        let debug_headers = maybe_debug_headers(
+            state.debug_headers_enabled,
+            &active_config.route_policy.route_policy_id,
+            None,
+            AdmissionResult::RejectedNoCandidate,
+            0,
+        );
+        publish_route_receipt_or_error(
+            &state,
+            &route,
+            &route_receipt,
+            Vec::new(),
+            &context,
+            debug_headers.clone(),
+        )
+        .await?;
+
+        return Err(GatewayError::with_route_receipt(
+            StatusCode::SERVICE_UNAVAILABLE,
+            route_receipt,
+            normalized,
+            &context,
+            Some(active_config.config_snapshot.config_snapshot_id.clone()),
+            debug_headers,
+        ));
+    }
+
+    execute_image_route(
         state,
         route,
         normalized_request,
+        image_request,
         context,
         request_headers,
         gateway_origin,
@@ -491,6 +909,267 @@ fn infer_gateway_origin(headers: &HeaderMap) -> Option<String> {
             let host = headers.get("host").and_then(|value| value.to_str().ok())?;
             Some(format!("{}://{}/v1", scheme.trim(), host.trim()))
         })
+}
+
+#[allow(clippy::too_many_lines)]
+async fn execute_image_route(
+    state: GatewayState,
+    route: RouteEvaluation,
+    request: NormalizedChatRequest,
+    image_request: ProviderImageRequest,
+    context: RequestContext,
+    request_headers: BTreeMap<String, String>,
+    gateway_origin: Option<String>,
+) -> Result<ImageExecutionSuccess, GatewayError> {
+    let mut fallback_transitions = Vec::new();
+    let mut provider_attempts = Vec::new();
+    let mut last_error = None;
+
+    for (index, ranked_target) in route.ranked_targets.iter().enumerate() {
+        let target = &ranked_target.target;
+        let Some(adapter) = state.adapter_registry.resolve(&target.resource.provider_id) else {
+            let provider_error = ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                format!(
+                    "no provider adapter registered for `{}`",
+                    target.resource.provider_id
+                ),
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                target.resource.provider_resource_id.as_str(),
+            );
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
+            last_error = Some((ranked_target.clone(), provider_error));
+            continue;
+        };
+        let adapter_manifest = adapter.manifest();
+        if !adapter_manifest.supports_protocol_family(&request.protocol_family) {
+            let provider_error = ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                format!(
+                    "provider adapter `{}` does not support protocol `{}`",
+                    adapter_manifest.adapter_id, request.protocol_family
+                ),
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                target.resource.provider_resource_id.as_str(),
+            )
+            .with_detail("adapter_id", adapter_manifest.adapter_id)
+            .with_detail("provider_kind", adapter_manifest.provider_kind)
+            .with_detail("protocol_family", request.protocol_family.as_str())
+            .with_detail("manifest_boundary", "protocol_family_unsupported");
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
+            last_error = Some((ranked_target.clone(), provider_error));
+            continue;
+        }
+
+        let provider_image_request = ProviderImageRequest {
+            model: target
+                .upstream_model
+                .clone()
+                .unwrap_or_else(|| image_request.model.clone()),
+            prompt: image_request.prompt.clone(),
+            n: image_request.n,
+            size: image_request.size.clone(),
+            quality: image_request.quality.clone(),
+            response_format: image_request.response_format.clone(),
+        };
+        let provider_context = ProviderExecutionContext {
+            request_id: context.request_id.clone(),
+            trace_id: context.trace_id.clone(),
+            gateway_service_name: GATEWAY_SERVICE_NAME.to_string(),
+            gateway_origin: gateway_origin.clone(),
+            request_headers: request_headers.clone(),
+            endpoint: ProviderEndpoint {
+                provider_resource_id: target.resource.provider_resource_id.as_str().to_string(),
+                endpoint_base_url: target.resource.endpoint_base_url.clone(),
+                api_key: target.api_key.clone(),
+                region: Some(target.resource.region.clone()),
+            },
+        };
+        let attempt_started_at = now_rfc3339();
+        let attempt_started = Instant::now();
+
+        match adapter
+            .execute_image_generation(&provider_image_request, &provider_context)
+            .await
+        {
+            Ok(image_response) => {
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    "succeeded",
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    "provider returned image output".to_string(),
+                ));
+                let fallback_count = fallback_transitions.len();
+                let route_receipt = build_route_receipt(
+                    &route,
+                    &context,
+                    &request,
+                    Some(ranked_target),
+                    None,
+                    fallback_transitions,
+                );
+                let debug_headers = maybe_debug_headers(
+                    state.debug_headers_enabled,
+                    &route.config_snapshot.route_policy_id,
+                    Some(target.resource.provider_resource_id.as_str()),
+                    AdmissionResult::Admitted,
+                    fallback_count,
+                );
+                publish_route_receipt_or_error(
+                    &state,
+                    &route,
+                    &route_receipt,
+                    provider_attempts.clone(),
+                    &context,
+                    debug_headers.clone(),
+                )
+                .await?;
+                let usage_event =
+                    build_image_usage_event(&route_receipt, target, &request, &image_response);
+                state
+                    .event_sink
+                    .publish(&route_receipt, &usage_event, &context)
+                    .await
+                    .map_err(|message| {
+                        GatewayError::with_route_receipt(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            route_receipt.clone(),
+                            normalized_error("usage_event_publish_failed", message, &context, true)
+                                .error,
+                            &context,
+                            Some(route.config_snapshot.config_snapshot_id.clone()),
+                            debug_headers.clone(),
+                        )
+                    })?;
+
+                publish_audit_best_effort(
+                    &state,
+                    "gateway.image_generation.succeeded",
+                    "admitted",
+                    &context,
+                    BTreeMap::from([(
+                        "route_receipt_id".to_string(),
+                        route_receipt.route_receipt_id.to_string(),
+                    )]),
+                );
+
+                return Ok(ImageExecutionSuccess {
+                    request_id: context.request_id.clone(),
+                    trace_id: context.trace_id.clone(),
+                    config_snapshot_id: route.config_snapshot.config_snapshot_id.clone(),
+                    route_receipt,
+                    image_response,
+                    debug_headers,
+                });
+            }
+            Err(error) => {
+                warn!(
+                    request_id = context.request_id,
+                    trace_id = context.trace_id,
+                    provider_resource_id = %target.resource.provider_resource_id,
+                    message = error.message,
+                    "provider image generation failed"
+                );
+
+                if let Some(next_target) = route.ranked_targets.get(index + 1)
+                    && error.retryable
+                {
+                    fallback_transitions.push(FallbackTransition {
+                        from_provider_resource_id: target.resource.provider_resource_id.clone(),
+                        to_provider_resource_id: next_target
+                            .target
+                            .resource
+                            .provider_resource_id
+                            .clone(),
+                        reason: format!("{}; retrying next ranked candidate", error.message),
+                    });
+                }
+
+                let has_more_candidates = index + 1 < route.ranked_targets.len();
+                provider_attempts.push(provider_attempt_record(
+                    target.resource.provider_resource_id.clone(),
+                    index + 1,
+                    if error.retryable && has_more_candidates {
+                        "retryable_failure"
+                    } else {
+                        "failed"
+                    },
+                    attempt_started_at,
+                    now_rfc3339(),
+                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                    error.message.clone(),
+                ));
+                last_error = Some((ranked_target.clone(), error.clone()));
+                if !error.retryable || !has_more_candidates {
+                    break;
+                }
+            }
+        }
+    }
+
+    let (ranked_target, provider_error) = last_error.expect("at least one target was evaluated");
+    let normalized = map_provider_error(&provider_error, &context);
+    let fallback_count = fallback_transitions.len();
+    let route_receipt = build_route_receipt(
+        &route,
+        &context,
+        &request,
+        Some(&ranked_target),
+        Some(normalized.error.clone()),
+        fallback_transitions,
+    );
+    let debug_headers = maybe_debug_headers(
+        state.debug_headers_enabled,
+        &route.config_snapshot.route_policy_id,
+        Some(ranked_target.target.resource.provider_resource_id.as_str()),
+        route.admission_result,
+        fallback_count,
+    );
+    publish_route_receipt_or_error(
+        &state,
+        &route,
+        &route_receipt,
+        provider_attempts,
+        &context,
+        debug_headers.clone(),
+    )
+    .await?;
+
+    Err(GatewayError::with_route_receipt(
+        status_for_error_code(&normalized.error.code),
+        route_receipt,
+        normalized.error,
+        &context,
+        Some(route.config_snapshot.config_snapshot_id.clone()),
+        debug_headers,
+    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -554,6 +1233,54 @@ async fn execute_route(
 
             break;
         };
+        let adapter_manifest = adapter.manifest();
+        if !adapter_manifest.supports_protocol_family(&request.protocol_family) {
+            let provider_error = ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                format!(
+                    "provider adapter `{}` does not support protocol `{}`",
+                    adapter_manifest.adapter_id, request.protocol_family
+                ),
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                target.resource.provider_resource_id.as_str(),
+            )
+            .with_detail("adapter_id", adapter_manifest.adapter_id)
+            .with_detail("provider_kind", adapter_manifest.provider_kind)
+            .with_detail("protocol_family", request.protocol_family.as_str())
+            .with_detail("manifest_boundary", "protocol_family_unsupported");
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
+
+            if let Some(next_target) = route.ranked_targets.get(index + 1) {
+                fallback_transitions.push(FallbackTransition {
+                    from_provider_resource_id: target.resource.provider_resource_id.clone(),
+                    to_provider_resource_id: next_target
+                        .target
+                        .resource
+                        .provider_resource_id
+                        .clone(),
+                    reason: format!("{}; retrying next ranked candidate", provider_error.message),
+                });
+            }
+
+            last_error = Some((ranked_target.clone(), provider_error));
+            if index + 1 < route.ranked_targets.len() {
+                continue;
+            }
+
+            break;
+        }
 
         let provider_request = ProviderRequest {
             model: target
@@ -573,6 +1300,7 @@ async fn execute_route(
                 provider_resource_id: target.resource.provider_resource_id.as_str().to_string(),
                 endpoint_base_url: target.resource.endpoint_base_url.clone(),
                 api_key: target.api_key.clone(),
+                region: Some(target.resource.region.clone()),
             },
         };
         let attempt_started_at = now_rfc3339();
@@ -954,6 +1682,150 @@ fn normalize_request(
 }
 
 #[allow(clippy::result_large_err)]
+fn normalize_responses_request(
+    request: ResponsesApiRequest,
+    context: &RequestContext,
+) -> Result<NormalizedChatRequest, GatewayError> {
+    let mut validation_issues = Vec::new();
+
+    if request.model.trim().is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "model".to_string(),
+            message: "model must not be empty".to_string(),
+        });
+    }
+
+    if request.stream {
+        validation_issues.push(ValidationIssue {
+            field: "stream".to_string(),
+            message: "stream=true is intentionally deferred for this slice".to_string(),
+        });
+    }
+
+    if request.input.is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "input".to_string(),
+            message: "input must include at least one message".to_string(),
+        });
+    }
+
+    let mut messages = Vec::with_capacity(request.input.len());
+    for (message_index, message) in request.input.iter().enumerate() {
+        if message.role.trim().is_empty() {
+            validation_issues.push(ValidationIssue {
+                field: format!("input[{message_index}].role"),
+                message: "role must not be empty".to_string(),
+            });
+        }
+        let text = message
+            .content
+            .iter()
+            .filter(|content| content.kind == "input_text")
+            .map(|content| content.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.is_empty() {
+            validation_issues.push(ValidationIssue {
+                field: format!("input[{message_index}].content"),
+                message:
+                    "responses input content must include at least one non-empty input_text item"
+                        .to_string(),
+            });
+            continue;
+        }
+        messages.push(ProviderMessage {
+            role: message.role.clone(),
+            content: text,
+        });
+    }
+
+    if !validation_issues.is_empty() {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            validation_error(
+                "request validation failed",
+                validation_issues,
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    Ok(NormalizedChatRequest {
+        model_alias: request.model,
+        protocol_family: "openai_responses".to_string(),
+        estimated_prompt_tokens: estimate_provider_messages_tokens(&messages),
+        messages,
+    })
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_image_generation_request(
+    request: ImageGenerationRequest,
+    context: &RequestContext,
+) -> Result<(NormalizedChatRequest, ProviderImageRequest), GatewayError> {
+    let mut validation_issues = Vec::new();
+
+    if request.model.trim().is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "model".to_string(),
+            message: "model must not be empty".to_string(),
+        });
+    }
+
+    if request.prompt.trim().is_empty() {
+        validation_issues.push(ValidationIssue {
+            field: "prompt".to_string(),
+            message: "prompt must not be empty".to_string(),
+        });
+    }
+
+    if request.n.is_some_and(|value| value == 0) {
+        validation_issues.push(ValidationIssue {
+            field: "n".to_string(),
+            message: "n must be greater than zero when provided".to_string(),
+        });
+    }
+
+    if !validation_issues.is_empty() {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            validation_error(
+                "image generation request validation failed",
+                validation_issues,
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    let model_alias = normalize_image_model_alias(&request.model);
+    let prompt = request.prompt.trim().to_string();
+    let normalized = NormalizedChatRequest {
+        model_alias: model_alias.clone(),
+        protocol_family: "openai_images".to_string(),
+        estimated_prompt_tokens: estimate_text_tokens(&prompt),
+        messages: vec![ProviderMessage {
+            role: "user".to_string(),
+            content: prompt.clone(),
+        }],
+    };
+    let provider_request = ProviderImageRequest {
+        model: model_alias,
+        prompt,
+        n: request.n,
+        size: request.size,
+        quality: request.quality,
+        response_format: request.response_format,
+    };
+
+    Ok((normalized, provider_request))
+}
+
+#[allow(clippy::result_large_err)]
 fn normalize_anthropic_request(
     request: AnthropicMessageRequest,
     context: &RequestContext,
@@ -1062,7 +1934,11 @@ fn evaluate_route(
     let mut ranked_targets = Vec::new();
 
     if active_config.route_policy.protocol_family != request.protocol_family
-        || active_config.route_policy.model_alias != request.model_alias
+        || !model_alias_matches(
+            &active_config.route_policy.protocol_family,
+            &active_config.route_policy.model_alias,
+            &request.model_alias,
+        )
     {
         return RouteEvaluation {
             config_snapshot: active_config.config_snapshot.clone(),
@@ -1115,6 +1991,11 @@ fn evaluate_route(
             continue;
         }
 
+        if !target_supports_protocol_family(target, &request.protocol_family) {
+            excluded_targets.push(protocol_family_exclusion(target, &request.protocol_family));
+            continue;
+        }
+
         if !route_capabilities_supported(&active_config.route_policy, target) {
             excluded_targets.push(ExcludedTarget {
                 provider_resource_id: target.resource.provider_resource_id.clone(),
@@ -1164,6 +2045,35 @@ fn evaluate_route(
     }
 }
 
+fn target_supports_protocol_family(target: &ProviderTargetRuntime, protocol_family: &str) -> bool {
+    target
+        .resource
+        .supported_protocol_families
+        .iter()
+        .any(|supported| supported == protocol_family)
+}
+
+fn protocol_family_exclusion(
+    target: &ProviderTargetRuntime,
+    protocol_family: &str,
+) -> ExcludedTarget {
+    ExcludedTarget {
+        provider_resource_id: target.resource.provider_resource_id.clone(),
+        reason_code: "protocol_family_unsupported".to_string(),
+        reason: format!(
+            "provider target does not declare support for protocol family `{protocol_family}`"
+        ),
+    }
+}
+
+fn model_alias_matches(protocol_family: &str, route_alias: &str, request_alias: &str) -> bool {
+    if protocol_family == "openai_images" {
+        normalize_image_model_alias(route_alias) == normalize_image_model_alias(request_alias)
+    } else {
+        route_alias == request_alias
+    }
+}
+
 fn route_capabilities_supported(
     route_policy: &RoutePolicy,
     target: &ProviderTargetRuntime,
@@ -1175,7 +2085,7 @@ fn route_capabilities_supported(
             "streaming" => target.resource.capabilities.supports_streaming,
             "tool_calling" | "tool_related" => target.resource.capabilities.supports_tool_calling,
             "json_mode" => target.resource.capabilities.supports_json_mode,
-            "chat_completions" => true,
+            "chat_completions" | "image_generation" => true,
             "realtime" => target.resource.capabilities.supports_realtime,
             "response_model_metadata" => {
                 target
@@ -1305,6 +2215,52 @@ fn build_usage_event(
     };
     let total_tokens = f64::from(usage.input_tokens + usage.output_tokens);
     let estimated_cost = (total_tokens / 1_000.0) * target.usd_per_1k_tokens;
+
+    UsageEvent {
+        usage_event_id: UsageEventId::parse(format!(
+            "usageevt_{}",
+            route_receipt
+                .route_receipt_id
+                .as_str()
+                .trim_start_matches("routercpt_")
+        ))
+        .expect("usage event id should be valid"),
+        route_receipt_id: route_receipt.route_receipt_id.clone(),
+        tenant_id: route_receipt.tenant_id.clone(),
+        project_id: route_receipt.project_id.clone(),
+        provider_resource_id: target.resource.provider_resource_id.clone(),
+        model_alias: request.model_alias.clone(),
+        phase: UsagePhase::Final,
+        idempotency_key: format!("{}:final", route_receipt.route_receipt_id),
+        usage,
+        estimated_cost: MonetaryAmount {
+            currency: "USD".to_string(),
+            amount: format!("{estimated_cost:.6}"),
+        },
+        recorded_at: now_rfc3339(),
+    }
+}
+
+fn build_image_usage_event(
+    route_receipt: &RouteReceipt,
+    target: &ProviderTargetRuntime,
+    request: &NormalizedChatRequest,
+    response: &ProviderImageResponse,
+) -> UsageEvent {
+    let usage = UsageMetrics {
+        input_tokens: response
+            .usage
+            .input_tokens
+            .max(request.estimated_prompt_tokens),
+        output_tokens: response.usage.output_tokens,
+        cached_input_tokens: response.usage.cached_input_tokens,
+    };
+    let total_tokens = f64::from(usage.input_tokens + usage.output_tokens);
+    let image_units = f64::from(u32::try_from(response.images.len().max(1)).unwrap_or(u32::MAX));
+    let estimated_cost = (total_tokens / 1_000.0).mul_add(
+        target.usd_per_1k_tokens,
+        image_units * image_usd_per_generation_for_target(target),
+    );
 
     UsageEvent {
         usage_event_id: UsageEventId::parse(format!(
@@ -1534,6 +2490,43 @@ fn map_provider_response(
     }
 }
 
+fn map_provider_response_to_responses(
+    context: &RequestContext,
+    request: &NormalizedChatRequest,
+    response: &ProviderResponse,
+) -> ResponsesApiResponse {
+    let prompt_tokens = response
+        .usage
+        .input_tokens
+        .max(request.estimated_prompt_tokens);
+    let completion_tokens = response.usage.output_tokens;
+    let response_id = response
+        .response_id
+        .clone()
+        .unwrap_or_else(|| format!("resp_{}", context.sequence));
+
+    ResponsesApiResponse {
+        id: response_id,
+        object: "response",
+        model: response.model.clone(),
+        output_text: response.output_text.clone(),
+        output: vec![ResponsesApiOutputItem {
+            kind: "message",
+            role: "assistant",
+            content: vec![ResponsesApiOutputContent {
+                kind: "output_text",
+                text: response.output_text.clone(),
+                annotations: Vec::new(),
+            }],
+        }],
+        usage: UsageSummary {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+        },
+    }
+}
+
 fn map_provider_error(error: &ProviderError, context: &RequestContext) -> ErrorEnvelope {
     let code = match error.kind {
         ProviderErrorKind::Auth | ProviderErrorKind::Unavailable => "provider_unavailable",
@@ -1616,25 +2609,131 @@ fn next_request_context() -> RequestContext {
 fn estimate_prompt_tokens(messages: &[ChatMessage]) -> u32 {
     messages
         .iter()
-        .map(|message| {
-            u32::try_from(message.content.split_whitespace().count())
-                .unwrap_or(u32::MAX)
-                .max(1)
-                + 4
-        })
+        .map(|message| estimate_text_tokens(&message.content))
         .sum()
 }
 
 fn estimate_provider_messages_tokens(messages: &[ProviderMessage]) -> u32 {
     messages
         .iter()
-        .map(|message| {
-            u32::try_from(message.content.split_whitespace().count())
-                .unwrap_or(u32::MAX)
-                .max(1)
-                + 4
-        })
+        .map(|message| estimate_text_tokens(&message.content))
         .sum()
+}
+
+fn estimate_text_tokens(text: &str) -> u32 {
+    u32::try_from(text.split_whitespace().count())
+        .unwrap_or(u32::MAX)
+        .max(1)
+        + 4
+}
+
+fn normalize_image_model_alias(model: &str) -> String {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "chatgpt image 2" | "chatgpt-image-2" | "chatgpt_image_2" => {
+            "chatgpt-image-latest".to_string()
+        }
+        _ => model.trim().to_string(),
+    }
+}
+
+async fn ensure_budget_allows_request(
+    state: &GatewayState,
+    api_key_scope: &GatewayApiKeyScope,
+    active_config: &ActiveGatewayConfig,
+    request: &NormalizedChatRequest,
+    context: &RequestContext,
+) -> Result<(), GatewayError> {
+    let projection = state
+        .budget_store
+        .load_budget(&BudgetProjectionScope {
+            tenant_id: api_key_scope.tenant_id.clone(),
+            project_id: api_key_scope.project_id.clone(),
+        })
+        .await
+        .map_err(|error| {
+            GatewayError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                normalized_error(
+                    "budget_projection_unavailable",
+                    format!("budget projection is unavailable: {error}"),
+                    context,
+                    true,
+                ),
+                context,
+            )
+        })?;
+
+    if projection.data.threshold_status != "exceeded" {
+        return Ok(());
+    }
+
+    let route = RouteEvaluation {
+        config_snapshot: active_config.config_snapshot.clone(),
+        admission_result: AdmissionResult::RejectedBudget,
+        excluded_targets: Vec::new(),
+        ranked_targets: Vec::new(),
+    };
+    let reason = format!(
+        "budget exhausted for tenant `{}` project `{}`; remaining budget {} {}",
+        projection.data.tenant_id,
+        projection
+            .data
+            .project_id
+            .as_ref()
+            .map_or_else(|| "global".to_string(), ToString::to_string),
+        projection.data.remaining_budget.amount,
+        projection.data.remaining_budget.currency
+    );
+    let normalized = normalized_error("budget_exceeded", reason, context, false).error;
+    let route_receipt = build_route_receipt(
+        &route,
+        context,
+        request,
+        None,
+        Some(normalized.clone()),
+        Vec::new(),
+    );
+    let debug_headers = maybe_debug_headers(
+        state.debug_headers_enabled,
+        &active_config.route_policy.route_policy_id,
+        None,
+        AdmissionResult::RejectedBudget,
+        0,
+    );
+    publish_route_receipt_or_error(
+        state,
+        &route,
+        &route_receipt,
+        Vec::new(),
+        context,
+        debug_headers.clone(),
+    )
+    .await?;
+    publish_audit_best_effort(
+        state,
+        "gateway.request.rejected",
+        "budget_exceeded",
+        context,
+        BTreeMap::from([
+            (
+                "configured_budget".to_string(),
+                projection.data.configured_budget.amount.clone(),
+            ),
+            (
+                "remaining_budget".to_string(),
+                projection.data.remaining_budget.amount.clone(),
+            ),
+        ]),
+    );
+
+    Err(GatewayError::with_route_receipt(
+        StatusCode::FORBIDDEN,
+        route_receipt,
+        normalized,
+        context,
+        Some(active_config.config_snapshot.config_snapshot_id.clone()),
+        debug_headers,
+    ))
 }
 
 fn unix_timestamp_seconds() -> u64 {
@@ -1642,6 +2741,34 @@ fn unix_timestamp_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+fn publish_audit_best_effort(
+    state: &GatewayState,
+    action: &str,
+    outcome: &str,
+    context: &RequestContext,
+    details: BTreeMap<String, String>,
+) {
+    let sink = Arc::clone(&state.event_sink);
+    let context = context.clone();
+    let action = action.to_string();
+    let outcome = outcome.to_string();
+    tokio::spawn(async move {
+        if let Err(error) = sink
+            .publish_audit(&action, &outcome, &context, details)
+            .await
+        {
+            warn!(
+                request_id = context.request_id,
+                trace_id = context.trace_id,
+                action,
+                outcome,
+                error,
+                "failed to publish gateway audit event"
+            );
+        }
+    });
 }
 
 fn now_rfc3339() -> String {
@@ -1731,6 +2858,32 @@ fn anthropic_success_response(success: &ExecutionSuccess) -> Response {
     response
 }
 
+fn responses_success_response(success: &ExecutionSuccess) -> Response {
+    let context = RequestContext {
+        request_id: success.request_id.clone(),
+        trace_id: success.trace_id.clone(),
+        sequence: success.sequence,
+    };
+    let request = NormalizedChatRequest {
+        model_alias: success.provider_response.model.clone(),
+        protocol_family: "openai_responses".to_string(),
+        messages: Vec::new(),
+        estimated_prompt_tokens: success.provider_response.usage.input_tokens,
+    };
+    let payload =
+        map_provider_response_to_responses(&context, &request, &success.provider_response);
+    let mut response = Json(payload).into_response();
+    insert_success_headers(
+        &mut response,
+        &success.request_id,
+        &success.trace_id,
+        &success.route_receipt,
+        &success.config_snapshot_id,
+        success.debug_headers.as_ref(),
+    );
+    response
+}
+
 fn gemini_success_response(success: &ExecutionSuccess) -> Response {
     let payload: GenerateContentResponse =
         gemini_from_provider_response(&success.provider_response);
@@ -1744,6 +2897,48 @@ fn gemini_success_response(success: &ExecutionSuccess) -> Response {
         success.debug_headers.as_ref(),
     );
     response
+}
+
+fn image_generation_success_response(success: &ImageExecutionSuccess) -> Response {
+    let input_tokens = success.image_response.usage.input_tokens;
+    let output_tokens = success.image_response.usage.output_tokens;
+    let payload = ImageGenerationResponse {
+        id: success.image_response.response_id.clone(),
+        created: success
+            .image_response
+            .created
+            .unwrap_or_else(unix_timestamp_seconds),
+        model: success.image_response.model.clone(),
+        data: success
+            .image_response
+            .images
+            .iter()
+            .map(image_generation_data)
+            .collect(),
+        usage: UsageSummary {
+            prompt_tokens: input_tokens,
+            completion_tokens: output_tokens,
+            total_tokens: input_tokens + output_tokens,
+        },
+    };
+    let mut response = Json(payload).into_response();
+    insert_success_headers(
+        &mut response,
+        &success.request_id,
+        &success.trace_id,
+        &success.route_receipt,
+        &success.config_snapshot_id,
+        success.debug_headers.as_ref(),
+    );
+    response
+}
+
+fn image_generation_data(image: &ProviderImageData) -> ImageGenerationData {
+    ImageGenerationData {
+        b64_json: image.b64_json.clone(),
+        url: image.url.clone(),
+        revised_prompt: image.revised_prompt.clone(),
+    }
 }
 
 fn insert_success_headers(
@@ -1811,6 +3006,14 @@ trait ActiveConfigStore: Send + Sync {
 }
 
 #[async_trait]
+trait BudgetProjectionStore: Send + Sync {
+    async fn load_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String>;
+}
+
+#[async_trait]
 trait ApiKeyScopeStore: Send + Sync {
     async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String>;
 }
@@ -1830,12 +3033,26 @@ trait RuntimeEventSink: Send + Sync {
         usage_event: &UsageEvent,
         context: &RequestContext,
     ) -> Result<(), String>;
+
+    async fn publish_audit(
+        &self,
+        action: &str,
+        outcome: &str,
+        context: &RequestContext,
+        details: BTreeMap<String, String>,
+    ) -> Result<(), String>;
 }
 
 #[cfg(test)]
 #[derive(Debug)]
 struct StaticConfigStore {
     config: ActiveGatewayConfig,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct StaticBudgetProjectionStore {
+    response: BalanceProjectionResponse,
 }
 
 #[cfg(test)]
@@ -1853,12 +3070,24 @@ impl ActiveConfigStore for StaticConfigStore {
     }
 }
 
+#[cfg(test)]
+#[async_trait]
+impl BudgetProjectionStore for StaticBudgetProjectionStore {
+    async fn load_budget(
+        &self,
+        _scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        Ok(self.response.clone())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ControlPlaneConfigStore {
     base_url: String,
     cache: Arc<Mutex<Option<CachedActiveConfig>>>,
     cache_ttl: Duration,
     client: reqwest::Client,
+    internal_token: Option<String>,
     snapshot_ref: String,
 }
 
@@ -1876,6 +3105,14 @@ struct ControlPlaneApiKeyStore {
     resolve_path: String,
 }
 
+#[derive(Debug, Clone)]
+struct ControlPlaneBudgetStore {
+    base_url: String,
+    client: reqwest::Client,
+    internal_token: Option<String>,
+    projection_path: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyResolveRequest {
     api_key: String,
@@ -1889,9 +3126,23 @@ struct GatewayApiKeyResolveResponse {
     tenant_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct BudgetProjectionScope {
+    tenant_id: String,
+    project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct InternalGatewayConfigResponse {
+    config_snapshot: ConfigSnapshot,
+    route_policy: RoutePolicy,
+    provider_resources: Vec<ProviderResource>,
+}
+
 #[derive(Debug)]
 struct NatsEventSink {
     client: OnceCell<async_nats::Client>,
+    audit_subject: String,
     route_receipt_subject: String,
     usage_event_subject: String,
     url: String,
@@ -1901,6 +3152,9 @@ impl ControlPlaneConfigStore {
     fn from_env() -> Self {
         let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
+        let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let snapshot_ref = std::env::var("GATEWAY_CONTROL_PLANE_SNAPSHOT_REF")
             .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_SNAPSHOT_REF.to_string());
         let cache_ttl = std::env::var("GATEWAY_CONFIG_CACHE_TTL_MS")
@@ -1908,12 +3162,19 @@ impl ControlPlaneConfigStore {
             .and_then(|value| value.parse::<u64>().ok())
             .map_or_else(|| Duration::from_secs(5), Duration::from_millis);
 
-        Self::new(base_url, snapshot_ref, cache_ttl, reqwest::Client::new())
+        Self::new(
+            base_url,
+            snapshot_ref,
+            internal_token,
+            cache_ttl,
+            control_plane_http_client_from_env(),
+        )
     }
 
     fn new(
         base_url: impl Into<String>,
         snapshot_ref: impl Into<String>,
+        internal_token: Option<String>,
         cache_ttl: Duration,
         client: reqwest::Client,
     ) -> Self {
@@ -1922,43 +3183,33 @@ impl ControlPlaneConfigStore {
             cache: Arc::new(Mutex::new(None)),
             cache_ttl,
             client,
+            internal_token,
             snapshot_ref: snapshot_ref.into(),
         }
     }
 
     async fn fetch_active_config(&self) -> Result<ActiveGatewayConfig, String> {
-        let snapshot = self
-            .get_json::<ConfigSnapshotResponse>(&format!(
-                "/v1/config-snapshots/{}",
-                self.snapshot_ref
-            ))
-            .await?
-            .config_snapshot;
-        let route_policies = self
-            .get_json::<RoutePoliciesResponse>("/v1/route-policies")
-            .await?
-            .data;
-        let provider_resources = self
-            .get_json::<ProviderResourcesResponse>("/v1/provider-resources")
-            .await?
-            .data;
+        let payload = self
+            .get_json::<InternalGatewayConfigResponse>("/internal/gateway/config/current")
+            .await?;
 
-        let route_policy = route_policies
-            .into_iter()
-            .find(|policy| policy.route_policy_id == snapshot.route_policy_id)
-            .ok_or_else(|| {
-                format!(
-                    "route policy {route_policy_id} is missing from control plane",
-                    route_policy_id = snapshot.route_policy_id
-                )
-            })?;
+        if self.snapshot_ref != DEFAULT_CONTROL_PLANE_SNAPSHOT_REF
+            && payload.config_snapshot.config_snapshot_id.as_str() != self.snapshot_ref
+        {
+            return Err(format!(
+                "control plane returned config snapshot `{}` but gateway requested `{}`",
+                payload.config_snapshot.config_snapshot_id, self.snapshot_ref
+            ));
+        }
 
-        let provider_targets = snapshot
+        let provider_targets = payload
+            .config_snapshot
             .provider_resource_ids
             .iter()
             .enumerate()
             .map(|(index, provider_resource_id)| {
-                let resource = provider_resources
+                let resource = payload
+                    .provider_resources
                     .iter()
                     .find(|candidate| &candidate.provider_resource_id == provider_resource_id)
                     .cloned()
@@ -1970,24 +3221,30 @@ impl ControlPlaneConfigStore {
 
                 Ok(ProviderTargetRuntime {
                     target_kind: provider_target_kind(&resource.provider_id),
-                    transit_metadata: transit_metadata_for_target(&resource, &route_policy),
+                    transit_metadata: transit_metadata_for_target(&resource, &payload.route_policy),
                     priority: u32::try_from(index + 1).unwrap_or(u32::MAX),
-                    upstream_model: upstream_model_for_target(&resource),
+                    upstream_model: upstream_model_for_target(&resource, &payload.route_policy),
                     api_key: api_key_for_target(&resource),
                     static_latency_score: static_latency_score_for_region(
-                        &route_policy.preferred_regions,
+                        &payload.route_policy.preferred_regions,
                         &resource.region,
                     ),
-                    static_cost_score: static_cost_score_for_target(&route_policy, &resource),
-                    usd_per_1k_tokens: usd_per_1k_tokens_for_target(&route_policy, &resource),
+                    static_cost_score: static_cost_score_for_target(
+                        &payload.route_policy,
+                        &resource,
+                    ),
+                    usd_per_1k_tokens: usd_per_1k_tokens_for_target(
+                        &payload.route_policy,
+                        &resource,
+                    ),
                     resource,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
 
         Ok(ActiveGatewayConfig {
-            config_snapshot: snapshot,
-            route_policy,
+            config_snapshot: payload.config_snapshot,
+            route_policy: payload.route_policy,
             provider_targets,
         })
     }
@@ -1998,9 +3255,11 @@ impl ControlPlaneConfigStore {
     {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{base}{path}");
-        let response = self
-            .client
-            .get(&url)
+        let mut request = self.client.get(&url);
+        if let Some(internal_token) = self.internal_token.as_ref() {
+            request = request.header(AUTHORIZATION, format!("Bearer {internal_token}"));
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| format!("failed to fetch {url}: {error}"))?;
@@ -2021,6 +3280,24 @@ impl ControlPlaneConfigStore {
     }
 }
 
+fn control_plane_request_timeout_from_env() -> Duration {
+    std::env::var("GATEWAY_CONTROL_PLANE_REQUEST_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|timeout_ms| *timeout_ms > 0)
+        .map_or_else(
+            || Duration::from_millis(DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT_MS),
+            Duration::from_millis,
+        )
+}
+
+fn control_plane_http_client_from_env() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(control_plane_request_timeout_from_env())
+        .build()
+        .expect("control-plane HTTP client should build")
+}
+
 impl ControlPlaneApiKeyStore {
     fn from_env() -> Self {
         let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
@@ -2035,7 +3312,7 @@ impl ControlPlaneApiKeyStore {
             base_url,
             resolve_path,
             internal_token,
-            reqwest::Client::new(),
+            control_plane_http_client_from_env(),
         )
     }
 
@@ -2099,10 +3376,96 @@ impl ControlPlaneApiKeyStore {
     }
 }
 
+impl ControlPlaneBudgetStore {
+    fn from_env() -> Self {
+        let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
+            .unwrap_or_else(|_| DEFAULT_CONTROL_PLANE_BASE_URL.to_string());
+        let internal_token = std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let projection_path = std::env::var("GATEWAY_BILLING_PROJECTION_PATH")
+            .unwrap_or_else(|_| "/internal/gateway/billing-projection".to_string());
+
+        Self::new(
+            base_url,
+            projection_path,
+            internal_token,
+            control_plane_http_client_from_env(),
+        )
+    }
+
+    fn new(
+        base_url: impl Into<String>,
+        projection_path: impl Into<String>,
+        internal_token: Option<String>,
+        client: reqwest::Client,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            client,
+            internal_token,
+            projection_path: projection_path.into(),
+        }
+    }
+
+    async fn fetch_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        let internal_token = self.internal_token.as_ref().ok_or_else(|| {
+            "CONTROL_PLANE_INTERNAL_TOKEN must be configured for gateway budget resolution"
+                .to_string()
+        })?;
+        let base = self.base_url.trim_end_matches('/');
+        let path = if self.projection_path.starts_with('/') {
+            self.projection_path.clone()
+        } else {
+            format!("/{}", self.projection_path)
+        };
+        let url = format!("{base}{path}");
+        let mut request = self
+            .client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {internal_token}"))
+            .query(&[("tenant_id", scope.tenant_id.as_str())]);
+        if let Some(project_id) = scope.project_id.as_deref() {
+            request = request.query(&[("project_id", project_id)]);
+        }
+        let response = request.send().await.map_err(|error| {
+            format!("failed to fetch budget projection via control plane: {error}")
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unable to read response body".to_string());
+            return Err(format!(
+                "control plane rejected budget projection query with HTTP {status}: {body}"
+            ));
+        }
+
+        response
+            .json::<BalanceProjectionResponse>()
+            .await
+            .map_err(|error| format!("failed to decode balance projection payload: {error}"))
+    }
+}
+
 #[async_trait]
 impl ApiKeyScopeStore for ControlPlaneApiKeyStore {
     async fn resolve(&self, api_key: &str) -> Result<GatewayApiKeyScope, String> {
         self.fetch_scope(api_key).await
+    }
+}
+
+#[async_trait]
+impl BudgetProjectionStore for ControlPlaneBudgetStore {
+    async fn load_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        self.fetch_budget(scope).await
     }
 }
 
@@ -2111,21 +3474,30 @@ impl NatsEventSink {
         let url = std::env::var("GATEWAY_NATS_URL")
             .or_else(|_| std::env::var("NATS_URL"))
             .unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string());
+        let audit_subject = std::env::var("GATEWAY_AUDIT_EVENT_SUBJECT")
+            .unwrap_or_else(|_| "events.audit_event.created".to_string());
         let route_receipt_subject = std::env::var("GATEWAY_ROUTE_RECEIPT_SUBJECT")
             .unwrap_or_else(|_| "events.route_receipt.recorded".to_string());
         let usage_event_subject = std::env::var("GATEWAY_USAGE_EVENT_SUBJECT")
             .unwrap_or_else(|_| "events.usage_event.recorded".to_string());
 
-        Self::new(url, route_receipt_subject, usage_event_subject)
+        Self::new(
+            url,
+            audit_subject,
+            route_receipt_subject,
+            usage_event_subject,
+        )
     }
 
     fn new(
         url: impl Into<String>,
+        audit_subject: impl Into<String>,
         route_receipt_subject: impl Into<String>,
         usage_event_subject: impl Into<String>,
     ) -> Self {
         Self {
             client: OnceCell::new(),
+            audit_subject: audit_subject.into(),
             route_receipt_subject: route_receipt_subject.into(),
             usage_event_subject: usage_event_subject.into(),
             url: url.into(),
@@ -2209,6 +3581,50 @@ impl RuntimeEventSink for NatsEventSink {
             .map_err(|error| format!("failed to flush usage event publish: {error}"))?;
         Ok(())
     }
+
+    async fn publish_audit(
+        &self,
+        action: &str,
+        outcome: &str,
+        context: &RequestContext,
+        details: BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let audit_event = core_domain::AuditEvent {
+            audit_event_id: format!("auditevt_{}", context.sequence),
+            actor: GATEWAY_SERVICE_NAME.to_string(),
+            action: action.to_string(),
+            request_id: Some(context.request_id.clone()),
+            trace_id: context.trace_id.clone(),
+            recorded_at: now_rfc3339(),
+        };
+        let payload = serde_json::json!({
+            "audit_event": audit_event,
+            "outcome": outcome,
+            "details": details,
+        });
+        let envelope = MessageEnvelope::new(
+            format!("msg_audit_{}", context.sequence),
+            MessageType::AuditEventCreated,
+            now_rfc3339(),
+            ServiceName::parse(GATEWAY_SERVICE_NAME).expect("gateway service name should be valid"),
+            format!("audit:{}:{}", action, context.request_id),
+            payload,
+        )
+        .with_request_context(context.trace_id.clone(), context.request_id.clone());
+        let body = serde_json::to_vec(&envelope)
+            .map_err(|error| format!("failed to serialize audit event envelope: {error}"))?;
+        let client = self.client().await?;
+
+        client
+            .publish(self.audit_subject.clone(), body.into())
+            .await
+            .map_err(|error| format!("failed to publish audit event: {error}"))?;
+        client
+            .flush()
+            .await
+            .map_err(|error| format!("failed to flush audit event publish: {error}"))?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -2246,7 +3662,7 @@ fn provider_resource_env_prefix(provider_resource_id: &str) -> String {
 }
 
 fn provider_target_kind(provider_id: &str) -> ProviderTargetKind {
-    if provider_id == "gateway" {
+    if matches!(provider_id, "gateway" | "chatgpt_web") {
         ProviderTargetKind::TransitGateway
     } else {
         ProviderTargetKind::Native
@@ -2257,15 +3673,23 @@ fn transit_metadata_for_target(
     resource: &ProviderResource,
     route_policy: &RoutePolicy,
 ) -> Option<TransitProviderMetadata> {
-    (resource.provider_id == "gateway").then(|| TransitProviderMetadata {
-        gateway_kind: TransitGatewayKind::OpenAiCompatible,
-        gateway_name: reqwest::Url::parse(&resource.endpoint_base_url)
-            .ok()
-            .and_then(|url| url.host_str().map(ToString::to_string))
-            .unwrap_or_else(|| "openai-compatible-gateway".to_string()),
-        route_cost_scope: route_policy.protocol_family.clone(),
-        transit_hops: 1,
-        preserves_error_diagnostics: true,
+    matches!(resource.provider_id.as_str(), "gateway" | "chatgpt_web").then(|| {
+        TransitProviderMetadata {
+            gateway_kind: TransitGatewayKind::OpenAiCompatible,
+            gateway_name: reqwest::Url::parse(&resource.endpoint_base_url)
+                .ok()
+                .and_then(|url| url.host_str().map(ToString::to_string))
+                .unwrap_or_else(|| {
+                    if resource.provider_id == "chatgpt_web" {
+                        "chatgpt-web-reverse-proxy".to_string()
+                    } else {
+                        "openai-compatible-gateway".to_string()
+                    }
+                }),
+            route_cost_scope: route_policy.protocol_family.clone(),
+            transit_hops: 1,
+            preserves_error_diagnostics: true,
+        }
     })
 }
 
@@ -2282,6 +3706,9 @@ fn api_key_for_target(resource: &ProviderResource) -> String {
                 .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
                 .unwrap_or_default(),
             "gateway" => std::env::var("GATEWAY_TRANSIT_API_KEY").unwrap_or_default(),
+            "chatgpt_web" => std::env::var("GATEWAY_CHATGPT_WEB_API_KEY")
+                .or_else(|_| std::env::var("GATEWAY_TRANSIT_API_KEY"))
+                .unwrap_or_default(),
             "gemini" => std::env::var("GATEWAY_GEMINI_API_KEY")
                 .or_else(|_| std::env::var("GEMINI_API_KEY"))
                 .or_else(|_| std::env::var("GOOGLE_API_KEY"))
@@ -2290,13 +3717,20 @@ fn api_key_for_target(resource: &ProviderResource) -> String {
         })
 }
 
-fn upstream_model_for_target(resource: &ProviderResource) -> Option<String> {
+fn upstream_model_for_target(
+    resource: &ProviderResource,
+    route_policy: &RoutePolicy,
+) -> Option<String> {
     let resource_prefix = provider_resource_env_prefix(resource.provider_resource_id.as_str());
     if let Ok(model) = std::env::var(format!("PROVIDER_RESOURCE_{resource_prefix}_MODEL")) {
         return Some(model);
     }
 
     match resource.provider_id.as_str() {
+        "openai" if route_policy.protocol_family == "openai_images" => Some(
+            std::env::var("GATEWAY_OPENAI_IMAGE_MODEL")
+                .unwrap_or_else(|_| "chatgpt-image-latest".to_string()),
+        ),
         "openai" => Some(
             std::env::var("GATEWAY_OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string()),
         ),
@@ -2304,7 +3738,18 @@ fn upstream_model_for_target(resource: &ProviderResource) -> Option<String> {
             std::env::var("GATEWAY_ANTHROPIC_MODEL")
                 .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string()),
         ),
+        "bedrock" => std::env::var("GATEWAY_BEDROCK_MODEL").ok(),
+        "gateway" if route_policy.protocol_family == "openai_images" => {
+            std::env::var("GATEWAY_TRANSIT_IMAGE_MODEL").ok()
+        }
         "gateway" => std::env::var("GATEWAY_TRANSIT_MODEL").ok(),
+        "chatgpt_web" if route_policy.protocol_family == "openai_images" => Some(
+            std::env::var("GATEWAY_CHATGPT_WEB_IMAGE_MODEL")
+                .unwrap_or_else(|_| "chatgpt-image-latest".to_string()),
+        ),
+        "chatgpt_web" => std::env::var("GATEWAY_CHATGPT_WEB_MODEL")
+            .or_else(|_| std::env::var("GATEWAY_TRANSIT_MODEL"))
+            .ok(),
         "gemini" => Some(
             std::env::var("GATEWAY_GEMINI_MODEL")
                 .unwrap_or_else(|_| "gemini-1.5-flash-latest".to_string()),
@@ -2334,6 +3779,12 @@ fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderR
     if resource.provider_id == "gateway" {
         return transit_usd_per_1k_tokens_for_route(route_policy);
     }
+    if resource.provider_id == "chatgpt_web" {
+        return std::env::var("GATEWAY_CHATGPT_WEB_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| transit_usd_per_1k_tokens_for_route(route_policy));
+    }
 
     match resource.provider_id.as_str() {
         "openai" => std::env::var("GATEWAY_OPENAI_USD_PER_1K_TOKENS")
@@ -2344,11 +3795,38 @@ fn usd_per_1k_tokens_for_target(route_policy: &RoutePolicy, resource: &ProviderR
             .ok()
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.012),
+        "bedrock" => std::env::var("GATEWAY_BEDROCK_USD_PER_1K_TOKENS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.012),
         "gemini" => std::env::var("GATEWAY_GEMINI_USD_PER_1K_TOKENS")
             .ok()
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.008),
         _ => 0.02,
+    }
+}
+
+fn image_usd_per_generation_for_target(target: &ProviderTargetRuntime) -> f64 {
+    if target.resource.provider_id == "gateway" {
+        return std::env::var("GATEWAY_TRANSIT_OPENAI_IMAGE_USD_PER_GENERATION")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.04);
+    }
+    if target.resource.provider_id == "chatgpt_web" {
+        return std::env::var("GATEWAY_CHATGPT_WEB_IMAGE_USD_PER_GENERATION")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.04);
+    }
+
+    match target.resource.provider_id.as_str() {
+        "openai" => std::env::var("GATEWAY_OPENAI_IMAGE_USD_PER_GENERATION")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.04),
+        _ => 0.05,
     }
 }
 
@@ -2492,1682 +3970,4 @@ impl IntoResponse for GatewayError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
-        ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
-        GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ProviderTargetRuntime,
-        RequestContext, RuntimeEventSink, StaticConfigStore, app_with_state, evaluate_route,
-        normalize_request,
-    };
-    use axum::{
-        Json, Router,
-        body::{Body, to_bytes},
-        extract::Json as ExtractJson,
-        extract::State,
-        http::{Request, StatusCode},
-        routing::{get, post},
-    };
-    use core_domain::{
-        AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
-        CredentialOwnerType, DeploymentScope, HealthState, ProjectId, ProvenanceClass,
-        ProviderResource, ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId,
-        RouteReceipt, TenantId, UsageEvent,
-    };
-    use protocol_ir::{
-        ConfigSnapshotResponse, ProviderResourcesResponse, RoutePoliciesResponse,
-        RouteReceiptRecorded,
-    };
-    use provider_gateway::{
-        GatewayAdapter, HttpRequest as GatewayHttpRequest, HttpResponse as GatewayHttpResponse,
-        HttpTransport as GatewayHttpTransport,
-    };
-    use provider_traits::{
-        AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
-        ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
-        ProviderUsage, StreamingSupport,
-    };
-    use std::{
-        collections::BTreeMap,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering as AtomicOrdering},
-        },
-        time::Duration,
-    };
-    use tokio::net::TcpListener;
-    use tokio::sync::Mutex;
-    use tower::ServiceExt;
-
-    fn valid_http_request() -> ChatCompletionRequest {
-        ChatCompletionRequest {
-            model: "reasoning-fast".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: "hello router".to_string(),
-            }],
-            stream: false,
-        }
-    }
-
-    fn request_context() -> super::RequestContext {
-        super::RequestContext {
-            request_id: "req_test".to_string(),
-            trace_id: "trace_test".to_string(),
-            sequence: 42,
-        }
-    }
-
-    fn default_route_policy() -> RoutePolicy {
-        let tenant_id = TenantId::parse("tenant_acme").unwrap();
-        RoutePolicy {
-            route_policy_id: RoutePolicyId::parse("routepol_default").unwrap(),
-            tenant_id,
-            display_name: "default".to_string(),
-            protocol_family: "openai_chat".to_string(),
-            model_alias: "reasoning-fast".to_string(),
-            required_capabilities: vec!["json_mode".to_string()],
-            preferred_regions: vec!["us-east-1".to_string()],
-            version: 1,
-            created_at: "2026-04-20T00:00:00Z".to_string(),
-            updated_at: "2026-04-20T00:00:00Z".to_string(),
-        }
-    }
-
-    fn build_config(targets: Vec<ProviderTargetRuntime>) -> ActiveGatewayConfig {
-        let tenant_id = TenantId::parse("tenant_acme").unwrap();
-        let project_id = ProjectId::parse("proj_core").unwrap();
-        let route_policy = default_route_policy();
-
-        ActiveGatewayConfig {
-            config_snapshot: ConfigSnapshot {
-                config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_test").unwrap(),
-                tenant_id,
-                project_id,
-                revision: 1,
-                status: ConfigSnapshotStatus::Active,
-                activated_at: Some("2026-04-20T00:00:00Z".to_string()),
-                provider_resource_ids: targets
-                    .iter()
-                    .map(|target| target.resource.provider_resource_id.clone())
-                    .collect(),
-                route_policy_id: route_policy.route_policy_id.clone(),
-                budget_policy_id: BudgetPolicyId::parse("budgetpol_test").unwrap(),
-            },
-            route_policy,
-            provider_targets: targets,
-        }
-    }
-
-    fn build_target(
-        provider_resource_id: &str,
-        region: &str,
-        latency: f32,
-        cost: f32,
-        health_state: HealthState,
-    ) -> ProviderTargetRuntime {
-        let resource = ProviderResource {
-            provider_resource_id: ProviderResourceId::parse(provider_resource_id).unwrap(),
-            tenant_id: TenantId::parse("tenant_acme").unwrap(),
-            project_id: Some(ProjectId::parse("proj_core").unwrap()),
-            provider_id: "openai".to_string(),
-            name: provider_resource_id.to_string(),
-            status: ProviderResourceStatus::Active,
-            provenance_class: ProvenanceClass::OfficialApi,
-            credential_owner_type: CredentialOwnerType::Platform,
-            deployment_scope: DeploymentScope::Shared,
-            region: region.to_string(),
-            endpoint_base_url: "https://api.openai.example/v1".to_string(),
-            auth_kind: AuthKind::ApiKey,
-            health_state,
-            health_message: Some("test health".to_string()),
-            quarantine_reason: None,
-            budget_policy_id: None,
-            capabilities: core_domain::ProviderCapabilities {
-                supports_streaming: true,
-                supports_tool_calling: true,
-                supports_json_mode: true,
-                supports_realtime: false,
-                supports_response_model_metadata: true,
-            },
-            supported_protocol_families: vec![
-                "openai_chat".to_string(),
-                "openai_responses".to_string(),
-            ],
-            is_transit_gateway: false,
-            version: 1,
-            created_at: "2026-04-20T00:00:00Z".to_string(),
-            updated_at: "2026-04-20T00:00:00Z".to_string(),
-        };
-
-        ProviderTargetRuntime {
-            target_kind: super::provider_target_kind(&resource.provider_id),
-            transit_metadata: None,
-            resource,
-            priority: 1,
-            upstream_model: Some("gpt-4.1-mini".to_string()),
-            api_key: "secret".to_string(),
-            static_latency_score: latency,
-            static_cost_score: cost,
-            usd_per_1k_tokens: 0.01,
-        }
-    }
-
-    fn build_target_with_provider(
-        provider_resource_id: &str,
-        provider_id: &str,
-        region: &str,
-        latency: f32,
-        cost: f32,
-        health_state: HealthState,
-    ) -> ProviderTargetRuntime {
-        let mut target = build_target(provider_resource_id, region, latency, cost, health_state);
-        target.resource.provider_id = provider_id.to_string();
-        target.target_kind = super::provider_target_kind(provider_id);
-        target.transit_metadata =
-            super::transit_metadata_for_target(&target.resource, &default_route_policy());
-        target
-    }
-
-    fn build_gateway_target(provider_resource_id: &str) -> ProviderTargetRuntime {
-        let mut target = build_target_with_provider(
-            provider_resource_id,
-            "gateway",
-            "us-east-1",
-            0.96,
-            0.92,
-            HealthState::Healthy,
-        );
-        target.resource.endpoint_base_url = "https://gateway.example.com/v1".to_string();
-        target.resource.provenance_class = ProvenanceClass::OfficialGateway;
-        target
-    }
-
-    struct MockGatewayTransport {
-        requests: Arc<Mutex<Vec<GatewayHttpRequest>>>,
-        response: Mutex<Result<GatewayHttpResponse, provider_gateway::HttpTransportError>>,
-    }
-
-    #[async_trait::async_trait]
-    impl GatewayHttpTransport for MockGatewayTransport {
-        async fn post_json(
-            &self,
-            request: GatewayHttpRequest,
-        ) -> Result<GatewayHttpResponse, provider_gateway::HttpTransportError> {
-            self.requests.lock().await.push(request);
-            self.response.lock().await.clone()
-        }
-    }
-
-    #[derive(Debug)]
-    struct StaticApiKeyScopeStore {
-        scope: GatewayApiKeyScope,
-    }
-
-    impl StaticApiKeyScopeStore {
-        fn matching_config() -> Self {
-            Self {
-                scope: GatewayApiKeyScope {
-                    credential_id: "cred_gateway_test".to_string(),
-                    tenant_id: "tenant_acme".to_string(),
-                    project_id: Some("proj_core".to_string()),
-                    status: "active".to_string(),
-                },
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ApiKeyScopeStore for StaticApiKeyScopeStore {
-        async fn resolve(&self, _api_key: &str) -> Result<GatewayApiKeyScope, String> {
-            Ok(self.scope.clone())
-        }
-    }
-
-    #[derive(Default)]
-    struct RecordingRuntimeEventSink {
-        route_receipt_publish_error: Option<String>,
-        usage_event_publish_error: Option<String>,
-        published_route_receipts: Arc<Mutex<Vec<RouteReceiptRecorded>>>,
-        published_usage_events: Arc<Mutex<Vec<UsageEvent>>>,
-    }
-
-    #[async_trait::async_trait]
-    impl RuntimeEventSink for RecordingRuntimeEventSink {
-        async fn publish_route_receipt(
-            &self,
-            _route_receipt: &RouteReceipt,
-            payload: &RouteReceiptRecorded,
-            _context: &RequestContext,
-        ) -> Result<(), String> {
-            if let Some(error) = &self.route_receipt_publish_error {
-                return Err(error.clone());
-            }
-
-            self.published_route_receipts
-                .lock()
-                .await
-                .push(payload.clone());
-            Ok(())
-        }
-
-        async fn publish(
-            &self,
-            _route_receipt: &RouteReceipt,
-            usage_event: &UsageEvent,
-            _context: &RequestContext,
-        ) -> Result<(), String> {
-            if let Some(error) = &self.usage_event_publish_error {
-                return Err(error.clone());
-            }
-
-            self.published_usage_events
-                .lock()
-                .await
-                .push(usage_event.clone());
-            Ok(())
-        }
-    }
-
-    fn test_state(
-        adapter: Arc<dyn ProviderAdapter>,
-        targets: Vec<ProviderTargetRuntime>,
-    ) -> GatewayState {
-        test_state_with_debug(adapter, targets, false)
-    }
-
-    fn test_state_with_debug(
-        adapter: Arc<dyn ProviderAdapter>,
-        targets: Vec<ProviderTargetRuntime>,
-        debug_headers_enabled: bool,
-    ) -> GatewayState {
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-
-        Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(targets))),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled,
-            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
-        })
-    }
-
-    struct MockAdapter {
-        outcomes: BTreeMap<String, Result<ProviderResponse, ProviderError>>,
-    }
-
-    struct ProtocolMockAdapter {
-        provider_kind: &'static str,
-        protocol_family: &'static str,
-        outcomes: BTreeMap<String, Result<ProviderResponse, ProviderError>>,
-    }
-
-    #[derive(Clone)]
-    struct ControlPlaneFixture {
-        config_snapshot: ConfigSnapshotResponse,
-        provider_resources: ProviderResourcesResponse,
-        route_policies: RoutePoliciesResponse,
-    }
-
-    #[derive(Clone)]
-    struct FixtureState {
-        fail: bool,
-        fixture: ControlPlaneFixture,
-        request_count: Arc<AtomicUsize>,
-    }
-
-    async fn control_plane_api_key_resolution(
-        State(state): State<FixtureState>,
-        ExtractJson(request): ExtractJson<GatewayApiKeyResolveRequest>,
-    ) -> Result<Json<GatewayApiKeyResolveResponse>, StatusCode> {
-        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
-        if state.fail || request.api_key != "test" {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        Ok(Json(GatewayApiKeyResolveResponse {
-            credential_id: "cred_gateway_test".to_string(),
-            tenant_id: "tenant_acme".to_string(),
-            project_id: Some("proj_core".to_string()),
-            status: "active".to_string(),
-        }))
-    }
-
-    #[async_trait::async_trait]
-    impl ProviderAdapter for MockAdapter {
-        fn manifest(&self) -> AdapterManifest {
-            AdapterManifest {
-                adapter_id: "mock-openai",
-                provider_kind: "openai",
-                display_name: "Mock OpenAI",
-                protocol_family: "openai_chat",
-                streaming_support: StreamingSupport::Unsupported,
-            }
-        }
-
-        async fn execute_chat(
-            &self,
-            _request: &ProviderRequest,
-            context: &ProviderExecutionContext,
-        ) -> Result<ProviderResponse, ProviderError> {
-            self.outcomes
-                .get(&context.endpoint.provider_resource_id)
-                .cloned()
-                .expect("test outcome should exist")
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ProviderAdapter for ProtocolMockAdapter {
-        fn manifest(&self) -> AdapterManifest {
-            AdapterManifest {
-                adapter_id: "mock-protocol",
-                provider_kind: self.provider_kind,
-                display_name: "Mock Protocol Adapter",
-                protocol_family: self.protocol_family,
-                streaming_support: StreamingSupport::Unsupported,
-            }
-        }
-
-        async fn execute_chat(
-            &self,
-            _request: &ProviderRequest,
-            context: &ProviderExecutionContext,
-        ) -> Result<ProviderResponse, ProviderError> {
-            self.outcomes
-                .get(&context.endpoint.provider_resource_id)
-                .cloned()
-                .expect("test outcome should exist")
-        }
-    }
-
-    fn control_plane_fixture() -> ControlPlaneFixture {
-        let config = build_config(vec![
-            build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            ),
-            build_target(
-                "prvrsrc_openai_backup",
-                "us-west-2",
-                0.85,
-                0.7,
-                HealthState::Healthy,
-            ),
-        ]);
-
-        ControlPlaneFixture {
-            config_snapshot: ConfigSnapshotResponse {
-                config_snapshot: config.config_snapshot,
-            },
-            provider_resources: ProviderResourcesResponse {
-                data: config
-                    .provider_targets
-                    .iter()
-                    .map(|target| target.resource.clone())
-                    .collect(),
-            },
-            route_policies: RoutePoliciesResponse {
-                data: vec![config.route_policy],
-            },
-        }
-    }
-
-    async fn control_plane_snapshot(
-        State(state): State<FixtureState>,
-    ) -> Result<Json<ConfigSnapshotResponse>, StatusCode> {
-        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
-        if state.fail {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
-        Ok(Json(state.fixture.config_snapshot))
-    }
-
-    async fn control_plane_route_policies(
-        State(state): State<FixtureState>,
-    ) -> Result<Json<RoutePoliciesResponse>, StatusCode> {
-        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
-        if state.fail {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
-        Ok(Json(state.fixture.route_policies))
-    }
-
-    async fn control_plane_provider_resources(
-        State(state): State<FixtureState>,
-    ) -> Result<Json<ProviderResourcesResponse>, StatusCode> {
-        state.request_count.fetch_add(1, AtomicOrdering::Relaxed);
-        if state.fail {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
-        Ok(Json(state.fixture.provider_resources))
-    }
-
-    async fn spawn_control_plane_server(
-        fail: bool,
-    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
-        let request_count = Arc::new(AtomicUsize::new(0));
-        let app = Router::new()
-            .route("/v1/config-snapshots/active", get(control_plane_snapshot))
-            .route("/v1/route-policies", get(control_plane_route_policies))
-            .route(
-                "/v1/provider-resources",
-                get(control_plane_provider_resources),
-            )
-            .route(
-                "/internal/gateway/api-keys/resolve",
-                post(control_plane_api_key_resolution),
-            )
-            .with_state(FixtureState {
-                fail,
-                fixture: control_plane_fixture(),
-                request_count: request_count.clone(),
-            });
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        (format!("http://{address}"), request_count, handle)
-    }
-
-    #[test]
-    fn rejects_streaming_requests_during_normalization() {
-        let error = normalize_request(
-            ChatCompletionRequest {
-                stream: true,
-                ..valid_http_request()
-            },
-            &request_context(),
-        )
-        .unwrap_err();
-
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.envelope.error.validation_issues[0].field, "stream");
-    }
-
-    #[test]
-    fn route_scoring_prefers_preferred_region() {
-        let config = build_config(vec![
-            build_target("prvrsrc_west", "us-west-2", 0.95, 0.8, HealthState::Healthy),
-            build_target(
-                "prvrsrc_east",
-                "us-east-1",
-                0.85,
-                0.75,
-                HealthState::Healthy,
-            ),
-        ]);
-        let route = evaluate_route(
-            &config,
-            &normalize_request(valid_http_request(), &request_context()).unwrap(),
-            &request_context(),
-        );
-
-        assert_eq!(
-            route.ranked_targets[0]
-                .target
-                .resource
-                .provider_resource_id
-                .as_str(),
-            "prvrsrc_east"
-        );
-    }
-
-    #[test]
-    fn route_scoring_can_target_transit_provider() {
-        let mut config = build_config(vec![
-            build_target(
-                "prvrsrc_openai_native",
-                "us-east-1",
-                0.88,
-                0.45,
-                HealthState::Healthy,
-            ),
-            build_gateway_target("prvrsrc_gateway_primary"),
-        ]);
-        config.route_policy.required_capabilities =
-            vec!["json_mode".to_string(), "transit_gateway".to_string()];
-
-        let route = evaluate_route(
-            &config,
-            &normalize_request(valid_http_request(), &request_context()).unwrap(),
-            &request_context(),
-        );
-
-        assert_eq!(route.ranked_targets.len(), 1);
-        assert_eq!(
-            route.ranked_targets[0]
-                .target
-                .resource
-                .provider_resource_id
-                .as_str(),
-            "prvrsrc_gateway_primary"
-        );
-        assert!(route.ranked_targets[0].target.transit_metadata.is_some());
-    }
-
-    #[tokio::test]
-    async fn healthz_returns_ok() {
-        let app = app_with_state(test_state(
-            Arc::new(MockAdapter {
-                outcomes: BTreeMap::new(),
-            }),
-            vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/healthz")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn rejects_missing_auth_with_normalized_error() {
-        let app = app_with_state(test_state(
-            Arc::new(MockAdapter {
-                outcomes: BTreeMap::new(),
-            }),
-            vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "auth_invalid");
-    }
-
-    #[tokio::test]
-    async fn returns_validation_failure_for_bad_request_shape() {
-        let app = app_with_state(test_state(
-            Arc::new(MockAdapter {
-                outcomes: BTreeMap::new(),
-            }),
-            vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "model": "",
-                            "messages": [],
-                            "stream": false
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "request_validation_failed");
-    }
-
-    #[tokio::test]
-    async fn gateway_target_routes_successfully_through_provider_chain() {
-        let transport = Arc::new(MockGatewayTransport {
-            requests: Arc::new(Mutex::new(Vec::new())),
-            response: Mutex::new(Ok(GatewayHttpResponse {
-                status: 200,
-                headers: BTreeMap::new(),
-                body: Some(
-                    serde_json::json!({
-                        "id": "chatcmpl_gateway_ok",
-                        "model": "gpt-4.1-mini",
-                        "choices": [{
-                            "message": {"content": "transit success"},
-                            "finish_reason": "stop"
-                        }],
-                        "usage": {
-                            "prompt_tokens": 10,
-                            "completion_tokens": 6,
-                            "prompt_tokens_details": {"cached_tokens": 1}
-                        }
-                    })
-                    .to_string(),
-                ),
-            })),
-        });
-        let app = app_with_state(test_state(
-            Arc::new(GatewayAdapter::new(transport.clone())),
-            vec![build_gateway_target("prvrsrc_gateway_primary")],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .header("x-forwarded-proto", "https")
-                    .header("host", "router.example.com")
-                    .header("idempotency-key", "idem-route-1")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            payload["choices"][0]["message"]["content"],
-            "transit success"
-        );
-
-        let outbound_headers = {
-            let outbound_requests = transport.requests.lock().await;
-            outbound_requests[0]
-                .headers
-                .iter()
-                .cloned()
-                .collect::<BTreeMap<_, _>>()
-        };
-        assert_eq!(
-            outbound_headers.get("idempotency-key"),
-            Some(&"idem-route-1".to_string())
-        );
-        assert_eq!(
-            outbound_headers.get("x-hugerouter-transit-via"),
-            Some(&"gateway-api".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn transit_loop_prevention_returns_normalized_error() {
-        let transport = Arc::new(MockGatewayTransport {
-            requests: Arc::new(Mutex::new(Vec::new())),
-            response: Mutex::new(Ok(GatewayHttpResponse {
-                status: 200,
-                headers: BTreeMap::new(),
-                body: Some("{}".to_string()),
-            })),
-        });
-        let app = app_with_state(test_state(
-            Arc::new(GatewayAdapter::new(transport.clone())),
-            vec![build_gateway_target("prvrsrc_gateway_primary")],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .header("x-forwarded-proto", "https")
-                    .header("host", "router.example.com")
-                    .header("x-hugerouter-transit-hop", "1")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "transit_loop_detected");
-        assert_eq!(
-            payload["error"]["details"]["loop_guard"],
-            "transit_header_present"
-        );
-        assert!(transport.requests.lock().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn falls_back_to_second_target_when_first_is_retryable_failure() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([
-                (
-                    "prvrsrc_openai_primary".to_string(),
-                    Err(ProviderError::new(
-                        ProviderErrorKind::Unavailable,
-                        "primary is degraded",
-                        true,
-                    )
-                    .with_upstream_status(Some(503))),
-                ),
-                (
-                    "prvrsrc_openai_backup".to_string(),
-                    Ok(ProviderResponse {
-                        response_id: Some("chatcmpl_123".to_string()),
-                        model: "gpt-4.1-mini".to_string(),
-                        output_text: "fallback success".to_string(),
-                        finish_reason: "stop".to_string(),
-                        usage: ProviderUsage {
-                            input_tokens: 12,
-                            output_tokens: 9,
-                            cached_input_tokens: 0,
-                        },
-                    }),
-                ),
-            ]),
-        });
-        let app = app_with_state(test_state(
-            adapter,
-            vec![
-                build_target(
-                    "prvrsrc_openai_primary",
-                    "us-east-1",
-                    0.95,
-                    0.8,
-                    HealthState::Healthy,
-                ),
-                build_target(
-                    "prvrsrc_openai_backup",
-                    "us-east-1",
-                    0.85,
-                    0.75,
-                    HealthState::Healthy,
-                ),
-            ],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(response.headers().get("x-route-receipt-id").is_some());
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            payload["choices"][0]["message"]["content"],
-            "fallback success"
-        );
-    }
-
-    #[tokio::test]
-    async fn falls_back_when_first_target_has_no_registered_adapter() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_backup".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("chatcmpl_456".to_string()),
-                    model: "gpt-4.1-mini".to_string(),
-                    output_text: "adapter fallback success".to_string(),
-                    finish_reason: "stop".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 11,
-                        output_tokens: 7,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let app = app_with_state(test_state(
-            adapter,
-            vec![
-                build_target_with_provider(
-                    "prvrsrc_anthropic_primary",
-                    "anthropic",
-                    "us-east-1",
-                    0.95,
-                    0.8,
-                    HealthState::Healthy,
-                ),
-                build_target(
-                    "prvrsrc_openai_backup",
-                    "us-east-1",
-                    0.85,
-                    0.75,
-                    HealthState::Healthy,
-                ),
-            ],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            payload["choices"][0]["message"]["content"],
-            "adapter fallback success"
-        );
-    }
-
-    #[tokio::test]
-    async fn emits_documented_debug_headers_when_enabled() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([
-                (
-                    "prvrsrc_openai_primary".to_string(),
-                    Err(ProviderError::new(
-                        ProviderErrorKind::Unavailable,
-                        "primary is degraded",
-                        true,
-                    )),
-                ),
-                (
-                    "prvrsrc_openai_backup".to_string(),
-                    Ok(ProviderResponse {
-                        response_id: Some("chatcmpl_789".to_string()),
-                        model: "gpt-4.1-mini".to_string(),
-                        output_text: "debug headers success".to_string(),
-                        finish_reason: "stop".to_string(),
-                        usage: ProviderUsage {
-                            input_tokens: 12,
-                            output_tokens: 8,
-                            cached_input_tokens: 0,
-                        },
-                    }),
-                ),
-            ]),
-        });
-        let app = app_with_state(test_state_with_debug(
-            adapter,
-            vec![
-                build_target(
-                    "prvrsrc_openai_primary",
-                    "us-east-1",
-                    0.95,
-                    0.8,
-                    HealthState::Healthy,
-                ),
-                build_target(
-                    "prvrsrc_openai_backup",
-                    "us-east-1",
-                    0.85,
-                    0.75,
-                    HealthState::Healthy,
-                ),
-            ],
-            true,
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get("x-debug-selected-target").unwrap(),
-            "prvrsrc_openai_backup"
-        );
-        assert_eq!(
-            response.headers().get("x-debug-route-policy-id").unwrap(),
-            "routepol_default"
-        );
-        assert_eq!(
-            response.headers().get("x-debug-fallback-count").unwrap(),
-            "1"
-        );
-        assert_eq!(
-            response.headers().get("x-debug-admission-result").unwrap(),
-            "admitted"
-        );
-    }
-
-    #[tokio::test]
-    async fn control_plane_config_store_fetches_and_maps_active_config() {
-        let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
-        let store = ControlPlaneConfigStore::new(
-            base_url,
-            "active",
-            Duration::from_secs(60),
-            reqwest::Client::new(),
-        );
-
-        let config = store.load().await.unwrap();
-
-        assert_eq!(
-            config.config_snapshot.config_snapshot_id.as_str(),
-            "cfgsnap_test"
-        );
-        assert_eq!(
-            config.route_policy.route_policy_id.as_str(),
-            "routepol_default"
-        );
-        assert_eq!(config.provider_targets.len(), 2);
-        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
-
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn control_plane_config_store_uses_ttl_cache() {
-        let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
-        let store = ControlPlaneConfigStore::new(
-            base_url,
-            "active",
-            Duration::from_secs(60),
-            reqwest::Client::new(),
-        );
-
-        let _ = store.load().await.unwrap();
-        let _ = store.load().await.unwrap();
-
-        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 3);
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn control_plane_config_store_reports_unavailable_backend() {
-        let (base_url, _request_count, handle) = spawn_control_plane_server(true).await;
-        let store = ControlPlaneConfigStore::new(
-            base_url,
-            "active",
-            Duration::from_millis(1),
-            reqwest::Client::new(),
-        );
-
-        let error = store.load().await.unwrap_err();
-
-        assert!(error.contains("HTTP 503"));
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn control_plane_api_key_store_resolves_and_caches_scope() {
-        let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
-        let store = ControlPlaneApiKeyStore::new(
-            base_url,
-            "/internal/gateway/api-keys/resolve",
-            Some("dev-internal-token".to_string()),
-            reqwest::Client::new(),
-        );
-
-        let first = store.resolve("test").await.unwrap();
-        let second = store.resolve("test").await.unwrap();
-
-        assert_eq!(first.credential_id, "cred_gateway_test");
-        assert_eq!(second.project_id.as_deref(), Some("proj_core"));
-        assert_eq!(request_count.load(AtomicOrdering::Relaxed), 2);
-
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn control_plane_api_key_store_fails_when_internal_token_is_missing() {
-        let (base_url, _request_count, handle) = spawn_control_plane_server(false).await;
-        let store = ControlPlaneApiKeyStore::new(
-            base_url,
-            "/internal/gateway/api-keys/resolve",
-            None,
-            reqwest::Client::new(),
-        );
-
-        let error = store.resolve("test").await.unwrap_err();
-
-        assert!(error.contains("CONTROL_PLANE_INTERNAL_TOKEN must be configured"));
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn returns_forbidden_when_api_key_scope_does_not_match_active_config() {
-        let mut registry = ProviderAdapterRegistry::new();
-        registry
-            .register(Arc::new(MockAdapter {
-                outcomes: BTreeMap::new(),
-            }))
-            .unwrap();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )]))),
-            auth_store: Arc::new(StaticApiKeyScopeStore {
-                scope: GatewayApiKeyScope {
-                    credential_id: "cred_other".to_string(),
-                    tenant_id: "tenant_platform".to_string(),
-                    project_id: Some("proj_core".to_string()),
-                    status: "active".to_string(),
-                },
-            }),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "auth_forbidden");
-    }
-
-    #[tokio::test]
-    async fn allows_tenant_scoped_api_keys_without_project_scope() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_primary".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("chatcmpl_tenant_scoped".to_string()),
-                    model: "gpt-4.1-mini".to_string(),
-                    output_text: "ok".to_string(),
-                    finish_reason: "stop".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 6,
-                        output_tokens: 4,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )]))),
-            auth_store: Arc::new(StaticApiKeyScopeStore {
-                scope: GatewayApiKeyScope {
-                    credential_id: "cred_tenant_shared".to_string(),
-                    tenant_id: "tenant_acme".to_string(),
-                    project_id: None,
-                    status: "active".to_string(),
-                },
-            }),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn publishes_route_receipt_event_for_successful_request() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_primary".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("chatcmpl_success".to_string()),
-                    model: "gpt-4.1-mini".to_string(),
-                    output_text: "ok".to_string(),
-                    finish_reason: "stop".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 9,
-                        output_tokens: 6,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let sink = Arc::new(RecordingRuntimeEventSink::default());
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )]))),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: sink.clone(),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let (
-            receipt_count,
-            selected_target,
-            provider_attempt_count,
-            first_attempt_status,
-            first_stage,
-        ) = {
-            let receipts = sink.published_route_receipts.lock().await;
-            (
-                receipts.len(),
-                receipts[0]
-                    .route_receipt
-                    .selected_target
-                    .as_ref()
-                    .unwrap()
-                    .as_str()
-                    .to_string(),
-                receipts[0].provider_attempts.len(),
-                receipts[0].provider_attempts[0].status.clone(),
-                receipts[0].decision_timeline[0].stage.clone(),
-            )
-        };
-        assert_eq!(receipt_count, 1);
-        assert_eq!(selected_target, "prvrsrc_openai_primary");
-        assert_eq!(provider_attempt_count, 1);
-        assert_eq!(first_attempt_status, "succeeded");
-        assert_eq!(first_stage, "admission");
-
-        let usage_event_count = {
-            let usage_events = sink.published_usage_events.lock().await;
-            usage_events.len()
-        };
-        assert_eq!(usage_event_count, 1);
-    }
-
-    #[tokio::test]
-    async fn publishes_route_receipt_event_for_failed_request() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_primary".to_string(),
-                Err(ProviderError::new(
-                    ProviderErrorKind::Unavailable,
-                    "provider down",
-                    false,
-                )),
-            )]),
-        });
-        let sink = Arc::new(RecordingRuntimeEventSink::default());
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )]))),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: sink.clone(),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-        let (receipt_count, normalized_error_code, provider_attempt_count, first_attempt_status) = {
-            let receipts = sink.published_route_receipts.lock().await;
-            (
-                receipts.len(),
-                receipts[0]
-                    .route_receipt
-                    .normalized_error
-                    .as_ref()
-                    .unwrap()
-                    .code
-                    .clone(),
-                receipts[0].provider_attempts.len(),
-                receipts[0].provider_attempts[0].status.clone(),
-            )
-        };
-        assert_eq!(receipt_count, 1);
-        assert_eq!(normalized_error_code, "provider_unavailable");
-        assert_eq!(provider_attempt_count, 1);
-        assert_eq!(first_attempt_status, "failed");
-    }
-
-    #[tokio::test]
-    async fn returns_service_unavailable_when_route_receipt_publish_fails() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_primary".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("chatcmpl_123".to_string()),
-                    model: "gpt-4.1-mini".to_string(),
-                    output_text: "ok".to_string(),
-                    finish_reason: "stop".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 8,
-                        output_tokens: 5,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )]))),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: Arc::new(RecordingRuntimeEventSink {
-                route_receipt_publish_error: Some("nats unavailable".to_string()),
-                ..RecordingRuntimeEventSink::default()
-            }),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "route_receipt_publish_failed");
-    }
-
-    #[tokio::test]
-    async fn returns_service_unavailable_when_usage_event_publish_fails() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_primary".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("chatcmpl_123".to_string()),
-                    model: "gpt-4.1-mini".to_string(),
-                    output_text: "ok".to_string(),
-                    finish_reason: "stop".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 8,
-                        output_tokens: 5,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )]))),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: Arc::new(RecordingRuntimeEventSink {
-                usage_event_publish_error: Some("nats unavailable".to_string()),
-                published_usage_events: Arc::new(Mutex::new(Vec::new())),
-                ..RecordingRuntimeEventSink::default()
-            }),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "usage_event_publish_failed");
-    }
-
-    #[tokio::test]
-    async fn anthropic_messages_route_returns_vendor_shaped_response() {
-        let adapter = Arc::new(ProtocolMockAdapter {
-            provider_kind: "anthropic",
-            protocol_family: "anthropic_messages",
-            outcomes: BTreeMap::from([(
-                "prvrsrc_anthropic_primary".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("msg_123".to_string()),
-                    model: "claude-3-opus".to_string(),
-                    output_text: "anthropic summary".to_string(),
-                    finish_reason: "end_turn".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 10,
-                        output_tokens: 6,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let mut config = build_config(vec![build_target_with_provider(
-            "prvrsrc_anthropic_primary",
-            "anthropic",
-            "us-east-1",
-            0.9,
-            0.6,
-            HealthState::Healthy,
-        )]);
-        config.route_policy.protocol_family = "anthropic_messages".to_string();
-        config.route_policy.model_alias = "claude-3-opus".to_string();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(config)),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/messages")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "model": "claude-3-opus",
-                            "messages": [{
-                                "role": "user",
-                                "content": [{"type": "text", "text": "hello"}]
-                            }],
-                            "max_tokens": 256,
-                            "stream": false
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["id"], "msg_123");
-        assert_eq!(payload["content"][0]["text"], "anthropic summary");
-        assert_eq!(payload["usage"]["input_tokens"], 10);
-    }
-
-    #[tokio::test]
-    async fn gemini_generate_content_route_returns_vendor_shaped_response() {
-        let adapter = Arc::new(ProtocolMockAdapter {
-            provider_kind: "gemini",
-            protocol_family: "gemini_generate_content",
-            outcomes: BTreeMap::from([(
-                "prvrsrc_gemini_primary".to_string(),
-                Ok(ProviderResponse {
-                    response_id: Some("resp_gemini_123".to_string()),
-                    model: "gemini-1.5-pro-latest".to_string(),
-                    output_text: "gemini summary".to_string(),
-                    finish_reason: "STOP".to_string(),
-                    usage: ProviderUsage {
-                        input_tokens: 14,
-                        output_tokens: 8,
-                        cached_input_tokens: 0,
-                    },
-                }),
-            )]),
-        });
-        let mut registry = ProviderAdapterRegistry::new();
-        registry.register(adapter).unwrap();
-        let mut config = build_config(vec![build_target_with_provider(
-            "prvrsrc_gemini_primary",
-            "gemini",
-            "us-east-1",
-            0.9,
-            0.6,
-            HealthState::Healthy,
-        )]);
-        config.route_policy.protocol_family = "gemini_generate_content".to_string();
-        config.route_policy.model_alias = "gemini-1.5-pro".to_string();
-        let state = Arc::new(AppState {
-            config_store: Arc::new(StaticConfigStore::new(config)),
-            auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
-            adapter_registry: registry,
-            debug_headers_enabled: false,
-            event_sink: Arc::new(RecordingRuntimeEventSink::default()),
-        });
-        let app = app_with_state(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1beta/models/gemini-1.5-pro:generateContent")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "model": "placeholder",
-                            "contents": [{
-                                "role": "user",
-                                "parts": [{"text": "hello"}]
-                            }],
-                            "stream": false,
-                            "tools": []
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["responseId"], "resp_gemini_123");
-        assert_eq!(
-            payload["candidates"][0]["content"]["parts"][0]["text"],
-            "gemini summary"
-        );
-        assert_eq!(payload["usageMetadata"]["totalTokenCount"], 22);
-    }
-
-    #[tokio::test]
-    async fn returns_provider_failure_when_last_candidate_fails() {
-        let adapter = Arc::new(MockAdapter {
-            outcomes: BTreeMap::from([(
-                "prvrsrc_openai_primary".to_string(),
-                Err(ProviderError::new(
-                    ProviderErrorKind::Unavailable,
-                    "openai unavailable",
-                    false,
-                )
-                .with_upstream_status(Some(503))
-                .with_upstream_code(Some("server_error".to_string()))),
-            )]),
-        });
-        let app = app_with_state(test_state(
-            adapter,
-            vec![build_target(
-                "prvrsrc_openai_primary",
-                "us-east-1",
-                0.9,
-                0.6,
-                HealthState::Healthy,
-            )],
-        ));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/chat/completions")
-                    .header("authorization", "Bearer test")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&valid_http_request()).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["error"]["code"], "provider_unavailable");
-        assert_eq!(payload["error"]["upstream_status_code"], 503);
-    }
-}
+mod tests;

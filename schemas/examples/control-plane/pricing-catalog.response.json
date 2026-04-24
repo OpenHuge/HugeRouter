@@ -26,6 +26,22 @@
       "micros_per_unit": 1500,
       "unit_denominator": 1,
       "source": "provider_native"
+    },
+    {
+      "dimension": "input_tokens",
+      "provider_id": "bedrock",
+      "region": "global",
+      "micros_per_unit": 6000,
+      "unit_denominator": 1000,
+      "source": "provider_native"
+    },
+    {
+      "dimension": "output_tokens",
+      "provider_id": "bedrock",
+      "region": "global",
+      "micros_per_unit": 30000,
+      "unit_denominator": 1000,
+      "source": "provider_native"
     }
   ]
 }

@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use provider_traits::{
-    AdapterManifest, ProviderAdapter, ProviderError, ProviderErrorKind, ProviderExecutionContext,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+    CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
+    ProviderExecutionContext, ProviderImageData, ProviderImageRequest, ProviderImageResponse,
     ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -39,6 +41,7 @@ impl Default for OpenAiAdapter {
 impl ProviderAdapter for OpenAiAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
             adapter_id: match self.wire_api {
                 OpenAiWireApi::ChatCompletions => "openai-chat-completions-v1",
                 OpenAiWireApi::Responses => "openai-responses-v1",
@@ -48,8 +51,15 @@ impl ProviderAdapter for OpenAiAdapter {
                 OpenAiWireApi::ChatCompletions => "OpenAI Chat Completions",
                 OpenAiWireApi::Responses => "OpenAI Responses",
             },
-            protocol_family: "openai_chat",
+            protocol_family: match self.wire_api {
+                OpenAiWireApi::ChatCompletions => "openai_chat",
+                OpenAiWireApi::Responses => "openai_responses",
+            },
+            supported_protocol_families: &["openai_chat", "openai_responses", "openai_images"],
+            lifecycle_family: AdapterLifecycleFamily::Inference,
+            stability: AdapterStability::Stable,
             streaming_support: StreamingSupport::ServerSentEvents,
+            configuration_schema_ref: Some("env:GATEWAY_OPENAI_*"),
         }
     }
 
@@ -149,6 +159,82 @@ impl ProviderAdapter for OpenAiAdapter {
                 parse_responses_api_response(body, request, &context.endpoint.provider_resource_id)
             }
         }
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        let mut body = serde_json::Map::from_iter([
+            (
+                "model".to_string(),
+                Value::String(normalize_openai_image_model(&request.model).to_string()),
+            ),
+            ("prompt".to_string(), Value::String(request.prompt.clone())),
+        ]);
+        insert_optional_u32(&mut body, "n", request.n);
+        insert_optional_string(&mut body, "size", request.size.as_deref());
+        insert_optional_string(&mut body, "quality", request.quality.as_deref());
+        insert_optional_string(
+            &mut body,
+            "response_format",
+            request.response_format.as_deref(),
+        );
+
+        let response = self
+            .transport
+            .post_json(HttpRequest {
+                url: format!(
+                    "{}/images/generations",
+                    context.endpoint.endpoint_base_url.trim_end_matches('/')
+                ),
+                headers: vec![
+                    (
+                        AUTHORIZATION.as_str().to_string(),
+                        format!("Bearer {}", context.endpoint.api_key),
+                    ),
+                    (
+                        CONTENT_TYPE.as_str().to_string(),
+                        "application/json".to_string(),
+                    ),
+                ],
+                body: Value::Object(body),
+            })
+            .await
+            .map_err(|error| {
+                let kind = match error.kind {
+                    HttpTransportErrorKind::Timeout => ProviderErrorKind::Timeout,
+                    HttpTransportErrorKind::Network => ProviderErrorKind::Unavailable,
+                };
+
+                ProviderError::new(kind, error.message, error.retryable).with_detail(
+                    "provider_resource_id",
+                    &context.endpoint.provider_resource_id,
+                )
+            })?;
+
+        if response.status >= 400 {
+            return Err(map_error_response(
+                response.status,
+                response.body.as_deref(),
+                &context.endpoint.provider_resource_id,
+            ));
+        }
+
+        let body = response.body.as_deref().ok_or_else(|| {
+            ProviderError::new(
+                ProviderErrorKind::Protocol,
+                "OpenAI returned an empty image generation response body",
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                &context.endpoint.provider_resource_id,
+            )
+        })?;
+
+        parse_image_generation_response(body, request, &context.endpoint.provider_resource_id)
     }
 }
 
@@ -267,6 +353,73 @@ fn parse_responses_api_response(
                 .unwrap_or_default(),
         },
     })
+}
+
+fn parse_image_generation_response(
+    body: &str,
+    request: &ProviderImageRequest,
+    provider_resource_id: &str,
+) -> Result<ProviderImageResponse, ProviderError> {
+    let payload: OpenAiImageGenerationResponse = serde_json::from_str(body).map_err(|error| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            format!("failed to decode OpenAI image generation response: {error}"),
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id)
+    })?;
+
+    if payload.data.is_empty() {
+        return Err(ProviderError::new(
+            ProviderErrorKind::Protocol,
+            "OpenAI image generation response did not include any images",
+            false,
+        )
+        .with_detail("provider_resource_id", provider_resource_id));
+    }
+
+    Ok(ProviderImageResponse {
+        response_id: payload.id,
+        model: payload.model.unwrap_or_else(|| request.model.clone()),
+        created: payload.created,
+        images: payload
+            .data
+            .into_iter()
+            .map(|image| ProviderImageData {
+                b64_json: image.b64_json,
+                url: image.url,
+                revised_prompt: image.revised_prompt,
+            })
+            .collect(),
+        usage: ProviderUsage {
+            input_tokens: payload.usage.input_tokens(),
+            output_tokens: payload.usage.output_tokens(),
+            cached_input_tokens: payload.usage.cached_input_tokens(),
+        },
+    })
+}
+
+fn normalize_openai_image_model(model: &str) -> &str {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "chatgpt image 2" | "chatgpt-image-2" | "chatgpt_image_2" => "chatgpt-image-latest",
+        _ => model,
+    }
+}
+
+fn insert_optional_string(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        body.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_optional_u32(body: &mut serde_json::Map<String, Value>, key: &str, value: Option<u32>) {
+    if let Some(value) = value {
+        body.insert(key.to_string(), Value::from(value));
+    }
 }
 
 fn map_error_response(
@@ -491,6 +644,66 @@ struct OpenAiResponsesApiResponse {
     status: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenAiImageGenerationResponse {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    created: Option<u64>,
+    #[serde(default)]
+    data: Vec<OpenAiImageData>,
+    #[serde(default)]
+    usage: OpenAiImageUsage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiImageData {
+    #[serde(default)]
+    b64_json: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpenAiImageUsage {
+    #[serde(default)]
+    input_tokens: Option<u32>,
+    #[serde(default)]
+    output_tokens: Option<u32>,
+    #[serde(default)]
+    total_tokens: Option<u32>,
+    #[serde(default)]
+    prompt_tokens: Option<u32>,
+    #[serde(default)]
+    input_tokens_details: Option<OpenAiPromptTokenDetails>,
+}
+
+impl OpenAiImageUsage {
+    fn input_tokens(&self) -> u32 {
+        self.input_tokens.or(self.prompt_tokens).unwrap_or_default()
+    }
+
+    fn output_tokens(&self) -> u32 {
+        self.output_tokens
+            .or_else(|| {
+                self.total_tokens
+                    .map(|total| total.saturating_sub(self.input_tokens()))
+            })
+            .unwrap_or_default()
+    }
+
+    fn cached_input_tokens(&self) -> u32 {
+        self.input_tokens_details
+            .as_ref()
+            .and_then(|details| details.cached_tokens)
+            .unwrap_or_default()
+    }
+}
+
 impl OpenAiResponsesApiResponse {
     fn output_text(&self) -> Option<String> {
         let text = self
@@ -559,209 +772,5 @@ struct OpenAiErrorBody {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        HttpRequest, HttpResponse, HttpTransport, HttpTransportError, HttpTransportErrorKind,
-        OpenAiAdapter, OpenAiWireApi,
-    };
-    use async_trait::async_trait;
-    use provider_traits::{
-        ProviderAdapter, ProviderEndpoint, ProviderErrorKind, ProviderExecutionContext,
-        ProviderMessage, ProviderRequest,
-    };
-    use serde_json::json;
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Clone)]
-    struct MockTransport {
-        responses: Arc<Mutex<Vec<Result<HttpResponse, HttpTransportError>>>>,
-        requests: Arc<Mutex<Vec<HttpRequest>>>,
-    }
-
-    impl MockTransport {
-        fn new(responses: Vec<Result<HttpResponse, HttpTransportError>>) -> Self {
-            Self {
-                responses: Arc::new(Mutex::new(responses)),
-                requests: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl HttpTransport for MockTransport {
-        async fn post_json(
-            &self,
-            request: HttpRequest,
-        ) -> Result<HttpResponse, HttpTransportError> {
-            self.requests.lock().unwrap().push(request);
-            self.responses.lock().unwrap().remove(0)
-        }
-    }
-
-    fn context() -> ProviderExecutionContext {
-        ProviderExecutionContext {
-            request_id: "req_123".to_string(),
-            trace_id: "trace_123".to_string(),
-            gateway_service_name: "gateway-api".to_string(),
-            gateway_origin: Some("https://router.example.com/v1".to_string()),
-            request_headers: std::collections::BTreeMap::new(),
-            endpoint: ProviderEndpoint {
-                provider_resource_id: "prvrsrc_openai_primary".to_string(),
-                endpoint_base_url: "https://api.openai.example/v1".to_string(),
-                api_key: "secret".to_string(),
-            },
-        }
-    }
-
-    fn request() -> ProviderRequest {
-        ProviderRequest {
-            model: "gpt-4.1-mini".to_string(),
-            messages: vec![ProviderMessage {
-                role: "user".to_string(),
-                content: "hello".to_string(),
-            }],
-            stream: false,
-        }
-    }
-
-    #[tokio::test]
-    async fn extracts_usage_from_success_response() {
-        let transport = MockTransport::new(vec![Ok(HttpResponse {
-            status: 200,
-            body: Some(
-                json!({
-                    "id": "chatcmpl_123",
-                    "model": "gpt-4.1-mini",
-                    "choices": [{
-                        "message": { "content": "world" },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": {
-                        "prompt_tokens": 12,
-                        "completion_tokens": 8,
-                        "prompt_tokens_details": {
-                            "cached_tokens": 3
-                        }
-                    }
-                })
-                .to_string(),
-            ),
-        })]);
-        let adapter = OpenAiAdapter::with_wire_api(
-            Arc::new(transport.clone()),
-            OpenAiWireApi::ChatCompletions,
-        );
-
-        let response = adapter.execute_chat(&request(), &context()).await.unwrap();
-
-        assert_eq!(response.output_text, "world");
-        assert_eq!(response.usage.input_tokens, 12);
-        assert_eq!(response.usage.output_tokens, 8);
-        assert_eq!(response.usage.cached_input_tokens, 3);
-
-        let first_request_url = {
-            let recorded_requests = transport.requests.lock().unwrap();
-            assert_eq!(recorded_requests.len(), 1);
-            recorded_requests[0].url.clone()
-        };
-        assert_eq!(
-            first_request_url,
-            "https://api.openai.example/v1/chat/completions"
-        );
-    }
-
-    #[tokio::test]
-    async fn responses_api_maps_text_and_usage() {
-        let transport = MockTransport::new(vec![Ok(HttpResponse {
-            status: 200,
-            body: Some(
-                json!({
-                    "id": "resp_123",
-                    "model": "gpt-4.1-mini",
-                    "status": "completed",
-                    "output": [{
-                        "content": [
-                            { "type": "output_text", "text": "world" }
-                        ]
-                    }],
-                    "usage": {
-                        "input_tokens": 11,
-                        "output_tokens": 7,
-                        "input_tokens_details": {
-                            "cached_tokens": 2
-                        }
-                    }
-                })
-                .to_string(),
-            ),
-        })]);
-        let adapter =
-            OpenAiAdapter::with_wire_api(Arc::new(transport.clone()), OpenAiWireApi::Responses);
-
-        let response = adapter.execute_chat(&request(), &context()).await.unwrap();
-
-        assert_eq!(response.output_text, "world");
-        assert_eq!(response.finish_reason, "stop");
-        assert_eq!(response.usage.input_tokens, 11);
-        assert_eq!(response.usage.output_tokens, 7);
-        assert_eq!(response.usage.cached_input_tokens, 2);
-
-        let (request_url, request_role, content_type) = {
-            let recorded_requests = transport.requests.lock().unwrap();
-            (
-                recorded_requests[0].url.clone(),
-                recorded_requests[0].body["input"][0]["role"].clone(),
-                recorded_requests[0].body["input"][0]["content"][0]["type"].clone(),
-            )
-        };
-        assert_eq!(request_url, "https://api.openai.example/v1/responses");
-        assert_eq!(request_role, "user");
-        assert_eq!(content_type, "input_text");
-    }
-
-    #[tokio::test]
-    async fn maps_rate_limit_error_to_retryable_provider_error() {
-        let adapter = OpenAiAdapter::new(Arc::new(MockTransport::new(vec![Ok(HttpResponse {
-            status: 429,
-            body: Some(
-                json!({
-                    "error": {
-                        "message": "too many requests",
-                        "type": "rate_limit_error",
-                        "code": "rate_limit_exceeded"
-                    }
-                })
-                .to_string(),
-            ),
-        })])));
-
-        let error = adapter
-            .execute_chat(&request(), &context())
-            .await
-            .unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::RateLimited);
-        assert!(error.retryable);
-        assert_eq!(error.upstream_status_code, Some(429));
-        assert_eq!(error.upstream_code.as_deref(), Some("rate_limit_exceeded"));
-    }
-
-    #[tokio::test]
-    async fn maps_transport_timeout_to_timeout_error() {
-        let adapter = OpenAiAdapter::new(Arc::new(MockTransport::new(vec![Err(
-            HttpTransportError {
-                kind: HttpTransportErrorKind::Timeout,
-                message: "timed out".to_string(),
-                retryable: true,
-            },
-        )])));
-
-        let error = adapter
-            .execute_chat(&request(), &context())
-            .await
-            .unwrap_err();
-
-        assert_eq!(error.kind, ProviderErrorKind::Timeout);
-        assert!(error.retryable);
-    }
-}
+#[path = "openai_tests.rs"]
+mod tests;

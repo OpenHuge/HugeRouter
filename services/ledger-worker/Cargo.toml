@@ -7,6 +7,8 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-nats = "0.39.0"
+chrono.workspace = true
 core-domain = { path = "../../crates/core-domain" }
 metering = { path = "../../crates/metering" }
 protocol-ir = { path = "../../crates/protocol-ir" }

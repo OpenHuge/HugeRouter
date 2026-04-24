@@ -49,13 +49,13 @@ case "${MODE}" in
     echo "[load] running usage breakdown baseline against ${CONTROL_PLANE_BASE_URL}"
     run_parallel "curl -fsS '${CONTROL_PLANE_BASE_URL}/v1/usage/breakdown?tenant_id=${TENANT_ID}&group_by=provider'"
     ;;
-  gateway-chat)
+  gateway-responses)
     if [[ -z "${GATEWAY_API_KEY}" ]]; then
-      echo "[load] GATEWAY_API_KEY is required for gateway-chat mode" >&2
+      echo "[load] GATEWAY_API_KEY is required for gateway-responses mode" >&2
       exit 1
     fi
-    echo "[load] running gateway chat baseline against ${GATEWAY_BASE_URL}"
-    run_parallel "curl -fsS -X POST '${GATEWAY_BASE_URL}/v1/chat/completions' -H 'content-type: application/json' -H 'authorization: Bearer ${GATEWAY_API_KEY}' --data '{\"model\":\"reasoning-fast\",\"messages\":[{\"role\":\"user\",\"content\":\"baseline ping\"}]}'"
+    echo "[load] running gateway responses baseline against ${GATEWAY_BASE_URL}"
+    run_parallel "curl -fsS -X POST '${GATEWAY_BASE_URL}/v1/responses' -H 'content-type: application/json' -H 'authorization: Bearer ${GATEWAY_API_KEY}' --data '{\"model\":\"reasoning-fast\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"baseline ping\"}]}]}'"
     ;;
   soak-usage-summary)
     echo "[load] running usage summary soak against ${CONTROL_PLANE_BASE_URL}"
@@ -66,7 +66,7 @@ case "${MODE}" in
     run_soak "curl -fsS '${CONTROL_PLANE_BASE_URL}/v1/usage/breakdown?tenant_id=${TENANT_ID}&group_by=provider'"
     ;;
   *)
-    echo "usage: $0 [usage-summary|usage-breakdown|gateway-chat|soak-usage-summary|soak-usage-breakdown]" >&2
+    echo "usage: $0 [usage-summary|usage-breakdown|gateway-responses|soak-usage-summary|soak-usage-breakdown]" >&2
     exit 1
     ;;
 esac

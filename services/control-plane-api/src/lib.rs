@@ -363,7 +363,7 @@ impl ControlPlaneAuthorizer {
             .session
             .active_tenant_id
             .as_ref()
-            .map(|tenant_id| tenant_id.as_str())
+            .map(core_domain::TenantId::as_str)
             .or_else(|| {
                 self.session
                     .session
@@ -497,6 +497,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/config/current",
             get(get_internal_gateway_config),
+        )
+        .route(
+            "/internal/gateway/billing-projection",
+            get(get_internal_gateway_balance_projection),
         )
         .route("/v1/usage/summary", get(get_usage_summary))
         .route("/v1/usage/breakdown", get(get_usage_breakdown))
@@ -1280,10 +1284,17 @@ async fn get_replay_capsule(
         )
     })?;
     authz.ensure_read_tenant(tenant_id, &context)?;
+    let tenant_id = core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
+        bad_request_error(
+            "tenant_required",
+            format!("invalid active tenant id: {error}"),
+            &context,
+        )
+    })?;
 
     let response = state
         .store
-        .get_replay_capsule(&replay_capsule_id)
+        .get_replay_capsule(&tenant_id, &replay_capsule_id)
         .await
         .map_err(|error| {
             internal_error(
@@ -1959,6 +1970,36 @@ async fn get_internal_gateway_config(
     }))
 }
 
+async fn get_internal_gateway_balance_projection(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<BalanceProjectionQuery>,
+) -> Result<Json<BalanceProjectionResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let tenant_id = query.tenant_id.ok_or_else(|| {
+        ApiError::bad_request(
+            "tenant_id_required",
+            "tenant_id is required for internal balance projection queries".to_string(),
+            &context,
+        )
+    })?;
+
+    let response = state
+        .store
+        .get_balance_projection(&tenant_id, query.project_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load balance projection: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
 async fn get_config_snapshot(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -2474,20 +2515,22 @@ async fn get_route_diagnostics(
 fn validate_route_policy_protocol_and_capabilities(
     route_policy: &RoutePolicy,
 ) -> Result<(), &'static str> {
-    const SUPPORTED_PROTOCOL_FAMILIES: [&str; 6] = [
+    const SUPPORTED_PROTOCOL_FAMILIES: [&str; 7] = [
         "openai_chat",
         "openai_responses",
+        "openai_images",
         "mcp_streamable_http",
         "realtime_webrtc",
         "anthropic_messages",
         "gemini_generate_content",
     ];
-    const SUPPORTED_CAPABILITIES: [&str; 7] = [
+    const SUPPORTED_CAPABILITIES: [&str; 8] = [
         "streaming",
         "tool_calling",
         "tool_related",
         "json_mode",
         "chat_completions",
+        "image_generation",
         "realtime",
         "response_model_metadata",
     ];
@@ -2759,13 +2802,12 @@ fn issue_email_verification_code(sequence: u64) -> String {
 fn email_code_hint(code: &str) -> Option<String> {
     if std::env::var("CONTROL_PLANE_EMAIL_DEBUG_CODE_HINTS")
         .ok()
-        .map(|value| {
+        .is_some_and(|value| {
             matches!(
                 value.to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes" | "on"
             )
         })
-        .unwrap_or(false)
     {
         Some(format!("Use verification code {code}."))
     } else {
@@ -3282,17 +3324,19 @@ fn build_session_cookie(session_id: &str) -> String {
 fn secure_cookies_enabled() -> bool {
     std::env::var("CONTROL_PLANE_SECURE_COOKIES")
         .ok()
-        .map(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or_else(|| {
-            std::env::var("CONSOLE_WEB_BASE_URL")
-                .map(|url| url.starts_with("https://"))
-                .unwrap_or(false)
-        })
+        .map_or_else(
+            || {
+                std::env::var("CONSOLE_WEB_BASE_URL")
+                    .map(|url| url.starts_with("https://"))
+                    .unwrap_or(false)
+            },
+            |value| {
+                matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            },
+        )
 }
 
 fn next_request_context() -> RequestContext {
@@ -3507,6 +3551,12 @@ mod tests {
             .find(|tenant| tenant.tenant_id.as_str() == "tenant_acme")
             .unwrap()
             .clone();
+        let tenant_northstar = seed
+            .tenants
+            .iter()
+            .find(|tenant| tenant.tenant_id.as_str() == "tenant_northstar")
+            .unwrap()
+            .clone();
 
         seed.users.push(user_seed(
             "user_acme_admin",
@@ -3525,6 +3575,16 @@ mod tests {
             vec![membership_seed(
                 "tmemb_acme_member",
                 &tenant_acme,
+                TenantMembershipRole::Member,
+            )],
+        ));
+        seed.users.push(user_seed(
+            "user_northstar_member",
+            "northstar-member@huge-router.dev",
+            "Northstar Member",
+            vec![membership_seed(
+                "tmemb_northstar_member",
+                &tenant_northstar,
                 TenantMembershipRole::Member,
             )],
         ));
@@ -3857,6 +3917,52 @@ mod tests {
             serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(body["selected_target"], "prvrsrc_openai_primary");
+    }
+
+    #[tokio::test]
+    async fn route_simulation_can_select_bedrock_provider() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/route-simulations")
+                    .header(COOKIE, &admin_cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "tenant_id": "tenant_acme",
+                            "project_id": "proj_acme_ops",
+                            "credential_scope": "cred_demo",
+                            "protocol_family": "openai_chat",
+                            "model_alias": "claude-sonnet",
+                            "required_capabilities": ["chat_completions"],
+                            "region": "us-east-1",
+                            "expected_prompt_tokens": 64,
+                            "expected_max_output_tokens": 128,
+                            "traffic_class": "interactive"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["admission_result"], "admitted");
+        assert_eq!(body["config_snapshot_id"], "cfgsnap_bedrock_ops_v1");
+        assert_eq!(body["selected_target"], "prvrsrc_bedrock_claude");
+        assert_eq!(
+            body["eligible_candidates"][0]["provider_resource_id"],
+            "prvrsrc_bedrock_claude"
+        );
+        assert!(body["excluded_candidates"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -4986,7 +5092,11 @@ mod tests {
         .await;
         assert_eq!(
             ids(&provider_resources["data"], "provider_resource_id"),
-            vec!["prvrsrc_openai_primary", "prvrsrc_openai_backup"]
+            vec![
+                "prvrsrc_openai_primary",
+                "prvrsrc_openai_backup",
+                "prvrsrc_bedrock_claude"
+            ]
         );
 
         let route_policies = response_json(
@@ -5003,7 +5113,11 @@ mod tests {
         .await;
         assert_eq!(
             ids(&route_policies["data"], "route_policy_id"),
-            vec!["routepol_openai_chat_default", "routepol_acme_support"]
+            vec![
+                "routepol_openai_chat_default",
+                "routepol_acme_support",
+                "routepol_bedrock_claude_text"
+            ]
         );
 
         let snapshots = response_json(
@@ -5020,7 +5134,7 @@ mod tests {
         .await;
         assert_eq!(
             ids(&snapshots["data"], "config_snapshot_id"),
-            vec!["cfgsnap_gateway_v1"]
+            vec!["cfgsnap_gateway_v1", "cfgsnap_bedrock_ops_v1"]
         );
 
         let route_receipts = response_json(
@@ -5138,6 +5252,47 @@ mod tests {
             body["data"]["recent_evaluations"][0]["estimated_tokens_saved"],
             2400
         );
+    }
+
+    #[tokio::test]
+    async fn tenant_cannot_read_another_tenants_replay_capsule_by_id() {
+        let state = authz_test_state();
+        let acme_cookie = issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state);
+
+        let acme_capsule = response_json(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/replay-capsules/replay_acme_relay_eval",
+                    Some(&acme_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            acme_capsule["replay_capsule"]["replay_capsule_id"],
+            "replay_acme_relay_eval"
+        );
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/replay-capsules/replay_acme_relay_eval",
+                    Some(&northstar_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -5407,7 +5562,7 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        assert_eq!(ids(&providers["data"], "provider_resource_id").len(), 3);
+        assert_eq!(ids(&providers["data"], "provider_resource_id").len(), 4);
 
         let route_policies = response_json(
             app.clone()
@@ -5421,7 +5576,7 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        assert_eq!(ids(&route_policies["data"], "route_policy_id").len(), 3);
+        assert_eq!(ids(&route_policies["data"], "route_policy_id").len(), 4);
 
         let route_receipts = response_json(
             app.clone()
