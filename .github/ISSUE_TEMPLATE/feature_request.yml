@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a product, protocol, or platform improvement.
+title: "[feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operator, developer, or tenant problem should this solve?
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase
+      options:
+        - PI-0 Foundation
+        - PI-1 Core Platform MVP
+        - PI-2 Multi-Protocol and Reliability
+        - PI-3 Billing and Enterprise Hardening
+        - PI-4 Ecosystem and Agentic Routing
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - ...
+        - ...

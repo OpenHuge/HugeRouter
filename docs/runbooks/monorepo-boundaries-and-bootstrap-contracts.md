@@ -62,7 +62,6 @@ Recommended first mapping:
 - `packages/ts-api-client`: `frontend-contract`
 - `packages/ts-shared-schema`: `frontend-contract`
 - `packages/typescript-config`: `tooling`
-- `packages/eslint-config`: `tooling`
 - `packages/test-utils`: `tooling`
 
 ## 5. JavaScript Dependency Rules

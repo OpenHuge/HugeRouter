@@ -26,7 +26,9 @@ describe("control-plane operational workflows", () => {
     expect(
       await screen.findByText(/starts with prvrsrc_/i),
     ).toBeInTheDocument();
-    expect(screen.getByText("Enter a provider resource name.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Enter a provider resource name."),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Provider resource id"), {
       target: { value: "prvrsrc_openai_canary" },
@@ -58,7 +60,9 @@ describe("control-plane operational workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     expect(
-      await screen.findByText("Updated provider resource OpenAI Canary Updated."),
+      await screen.findByText(
+        "Updated provider resource OpenAI Canary Updated.",
+      ),
     ).toBeInTheDocument();
     expect(
       await screen.findByText("OpenAI Canary Updated"),
@@ -67,13 +71,17 @@ describe("control-plane operational workflows", () => {
     const updatedRow = screen.getByRole("row", {
       name: /OpenAI Canary Updated/,
     });
-    fireEvent.click(within(updatedRow).getByRole("button", { name: "Disable" }));
+    fireEvent.click(
+      within(updatedRow).getByRole("button", { name: "Disable" }),
+    );
 
     await waitFor(() => {
       const disabledRow = screen.getByRole("row", {
         name: /OpenAI Canary Updated/,
       });
-      expect(within(disabledRow).getAllByText("disabled").length).toBeGreaterThan(0);
+      expect(
+        within(disabledRow).getAllByText("disabled").length,
+      ).toBeGreaterThan(0);
     });
   });
 
@@ -121,9 +129,7 @@ describe("control-plane operational workflows", () => {
     expect(
       await screen.findByText("Created route policy OpenAI Canary Route."),
     ).toBeInTheDocument();
-    expect(
-      await screen.findByText("OpenAI Canary Route"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("OpenAI Canary Route")).toBeInTheDocument();
 
     const createdRow = screen.getByRole("row", {
       name: /OpenAI Canary Route/,
@@ -135,7 +141,9 @@ describe("control-plane operational workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save route policy" }));
 
     expect(
-      await screen.findByText("Updated route policy OpenAI Canary Route Updated."),
+      await screen.findByText(
+        "Updated route policy OpenAI Canary Route Updated.",
+      ),
     ).toBeInTheDocument();
     expect(
       await screen.findByText("OpenAI Canary Route Updated"),
@@ -247,8 +255,10 @@ describe("control-plane operational workflows", () => {
   });
 
   it("queues billing exports, shows pending status, refreshes to completed, and downloads the export", async () => {
-    const createObjectUrl = vi.fn(() => "blob:billing-export");
-    const revokeObjectUrl = vi.fn();
+    const createObjectUrl = vi.fn<(object: Blob | MediaSource) => string>(
+      () => "blob:billing-export",
+    );
+    const revokeObjectUrl = vi.fn<(url: string) => void>();
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
@@ -261,7 +271,9 @@ describe("control-plane operational workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Queue export" }));
 
-    expect(await screen.findByText("Queued a billing export job.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Queued a billing export job."),
+    ).toBeInTheDocument();
     expect(await screen.findByText("export_201")).toBeInTheDocument();
 
     const queuedRow = screen.getByRole("row", { name: /export_201/ });

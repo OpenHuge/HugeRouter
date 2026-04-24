@@ -3,6 +3,7 @@ const protocolLabelByFamily: Record<string, string> = {
   gemini_generate_content: "Gemini Generate Content",
   mcp_streamable_http: "MCP Streamable HTTP",
   openai_chat: "OpenAI Chat",
+  openai_images: "OpenAI Images",
   openai_responses: "OpenAI Responses",
   realtime_webrtc: "Realtime WebRTC",
 };
@@ -12,6 +13,7 @@ const protocolColorByFamily: Record<string, string> = {
   gemini_generate_content: "lime",
   mcp_streamable_http: "indigo",
   openai_chat: "blue",
+  openai_images: "pink",
   openai_responses: "violet",
   realtime_webrtc: "teal",
 };
