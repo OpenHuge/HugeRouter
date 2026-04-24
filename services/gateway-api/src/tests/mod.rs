@@ -4,7 +4,7 @@ use super::{
     GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, InternalGatewayConfigResponse,
     ProviderTargetRuntime, RequestContext, ResponsesApiInputContent, ResponsesApiInputMessage,
     ResponsesApiRequest, RuntimeEventSink, StaticBudgetProjectionStore, StaticConfigStore,
-    app_with_state, composition, evaluate_route, normalize_request,
+    app_with_state, composition, evaluate_route, normalize_request, normalize_responses_request,
 };
 use axum::{
     Json, Router,
@@ -210,6 +210,18 @@ fn build_target_with_provider(
 ) -> ProviderTargetRuntime {
     let mut target = build_target(provider_resource_id, region, latency, cost, health_state);
     target.resource.provider_id = provider_id.to_string();
+    target.resource.supported_protocol_families = match provider_id {
+        "anthropic" => vec!["anthropic_messages".to_string()],
+        "bedrock" => vec!["openai_chat".to_string()],
+        "gateway" => vec![
+            "openai_chat".to_string(),
+            "openai_responses".to_string(),
+            "anthropic_messages".to_string(),
+            "gemini_generate_content".to_string(),
+        ],
+        "gemini" => vec!["gemini_generate_content".to_string()],
+        _ => vec!["openai_chat".to_string(), "openai_responses".to_string()],
+    };
     target.target_kind = super::provider_target_kind(provider_id);
     target.transit_metadata =
         super::transit_metadata_for_target(&target.resource, &default_route_policy());
