@@ -85,3 +85,29 @@ fn route_scoring_can_target_transit_provider() {
     );
     assert!(route.ranked_targets[0].target.transit_metadata.is_some());
 }
+
+#[test]
+fn route_evaluation_excludes_targets_that_do_not_support_request_protocol() {
+    let mut unsupported_target = build_target(
+        "prvrsrc_chat_only",
+        "us-east-1",
+        0.95,
+        0.8,
+        HealthState::Healthy,
+    );
+    unsupported_target.resource.supported_protocol_families = vec!["openai_chat".to_string()];
+    let mut config = build_config(vec![unsupported_target]);
+    config.route_policy.protocol_family = "openai_responses".to_string();
+    config.route_policy.required_capabilities = vec![];
+    let request = normalize_responses_request(valid_responses_request(), &request_context())
+        .expect("responses request should normalize");
+
+    let route = evaluate_route(&config, &request, &request_context());
+
+    assert!(route.ranked_targets.is_empty());
+    assert_eq!(route.excluded_targets.len(), 1);
+    assert_eq!(
+        route.excluded_targets[0].reason_code,
+        "protocol_family_unsupported"
+    );
+}

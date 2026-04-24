@@ -1,7 +1,7 @@
 use crate::openai::OpenAiAdapter;
 use provider_anthropic::AnthropicAdapter;
 use provider_bedrock::BedrockConverseAdapter;
-use provider_gateway::GatewayAdapter;
+use provider_gateway::{ChatGptWebAdapter, GatewayAdapter};
 use provider_gemini::GeminiAdapter;
 use provider_traits::{ProviderAdapter, ProviderAdapterRegistry, ProviderRegistryError};
 use std::{
@@ -40,6 +40,10 @@ const BUILTIN_PROVIDER_PLUGINS: &[ProviderAdapterPlugin] = &[
     ProviderAdapterPlugin {
         provider_kind: "gateway",
         build: build_gateway_adapter,
+    },
+    ProviderAdapterPlugin {
+        provider_kind: "chatgpt_web",
+        build: build_chatgpt_web_adapter,
     },
     ProviderAdapterPlugin {
         provider_kind: "gemini",
@@ -244,6 +248,10 @@ fn build_gateway_adapter() -> Arc<dyn ProviderAdapter> {
     Arc::new(GatewayAdapter::default())
 }
 
+fn build_chatgpt_web_adapter() -> Arc<dyn ProviderAdapter> {
+    Arc::new(ChatGptWebAdapter::default())
+}
+
 fn build_gemini_adapter() -> Arc<dyn ProviderAdapter> {
     Arc::new(GeminiAdapter::default())
 }
@@ -260,11 +268,12 @@ mod tests {
         let registry = provider_registry_from_config(&ProviderRegistryConfig::all_enabled())
             .expect("default provider catalog should compose");
 
-        assert_eq!(registry.len(), 5);
+        assert_eq!(registry.len(), 6);
         assert!(registry.resolve("openai").is_some());
         assert!(registry.resolve("anthropic").is_some());
         assert!(registry.resolve("bedrock").is_some());
         assert!(registry.resolve("gateway").is_some());
+        assert!(registry.resolve("chatgpt_web").is_some());
         assert!(registry.resolve("gemini").is_some());
     }
 
@@ -284,7 +293,7 @@ mod tests {
             provider_registry_from_config(&ProviderRegistryConfig::with_disabled(&["bedrock"]))
                 .expect("provider catalog should compose with disabled adapters");
 
-        assert_eq!(registry.len(), 4);
+        assert_eq!(registry.len(), 5);
         assert!(registry.resolve("bedrock").is_none());
     }
 
@@ -308,6 +317,7 @@ mod tests {
             "anthropic",
             "bedrock",
             "gateway",
+            "chatgpt_web",
             "gemini",
         ])) else {
             panic!("empty provider composition should fail");

@@ -424,6 +424,7 @@ impl SeedData {
             supported_protocol_families: vec![
                 "openai_chat".to_string(),
                 "openai_responses".to_string(),
+                "openai_images".to_string(),
             ],
             is_transit_gateway: false,
             version: 1,
@@ -457,6 +458,7 @@ impl SeedData {
             supported_protocol_families: vec![
                 "openai_chat".to_string(),
                 "openai_responses".to_string(),
+                "openai_images".to_string(),
             ],
             is_transit_gateway: false,
             version: 1,
@@ -2019,7 +2021,11 @@ impl StoreMode {
                     "anthropic" => vec!["anthropic_messages".to_string()],
                     "bedrock" => vec!["openai_chat".to_string()],
                     "gemini" => vec!["gemini_generate_content".to_string()],
-                    _ => vec!["openai_chat".to_string(), "openai_responses".to_string()],
+                    _ => vec![
+                        "openai_chat".to_string(),
+                        "openai_responses".to_string(),
+                        "openai_images".to_string(),
+                    ],
                 };
             }
             Self::Postgres(_) => panic!("test helper only supports memory store"),
@@ -4946,6 +4952,7 @@ const fn protocol_family_slug(protocol_family: &ProtocolFamily) -> &'static str 
     match protocol_family {
         ProtocolFamily::OpenAiChat => "openai_chat",
         ProtocolFamily::OpenAiResponses => "openai_responses",
+        ProtocolFamily::OpenAiImages => "openai_images",
         ProtocolFamily::McpStreamableHttp => "mcp_streamable_http",
         ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
         ProtocolFamily::AnthropicMessages => "anthropic_messages",
@@ -4961,6 +4968,7 @@ fn route_capability_supported_by_provider_capabilities(capability: &str) -> bool
             | "tool_related"
             | "json_mode"
             | "chat_completions"
+            | "image_generation"
             | "realtime"
             | "response_model_metadata"
     )
@@ -4971,7 +4979,7 @@ fn route_capability_supported(capability: &str, target: &ProviderCapabilities) -
         "streaming" => target.supports_streaming,
         "tool_calling" | "tool_related" => target.supports_tool_calling,
         "json_mode" => target.supports_json_mode,
-        "chat_completions" => true,
+        "chat_completions" | "image_generation" => true,
         "realtime" => target.supports_realtime,
         "response_model_metadata" => target.supports_response_model_metadata,
         _ => false,

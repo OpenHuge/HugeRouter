@@ -1,10 +1,11 @@
 use super::{
     ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
     ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
-    GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, InternalGatewayConfigResponse,
-    ProviderTargetRuntime, RequestContext, ResponsesApiInputContent, ResponsesApiInputMessage,
-    ResponsesApiRequest, RuntimeEventSink, StaticBudgetProjectionStore, StaticConfigStore,
-    app_with_state, composition, evaluate_route, normalize_request,
+    GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ImageGenerationRequest,
+    InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext, ResponsesApiInputContent,
+    ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink, StaticBudgetProjectionStore,
+    StaticConfigStore, app_with_state, composition, evaluate_route, normalize_request,
+    normalize_responses_request,
 };
 use axum::{
     Json, Router,
@@ -28,8 +29,9 @@ use provider_gateway::{
 use provider_traits::{
     AdapterLifecycleFamily, AdapterManifest, AdapterStability,
     CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderAdapterRegistry,
-    ProviderError, ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
-    ProviderUsage, StreamingSupport,
+    ProviderError, ProviderErrorKind, ProviderExecutionContext, ProviderImageData,
+    ProviderImageRequest, ProviderImageResponse, ProviderRequest, ProviderResponse, ProviderUsage,
+    StreamingSupport,
 };
 use std::{
     collections::BTreeMap,
@@ -65,6 +67,17 @@ fn valid_responses_request() -> ResponsesApiRequest {
             }],
         }],
         stream: false,
+    }
+}
+
+fn valid_image_generation_request() -> ImageGenerationRequest {
+    ImageGenerationRequest {
+        model: "chatgpt-image-2".to_string(),
+        prompt: "draw a reliable router appliance".to_string(),
+        n: Some(1),
+        size: Some("1024x1024".to_string()),
+        quality: Some("auto".to_string()),
+        response_format: Some("b64_json".to_string()),
     }
 }
 
@@ -180,6 +193,7 @@ fn build_target(
         supported_protocol_families: vec![
             "openai_chat".to_string(),
             "openai_responses".to_string(),
+            "openai_images".to_string(),
         ],
         is_transit_gateway: false,
         version: 1,
@@ -210,6 +224,18 @@ fn build_target_with_provider(
 ) -> ProviderTargetRuntime {
     let mut target = build_target(provider_resource_id, region, latency, cost, health_state);
     target.resource.provider_id = provider_id.to_string();
+    target.resource.supported_protocol_families = match provider_id {
+        "anthropic" => vec!["anthropic_messages".to_string()],
+        "bedrock" => vec!["openai_chat".to_string()],
+        "gateway" => vec![
+            "openai_chat".to_string(),
+            "openai_responses".to_string(),
+            "anthropic_messages".to_string(),
+            "gemini_generate_content".to_string(),
+        ],
+        "gemini" => vec!["gemini_generate_content".to_string()],
+        _ => vec!["openai_chat".to_string(), "openai_responses".to_string()],
+    };
     target.target_kind = super::provider_target_kind(provider_id);
     target.transit_metadata =
         super::transit_metadata_for_target(&target.resource, &default_route_policy());
@@ -374,6 +400,11 @@ struct ProtocolMockAdapter {
     outcomes: BTreeMap<String, Result<ProviderResponse, ProviderError>>,
 }
 
+struct ImageMockAdapter {
+    outcomes: BTreeMap<String, Result<ProviderImageResponse, ProviderError>>,
+    requests: Arc<Mutex<Vec<ProviderImageRequest>>>,
+}
+
 #[derive(Clone)]
 struct ControlPlaneFixture {
     active_config: InternalGatewayConfigResponse,
@@ -461,6 +492,52 @@ impl ProviderAdapter for ProtocolMockAdapter {
             .get(&context.endpoint.provider_resource_id)
             .cloned()
             .expect("test outcome should exist")
+    }
+}
+
+#[async_trait::async_trait]
+impl ProviderAdapter for ImageMockAdapter {
+    fn manifest(&self) -> AdapterManifest {
+        AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
+            adapter_id: "mock-openai-images",
+            provider_kind: "openai",
+            display_name: "Mock OpenAI Images",
+            protocol_family: "openai_images",
+            supported_protocol_families: &["openai_images"],
+            lifecycle_family: AdapterLifecycleFamily::Inference,
+            stability: AdapterStability::Stable,
+            streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("test:mock-openai-images"),
+        }
+    }
+
+    async fn execute_chat(
+        &self,
+        _request: &ProviderRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderResponse, ProviderError> {
+        Err(ProviderError::new(
+            ProviderErrorKind::InvalidRequest,
+            "chat is not supported by image mock",
+            false,
+        )
+        .with_detail(
+            "provider_resource_id",
+            &context.endpoint.provider_resource_id,
+        ))
+    }
+
+    async fn execute_image_generation(
+        &self,
+        request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        self.requests.lock().await.push(request.clone());
+        self.outcomes
+            .get(&context.endpoint.provider_resource_id)
+            .cloned()
+            .expect("test image outcome should exist")
     }
 }
 

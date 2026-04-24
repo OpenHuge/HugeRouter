@@ -1,6 +1,13 @@
 # Provider Gateway Transit Adapter
 
-`PAD-005` v1 adds a first-class `provider_id="gateway"` target that treats an upstream OpenAI-compatible gateway as a governed transit provider inside HugeRouter's normal routing chain.
+`PAD-005` v1 adds first-class transit targets that treat an upstream OpenAI-compatible gateway as a governed provider inside HugeRouter's normal routing chain.
+
+Supported transit provider ids:
+
+- `provider_id="gateway"` for ordinary OpenAI-compatible API gateways.
+- `provider_id="chatgpt_web"` for externally hosted ChatGPT Web reverse proxies that already expose an OpenAI-compatible API surface.
+
+`chatgpt_web` is intentionally modeled as an experimental transit provider. HugeRouter does not implement browser automation, ChatGPT Web token extraction, or webapp protocol reverse engineering internally.
 
 ## Why This Is Not Just an `openai` Alias
 
@@ -16,11 +23,13 @@ Treating it as a plain `openai` alias would hide those differences and would for
 
 ## Transit Semantics
 
-`provider_id="gateway"` means:
+`provider_id="gateway"` or `provider_id="chatgpt_web"` means:
 
 - HugeRouter normalizes northbound requests first.
 - The selected target is still ranked alongside native providers.
-- The adapter then forwards the normalized request to the upstream gateway's `/chat/completions` endpoint using OpenAI-compatible JSON.
+- The adapter then forwards the normalized request to the upstream gateway using OpenAI-compatible JSON:
+  - `/chat/completions` for `openai_chat`
+  - `/images/generations` for `openai_images`
 - Error diagnostics from the upstream gateway are retained in normalized error details, including `upstream_status_code`, `upstream_code`, and request-id style gateway diagnostics when present.
 
 The current v1 transit metadata is runtime-typed and includes:
@@ -98,10 +107,20 @@ Shared transit env vars:
 
 - `GATEWAY_TRANSIT_API_KEY`
 - `GATEWAY_TRANSIT_MODEL` (optional override; default is to preserve the route's model alias)
+- `GATEWAY_TRANSIT_IMAGE_MODEL` (optional image-model override)
 - `GATEWAY_PUBLIC_BASE_URL`
 - `GATEWAY_TRANSIT_OPENAI_USD_PER_1K_TOKENS`
 - `GATEWAY_TRANSIT_ANTHROPIC_USD_PER_1K_TOKENS`
 - `GATEWAY_TRANSIT_GEMINI_USD_PER_1K_TOKENS`
+- `GATEWAY_TRANSIT_OPENAI_IMAGE_USD_PER_GENERATION`
+
+ChatGPT Web reverse proxy env vars:
+
+- `GATEWAY_CHATGPT_WEB_API_KEY`
+- `GATEWAY_CHATGPT_WEB_MODEL`
+- `GATEWAY_CHATGPT_WEB_IMAGE_MODEL` (defaults to `chatgpt-image-latest` for `openai_images`)
+- `GATEWAY_CHATGPT_WEB_USD_PER_1K_TOKENS`
+- `GATEWAY_CHATGPT_WEB_IMAGE_USD_PER_GENERATION`
 
 Per-target overrides:
 
