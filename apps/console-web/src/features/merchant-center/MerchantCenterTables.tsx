@@ -1,12 +1,63 @@
-import { Badge, Button, Card, Group, Stack, Table, Text } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Card,
+  Group,
+  SegmentedControl,
+  Stack,
+  Table,
+  Text,
+} from "@mantine/core";
 import type {
   CardProductView,
   MerchantShopView,
   MerchantWorkspaceData,
   ReplayCapsuleView,
+  RelayEvaluationView,
   TrialConnectionView,
 } from "../control-plane/types";
 import { EmptyCollectionState } from "../control-plane/route-state";
+
+type RelayEvaluationVerdictFilter = "all" | RelayEvaluationView["verdict"];
+
+function statusColor(status: string) {
+  if (status === "active" || status === "healthy" || status === "pass") {
+    return "teal";
+  }
+
+  if (status === "warning" || status === "needs_rotation") {
+    return "yellow";
+  }
+
+  if (status === "fail" || status === "suspended" || status === "paused") {
+    return "red";
+  }
+
+  return "gray";
+}
+
+function EvaluationCheckBadges({
+  evaluation,
+}: {
+  evaluation: RelayEvaluationView;
+}) {
+  const checks = [
+    ["Fingerprint", evaluation.fingerprintStatus],
+    ["Protocol", evaluation.protocolStatus],
+    ["Token", evaluation.tokenStatus],
+    ["Multimodal", evaluation.multimodalStatus],
+  ] as const;
+
+  return (
+    <Group gap={4}>
+      {checks.map(([label, status]) => (
+        <Badge color={statusColor(status)} key={label} size="xs" variant="dot">
+          {label} {status}
+        </Badge>
+      ))}
+    </Group>
+  );
+}
 
 export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
   return (
@@ -37,7 +88,11 @@ export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
                       {shop.merchantShopId}
                     </Text>
                   </Table.Td>
-                  <Table.Td>{shop.status}</Table.Td>
+                  <Table.Td>
+                    <Badge color={statusColor(shop.status)} variant="light">
+                      {shop.status}
+                    </Badge>
+                  </Table.Td>
                   <Table.Td>{shop.slug}</Table.Td>
                   <Table.Td>{shop.fulfillmentMode}</Table.Td>
                 </Table.Tr>
@@ -84,7 +139,11 @@ export function CardProductTable({
                       {product.cardProductId}
                     </Text>
                   </Table.Td>
-                  <Table.Td>{product.status}</Table.Td>
+                  <Table.Td>
+                    <Badge color={statusColor(product.status)} variant="light">
+                      {product.status}
+                    </Badge>
+                  </Table.Td>
                   <Table.Td>{product.inventoryCount}</Table.Td>
                   <Table.Td>${product.faceValueUsd}</Table.Td>
                   <Table.Td>${product.retailPriceUsd}</Table.Td>
@@ -117,6 +176,7 @@ export function TrialConnectionTable({
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Provider</Table.Th>
+                <Table.Th>Status</Table.Th>
                 <Table.Th>Endpoint</Table.Th>
                 <Table.Th>Masked Key</Table.Th>
                 <Table.Th>Model</Table.Th>
@@ -130,6 +190,14 @@ export function TrialConnectionTable({
                     <Text c="dimmed" size="sm">
                       {connection.trialConnectionId}
                     </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge
+                      color={statusColor(connection.status)}
+                      variant="light"
+                    >
+                      {connection.status}
+                    </Badge>
                   </Table.Td>
                   <Table.Td>{connection.endpointBaseUrl}</Table.Td>
                   <Table.Td>{connection.apiKeyMasked}</Table.Td>
@@ -145,24 +213,61 @@ export function TrialConnectionTable({
 }
 
 export function RelayEvaluationTable({
+  evaluationVerdictFilter,
   isLoadingReplayCapsule,
   onViewReplayCapsule,
+  setEvaluationVerdictFilter,
   selectedReplayCapsuleId,
   workspace,
 }: {
+  evaluationVerdictFilter: string;
   isLoadingReplayCapsule: boolean;
   onViewReplayCapsule: (replayCapsuleId: string) => Promise<void>;
+  setEvaluationVerdictFilter: (filter: RelayEvaluationVerdictFilter) => void;
   selectedReplayCapsuleId: string | null;
   workspace: MerchantWorkspaceData;
 }) {
+  const visibleEvaluations =
+    evaluationVerdictFilter === "all"
+      ? workspace.recentEvaluations
+      : workspace.recentEvaluations.filter(
+          (evaluation) => evaluation.verdict === evaluationVerdictFilter,
+        );
+
   return (
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
-        <Text fw={700}>Recent Evaluations</Text>
+        <Group justify="space-between">
+          <Stack gap={0}>
+            <Text fw={700}>Recent Evaluations</Text>
+            <Text c="dimmed" size="sm">
+              {visibleEvaluations.length} of{" "}
+              {workspace.recentEvaluations.length} evaluations shown.
+            </Text>
+          </Stack>
+          <SegmentedControl
+            data={[
+              { label: "All", value: "all" },
+              { label: "Healthy", value: "healthy" },
+              { label: "Warning", value: "warning" },
+              { label: "Fail", value: "fail" },
+            ]}
+            onChange={(value) =>
+              setEvaluationVerdictFilter(value as RelayEvaluationVerdictFilter)
+            }
+            size="xs"
+            value={evaluationVerdictFilter}
+          />
+        </Group>
         {workspace.recentEvaluations.length === 0 ? (
           <EmptyCollectionState
             description="Run your first evaluation to produce replay-backed merchant evidence."
             title="No evaluations"
+          />
+        ) : visibleEvaluations.length === 0 ? (
+          <EmptyCollectionState
+            description="Change the verdict filter or run another evaluation to review more evidence."
+            title="No matching evaluations"
           />
         ) : (
           <Table striped withRowBorders>
@@ -177,40 +282,63 @@ export function RelayEvaluationTable({
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {workspace.recentEvaluations.map((evaluation) => (
-                <Table.Tr key={evaluation.relayEvaluationId}>
-                  <Table.Td>
-                    <Text fw={600}>{evaluation.providerLabel}</Text>
-                    <Text c="dimmed" size="sm">
-                      {evaluation.summary}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>{evaluation.verdict}</Table.Td>
-                  <Table.Td>{evaluation.overallScore}</Table.Td>
-                  <Table.Td>
-                    <Text>{evaluation.replayCapsuleId}</Text>
-                    <Text c="dimmed" size="sm">
-                      {evaluation.runnerMode}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>{evaluation.estimatedTokensSaved}</Table.Td>
-                  <Table.Td>
-                    <Button
-                      loading={
-                        isLoadingReplayCapsule &&
-                        selectedReplayCapsuleId === evaluation.replayCapsuleId
-                      }
-                      onClick={() =>
-                        void onViewReplayCapsule(evaluation.replayCapsuleId)
-                      }
-                      size="xs"
-                      variant="light"
-                    >
-                      View replay
-                    </Button>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
+              {visibleEvaluations.map((evaluation) => {
+                const isSelected =
+                  selectedReplayCapsuleId === evaluation.replayCapsuleId;
+
+                return (
+                  <Table.Tr
+                    bg={isSelected ? "var(--mantine-color-blue-0)" : undefined}
+                    key={evaluation.relayEvaluationId}
+                  >
+                    <Table.Td>
+                      <Text fw={600}>{evaluation.providerLabel}</Text>
+                      <Text c="dimmed" size="sm">
+                        {evaluation.summary}
+                      </Text>
+                      <EvaluationCheckBadges evaluation={evaluation} />
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge
+                        color={statusColor(evaluation.verdict)}
+                        variant="light"
+                      >
+                        {evaluation.verdict}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>{evaluation.overallScore}</Table.Td>
+                    <Table.Td>
+                      <Group gap="xs">
+                        <Text>{evaluation.replayCapsuleId}</Text>
+                        {isSelected ? (
+                          <Badge color="blue" size="xs" variant="light">
+                            Selected
+                          </Badge>
+                        ) : null}
+                      </Group>
+                      <Text c="dimmed" size="sm">
+                        {evaluation.runnerMode}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>{evaluation.estimatedTokensSaved}</Table.Td>
+                    <Table.Td>
+                      <Button
+                        loading={
+                          isLoadingReplayCapsule &&
+                          selectedReplayCapsuleId === evaluation.replayCapsuleId
+                        }
+                        onClick={() =>
+                          void onViewReplayCapsule(evaluation.replayCapsuleId)
+                        }
+                        size="xs"
+                        variant="light"
+                      >
+                        View replay
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
             </Table.Tbody>
           </Table>
         )}
@@ -263,6 +391,12 @@ export function ReplayCapsuleDetailCard({
                   Config Snapshot
                 </Text>
                 <Text fw={600}>{replayCapsule.configSnapshotId}</Text>
+              </Stack>
+              <Stack gap={0}>
+                <Text c="dimmed" size="sm">
+                  Route Receipt
+                </Text>
+                <Text fw={600}>{replayCapsule.routeReceiptId}</Text>
               </Stack>
             </Group>
             <Table striped withRowBorders>

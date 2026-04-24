@@ -153,6 +153,7 @@ type ActionErrorKind =
   | "provider-disable"
   | "provider-update"
   | "relay-evaluation-create"
+  | "replay-capsule-load"
   | "route-policy-create"
   | "route-policy-disable"
   | "route-policy-update"
@@ -172,12 +173,7 @@ export type ProviderResourceMutationInput = {
   createdAt?: string;
   deploymentScope: "shared" | "tenant_dedicated" | "project_dedicated";
   endpointBaseUrl: string;
-  healthState:
-    | "healthy"
-    | "degraded"
-    | "quarantined"
-    | "draining"
-    | "disabled";
+  healthState: "healthy" | "degraded" | "quarantined" | "draining" | "disabled";
   name: string;
   projectId?: string;
   providerId: string;
@@ -587,7 +583,10 @@ function mapRoutePolicies(
 
 function routePolicyLabelById(routePolicies: RoutePolicy[]) {
   return new Map(
-    routePolicies.map((policy) => [policy.route_policy_id, policy.display_name]),
+    routePolicies.map((policy) => [
+      policy.route_policy_id,
+      policy.display_name,
+    ]),
   );
 }
 
@@ -793,7 +792,9 @@ function parseApiKeyList(payload: unknown) {
   ]).map(parseApiKeyRecord);
 }
 
-function toMerchantShopView(shop: ReturnType<typeof merchantShopSchema.parse>): MerchantShopView {
+function toMerchantShopView(
+  shop: ReturnType<typeof merchantShopSchema.parse>,
+): MerchantShopView {
   return {
     announcement: shop.announcement,
     createdAt: shop.created_at,
@@ -981,6 +982,10 @@ export function getControlPlaneActionErrorMessage(
 
   if (kind === "billing-export-download") {
     return "The billing export could not be downloaded right now.";
+  }
+
+  if (kind === "replay-capsule-load") {
+    return "The replay capsule could not be loaded right now.";
   }
 
   if (kind === "billing-export-queue") {
@@ -1833,9 +1838,9 @@ const defaultConsoleDataService: ConsoleDataService = {
     const tenantRoutePolicies = routePolicies.filter(
       (policy) => policy.tenant_id === tenantId,
     );
-    const tenantRouteReceipts = filterByTenant(await listRouteReceiptsFromControlPlane()).filter(
-      (receipt) => receipt.tenant_id === tenantId,
-    );
+    const tenantRouteReceipts = filterByTenant(
+      await listRouteReceiptsFromControlPlane(),
+    ).filter((receipt) => receipt.tenant_id === tenantId);
     const simulation = await getRouteSimulationOrNull(
       client,
       activeSnapshot?.tenant_id === tenantId ? activeSnapshot : null,
@@ -1893,11 +1898,13 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async listRouteReceipts() {
-    const [routeReceipts, providerResources, routePolicies] = await Promise.all([
-      listRouteReceiptsFromControlPlane(),
-      client.listProviderResources(),
-      client.listRoutePolicies(),
-    ]);
+    const [routeReceipts, providerResources, routePolicies] = await Promise.all(
+      [
+        listRouteReceiptsFromControlPlane(),
+        client.listProviderResources(),
+        client.listRoutePolicies(),
+      ],
+    );
     const filteredReceipts = filterByTenant(routeReceipts).slice(0, 20);
 
     return mapRouteReceipts(
@@ -1949,7 +1956,9 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async createConfigSnapshot(snapshot) {
-    return createConfigSnapshotInControlPlane(toConfigSnapshotPayload(snapshot));
+    return createConfigSnapshotInControlPlane(
+      toConfigSnapshotPayload(snapshot),
+    );
   },
 
   async activateConfigSnapshot(configSnapshotId) {
