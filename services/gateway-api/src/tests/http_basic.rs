@@ -272,6 +272,93 @@ async fn responses_route_returns_response_api_shape() {
 }
 
 #[tokio::test]
+async fn image_generation_route_returns_openai_image_shape() {
+    let image_requests = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(ImageMockAdapter {
+        requests: image_requests.clone(),
+        outcomes: BTreeMap::from([(
+            "prvrsrc_openai_primary".to_string(),
+            Ok(ProviderImageResponse {
+                response_id: Some("img_test_123".to_string()),
+                model: "chatgpt-image-latest".to_string(),
+                created: Some(1_777_000_000),
+                images: vec![ProviderImageData {
+                    b64_json: Some("aW1hZ2U=".to_string()),
+                    url: None,
+                    revised_prompt: Some("Draw a reliable router appliance".to_string()),
+                }],
+                usage: ProviderUsage {
+                    input_tokens: 16,
+                    output_tokens: 64,
+                    cached_input_tokens: 0,
+                },
+            }),
+        )]),
+    });
+    let mut image_target = build_target(
+        "prvrsrc_openai_primary",
+        "us-east-1",
+        0.9,
+        0.6,
+        HealthState::Healthy,
+    );
+    image_target.upstream_model = Some("chatgpt-image-latest".to_string());
+    let mut config = build_config(vec![image_target]);
+    config.route_policy.protocol_family = "openai_images".to_string();
+    config.route_policy.model_alias = "chatgpt-image-latest".to_string();
+    config.route_policy.required_capabilities = vec!["image_generation".to_string()];
+    let mut registry = ProviderAdapterRegistry::new();
+    registry.register(adapter).unwrap();
+    let app = app_with_state(Arc::new(AppState {
+        config_store: Arc::new(StaticConfigStore::new(config)),
+        auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        budget_store: Arc::new(StaticBudgetProjectionStore {
+            response: ok_budget_projection(),
+        }),
+        adapter_registry: registry,
+        debug_headers_enabled: false,
+        event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+    }));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/images/generations")
+                .header("authorization", "Bearer test")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&valid_image_generation_request()).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["id"], "img_test_123");
+    assert_eq!(payload["model"], "chatgpt-image-latest");
+    assert_eq!(payload["data"][0]["b64_json"], "aW1hZ2U=");
+    assert_eq!(
+        payload["data"][0]["revised_prompt"],
+        "Draw a reliable router appliance"
+    );
+    assert_eq!(payload["usage"]["total_tokens"], 80);
+
+    let (outbound_model, outbound_response_format) = {
+        let outbound = image_requests.lock().await;
+        (
+            outbound[0].model.clone(),
+            outbound[0].response_format.clone(),
+        )
+    };
+    assert_eq!(outbound_model, "chatgpt-image-latest");
+    assert_eq!(outbound_response_format.as_deref(), Some("b64_json"));
+}
+
+#[tokio::test]
 async fn gateway_target_routes_successfully_through_provider_chain() {
     let transport = Arc::new(MockGatewayTransport {
         requests: Arc::new(Mutex::new(Vec::new())),

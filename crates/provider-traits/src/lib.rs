@@ -129,6 +129,16 @@ pub struct ProviderRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderImageRequest {
+    pub model: String,
+    pub prompt: String,
+    pub n: Option<u32>,
+    pub size: Option<String>,
+    pub quality: Option<String>,
+    pub response_format: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -141,6 +151,22 @@ pub struct ProviderResponse {
     pub model: String,
     pub output_text: String,
     pub finish_reason: String,
+    pub usage: ProviderUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderImageData {
+    pub b64_json: Option<String>,
+    pub url: Option<String>,
+    pub revised_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderImageResponse {
+    pub response_id: Option<String>,
+    pub model: String,
+    pub created: Option<u64>,
+    pub images: Vec<ProviderImageData>,
     pub usage: ProviderUsage,
 }
 
@@ -243,6 +269,23 @@ pub trait ProviderAdapter: Send + Sync {
         request: &ProviderRequest,
         context: &ProviderExecutionContext,
     ) -> Result<ProviderResponse, ProviderError>;
+
+    async fn execute_image_generation(
+        &self,
+        _request: &ProviderImageRequest,
+        context: &ProviderExecutionContext,
+    ) -> Result<ProviderImageResponse, ProviderError> {
+        Err(ProviderError::new(
+            ProviderErrorKind::InvalidRequest,
+            "image generation is not supported by this provider adapter",
+            false,
+        )
+        .with_detail(
+            "provider_resource_id",
+            &context.endpoint.provider_resource_id,
+        )
+        .with_detail("adapter_boundary", "image_generation_unsupported"))
+    }
 }
 
 #[derive(Clone, Default)]

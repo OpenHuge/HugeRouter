@@ -2508,20 +2508,22 @@ async fn get_route_diagnostics(
 fn validate_route_policy_protocol_and_capabilities(
     route_policy: &RoutePolicy,
 ) -> Result<(), &'static str> {
-    const SUPPORTED_PROTOCOL_FAMILIES: [&str; 6] = [
+    const SUPPORTED_PROTOCOL_FAMILIES: [&str; 7] = [
         "openai_chat",
         "openai_responses",
+        "openai_images",
         "mcp_streamable_http",
         "realtime_webrtc",
         "anthropic_messages",
         "gemini_generate_content",
     ];
-    const SUPPORTED_CAPABILITIES: [&str; 7] = [
+    const SUPPORTED_CAPABILITIES: [&str; 8] = [
         "streaming",
         "tool_calling",
         "tool_related",
         "json_mode",
         "chat_completions",
+        "image_generation",
         "realtime",
         "response_model_metadata",
     ];

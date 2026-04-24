@@ -6,6 +6,7 @@ export const SUPPORTED_ROUTE_CAPABILITIES = [
   "tool_related",
   "json_mode",
   "chat_completions",
+  "image_generation",
   "realtime",
   "response_model_metadata",
 ] as const;
@@ -13,6 +14,7 @@ export const SUPPORTED_ROUTE_CAPABILITIES = [
 export const PROTOCOL_FAMILY_OPTIONS = [
   "openai_chat",
   "openai_responses",
+  "openai_images",
   "mcp_streamable_http",
   "realtime_webrtc",
   "anthropic_messages",
