@@ -1946,6 +1946,11 @@ fn evaluate_route(
             continue;
         }
 
+        if !target_supports_protocol_family(target, &request.protocol_family) {
+            excluded_targets.push(protocol_family_exclusion(target, &request.protocol_family));
+            continue;
+        }
+
         if !route_capabilities_supported(&active_config.route_policy, target) {
             excluded_targets.push(ExcludedTarget {
                 provider_resource_id: target.resource.provider_resource_id.clone(),
@@ -1992,6 +1997,27 @@ fn evaluate_route(
         admission_result,
         excluded_targets,
         ranked_targets,
+    }
+}
+
+fn target_supports_protocol_family(target: &ProviderTargetRuntime, protocol_family: &str) -> bool {
+    target
+        .resource
+        .supported_protocol_families
+        .iter()
+        .any(|supported| supported == protocol_family)
+}
+
+fn protocol_family_exclusion(
+    target: &ProviderTargetRuntime,
+    protocol_family: &str,
+) -> ExcludedTarget {
+    ExcludedTarget {
+        provider_resource_id: target.resource.provider_resource_id.clone(),
+        reason_code: "protocol_family_unsupported".to_string(),
+        reason: format!(
+            "provider target does not declare support for protocol family `{protocol_family}`"
+        ),
     }
 }
 
