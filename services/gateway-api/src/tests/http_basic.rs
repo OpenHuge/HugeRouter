@@ -66,6 +66,74 @@ async fn internal_provider_adapters_exposes_runtime_manifests() {
 }
 
 #[tokio::test]
+async fn internal_provider_adapter_lookup_returns_one_runtime_manifest() {
+    let app = app_with_state(test_state(
+        Arc::new(MockAdapter {
+            outcomes: BTreeMap::new(),
+        }),
+        vec![build_target(
+            "prvrsrc_openai_primary",
+            "us-east-1",
+            0.9,
+            0.6,
+            HealthState::Healthy,
+        )],
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/internal/provider-adapters/openai")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(payload["adapter_id"], "mock-openai");
+    assert_eq!(payload["provider_kind"], "openai");
+    assert_eq!(payload["protocol_family"], "openai_chat");
+}
+
+#[tokio::test]
+async fn internal_provider_adapter_lookup_reports_unloaded_provider() {
+    let app = app_with_state(test_state(
+        Arc::new(MockAdapter {
+            outcomes: BTreeMap::new(),
+        }),
+        vec![build_target(
+            "prvrsrc_openai_primary",
+            "us-east-1",
+            0.9,
+            0.6,
+            HealthState::Healthy,
+        )],
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/internal/provider-adapters/bedrock")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(payload["code"], "provider_adapter_not_found");
+    assert_eq!(payload["provider_kind"], "bedrock");
+    assert_eq!(payload["available_provider_kinds"][0], "openai");
+}
+
+#[tokio::test]
 async fn rejects_missing_auth_with_normalized_error() {
     let app = app_with_state(test_state(
         Arc::new(MockAdapter {

@@ -183,6 +183,14 @@ pub struct ProviderAdapterManifestDto {
     pub configuration_schema_ref: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderAdapterManifestLookupError {
+    pub code: &'static str,
+    pub message: String,
+    pub provider_kind: String,
+    pub available_provider_kinds: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewaySuccess {
     pub request_id: String,
@@ -291,6 +299,10 @@ pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/internal/provider-adapters", get(provider_adapters))
+        .route(
+            "/internal/provider-adapters/{provider_kind}",
+            get(provider_adapter),
+        )
         .route("/v1/responses", post(responses))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(anthropic_messages))
@@ -329,6 +341,38 @@ async fn provider_adapters(
     State(state): State<GatewayState>,
 ) -> Json<ProviderAdapterManifestsResponse> {
     Json(provider_adapter_manifests_response(&state.adapter_registry))
+}
+
+async fn provider_adapter(
+    State(state): State<GatewayState>,
+    Path(provider_kind): Path<String>,
+) -> Response {
+    let provider_kind = provider_kind.trim().to_ascii_lowercase();
+
+    state.adapter_registry.resolve(&provider_kind).map_or_else(
+        || {
+            let available_provider_kinds = state
+                .adapter_registry
+                .provider_kinds()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            (
+                StatusCode::NOT_FOUND,
+                Json(ProviderAdapterManifestLookupError {
+                    code: "provider_adapter_not_found",
+                    message: format!("provider adapter `{provider_kind}` is not loaded"),
+                    provider_kind,
+                    available_provider_kinds,
+                }),
+            )
+                .into_response()
+        },
+        |adapter| {
+            let manifest = adapter.manifest();
+            Json(provider_adapter_manifest_dto(&manifest)).into_response()
+        },
+    )
 }
 
 fn provider_adapter_manifests_response(
