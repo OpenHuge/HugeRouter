@@ -47,9 +47,10 @@ use protocol_ir::{
     BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse,
     PricingCatalogResponse, PricingSimulationRequest, PricingSimulationResponse, ProjectsResponse,
     ProtocolFamily, ProviderResourcesResponse, RouteDiagnosticDecision, RouteDiagnosticTarget,
-    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptResponse, RouteReceiptSummary,
-    RouteSimulationRequest, RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse,
-    UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
+    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptDecisionTraceStep,
+    RouteReceiptDiagnosticsResponse, RouteReceiptPolicyCheck, RouteReceiptProviderAttempt,
+    RouteReceiptResponse, RouteReceiptSummary, RouteSimulationRequest, RouteSimulationResponse,
+    TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
 };
 use routing_engine::{
     ProviderTargetKind, ProviderTargetRuntime, RoutingConfig, RoutingRequest, health_state_slug,
@@ -60,7 +61,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Pool, Postgres, Row, postgres::PgPoolOptions, types::Json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -1787,6 +1788,22 @@ impl StoreMode {
         }
     }
 
+    pub async fn get_route_receipt_diagnostics(
+        &self,
+        route_receipt_id: &str,
+    ) -> Result<Option<RouteReceiptDiagnosticsResponse>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .route_receipts
+                .get(route_receipt_id)
+                .cloned()
+                .map(memory_route_receipt_diagnostics_response)),
+            Self::Postgres(store) => store.get_route_receipt_diagnostics(route_receipt_id).await,
+        }
+    }
+
     pub async fn list_route_receipts(
         &self,
         filters: &RouteReceiptFilters,
@@ -3169,6 +3186,78 @@ impl PostgresStore {
             .await?;
         Ok(row.map(|row| RouteReceiptResponse {
             route_receipt: row.get::<Json<RouteReceipt>, _>("payload").0,
+        }))
+    }
+
+    async fn get_route_receipt_diagnostics(
+        &self,
+        route_receipt_id: &str,
+    ) -> Result<Option<RouteReceiptDiagnosticsResponse>> {
+        let row = sqlx::query(
+            r"
+            SELECT
+                receipts.payload AS route_receipt,
+                diagnostics.decision_timeline,
+                diagnostics.policy_checks,
+                diagnostics.provider_attempts,
+                diagnostics.source_message_id,
+                diagnostics.source_producer,
+                diagnostics.source_request_id,
+                diagnostics.source_trace_id,
+                diagnostics.created_at::text AS diagnostics_created_at
+            FROM route_receipts receipts
+            LEFT JOIN route_receipt_diagnostics diagnostics
+              ON diagnostics.route_receipt_id = receipts.route_receipt_id
+            WHERE receipts.route_receipt_id = $1
+            ",
+        )
+        .bind(route_receipt_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| {
+            let route_receipt = row.get::<Json<RouteReceipt>, _>("route_receipt").0;
+            let mut metadata = BTreeMap::new();
+            for (key, value) in [
+                (
+                    "source_message_id",
+                    row.get::<Option<String>, _>("source_message_id"),
+                ),
+                (
+                    "source_producer",
+                    row.get::<Option<String>, _>("source_producer"),
+                ),
+                (
+                    "source_request_id",
+                    row.get::<Option<String>, _>("source_request_id"),
+                ),
+                (
+                    "source_trace_id",
+                    row.get::<Option<String>, _>("source_trace_id"),
+                ),
+                (
+                    "diagnostics_created_at",
+                    row.get::<Option<String>, _>("diagnostics_created_at"),
+                ),
+            ] {
+                if let Some(value) = value {
+                    metadata.insert(key.to_string(), value);
+                }
+            }
+
+            RouteReceiptDiagnosticsResponse {
+                route_receipt,
+                decision_timeline: row
+                    .get::<Option<Json<Vec<RouteReceiptDecisionTraceStep>>>, _>("decision_timeline")
+                    .map_or_else(Vec::new, |value| value.0),
+                policy_checks: row
+                    .get::<Option<Json<Vec<RouteReceiptPolicyCheck>>>, _>("policy_checks")
+                    .map_or_else(Vec::new, |value| value.0),
+                provider_attempts: row
+                    .get::<Option<Json<Vec<RouteReceiptProviderAttempt>>>, _>("provider_attempts")
+                    .map_or_else(Vec::new, |value| value.0),
+                metadata,
+            }
         }))
     }
 
@@ -4969,6 +5058,53 @@ fn to_route_receipt_summary(receipt: &RouteReceipt) -> RouteReceiptSummary {
     }
 }
 
+fn memory_route_receipt_diagnostics_response(
+    route_receipt: RouteReceipt,
+) -> RouteReceiptDiagnosticsResponse {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("source".to_string(), "memory_store".to_string());
+    metadata.insert("request_id".to_string(), route_receipt.request_id.clone());
+    metadata.insert("trace_id".to_string(), route_receipt.trace_id.clone());
+
+    RouteReceiptDiagnosticsResponse {
+        policy_checks: vec![RouteReceiptPolicyCheck {
+            policy_id: route_receipt.route_policy_id.clone(),
+            status: match route_receipt.admission_result {
+                AdmissionResult::Admitted => "passed".to_string(),
+                _ => "failed".to_string(),
+            },
+            reason: route_receipt.failure_reason.clone(),
+        }],
+        decision_timeline: vec![RouteReceiptDecisionTraceStep {
+            stage: "route_receipt".to_string(),
+            status: if route_receipt.normalized_error.is_some() {
+                "failed".to_string()
+            } else {
+                "recorded".to_string()
+            },
+            message: route_receipt.failure_reason.clone().unwrap_or_else(|| {
+                "Route receipt was recorded without persisted worker diagnostics.".to_string()
+            }),
+            score: route_receipt.selected_target.as_ref().map(|_| {
+                route_receipt.score_breakdown.latency
+                    + route_receipt.score_breakdown.cost
+                    + route_receipt.score_breakdown.health
+                    + route_receipt.score_breakdown.trust
+            }),
+            notes: vec![
+                format!("excluded_targets={}", route_receipt.excluded_targets.len()),
+                format!(
+                    "fallback_transitions={}",
+                    route_receipt.fallback_transitions.len()
+                ),
+            ],
+        }],
+        provider_attempts: Vec::new(),
+        metadata,
+        route_receipt,
+    }
+}
+
 fn build_memory_route_diagnostics(
     store: &MemoryStore,
     route_policy_id: &str,
@@ -5421,6 +5557,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn memory_store_get_route_receipt_diagnostics_returns_trace_context() {
+        let store = StoreMode::memory();
+        store.insert_route_receipt_for_tests(sample_route_receipt(
+            "routercpt_store_diag",
+            "tenant_acme",
+            "proj_core",
+            "openai_chat",
+            "2026-04-22T00:01:00Z",
+        ));
+
+        let diagnostics = store
+            .get_route_receipt_diagnostics("routercpt_store_diag")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            diagnostics.route_receipt.route_receipt_id.as_str(),
+            "routercpt_store_diag"
+        );
+        assert_eq!(
+            diagnostics.metadata.get("source").map(String::as_str),
+            Some("memory_store")
+        );
+        assert_eq!(diagnostics.policy_checks.len(), 1);
+        assert_eq!(diagnostics.decision_timeline[0].stage, "route_receipt");
+    }
+
+    #[tokio::test]
     async fn memory_store_activation_supersedes_previous_project_snapshot() {
         let store = StoreMode::memory();
         let newer = core_domain::ConfigSnapshot {
@@ -5690,6 +5855,17 @@ const MIGRATIONS: &[&str] = &[
     r"CREATE TABLE IF NOT EXISTS route_receipts (
         route_receipt_id TEXT PRIMARY KEY,
         payload JSONB NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS route_receipt_diagnostics (
+        route_receipt_id TEXT PRIMARY KEY,
+        decision_timeline JSONB NOT NULL,
+        policy_checks JSONB NOT NULL,
+        provider_attempts JSONB NOT NULL,
+        source_message_id TEXT NOT NULL,
+        source_producer TEXT NOT NULL,
+        source_request_id TEXT NULL,
+        source_trace_id TEXT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )",
     r"CREATE TABLE IF NOT EXISTS billing_export_jobs (
         export_job_id TEXT PRIMARY KEY,
