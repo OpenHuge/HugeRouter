@@ -5,8 +5,10 @@ use protocol_gemini::{
     GenerationConfig, to_provider_response, to_upstream_generate_content_request,
 };
 use provider_traits::{
-    AdapterManifest, ProviderAdapter, ProviderEndpoint, ProviderError, ProviderErrorKind,
-    ProviderExecutionContext, ProviderRequest, ProviderResponse, StreamingSupport,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+    CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderEndpoint, ProviderError,
+    ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
+    StreamingSupport,
 };
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
@@ -36,11 +38,16 @@ impl GeminiAdapter {
 impl ProviderAdapter for GeminiAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
             adapter_id: "gemini-native-v1",
             provider_kind: "gemini",
             display_name: "Gemini Generate Content",
             protocol_family: "gemini_generate_content",
+            supported_protocol_families: &["gemini_generate_content"],
+            lifecycle_family: AdapterLifecycleFamily::Inference,
+            stability: AdapterStability::Beta,
             streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("env:GATEWAY_GEMINI_*"),
         }
     }
 

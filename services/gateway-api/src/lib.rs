@@ -1,3 +1,4 @@
+mod composition;
 mod openai;
 
 use async_trait::async_trait;
@@ -18,7 +19,6 @@ use core_domain::{
     RouteReceipt, RouteReceiptId, ScoreBreakdown, ServiceName, UsageEvent, UsageEventId,
     UsageMetrics, UsagePhase, ValidationIssue,
 };
-use openai::OpenAiAdapter;
 use protocol_anthropic::{
     AnthropicMessageRequest, AnthropicMessageResponse, AnthropicResponseContentBlock,
     AnthropicUsage, MappingError as AnthropicMappingError,
@@ -32,14 +32,11 @@ use protocol_ir::{
     RouteReceiptPolicyCheck, RouteReceiptProviderAttempt, RouteReceiptRecorded,
     RouteReceiptRecordedMessage, RouteReceiptRecordedMessageType, UsageEventRecorded,
 };
-use provider_anthropic::AnthropicAdapter;
-use provider_bedrock::BedrockConverseAdapter;
-use provider_gateway::GatewayAdapter;
-use provider_gemini::GeminiAdapter;
 use provider_traits::{
-    ProviderAdapterRegistry, ProviderEndpoint, ProviderError, ProviderErrorKind,
-    ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse,
-    ProviderTargetKind, TransitGatewayKind, TransitProviderMetadata,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability, ProviderAdapterRegistry,
+    ProviderEndpoint, ProviderError, ProviderErrorKind, ProviderExecutionContext, ProviderMessage,
+    ProviderRequest, ProviderResponse, ProviderTargetKind, StreamingSupport, TransitGatewayKind,
+    TransitProviderMetadata,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -167,6 +164,25 @@ pub struct HealthResponse {
     pub status: &'static str,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderAdapterManifestsResponse {
+    pub adapters: Vec<ProviderAdapterManifestDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderAdapterManifestDto {
+    pub manifest_schema_version: u16,
+    pub adapter_id: &'static str,
+    pub provider_kind: &'static str,
+    pub display_name: &'static str,
+    pub protocol_family: &'static str,
+    pub supported_protocol_families: Vec<&'static str>,
+    pub lifecycle_family: &'static str,
+    pub stability: &'static str,
+    pub streaming_support: &'static str,
+    pub configuration_schema_ref: Option<&'static str>,
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewaySuccess {
     pub request_id: String,
@@ -274,6 +290,7 @@ pub fn app() -> Router {
 pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
+        .route("/internal/provider-adapters", get(provider_adapters))
         .route("/v1/responses", post(responses))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(anthropic_messages))
@@ -288,22 +305,8 @@ fn default_state() -> GatewayState {
     let config_store = Arc::new(ControlPlaneConfigStore::from_env());
     let auth_store = Arc::new(ControlPlaneApiKeyStore::from_env());
     let budget_store = Arc::new(ControlPlaneBudgetStore::from_env());
-    let mut adapter_registry = ProviderAdapterRegistry::new();
-    adapter_registry
-        .register(Arc::new(OpenAiAdapter::default()))
-        .expect("openai adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(AnthropicAdapter::default()))
-        .expect("anthropic adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(BedrockConverseAdapter::default()))
-        .expect("bedrock adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(GatewayAdapter::default()))
-        .expect("gateway adapter registration should succeed");
-    adapter_registry
-        .register(Arc::new(GeminiAdapter::default()))
-        .expect("gemini adapter registration should succeed");
+    let adapter_registry = composition::default_provider_registry()
+        .expect("provider adapter composition should succeed");
 
     Arc::new(AppState {
         config_store,
@@ -320,6 +323,64 @@ async fn health() -> Json<HealthResponse> {
         service: GATEWAY_SERVICE_NAME,
         status: "ok",
     })
+}
+
+async fn provider_adapters(
+    State(state): State<GatewayState>,
+) -> Json<ProviderAdapterManifestsResponse> {
+    Json(provider_adapter_manifests_response(&state.adapter_registry))
+}
+
+fn provider_adapter_manifests_response(
+    registry: &ProviderAdapterRegistry,
+) -> ProviderAdapterManifestsResponse {
+    ProviderAdapterManifestsResponse {
+        adapters: registry
+            .manifests()
+            .into_iter()
+            .map(provider_adapter_manifest_dto)
+            .collect(),
+    }
+}
+
+fn provider_adapter_manifest_dto(manifest: AdapterManifest) -> ProviderAdapterManifestDto {
+    ProviderAdapterManifestDto {
+        manifest_schema_version: manifest.manifest_schema_version,
+        adapter_id: manifest.adapter_id,
+        provider_kind: manifest.provider_kind,
+        display_name: manifest.display_name,
+        protocol_family: manifest.protocol_family,
+        supported_protocol_families: manifest.supported_protocol_families.to_vec(),
+        lifecycle_family: lifecycle_family_slug(manifest.lifecycle_family),
+        stability: adapter_stability_slug(manifest.stability),
+        streaming_support: streaming_support_slug(manifest.streaming_support),
+        configuration_schema_ref: manifest.configuration_schema_ref,
+    }
+}
+
+const fn lifecycle_family_slug(lifecycle_family: AdapterLifecycleFamily) -> &'static str {
+    match lifecycle_family {
+        AdapterLifecycleFamily::Inference => "inference",
+        AdapterLifecycleFamily::TransitGateway => "transit_gateway",
+        AdapterLifecycleFamily::Realtime => "realtime",
+        AdapterLifecycleFamily::Tool => "tool",
+        AdapterLifecycleFamily::Agent => "agent",
+    }
+}
+
+const fn adapter_stability_slug(stability: AdapterStability) -> &'static str {
+    match stability {
+        AdapterStability::Stable => "stable",
+        AdapterStability::Beta => "beta",
+        AdapterStability::Experimental => "experimental",
+    }
+}
+
+const fn streaming_support_slug(streaming_support: StreamingSupport) -> &'static str {
+    match streaming_support {
+        StreamingSupport::Unsupported => "unsupported",
+        StreamingSupport::ServerSentEvents => "server_sent_events",
+    }
 }
 
 async fn chat_completions(
@@ -688,6 +749,54 @@ async fn execute_route(
 
             break;
         };
+        let adapter_manifest = adapter.manifest();
+        if !adapter_manifest.supports_protocol_family(&request.protocol_family) {
+            let provider_error = ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                format!(
+                    "provider adapter `{}` does not support protocol `{}`",
+                    adapter_manifest.adapter_id, request.protocol_family
+                ),
+                false,
+            )
+            .with_detail(
+                "provider_resource_id",
+                target.resource.provider_resource_id.as_str(),
+            )
+            .with_detail("adapter_id", adapter_manifest.adapter_id)
+            .with_detail("provider_kind", adapter_manifest.provider_kind)
+            .with_detail("protocol_family", request.protocol_family.as_str())
+            .with_detail("manifest_boundary", "protocol_family_unsupported");
+            let occurred_at = now_rfc3339();
+            provider_attempts.push(provider_attempt_record(
+                target.resource.provider_resource_id.clone(),
+                index + 1,
+                "skipped",
+                occurred_at.clone(),
+                occurred_at,
+                0,
+                provider_error.message.clone(),
+            ));
+
+            if let Some(next_target) = route.ranked_targets.get(index + 1) {
+                fallback_transitions.push(FallbackTransition {
+                    from_provider_resource_id: target.resource.provider_resource_id.clone(),
+                    to_provider_resource_id: next_target
+                        .target
+                        .resource
+                        .provider_resource_id
+                        .clone(),
+                    reason: format!("{}; retrying next ranked candidate", provider_error.message),
+                });
+            }
+
+            last_error = Some((ranked_target.clone(), provider_error));
+            if index + 1 < route.ranked_targets.len() {
+                continue;
+            }
+
+            break;
+        }
 
         let provider_request = ProviderRequest {
             model: target
@@ -3113,7 +3222,7 @@ mod tests {
         GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState,
         InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext,
         ResponsesApiInputContent, ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink,
-        StaticBudgetProjectionStore, StaticConfigStore, app_with_state, default_state,
+        StaticBudgetProjectionStore, StaticConfigStore, app_with_state, composition,
         evaluate_route, normalize_request,
     };
     use axum::{
@@ -3136,9 +3245,10 @@ mod tests {
         HttpTransport as GatewayHttpTransport,
     };
     use provider_traits::{
-        AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
-        ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
-        ProviderUsage, StreamingSupport,
+        AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+        CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderAdapterRegistry,
+        ProviderError, ProviderErrorKind, ProviderExecutionContext, ProviderRequest,
+        ProviderResponse, ProviderUsage, StreamingSupport,
     };
     use std::{
         collections::BTreeMap,
@@ -3515,11 +3625,16 @@ mod tests {
     impl ProviderAdapter for MockAdapter {
         fn manifest(&self) -> AdapterManifest {
             AdapterManifest {
+                manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
                 adapter_id: "mock-openai",
                 provider_kind: "openai",
                 display_name: "Mock OpenAI",
                 protocol_family: "openai_chat",
+                supported_protocol_families: &["openai_chat", "openai_responses"],
+                lifecycle_family: AdapterLifecycleFamily::Inference,
+                stability: AdapterStability::Stable,
                 streaming_support: StreamingSupport::Unsupported,
+                configuration_schema_ref: Some("test:mock-openai"),
             }
         }
 
@@ -3539,11 +3654,20 @@ mod tests {
     impl ProviderAdapter for ProtocolMockAdapter {
         fn manifest(&self) -> AdapterManifest {
             AdapterManifest {
+                manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
                 adapter_id: "mock-protocol",
                 provider_kind: self.provider_kind,
                 display_name: "Mock Protocol Adapter",
                 protocol_family: self.protocol_family,
+                supported_protocol_families: &[
+                    "openai_chat",
+                    "anthropic_messages",
+                    "gemini_generate_content",
+                ],
+                lifecycle_family: AdapterLifecycleFamily::Inference,
+                stability: AdapterStability::Stable,
                 streaming_support: StreamingSupport::Unsupported,
+                configuration_schema_ref: Some("test:mock-protocol"),
             }
         }
 
@@ -3645,9 +3769,12 @@ mod tests {
 
     #[test]
     fn default_registry_registers_bedrock_adapter() {
-        let state = default_state();
+        let registry = composition::provider_registry_from_config(
+            &composition::ProviderRegistryConfig::all_enabled(),
+        )
+        .expect("default provider catalog should compose");
 
-        assert!(state.adapter_registry.resolve("bedrock").is_some());
+        assert!(registry.resolve("bedrock").is_some());
     }
 
     #[test]
@@ -3737,6 +3864,43 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn internal_provider_adapters_exposes_runtime_manifests() {
+        let app = app_with_state(test_state(
+            Arc::new(MockAdapter {
+                outcomes: BTreeMap::new(),
+            }),
+            vec![build_target(
+                "prvrsrc_openai_primary",
+                "us-east-1",
+                0.9,
+                0.6,
+                HealthState::Healthy,
+            )],
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/internal/provider-adapters")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(payload["adapters"][0]["adapter_id"], "mock-openai");
+        assert_eq!(payload["adapters"][0]["lifecycle_family"], "inference");
+        assert_eq!(
+            payload["adapters"][0]["supported_protocol_families"][1],
+            "openai_responses"
+        );
     }
 
     #[tokio::test]

@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use provider_traits::{
-    AdapterManifest, ProviderAdapter, ProviderError, ProviderErrorKind, ProviderExecutionContext,
-    ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+    CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
+    ProviderExecutionContext, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ impl Default for OpenAiAdapter {
 impl ProviderAdapter for OpenAiAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
             adapter_id: match self.wire_api {
                 OpenAiWireApi::ChatCompletions => "openai-chat-completions-v1",
                 OpenAiWireApi::Responses => "openai-responses-v1",
@@ -52,7 +54,11 @@ impl ProviderAdapter for OpenAiAdapter {
                 OpenAiWireApi::ChatCompletions => "openai_chat",
                 OpenAiWireApi::Responses => "openai_responses",
             },
+            supported_protocol_families: &["openai_chat", "openai_responses"],
+            lifecycle_family: AdapterLifecycleFamily::Inference,
+            stability: AdapterStability::Stable,
             streaming_support: StreamingSupport::ServerSentEvents,
+            configuration_schema_ref: Some("env:GATEWAY_OPENAI_*"),
         }
     }
 

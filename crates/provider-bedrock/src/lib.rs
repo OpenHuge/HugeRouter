@@ -7,8 +7,10 @@ use aws_sdk_bedrockruntime::{
     },
 };
 use provider_traits::{
-    AdapterManifest, ProviderAdapter, ProviderError, ProviderErrorKind, ProviderExecutionContext,
-    ProviderMessage, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+    CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
+    ProviderExecutionContext, ProviderMessage, ProviderRequest, ProviderResponse, ProviderUsage,
+    StreamingSupport,
 };
 use std::{env, sync::Arc};
 
@@ -37,11 +39,16 @@ impl Default for BedrockConverseAdapter {
 impl ProviderAdapter for BedrockConverseAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
             adapter_id: "aws-bedrock-converse-v1",
             provider_kind: "bedrock",
             display_name: "AWS Bedrock Converse",
             protocol_family: "openai_chat",
+            supported_protocol_families: &["openai_chat"],
+            lifecycle_family: AdapterLifecycleFamily::Inference,
+            stability: AdapterStability::Beta,
             streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("env:GATEWAY_BEDROCK_*"),
         }
     }
 

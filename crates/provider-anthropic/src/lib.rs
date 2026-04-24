@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use protocol_anthropic::AnthropicMessageResponse;
 use provider_traits::{
-    AdapterManifest, ProviderAdapter, ProviderError, ProviderErrorKind, ProviderExecutionContext,
-    ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
+    AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+    CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderError, ProviderErrorKind,
+    ProviderExecutionContext, ProviderRequest, ProviderResponse, ProviderUsage, StreamingSupport,
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
@@ -47,11 +48,16 @@ impl Default for AnthropicAdapter {
 impl ProviderAdapter for AnthropicAdapter {
     fn manifest(&self) -> AdapterManifest {
         AdapterManifest {
+            manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
             adapter_id: "anthropic-messages-v1",
             provider_kind: "anthropic",
             display_name: "Anthropic Messages",
-            protocol_family: "anthropic",
+            protocol_family: "anthropic_messages",
+            supported_protocol_families: &["anthropic_messages"],
+            lifecycle_family: AdapterLifecycleFamily::Inference,
+            stability: AdapterStability::Stable,
             streaming_support: StreamingSupport::Unsupported,
+            configuration_schema_ref: Some("env:GATEWAY_ANTHROPIC_*"),
         }
     }
 

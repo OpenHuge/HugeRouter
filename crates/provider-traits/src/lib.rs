@@ -2,19 +2,115 @@ use async_trait::async_trait;
 use std::{collections::BTreeMap, sync::Arc};
 use thiserror::Error;
 
+pub const CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION: u16 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamingSupport {
     Unsupported,
     ServerSentEvents,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdapterLifecycleFamily {
+    Inference,
+    TransitGateway,
+    Realtime,
+    Tool,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdapterStability {
+    Stable,
+    Beta,
+    Experimental,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterManifest {
+    pub manifest_schema_version: u16,
     pub adapter_id: &'static str,
     pub provider_kind: &'static str,
     pub display_name: &'static str,
     pub protocol_family: &'static str,
+    pub supported_protocol_families: &'static [&'static str],
+    pub lifecycle_family: AdapterLifecycleFamily,
+    pub stability: AdapterStability,
     pub streaming_support: StreamingSupport,
+    pub configuration_schema_ref: Option<&'static str>,
+}
+
+impl AdapterManifest {
+    #[must_use]
+    pub fn supports_protocol_family(&self, protocol_family: &str) -> bool {
+        self.supported_protocol_families
+            .iter()
+            .any(|candidate| *candidate == protocol_family)
+    }
+
+    #[must_use]
+    pub fn validate(&self) -> Result<(), AdapterManifestError> {
+        if self.manifest_schema_version != CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION {
+            return Err(AdapterManifestError::UnsupportedSchemaVersion {
+                adapter_id: self.adapter_id.to_string(),
+                manifest_schema_version: self.manifest_schema_version,
+            });
+        }
+
+        for (field, value) in [
+            ("adapter_id", self.adapter_id),
+            ("provider_kind", self.provider_kind),
+            ("display_name", self.display_name),
+            ("protocol_family", self.protocol_family),
+        ] {
+            if value.trim().is_empty() {
+                return Err(AdapterManifestError::MissingRequiredField {
+                    adapter_id: self.adapter_id.to_string(),
+                    field,
+                });
+            }
+        }
+
+        if self.supported_protocol_families.is_empty() {
+            return Err(AdapterManifestError::MissingSupportedProtocols {
+                adapter_id: self.adapter_id.to_string(),
+            });
+        }
+
+        if !self.supports_protocol_family(self.protocol_family) {
+            return Err(AdapterManifestError::ProtocolFamilyNotDeclared {
+                adapter_id: self.adapter_id.to_string(),
+                protocol_family: self.protocol_family.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum AdapterManifestError {
+    #[error(
+        "adapter `{adapter_id}` uses unsupported manifest schema version {manifest_schema_version}"
+    )]
+    UnsupportedSchemaVersion {
+        adapter_id: String,
+        manifest_schema_version: u16,
+    },
+    #[error("adapter `{adapter_id}` manifest is missing required field `{field}`")]
+    MissingRequiredField {
+        adapter_id: String,
+        field: &'static str,
+    },
+    #[error("adapter `{adapter_id}` manifest does not declare any supported protocols")]
+    MissingSupportedProtocols { adapter_id: String },
+    #[error(
+        "adapter `{adapter_id}` manifest primary protocol `{protocol_family}` is not declared in supported protocols"
+    )]
+    ProtocolFamilyNotDeclared {
+        adapter_id: String,
+        protocol_family: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,10 +264,21 @@ impl ProviderAdapterRegistry {
         &mut self,
         adapter: Arc<dyn ProviderAdapter>,
     ) -> Result<(), ProviderRegistryError> {
-        let provider_kind = adapter.manifest().provider_kind.to_string();
+        let manifest = adapter.manifest();
+        manifest.validate()?;
+
+        let provider_kind = manifest.provider_kind.to_string();
+        let adapter_id = manifest.adapter_id.to_string();
 
         if self.adapters.contains_key(&provider_kind) {
             return Err(ProviderRegistryError::DuplicateProviderKind { provider_kind });
+        }
+        if self
+            .adapters
+            .values()
+            .any(|candidate| candidate.manifest().adapter_id == manifest.adapter_id)
+        {
+            return Err(ProviderRegistryError::DuplicateAdapterId { adapter_id });
         }
 
         self.adapters.insert(provider_kind, adapter);
@@ -184,8 +291,26 @@ impl ProviderAdapterRegistry {
     }
 
     #[must_use]
+    pub fn len(&self) -> usize {
+        self.adapters.len()
+    }
+
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.adapters.is_empty()
+    }
+
+    #[must_use]
+    pub fn provider_kinds(&self) -> Vec<&str> {
+        self.adapters.keys().map(String::as_str).collect()
+    }
+
+    #[must_use]
+    pub fn manifests(&self) -> Vec<AdapterManifest> {
+        self.adapters
+            .values()
+            .map(|adapter| adapter.manifest())
+            .collect()
     }
 }
 
@@ -193,29 +318,41 @@ impl ProviderAdapterRegistry {
 pub enum ProviderRegistryError {
     #[error("provider adapter already registered for `{provider_kind}`")]
     DuplicateProviderKind { provider_kind: String },
+    #[error("provider adapter id `{adapter_id}` is already registered")]
+    DuplicateAdapterId { adapter_id: String },
+    #[error("{0}")]
+    InvalidManifest(#[from] AdapterManifestError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AdapterManifest, ProviderAdapter, ProviderAdapterRegistry, ProviderError,
-        ProviderErrorKind, ProviderExecutionContext, ProviderRequest, ProviderResponse,
-        ProviderUsage, StreamingSupport, TransitGatewayKind, TransitProviderMetadata,
+        AdapterLifecycleFamily, AdapterManifest, AdapterStability,
+        CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION, ProviderAdapter, ProviderAdapterRegistry,
+        ProviderError, ProviderErrorKind, ProviderExecutionContext, ProviderRequest,
+        ProviderResponse, ProviderUsage, StreamingSupport, TransitGatewayKind,
+        TransitProviderMetadata,
     };
     use async_trait::async_trait;
     use std::{collections::BTreeMap, sync::Arc};
 
     struct FakeAdapter;
+    struct InvalidManifestAdapter;
 
     #[async_trait]
     impl ProviderAdapter for FakeAdapter {
         fn manifest(&self) -> AdapterManifest {
             AdapterManifest {
+                manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
                 adapter_id: "fake-openai",
                 provider_kind: "openai",
                 display_name: "Fake OpenAI",
                 protocol_family: "openai_chat",
+                supported_protocol_families: &["openai_chat"],
+                lifecycle_family: AdapterLifecycleFamily::Inference,
+                stability: AdapterStability::Stable,
                 streaming_support: StreamingSupport::Unsupported,
+                configuration_schema_ref: Some("test:fake-openai"),
             }
         }
 
@@ -238,6 +375,32 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl ProviderAdapter for InvalidManifestAdapter {
+        fn manifest(&self) -> AdapterManifest {
+            AdapterManifest {
+                manifest_schema_version: CURRENT_ADAPTER_MANIFEST_SCHEMA_VERSION,
+                adapter_id: "invalid",
+                provider_kind: "invalid",
+                display_name: "Invalid",
+                protocol_family: "openai_chat",
+                supported_protocol_families: &[],
+                lifecycle_family: AdapterLifecycleFamily::Inference,
+                stability: AdapterStability::Experimental,
+                streaming_support: StreamingSupport::Unsupported,
+                configuration_schema_ref: None,
+            }
+        }
+
+        async fn execute_chat(
+            &self,
+            _request: &ProviderRequest,
+            _context: &ProviderExecutionContext,
+        ) -> Result<ProviderResponse, ProviderError> {
+            unreachable!("invalid adapter should not execute in registry tests")
+        }
+    }
+
     #[test]
     fn registry_rejects_duplicate_provider_kind() {
         let mut registry = ProviderAdapterRegistry::new();
@@ -248,6 +411,28 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "provider adapter already registered for `openai`"
+        );
+    }
+
+    #[test]
+    fn registry_exposes_registered_provider_metadata() {
+        let mut registry = ProviderAdapterRegistry::new();
+
+        registry.register(Arc::new(FakeAdapter)).unwrap();
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.provider_kinds(), vec!["openai"]);
+        assert_eq!(registry.manifests()[0].adapter_id, "fake-openai");
+    }
+
+    #[test]
+    fn registry_rejects_invalid_adapter_manifest() {
+        let mut registry = ProviderAdapterRegistry::new();
+        let error = registry.register(Arc::new(InvalidManifestAdapter)).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "adapter `invalid` manifest does not declare any supported protocols"
         );
     }
 
