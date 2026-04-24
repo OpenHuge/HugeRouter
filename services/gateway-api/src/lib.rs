@@ -55,6 +55,7 @@ use tracing::{info, warn};
 const GATEWAY_SERVICE_NAME: &str = "gateway-api";
 const DEFAULT_CONTROL_PLANE_BASE_URL: &str = "http://127.0.0.1:8081";
 const DEFAULT_CONTROL_PLANE_SNAPSHOT_REF: &str = "active";
+const DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT_MS: u64 = 2_000;
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1_000);
 
 pub type GatewayState = Arc<AppState>;
@@ -3166,7 +3167,7 @@ impl ControlPlaneConfigStore {
             snapshot_ref,
             internal_token,
             cache_ttl,
-            reqwest::Client::new(),
+            control_plane_http_client_from_env(),
         )
     }
 
@@ -3279,6 +3280,24 @@ impl ControlPlaneConfigStore {
     }
 }
 
+fn control_plane_request_timeout_from_env() -> Duration {
+    std::env::var("GATEWAY_CONTROL_PLANE_REQUEST_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|timeout_ms| *timeout_ms > 0)
+        .map_or_else(
+            || Duration::from_millis(DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT_MS),
+            Duration::from_millis,
+        )
+}
+
+fn control_plane_http_client_from_env() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(control_plane_request_timeout_from_env())
+        .build()
+        .expect("control-plane HTTP client should build")
+}
+
 impl ControlPlaneApiKeyStore {
     fn from_env() -> Self {
         let base_url = std::env::var("CONTROL_PLANE_BASE_URL")
@@ -3293,7 +3312,7 @@ impl ControlPlaneApiKeyStore {
             base_url,
             resolve_path,
             internal_token,
-            reqwest::Client::new(),
+            control_plane_http_client_from_env(),
         )
     }
 
@@ -3371,7 +3390,7 @@ impl ControlPlaneBudgetStore {
             base_url,
             projection_path,
             internal_token,
-            reqwest::Client::new(),
+            control_plane_http_client_from_env(),
         )
     }
 

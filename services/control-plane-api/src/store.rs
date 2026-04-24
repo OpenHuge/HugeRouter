@@ -1387,16 +1387,27 @@ impl StoreMode {
 
     pub async fn get_replay_capsule(
         &self,
+        tenant_id: &TenantId,
         replay_capsule_id: &str,
     ) -> Result<Option<ReplayCapsuleResponse>> {
         match self {
-            Self::Memory(store) => Ok(store
-                .read()
-                .expect("memory store read lock")
-                .replay_capsules
-                .get(replay_capsule_id)
-                .cloned()
-                .map(|replay_capsule| ReplayCapsuleResponse { replay_capsule })),
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let has_tenant_evaluation = store.relay_evaluations.iter().any(|evaluation| {
+                    evaluation.tenant_id == *tenant_id
+                        && evaluation.replay_capsule_id.as_str() == replay_capsule_id
+                });
+
+                if !has_tenant_evaluation {
+                    return Ok(None);
+                }
+
+                Ok(store
+                    .replay_capsules
+                    .get(replay_capsule_id)
+                    .cloned()
+                    .map(|replay_capsule| ReplayCapsuleResponse { replay_capsule }))
+            }
             Self::Postgres(_) => Err(anyhow!(
                 "replay capsule persistence is not yet implemented for postgres mode"
             )),
