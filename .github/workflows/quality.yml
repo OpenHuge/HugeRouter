@@ -270,7 +270,16 @@ jobs:
         run: docker compose -f infra/docker/compose.yaml --profile runtime --profile observability config -q
 
       - name: Build runtime service images
-        run: docker compose -f infra/docker/compose.yaml --profile runtime build control-plane-api gateway-api ledger-worker route-receipt-worker
+        run: >-
+          docker compose -f infra/docker/compose.yaml --profile runtime build
+          control-plane-api
+          gateway-api
+          ledger-worker
+          route-receipt-worker
+          routing-worker
+          edge-probe
+          audit-worker
+          notification-worker
 
   infrastructure-smoke:
     name: Infrastructure Smoke

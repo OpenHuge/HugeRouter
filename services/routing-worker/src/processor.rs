@@ -12,9 +12,19 @@ pub enum ObservedProbeStatus {
     Unhealthy,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedProbeMode {
+    #[default]
+    CheapHealth,
+    BillableSynthetic,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProbeObservationPayload {
     pub provider_resource_id: String,
+    #[serde(default)]
+    pub probe_mode: ObservedProbeMode,
     pub observed_status: ObservedProbeStatus,
     #[serde(default)]
     pub latency_ms: Option<u32>,
@@ -57,12 +67,24 @@ pub enum RouteHealthUpdate {
     },
 }
 
+struct IncidentEventInput<'a> {
+    provider_resource_id: &'a str,
+    observed_status: ObservedProbeStatus,
+    previous_health_state: HealthState,
+    next_health_state: HealthState,
+    unhealthy_streak: u32,
+    reason: Option<&'a str>,
+    latency_ms: Option<u32>,
+    probe_mode: ObservedProbeMode,
+}
+
 pub async fn ensure_probe_tables(pool: &PgPool) -> Result<()> {
     sqlx::query(
         r"
         CREATE TABLE IF NOT EXISTS provider_probe_events (
             message_id TEXT PRIMARY KEY,
             provider_resource_id TEXT NOT NULL,
+            probe_mode TEXT NOT NULL DEFAULT 'cheap_health',
             observed_status TEXT NOT NULL,
             latency_ms INTEGER NULL,
             reason TEXT NULL,
@@ -79,6 +101,16 @@ pub async fn ensure_probe_tables(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating provider_probe_events table failed")?;
+
+    sqlx::query(
+        r"
+        ALTER TABLE provider_probe_events
+        ADD COLUMN IF NOT EXISTS probe_mode TEXT NOT NULL DEFAULT 'cheap_health'
+        ",
+    )
+    .execute(pool)
+    .await
+    .context("adding provider probe mode column failed")?;
 
     Ok(())
 }
@@ -99,6 +131,7 @@ async fn persist_probe_event(pool: &PgPool, envelope: &ProbeObservationEnvelope)
         INSERT INTO provider_probe_events (
             message_id,
             provider_resource_id,
+            probe_mode,
             observed_status,
             latency_ms,
             reason,
@@ -109,12 +142,13 @@ async fn persist_probe_event(pool: &PgPool, envelope: &ProbeObservationEnvelope)
             occurred_at,
             raw_payload
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()), $12)
         ON CONFLICT (message_id) DO NOTHING
         ",
     )
     .bind(&envelope.message_id)
     .bind(&envelope.payload.provider_resource_id)
+    .bind(observed_probe_mode_slug(envelope.payload.probe_mode))
     .bind(observed_status_slug(envelope.payload.observed_status))
     .bind(envelope.payload.latency_ms.map(i32::try_from).transpose()?)
     .bind(&envelope.payload.reason)
@@ -136,6 +170,13 @@ const fn observed_status_slug(status: ObservedProbeStatus) -> &'static str {
         ObservedProbeStatus::Healthy => "healthy",
         ObservedProbeStatus::Degraded => "degraded",
         ObservedProbeStatus::Unhealthy => "unhealthy",
+    }
+}
+
+const fn observed_probe_mode_slug(mode: ObservedProbeMode) -> &'static str {
+    match mode {
+        ObservedProbeMode::CheapHealth => "cheap_health",
+        ObservedProbeMode::BillableSynthetic => "billable_synthetic",
     }
 }
 
@@ -199,20 +240,12 @@ fn resolve_next_states(
     (next_health_state, next_status)
 }
 
-fn incident_event(
-    provider_resource_id: &str,
-    observed_status: ObservedProbeStatus,
-    previous_health_state: HealthState,
-    next_health_state: HealthState,
-    unhealthy_streak: u32,
-    reason: Option<&str>,
-    latency_ms: Option<u32>,
-) -> Option<RoutingIncidentEvent> {
-    if previous_health_state == next_health_state {
+fn incident_event(input: &IncidentEventInput<'_>) -> Option<RoutingIncidentEvent> {
+    if input.previous_health_state == input.next_health_state {
         return None;
     }
 
-    let (message_type, severity) = match next_health_state {
+    let (message_type, severity) = match input.next_health_state {
         HealthState::Quarantined => ("provider_resource.quarantined", "critical"),
         HealthState::Degraded => ("provider_resource.degraded", "warning"),
         _ => return None,
@@ -221,17 +254,18 @@ fn incident_event(
     Some(RoutingIncidentEvent {
         message_type,
         payload: json!({
-            "provider_resource_id": provider_resource_id,
+            "provider_resource_id": input.provider_resource_id,
             "severity": severity,
-            "reason": reason.unwrap_or(match observed_status {
+            "reason": input.reason.unwrap_or(match input.observed_status {
                 ObservedProbeStatus::Healthy => "probe recovered",
                 ObservedProbeStatus::Degraded => "probe exceeded degraded latency budget",
                 ObservedProbeStatus::Unhealthy => "probe failed",
             }),
-            "previous_health_state": format!("{previous_health_state:?}").to_ascii_lowercase(),
-            "next_health_state": format!("{next_health_state:?}").to_ascii_lowercase(),
-            "consecutive_unhealthy_observations": unhealthy_streak,
-            "latency_ms": latency_ms
+            "previous_health_state": format!("{:?}", input.previous_health_state).to_ascii_lowercase(),
+            "next_health_state": format!("{:?}", input.next_health_state).to_ascii_lowercase(),
+            "consecutive_unhealthy_observations": input.unhealthy_streak,
+            "latency_ms": input.latency_ms,
+            "probe_mode": observed_probe_mode_slug(input.probe_mode)
         }),
     })
 }
@@ -284,15 +318,16 @@ pub async fn handle_probe_observation(
         provider_resource_id: provider_resource.provider_resource_id.to_string(),
         previous_health_state,
         next_health_state,
-        emitted_event: incident_event(
-            provider_resource.provider_resource_id.as_str(),
-            envelope.payload.observed_status,
+        emitted_event: incident_event(&IncidentEventInput {
+            provider_resource_id: provider_resource.provider_resource_id.as_str(),
+            observed_status: envelope.payload.observed_status,
             previous_health_state,
             next_health_state,
             unhealthy_streak,
-            envelope.payload.reason.as_deref(),
-            envelope.payload.latency_ms,
-        ),
+            reason: envelope.payload.reason.as_deref(),
+            latency_ms: envelope.payload.latency_ms,
+            probe_mode: envelope.payload.probe_mode,
+        }),
     })
 }
 
@@ -379,6 +414,27 @@ mod tests {
         assert_eq!(
             envelope.payload.observed_status,
             ObservedProbeStatus::Degraded
+        );
+        assert_eq!(envelope.payload.probe_mode, ObservedProbeMode::CheapHealth);
+    }
+
+    #[test]
+    fn parses_billable_probe_mode_when_present() {
+        let payload = br#"{
+          "message_id":"msg_probe_2",
+          "message_type":"provider_probe.observed",
+          "producer":"edge-probe",
+          "payload":{
+            "provider_resource_id":"prvrsrc_openai_primary",
+            "probe_mode":"billable_synthetic",
+            "observed_status":"healthy"
+          }
+        }"#;
+
+        let envelope = parse_probe_observation(payload).expect("parse");
+        assert_eq!(
+            envelope.payload.probe_mode,
+            ObservedProbeMode::BillableSynthetic
         );
     }
 }

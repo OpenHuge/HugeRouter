@@ -10,7 +10,7 @@ use tracing::{info, warn};
 
 mod processor;
 
-use processor::{ProbeEventPayload, assess_probe_result, build_probe_event};
+use processor::{ProbeEventPayload, assess_probe_result, build_probe_event, parse_probe_mode};
 
 const WORKER_PREFIX: &str = "EDGE_PROBE";
 const SERVICE_NAME: &str = "edge-probe";
@@ -41,6 +41,9 @@ async fn main() -> Result<()> {
         "PROVIDER_RESOURCE_ID",
         "prvrsrc_openai_primary",
     );
+    let probe_mode_raw = read_env_or_default(WORKER_PREFIX, "PROBE_MODE", "cheap_health");
+    let probe_mode = parse_probe_mode(&probe_mode_raw)
+        .with_context(|| format!("invalid EDGE_PROBE_PROBE_MODE `{probe_mode_raw}`"))?;
     let interval_ms = env::var("EDGE_PROBE_INTERVAL_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -68,6 +71,7 @@ async fn main() -> Result<()> {
     info!(
         target_url,
         provider_resource_id,
+        probe_mode = probe_mode.as_str(),
         interval_ms,
         timeout_ms,
         degraded_latency_ms,
@@ -87,6 +91,7 @@ async fn main() -> Result<()> {
                     &config.nats.subject,
                     &provider_resource_id,
                     &target_url,
+                    probe_mode,
                     degraded_latency_ms,
                 ).await {
                     warn!(error = %error, "edge probe iteration failed");
@@ -104,6 +109,7 @@ async fn run_probe_iteration(
     subject: &str,
     provider_resource_id: &str,
     target_url: &str,
+    probe_mode: processor::ProbeMode,
     degraded_latency_ms: u32,
 ) -> Result<()> {
     let started = std::time::Instant::now();
@@ -126,6 +132,7 @@ async fn run_probe_iteration(
     let payload = ProbeEventPayload {
         provider_resource_id: provider_resource_id.to_string(),
         target_url: target_url.to_string(),
+        probe_mode,
         assessment,
         latency_ms,
     };
@@ -142,6 +149,7 @@ async fn run_probe_iteration(
 
     info!(
         provider_resource_id,
+        probe_mode = event.payload.probe_mode.as_str(),
         observed_status = event.payload.observed_status.as_str(),
         latency_ms = event.payload.latency_ms,
         "edge probe published observation"

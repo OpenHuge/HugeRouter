@@ -142,6 +142,50 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  routing-worker:
+    profiles: ["runtime"]
+    build:
+      context: ../..
+      dockerfile: Dockerfile.rust-service
+      args:
+        SERVICE_NAME: routing-worker
+        BIN_NAME: routing-worker
+    environment:
+      ROUTING_WORKER_DATABASE_URL: postgres://${POSTGRES_USER:-huge_router}:${POSTGRES_PASSWORD:-huge_router}@postgres:5432/${POSTGRES_DB:-huge_router}
+      ROUTING_WORKER_NATS_URL: nats://nats:4222
+      ROUTING_WORKER_QUARANTINE_THRESHOLD: ${ROUTING_WORKER_QUARANTINE_THRESHOLD:-3}
+      RUST_LOG: ${ROUTING_WORKER_RUST_LOG:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  edge-probe:
+    profiles: ["runtime"]
+    build:
+      context: ../..
+      dockerfile: Dockerfile.rust-service
+      args:
+        SERVICE_NAME: edge-probe
+        BIN_NAME: edge-probe
+    environment:
+      EDGE_PROBE_NATS_URL: nats://nats:4222
+      EDGE_PROBE_TARGET_URL: ${EDGE_PROBE_TARGET_URL:-http://gateway-api:8080/healthz}
+      EDGE_PROBE_PROVIDER_RESOURCE_ID: ${EDGE_PROBE_PROVIDER_RESOURCE_ID:-prvrsrc_openai_primary}
+      EDGE_PROBE_PROBE_MODE: ${EDGE_PROBE_PROBE_MODE:-cheap_health}
+      EDGE_PROBE_INTERVAL_MS: ${EDGE_PROBE_INTERVAL_MS:-30000}
+      EDGE_PROBE_TIMEOUT_MS: ${EDGE_PROBE_TIMEOUT_MS:-2000}
+      EDGE_PROBE_DEGRADED_LATENCY_MS: ${EDGE_PROBE_DEGRADED_LATENCY_MS:-1500}
+      RUST_LOG: ${EDGE_PROBE_RUST_LOG:-info}
+    depends_on:
+      nats:
+        condition: service_healthy
+      gateway-api:
+        condition: service_healthy
+    restart: unless-stopped
+
   audit-worker:
     profiles: ["runtime"]
     build:
