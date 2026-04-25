@@ -678,6 +678,15 @@ impl SeedData {
                 code: "provider_signature_mismatch".to_string(),
             }),
         };
+        let route_receipt = build_merchant_replay_route_receipt(
+            &tenant_acme.tenant_id,
+            &config_active,
+            replay_capsule.route_receipt_id.clone(),
+            replay_capsule.request_id.clone(),
+            replay_capsule.trace_id.clone(),
+            trial_connection.target_model.clone(),
+            now.clone(),
+        );
         let relay_evaluation = RelayEvaluation {
             relay_evaluation_id: RelayEvaluationId::parse("reval_acme_relay").unwrap(),
             tenant_id: tenant_acme.tenant_id.clone(),
@@ -767,7 +776,7 @@ impl SeedData {
             trial_connections: vec![trial_connection],
             relay_evaluations: vec![relay_evaluation],
             replay_capsules: vec![replay_capsule],
-            route_receipts: Vec::new(),
+            route_receipts: vec![route_receipt],
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
             users: vec![UserSeed {
                 user: ops_user,
@@ -2250,6 +2259,7 @@ impl PostgresStore {
             seed.trial_connections,
             seed.relay_evaluations,
             seed.replay_capsules,
+            seed.route_receipts,
         )
         .await?;
 
@@ -5532,10 +5542,11 @@ mod tests {
             .await
             .unwrap()
             .data;
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 4);
         assert_eq!(all[0].route_receipt_id.as_str(), "routercpt_store_b");
         assert_eq!(all[1].route_receipt_id.as_str(), "routercpt_store_c");
         assert_eq!(all[2].route_receipt_id.as_str(), "routercpt_store_a");
+        assert_eq!(all[3].route_receipt_id.as_str(), "routercpt_acme_relay_eval");
 
         let tenant_filtered = store
             .list_route_receipts(&RouteReceiptFilters {
@@ -5545,7 +5556,7 @@ mod tests {
             .await
             .unwrap()
             .data;
-        assert_eq!(tenant_filtered.len(), 2);
+        assert_eq!(tenant_filtered.len(), 3);
         assert_eq!(
             tenant_filtered[0].route_receipt_id.as_str(),
             "routercpt_store_b"
@@ -5559,7 +5570,66 @@ mod tests {
             .await
             .unwrap()
             .data;
-        assert_eq!(protocol_filtered.len(), 2);
+        assert_eq!(protocol_filtered.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn memory_store_bootstrap_replay_capsule_links_to_seeded_route_receipt() {
+        let store = StoreMode::memory();
+        let tenant_id = TenantId::parse("tenant_acme").unwrap();
+
+        let replay_capsule = store
+            .get_replay_capsule(&tenant_id, "replay_acme_relay_eval")
+            .await
+            .unwrap()
+            .expect("seeded replay capsule should exist")
+            .replay_capsule;
+        let route_receipt = store
+            .get_route_receipt(replay_capsule.route_receipt_id.as_str())
+            .await
+            .unwrap()
+            .expect("seeded route receipt should exist")
+            .route_receipt;
+
+        assert_eq!(
+            route_receipt.route_receipt_id,
+            replay_capsule.route_receipt_id
+        );
+        assert_eq!(route_receipt.failure_reason, None);
+        assert_eq!(
+            route_receipt.selected_target,
+            Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_store_create_relay_evaluation_records_successful_route_receipt() {
+        let store = StoreMode::memory();
+        let tenant_id = TenantId::parse("tenant_acme").unwrap();
+
+        let evaluation = store
+            .create_relay_evaluation(&tenant_id, "trialconn_acme_relay")
+            .await
+            .unwrap();
+        let replay_capsule = store
+            .get_replay_capsule(&tenant_id, evaluation.replay_capsule_id.as_str())
+            .await
+            .unwrap()
+            .expect("created replay capsule should exist")
+            .replay_capsule;
+        let route_receipt = store
+            .get_route_receipt(replay_capsule.route_receipt_id.as_str())
+            .await
+            .unwrap()
+            .expect("created route receipt should exist")
+            .route_receipt;
+
+        assert_eq!(
+            route_receipt.route_receipt_id,
+            replay_capsule.route_receipt_id
+        );
+        assert_eq!(route_receipt.failure_reason, None);
+        assert_eq!(route_receipt.admission_result, AdmissionResult::Admitted);
     }
 
     #[tokio::test]

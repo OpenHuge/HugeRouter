@@ -174,6 +174,14 @@ VALUES (
 ON CONFLICT (replay_capsule_id) DO UPDATE
 SET payload = EXCLUDED.payload;
 
+INSERT INTO route_receipts (route_receipt_id, payload)
+VALUES (
+    'routercpt_acme_relay_eval',
+    $json${"route_receipt_id":"routercpt_acme_relay_eval","tenant_id":"tenant_acme","project_id":"proj_core","route_policy_id":"routepol_acme_default","request_id":"req_merchant_eval_acme","trace_id":"trace_merchant_eval_acme","protocol_family":"openai_chat","model_alias":"claude-sonnet","config_snapshot_id":"cfgsnap_gateway_v1","admission_result":"admitted","selected_target":"prvrsrc_openai_primary","excluded_targets":[],"score_breakdown":{"latency":0.8,"cost":0.7,"health":1.0,"trust":0.9},"fallback_transitions":[],"created_at":"2026-04-22T00:00:00Z"}$json$::jsonb
+)
+ON CONFLICT (route_receipt_id) DO UPDATE
+SET payload = EXCLUDED.payload;
+
 INSERT INTO relay_evaluations (
     relay_evaluation_id,
     tenant_id,
