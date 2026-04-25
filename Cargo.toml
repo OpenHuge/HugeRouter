@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/config",
   "crates/core-domain",
   "crates/metering",
   "crates/plugin-registry",
