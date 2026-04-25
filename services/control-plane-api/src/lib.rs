@@ -3208,7 +3208,7 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::{ControlPlaneState, app_with_state, resolve_oidc_membership};
-    use crate::store::{IdentityLookup, UserIdentityKey, UserSeed};
+    use crate::store::{IdentityLookup, SESSION_TTL_SECONDS, UserIdentityKey, UserSeed};
     use axum::{
         body::{Body, to_bytes},
         http::{
@@ -3225,8 +3225,13 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::{Arc, RwLock};
 
+    fn fresh_session_window() -> (String, String) {
+        (crate::now_rfc3339(), crate::expires_at(SESSION_TTL_SECONDS))
+    }
+
     async fn platform_admin_cookie(state: &ControlPlaneState) -> String {
         let session_id = "sess_platform_admin_test";
+        let (authenticated_at, expires_at) = fresh_session_window();
         state
             .store
             .issue_session(
@@ -3234,8 +3239,8 @@ mod tests {
                 AuthProvider::Email,
                 &IdentityLookup::Email("ops@huge-router.dev".to_string()),
                 "platform-admin",
-                "2026-04-23T00:00:00Z",
-                "2026-04-25T00:00:00Z",
+                &authenticated_at,
+                &expires_at,
             )
             .await
             .expect("platform admin session should issue");
@@ -3251,6 +3256,7 @@ mod tests {
 
     async fn issue_cookie(state: &ControlPlaneState, email: &str, workspace_slug: &str) -> String {
         let session_id = format!("sess_{}_{}", workspace_slug, email.replace(['@', '.'], "_"));
+        let (authenticated_at, expires_at) = fresh_session_window();
         state
             .store
             .issue_session(
@@ -3258,8 +3264,8 @@ mod tests {
                 AuthProvider::Email,
                 &IdentityLookup::Email(email.to_string()),
                 workspace_slug,
-                "2026-04-23T00:00:00Z",
-                "2026-04-25T00:00:00Z",
+                &authenticated_at,
+                &expires_at,
             )
             .await
             .expect("test session should issue");
@@ -3854,7 +3860,7 @@ mod tests {
         let list_all: Value =
             serde_json::from_slice(&to_bytes(list_all.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        assert_eq!(list_all["data"].as_array().unwrap().len(), 3);
+        assert_eq!(list_all["data"].as_array().unwrap().len(), 4);
         let receipt_ids: Vec<_> = list_all["data"]
             .as_array()
             .unwrap()
@@ -3863,7 +3869,12 @@ mod tests {
             .collect();
         assert_eq!(
             receipt_ids,
-            vec!["routercpt_cp_b", "routercpt_cp_c", "routercpt_cp_a"]
+            vec![
+                "routercpt_cp_b",
+                "routercpt_cp_c",
+                "routercpt_cp_a",
+                "routercpt_acme_relay_eval",
+            ]
         );
 
         let filtered = app
@@ -3887,7 +3898,10 @@ mod tests {
             .iter()
             .map(|entry| entry["route_receipt_id"].as_str().unwrap())
             .collect();
-        assert_eq!(filtered_ids, vec!["routercpt_cp_a"]);
+        assert_eq!(
+            filtered_ids,
+            vec!["routercpt_cp_a", "routercpt_acme_relay_eval"]
+        );
     }
 
     #[tokio::test]
@@ -4872,9 +4886,11 @@ mod tests {
                 .unwrap(),
         )
         .await;
+        let mut route_receipt_ids = ids(&route_receipts["data"], "route_receipt_id");
+        route_receipt_ids.sort();
         assert_eq!(
-            ids(&route_receipts["data"], "route_receipt_id"),
-            vec!["routercpt_acme_1"]
+            route_receipt_ids,
+            vec!["routercpt_acme_1", "routercpt_acme_relay_eval"]
         );
 
         let usage = response_json(

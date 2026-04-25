@@ -250,6 +250,7 @@ impl PostgresStore {
         connections: Vec<TrialConnection>,
         evaluations: Vec<RelayEvaluation>,
         capsules: Vec<ReplayCapsule>,
+        route_receipts: Vec<core_domain::RouteReceipt>,
     ) -> Result<()> {
         for shop in shops {
             let shop_id = shop.merchant_shop_id.as_str().to_string();
@@ -314,6 +315,18 @@ impl PostgresStore {
             )
             .bind(&capsule_id)
             .bind(Json(capsule))
+            .execute(&self.pool)
+            .await?;
+        }
+        for route_receipt in route_receipts {
+            let route_receipt_id = route_receipt.route_receipt_id.as_str().to_string();
+            sqlx::query(
+                "INSERT INTO route_receipts (route_receipt_id, payload)
+                 VALUES ($1, $2)
+                 ON CONFLICT (route_receipt_id) DO UPDATE SET payload = EXCLUDED.payload",
+            )
+            .bind(&route_receipt_id)
+            .bind(Json(route_receipt))
             .execute(&self.pool)
             .await?;
         }

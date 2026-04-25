@@ -51,7 +51,7 @@ pub fn build_merchant_replay_route_receipt(
         },
         fallback_transitions: Vec::new(),
         normalized_error: None,
-        failure_reason: Some("merchant_replay_evaluation".to_string()),
+        failure_reason: None,
         created_at,
     }
 }

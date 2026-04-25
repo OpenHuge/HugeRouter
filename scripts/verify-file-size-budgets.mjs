@@ -121,9 +121,9 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/store.rs",
     {
-      maxLines: 5750,
+      maxLines: 5800,
       reason:
-        "Store implementation is a known monolith. Persistence and domain-specific store code should move into focused modules.",
+        "Store implementation is a known monolith. Persistence and domain-specific store code should move into focused modules; replay receipt regression coverage raised the temporary ceiling slightly.",
     },
   ],
   [
