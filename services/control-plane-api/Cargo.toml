@@ -13,6 +13,8 @@ core-domain = { path = "../../crates/core-domain" }
 metering = { path = "../../crates/metering" }
 protocol-ir = { path = "../../crates/protocol-ir" }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+base64 = "0.22.1"
+ring = "0.17.14"
 routing-engine = { path = "../../crates/routing-engine" }
 runtime-composition = { path = "../../crates/runtime-composition" }
 serde.workspace = true

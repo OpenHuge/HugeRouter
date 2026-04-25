@@ -3,8 +3,11 @@ import {
   Button,
   Card,
   Checkbox,
+  FileInput,
   Group,
+  NumberInput,
   Select,
+  Switch,
   Stack,
   Table,
   Text,
@@ -23,6 +26,11 @@ import {
 import {
   getConsoleDataService,
   getControlPlaneActionErrorMessage,
+  type OAuthCarpoolMutationInput,
+  type OAuthCarpoolView,
+  type OAuthSharingLeaseMutationInput,
+  type OAuthSharingLeaseView,
+  type OAuthSharingUsageView,
   type ProviderResourceMutationInput,
 } from "../features/control-plane/service";
 import type {
@@ -36,6 +44,9 @@ import {
 } from "../features/control-plane/workflow-ui";
 
 type ProvidersPageData = {
+  carpools: OAuthCarpoolView[];
+  leases: OAuthSharingLeaseView[];
+  sharingUsage: OAuthSharingUsageView;
   projects: ProjectSummary[];
   providers: ProviderResource[];
   routePolicies: RoutePolicyView[];
@@ -62,6 +73,47 @@ type ProviderFormState = {
 };
 
 type ProviderFormErrors = Partial<Record<keyof ProviderFormState, string>>;
+
+type CodexAuthUploadState = {
+  displayName: string;
+  endpointBaseUrl: string;
+  file: File | null;
+  projectId: string;
+  providerResourceId: string;
+  region: string;
+};
+
+type CodexAuthUploadErrors = Partial<
+  Record<keyof CodexAuthUploadState, string>
+>;
+
+type SharingLeaseFormState = {
+  borrowerWorkspaceId: string;
+  expiresAt: string;
+  leaseId: string;
+  maxConcurrentRuns: number;
+  policy: OAuthSharingLeaseMutationInput["policy"];
+  poolId: string;
+  provider: OAuthSharingLeaseMutationInput["provider"];
+  status: OAuthSharingLeaseMutationInput["status"];
+  turnBudget: number;
+};
+
+type CarpoolFormState = {
+  carpoolId: string;
+  enabled: boolean;
+  memberWorkspaceIds: string;
+  name: string;
+  perMemberConcurrencyLimit: number;
+  perMemberTurnBudget: number;
+  poolIds: string;
+  provider: OAuthCarpoolMutationInput["provider"];
+  strategy: OAuthCarpoolMutationInput["strategy"];
+};
+
+type SharingFormErrors = Partial<
+  Record<keyof SharingLeaseFormState | keyof CarpoolFormState, string>
+>;
 
 const providerStatusOptions = [
   { label: "active", value: "active" },
@@ -140,6 +192,56 @@ function createEmptyProviderForm(): ProviderFormState {
   };
 }
 
+function createEmptyCodexAuthUpload(): CodexAuthUploadState {
+  return {
+    displayName: "",
+    endpointBaseUrl: "https://",
+    file: null,
+    projectId: "",
+    providerResourceId: "",
+    region: "global",
+  };
+}
+
+function defaultSharingExpiry() {
+  return new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
+}
+
+function createEmptySharingLeaseForm(): SharingLeaseFormState {
+  return {
+    borrowerWorkspaceId: "tenant_acme",
+    expiresAt: defaultSharingExpiry(),
+    leaseId: "",
+    maxConcurrentRuns: 1,
+    policy: "fair_share",
+    poolId: "",
+    provider: "codex",
+    status: "active",
+    turnBudget: 20,
+  };
+}
+
+function createEmptyCarpoolForm(): CarpoolFormState {
+  return {
+    carpoolId: "",
+    enabled: true,
+    memberWorkspaceIds: "tenant_acme",
+    name: "",
+    perMemberConcurrencyLimit: 2,
+    perMemberTurnBudget: 50,
+    poolIds: "",
+    provider: "codex",
+    strategy: "fair_share",
+  };
+}
+
+function splitCsv(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function providerToFormState(provider: ProviderResource): ProviderFormState {
   return {
     authKind: provider.auth_kind,
@@ -195,18 +297,32 @@ function validateProviderForm(form: ProviderFormState) {
 export const Route = createFileRoute("/app/providers")({
   loader: () =>
     loadRouteData(async () => {
-      const [providers, projects, routePolicies, routeReceipts] = await Promise.all([
+      const [
+        providers,
+        projects,
+        routePolicies,
+        routeReceipts,
+        leases,
+        carpools,
+        sharingUsage,
+      ] = await Promise.all([
         getConsoleDataService().listProviderResources(),
         getConsoleDataService().listProjects(),
         getConsoleDataService().listRoutePolicies(),
         getConsoleDataService().listRouteReceipts(),
+        getConsoleDataService().listOAuthSharingLeases(),
+        getConsoleDataService().listOAuthCarpools(),
+        getConsoleDataService().readOAuthSharingUsage(),
       ]);
 
       return {
+        carpools,
+        leases,
         projects,
         providers,
         routePolicies,
         routeReceipts,
+        sharingUsage,
       } satisfies ProvidersPageData;
     }),
   pendingComponent: () => <RouteLoadingState label="Loading providers" />,
@@ -225,7 +341,23 @@ function ProvidersPage() {
   const [formState, setFormState] = useState<ProviderFormState>(
     createEmptyProviderForm(),
   );
+  const [codexAuthUpload, setCodexAuthUpload] =
+    useState<CodexAuthUploadState>(createEmptyCodexAuthUpload());
+  const [codexAuthUploadErrors, setCodexAuthUploadErrors] =
+    useState<CodexAuthUploadErrors>({});
+  const [sharingLeaseForm, setSharingLeaseForm] =
+    useState<SharingLeaseFormState>(createEmptySharingLeaseForm());
+  const [carpoolForm, setCarpoolForm] =
+    useState<CarpoolFormState>(createEmptyCarpoolForm());
+  const [sharingFormErrors, setSharingFormErrors] =
+    useState<SharingFormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCodexAuthUploading, setIsCodexAuthUploading] = useState(false);
+  const [isSharingSubmitting, setIsSharingSubmitting] = useState(false);
+  const [revokingLeaseId, setRevokingLeaseId] = useState<string | null>(null);
+  const [removingCarpoolId, setRemovingCarpoolId] = useState<string | null>(
+    null,
+  );
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
   const [disablingProviderId, setDisablingProviderId] = useState<string | null>(
@@ -250,6 +382,7 @@ function ProvidersPage() {
   }
 
   const { projects, providers, routePolicies, routeReceipts } = result.data;
+  const { carpools, leases, sharingUsage } = result.data;
   const routePolicyNames = new Map(
     routePolicies.map((policy) => [policy.id, policy.name]),
   );
@@ -270,6 +403,48 @@ function ProvidersPage() {
       [key]: value,
     }));
     setFormErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function updateCodexAuthField<K extends keyof CodexAuthUploadState>(
+    key: K,
+    value: CodexAuthUploadState[K],
+  ) {
+    setCodexAuthUpload((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setCodexAuthUploadErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function updateSharingLeaseField<K extends keyof SharingLeaseFormState>(
+    key: K,
+    value: SharingLeaseFormState[K],
+  ) {
+    setSharingLeaseForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setSharingFormErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function updateCarpoolField<K extends keyof CarpoolFormState>(
+    key: K,
+    value: CarpoolFormState[K],
+  ) {
+    setCarpoolForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setSharingFormErrors((current) => ({
       ...current,
       [key]: undefined,
     }));
@@ -353,7 +528,7 @@ function ProvidersPage() {
       }
 
       resetForm();
-      await refreshRoute();
+      void refreshRoute();
     } catch (error) {
       setStatusError(
         getControlPlaneActionErrorMessage(
@@ -384,6 +559,182 @@ function ProvidersPage() {
       );
     } finally {
       setDisablingProviderId(null);
+    }
+  }
+
+  async function onUploadCodexAuth() {
+    const errors: CodexAuthUploadErrors = {};
+    if (!codexAuthUpload.displayName.trim()) {
+      errors.displayName = "Enter a display name.";
+    }
+    if (!codexAuthUpload.file) {
+      errors.file = "Choose a Codex auth.json file.";
+    }
+    if (
+      codexAuthUpload.providerResourceId.trim() &&
+      !/^prvrsrc_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(
+        codexAuthUpload.providerResourceId.trim(),
+      )
+    ) {
+      errors.providerResourceId = "Provider resource ids must start with prvrsrc_.";
+    }
+    if (!/^https:\/\/.+/.test(codexAuthUpload.endpointBaseUrl.trim())) {
+      errors.endpointBaseUrl = "Use an HTTPS reverse proxy endpoint.";
+    }
+    if (!codexAuthUpload.region.trim()) {
+      errors.region = "Enter a region label.";
+    }
+    setCodexAuthUploadErrors(errors);
+    if (Object.keys(errors).length > 0 || !codexAuthUpload.file) {
+      return;
+    }
+
+    setIsCodexAuthUploading(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+    try {
+      const authJson = JSON.parse(await codexAuthUpload.file.text());
+      const created = await getConsoleDataService().uploadCodexAuthAccount({
+        authJson,
+        displayName: codexAuthUpload.displayName.trim(),
+        endpointBaseUrl: codexAuthUpload.endpointBaseUrl.trim(),
+        projectId: codexAuthUpload.projectId || undefined,
+        providerResourceId: codexAuthUpload.providerResourceId.trim() || undefined,
+        region: codexAuthUpload.region.trim(),
+      });
+      setCodexAuthUpload(createEmptyCodexAuthUpload());
+      setStatusSuccess(
+        `Added ${created.displayName} to the Codex auth account pool.`,
+      );
+      await refreshRoute();
+    } catch (error) {
+      setStatusError(
+        error instanceof SyntaxError
+          ? "The selected file is not valid JSON."
+          : getControlPlaneActionErrorMessage(error, "codex-auth-upload"),
+      );
+    } finally {
+      setIsCodexAuthUploading(false);
+    }
+  }
+
+  async function onCreateSharingLease() {
+    const errors: SharingFormErrors = {};
+    if (!sharingLeaseForm.leaseId.trim()) {
+      errors.leaseId = "Enter a lease id.";
+    }
+    if (!sharingLeaseForm.borrowerWorkspaceId.trim()) {
+      errors.borrowerWorkspaceId = "Enter a borrower workspace id.";
+    }
+    if (!sharingLeaseForm.poolId.trim()) {
+      errors.poolId = "Enter a pool id.";
+    }
+    if (!sharingLeaseForm.expiresAt.trim()) {
+      errors.expiresAt = "Enter an expiration timestamp.";
+    }
+    setSharingFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
+    setIsSharingSubmitting(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+    try {
+      await getConsoleDataService().upsertOAuthSharingLease({
+        allowedAccountIds: [],
+        borrowerWorkspaceId: sharingLeaseForm.borrowerWorkspaceId.trim(),
+        expiresAt: sharingLeaseForm.expiresAt.trim(),
+        leaseId: sharingLeaseForm.leaseId.trim(),
+        maxConcurrentRuns: sharingLeaseForm.maxConcurrentRuns,
+        policy: sharingLeaseForm.policy,
+        poolId: sharingLeaseForm.poolId.trim(),
+        provider: sharingLeaseForm.provider,
+        startsAt: new Date().toISOString(),
+        status: sharingLeaseForm.status,
+        turnBudget: sharingLeaseForm.turnBudget,
+      });
+      setSharingLeaseForm(createEmptySharingLeaseForm());
+      setStatusSuccess("Created sharing lease.");
+      await refreshRoute();
+    } catch (error) {
+      setStatusError(getControlPlaneActionErrorMessage(error, "sharing"));
+    } finally {
+      setIsSharingSubmitting(false);
+    }
+  }
+
+  async function onRevokeSharingLease(lease: OAuthSharingLeaseView) {
+    setRevokingLeaseId(lease.leaseId);
+    setStatusError(null);
+    setStatusSuccess(null);
+    try {
+      await getConsoleDataService().revokeOAuthSharingLease(lease.leaseId);
+      setStatusSuccess(`Revoked sharing lease ${lease.leaseId}.`);
+      await refreshRoute();
+    } catch (error) {
+      setStatusError(getControlPlaneActionErrorMessage(error, "sharing"));
+    } finally {
+      setRevokingLeaseId(null);
+    }
+  }
+
+  async function onCreateCarpool() {
+    const errors: SharingFormErrors = {};
+    if (!carpoolForm.carpoolId.trim()) {
+      errors.carpoolId = "Enter a carpool id.";
+    }
+    if (!carpoolForm.name.trim()) {
+      errors.name = "Enter a carpool name.";
+    }
+    if (splitCsv(carpoolForm.memberWorkspaceIds).length === 0) {
+      errors.memberWorkspaceIds = "Enter at least one member workspace.";
+    }
+    if (splitCsv(carpoolForm.poolIds).length === 0) {
+      errors.poolIds = "Enter at least one pool id.";
+    }
+    setSharingFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
+    setIsSharingSubmitting(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+    try {
+      await getConsoleDataService().upsertOAuthCarpool({
+        carpoolId: carpoolForm.carpoolId.trim(),
+        enabled: carpoolForm.enabled,
+        memberWorkspaceIds: splitCsv(carpoolForm.memberWorkspaceIds),
+        name: carpoolForm.name.trim(),
+        perMemberConcurrencyLimit: carpoolForm.perMemberConcurrencyLimit,
+        perMemberTurnBudget: carpoolForm.perMemberTurnBudget,
+        poolIds: splitCsv(carpoolForm.poolIds),
+        provider: carpoolForm.provider,
+        strategy: carpoolForm.strategy,
+      });
+      setCarpoolForm(createEmptyCarpoolForm());
+      setStatusSuccess("Created carpool.");
+      await refreshRoute();
+    } catch (error) {
+      setStatusError(getControlPlaneActionErrorMessage(error, "sharing"));
+    } finally {
+      setIsSharingSubmitting(false);
+    }
+  }
+
+  async function onRemoveCarpool(carpool: OAuthCarpoolView) {
+    setRemovingCarpoolId(carpool.carpoolId);
+    setStatusError(null);
+    setStatusSuccess(null);
+    try {
+      await getConsoleDataService().removeOAuthCarpool(carpool.carpoolId);
+      setStatusSuccess(`Disabled carpool ${carpool.name}.`);
+      await refreshRoute();
+    } catch (error) {
+      setStatusError(getControlPlaneActionErrorMessage(error, "sharing"));
+    } finally {
+      setRemovingCarpoolId(null);
     }
   }
 
@@ -606,6 +957,424 @@ function ProvidersPage() {
             Create a new provider resource, or edit and disable an existing one.
           </Text>
         )}
+      </Card>
+      <Card padding="lg" radius="md" shadow="sm">
+        <Group justify="space-between" mb="md">
+          <Text fw={700}>Codex auth account pool</Text>
+          <Badge color="grape" variant="light">
+            encrypted upload
+          </Badge>
+        </Group>
+        <Stack>
+          <Group grow>
+            <TextInput
+              label="Account display name"
+              onChange={(event) =>
+                updateCodexAuthField("displayName", event.currentTarget.value)
+              }
+              placeholder="Team Codex account"
+              value={codexAuthUpload.displayName}
+            />
+            <Select
+              data={projectOptions}
+              label="Project scope"
+              onChange={(value) =>
+                updateCodexAuthField("projectId", value ?? "")
+              }
+              value={codexAuthUpload.projectId}
+            />
+          </Group>
+          <Group grow>
+            <FieldErrorText error={codexAuthUploadErrors.displayName} />
+            <FieldErrorText error={codexAuthUploadErrors.projectId} />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="Pool provider resource id"
+              onChange={(event) =>
+                updateCodexAuthField(
+                  "providerResourceId",
+                  event.currentTarget.value,
+                )
+              }
+              placeholder="Leave blank to create one"
+              value={codexAuthUpload.providerResourceId}
+            />
+            <TextInput
+              label="Pool region"
+              onChange={(event) =>
+                updateCodexAuthField("region", event.currentTarget.value)
+              }
+              placeholder="global"
+              value={codexAuthUpload.region}
+            />
+          </Group>
+          <Group grow>
+            <FieldErrorText error={codexAuthUploadErrors.providerResourceId} />
+            <FieldErrorText error={codexAuthUploadErrors.region} />
+          </Group>
+          <TextInput
+            label="Reverse proxy endpoint"
+            onChange={(event) =>
+              updateCodexAuthField("endpointBaseUrl", event.currentTarget.value)
+            }
+            placeholder="https://chatgpt-reverse-proxy.example.com/v1"
+            value={codexAuthUpload.endpointBaseUrl}
+          />
+          <FieldErrorText error={codexAuthUploadErrors.endpointBaseUrl} />
+          <FileInput
+            accept="application/json,.json"
+            clearable
+            label="Codex auth.json"
+            onChange={(file) => updateCodexAuthField("file", file)}
+            placeholder="Choose auth.json"
+            value={codexAuthUpload.file}
+          />
+          <FieldErrorText error={codexAuthUploadErrors.file} />
+          <Group justify="flex-end">
+            <Button
+              loading={isCodexAuthUploading}
+              onClick={() => void onUploadCodexAuth()}
+            >
+              Add to pool
+            </Button>
+          </Group>
+        </Stack>
+      </Card>
+      <Card padding="lg" radius="md" shadow="sm">
+        <Group justify="space-between" mb="md">
+          <Text fw={700}>Pools sharing</Text>
+          <Badge color="teal" variant="light">
+            runtime-owned
+          </Badge>
+        </Group>
+        <Stack>
+          <Group align="flex-end" grow>
+            <TextInput
+              label="Lease id"
+              onChange={(event) =>
+                updateSharingLeaseField("leaseId", event.currentTarget.value)
+              }
+              placeholder="lease_codex_acme_support"
+              value={sharingLeaseForm.leaseId}
+            />
+            <TextInput
+              label="Borrower workspace"
+              onChange={(event) =>
+                updateSharingLeaseField(
+                  "borrowerWorkspaceId",
+                  event.currentTarget.value,
+                )
+              }
+              value={sharingLeaseForm.borrowerWorkspaceId}
+            />
+            <TextInput
+              label="Pool id"
+              onChange={(event) =>
+                updateSharingLeaseField("poolId", event.currentTarget.value)
+              }
+              placeholder="prvrsrc_codex_team"
+              value={sharingLeaseForm.poolId}
+            />
+          </Group>
+          <Group grow>
+            <FieldErrorText error={sharingFormErrors.leaseId} />
+            <FieldErrorText error={sharingFormErrors.borrowerWorkspaceId} />
+            <FieldErrorText error={sharingFormErrors.poolId} />
+          </Group>
+          <Group align="flex-end" grow>
+            <Select
+              data={[
+                { label: "codex", value: "codex" },
+                { label: "gemini", value: "gemini" },
+                { label: "claude_code", value: "claude_code" },
+              ]}
+              label="Provider"
+              onChange={(value) =>
+                updateSharingLeaseField(
+                  "provider",
+                  (value ?? "codex") as SharingLeaseFormState["provider"],
+                )
+              }
+              value={sharingLeaseForm.provider}
+            />
+            <Select
+              data={[
+                { label: "active", value: "active" },
+                { label: "paused", value: "paused" },
+                { label: "pending", value: "pending" },
+              ]}
+              label="Lease status"
+              onChange={(value) =>
+                updateSharingLeaseField(
+                  "status",
+                  (value ?? "active") as SharingLeaseFormState["status"],
+                )
+              }
+              value={sharingLeaseForm.status}
+            />
+            <Select
+              data={[
+                { label: "fair_share", value: "fair_share" },
+                { label: "owner_priority", value: "owner_priority" },
+                { label: "borrower_priority", value: "borrower_priority" },
+              ]}
+              label="Policy"
+              onChange={(value) =>
+                updateSharingLeaseField(
+                  "policy",
+                  (value ?? "fair_share") as SharingLeaseFormState["policy"],
+                )
+              }
+              value={sharingLeaseForm.policy}
+            />
+          </Group>
+          <Group align="flex-end" grow>
+            <NumberInput
+              label="Max concurrent runs"
+              min={1}
+              onChange={(value) =>
+                updateSharingLeaseField(
+                  "maxConcurrentRuns",
+                  Number(value) || 1,
+                )
+              }
+              value={sharingLeaseForm.maxConcurrentRuns}
+            />
+            <NumberInput
+              label="Turn budget"
+              min={1}
+              onChange={(value) =>
+                updateSharingLeaseField("turnBudget", Number(value) || 1)
+              }
+              value={sharingLeaseForm.turnBudget}
+            />
+            <TextInput
+              label="Expires at"
+              onChange={(event) =>
+                updateSharingLeaseField("expiresAt", event.currentTarget.value)
+              }
+              value={sharingLeaseForm.expiresAt}
+            />
+          </Group>
+          <FieldErrorText error={sharingFormErrors.expiresAt} />
+          <Group justify="flex-end">
+            <Button
+              loading={isSharingSubmitting}
+              onClick={() => void onCreateSharingLease()}
+            >
+              Create lease
+            </Button>
+          </Group>
+          {leases.length === 0 ? (
+            <EmptyCollectionState
+              description="Create a sharing lease to authorize a borrower workspace for a pool."
+              title="No sharing leases"
+            />
+          ) : (
+            <Table striped withTableBorder>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Lease</Table.Th>
+                  <Table.Th>Borrower</Table.Th>
+                  <Table.Th>Pool</Table.Th>
+                  <Table.Th>Budget</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {leases.map((lease) => (
+                  <Table.Tr key={lease.leaseId}>
+                    <Table.Td>{lease.leaseId}</Table.Td>
+                    <Table.Td>{lease.borrowerWorkspaceId}</Table.Td>
+                    <Table.Td>{lease.poolId}</Table.Td>
+                    <Table.Td>
+                      {lease.turnBudget ?? "unlimited"} turns /{" "}
+                      {lease.maxConcurrentRuns} concurrent
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge variant="light">{lease.status}</Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Button
+                        disabled={lease.status === "revoked"}
+                        loading={revokingLeaseId === lease.leaseId}
+                        onClick={() => void onRevokeSharingLease(lease)}
+                        size="xs"
+                        variant="subtle"
+                      >
+                        Revoke
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+          <Group align="flex-end" grow>
+            <TextInput
+              label="Carpool id"
+              onChange={(event) =>
+                updateCarpoolField("carpoolId", event.currentTarget.value)
+              }
+              placeholder="carpool_codex_acme"
+              value={carpoolForm.carpoolId}
+            />
+            <TextInput
+              label="Name"
+              onChange={(event) =>
+                updateCarpoolField("name", event.currentTarget.value)
+              }
+              value={carpoolForm.name}
+            />
+            <TextInput
+              label="Pool ids"
+              onChange={(event) =>
+                updateCarpoolField("poolIds", event.currentTarget.value)
+              }
+              placeholder="prvrsrc_codex_team"
+              value={carpoolForm.poolIds}
+            />
+          </Group>
+          <Group grow>
+            <FieldErrorText error={sharingFormErrors.carpoolId} />
+            <FieldErrorText error={sharingFormErrors.name} />
+            <FieldErrorText error={sharingFormErrors.poolIds} />
+          </Group>
+          <Group align="flex-end" grow>
+            <TextInput
+              label="Member workspaces"
+              onChange={(event) =>
+                updateCarpoolField(
+                  "memberWorkspaceIds",
+                  event.currentTarget.value,
+                )
+              }
+              value={carpoolForm.memberWorkspaceIds}
+            />
+            <Select
+              data={[
+                { label: "fair_share", value: "fair_share" },
+                { label: "weighted", value: "weighted" },
+                { label: "cheapest_ready", value: "cheapest_ready" },
+                { label: "fastest_ready", value: "fastest_ready" },
+              ]}
+              label="Strategy"
+              onChange={(value) =>
+                updateCarpoolField(
+                  "strategy",
+                  (value ?? "fair_share") as CarpoolFormState["strategy"],
+                )
+              }
+              value={carpoolForm.strategy}
+            />
+            <Switch
+              checked={carpoolForm.enabled}
+              label="Enabled"
+              onChange={(event) =>
+                updateCarpoolField("enabled", event.currentTarget.checked)
+              }
+            />
+          </Group>
+          <FieldErrorText error={sharingFormErrors.memberWorkspaceIds} />
+          <Group align="flex-end" grow>
+            <NumberInput
+              label="Per-member concurrency"
+              min={1}
+              onChange={(value) =>
+                updateCarpoolField(
+                  "perMemberConcurrencyLimit",
+                  Number(value) || 1,
+                )
+              }
+              value={carpoolForm.perMemberConcurrencyLimit}
+            />
+            <NumberInput
+              label="Per-member turns"
+              min={1}
+              onChange={(value) =>
+                updateCarpoolField("perMemberTurnBudget", Number(value) || 1)
+              }
+              value={carpoolForm.perMemberTurnBudget}
+            />
+            <Button
+              loading={isSharingSubmitting}
+              onClick={() => void onCreateCarpool()}
+            >
+              Create carpool
+            </Button>
+          </Group>
+          {carpools.length === 0 ? (
+            <EmptyCollectionState
+              description="Create a carpool to share one or more pools across member workspaces."
+              title="No carpools"
+            />
+          ) : (
+            <Table striped withTableBorder>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Carpool</Table.Th>
+                  <Table.Th>Members</Table.Th>
+                  <Table.Th>Pools</Table.Th>
+                  <Table.Th>Limits</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {carpools.map((carpool) => (
+                  <Table.Tr key={carpool.carpoolId}>
+                    <Table.Td>{carpool.name}</Table.Td>
+                    <Table.Td>{carpool.memberWorkspaceIds.join(", ")}</Table.Td>
+                    <Table.Td>{carpool.poolIds.join(", ")}</Table.Td>
+                    <Table.Td>
+                      {carpool.perMemberTurnBudget ?? "unlimited"} turns /{" "}
+                      {carpool.perMemberConcurrencyLimit ?? "unlimited"} concurrent
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge color={carpool.enabled ? "teal" : "gray"} variant="light">
+                        {carpool.enabled ? "enabled" : "disabled"}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Button
+                        loading={removingCarpoolId === carpool.carpoolId}
+                        onClick={() => void onRemoveCarpool(carpool)}
+                        size="xs"
+                        variant="subtle"
+                      >
+                        Disable
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+          <Table striped withTableBorder>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Usage scope</Table.Th>
+                <Table.Th>Provider</Table.Th>
+                <Table.Th>Account</Table.Th>
+                <Table.Th>Turns</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {sharingUsage.rows.slice(0, 6).map((row, index) => (
+                <Table.Tr key={`${row.leaseId ?? row.carpoolId ?? "usage"}-${index}`}>
+                  <Table.Td>
+                    {row.leaseId ?? row.carpoolId ?? row.workspaceId ?? "pool"}
+                  </Table.Td>
+                  <Table.Td>{row.provider}</Table.Td>
+                  <Table.Td>{row.accountId ?? "all accounts"}</Table.Td>
+                  <Table.Td>{row.turns}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Stack>
       </Card>
       <Card padding="lg" radius="md" shadow="sm">
         <Group justify="space-between" mb="md">

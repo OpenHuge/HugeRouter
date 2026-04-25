@@ -19,12 +19,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use core_domain::{
-    AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, ConfigSnapshot,
-    EmailLoginCompleteRequest, EmailLoginStartRequest, EmailLoginStartResponse,
-    OAuthCallbackRequest, OAuthLoginStartRequest, OAuthLoginStartResponse, Project,
-    ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, Tenant, TenantMembership,
-    TenantMembershipRole, TenantMembershipStatus, UnlinkAuthProviderResponse,
+    AuthKind, AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, ConfigSnapshot,
+    CredentialOwnerType, DeploymentScope, EmailLoginCompleteRequest, EmailLoginStartRequest,
+    EmailLoginStartResponse, HealthState, OAuthCallbackRequest, OAuthLoginStartRequest,
+    OAuthLoginStartResponse, Project, ProvenanceClass, ProviderCapabilities, ProviderResource,
+    ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId, Tenant,
+    TenantMembership, TenantMembershipRole, TenantMembershipStatus, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
@@ -34,13 +36,18 @@ use protocol_ir::{
     RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageSummaryResponse,
 };
 use reqwest::Client as HttpClient;
+use ring::{aead, rand};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
-    ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, IdentityLookup,
-    ProviderResourceFilters, SESSION_TTL_SECONDS, StoreMode, auth_provider_enabled, expires_at,
-    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
+    ApiKey, ApiKeysResponse, CodexAuthAccount, CodexAuthAccountRecord, CodexAuthAccountsResponse,
+    ConcurrencyResult, ConfigSnapshotsResponse, EncryptedSecretBlob, IdentityLookup,
+    OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolSelectionRequest, OAuthSharingLeaseRecord,
+    OAuthSharingLeasesResponse, OAuthSharingUsageBudget, OAuthSharingUsageFilters,
+    OAuthSharingUsageResponse, ProviderResourceFilters, SESSION_TTL_SECONDS, StoreMode,
+    auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -49,6 +56,8 @@ const CONTROL_PLANE_SERVICE_NAME: &str = "control-plane-api";
 const FRONTEND_BASE_URL: &str = "http://127.0.0.1:3000";
 const PLATFORM_ADMIN_TENANT_SLUG: &str = "platform-admin";
 const SESSION_COOKIE_NAME: &str = "huge_router_session";
+const CODEX_AUTH_ENCRYPTION_ALGORITHM: &str = "AES-256-GCM";
+const DEFAULT_CODEX_REVERSE_PROXY_ENDPOINT: &str = "https://chatgpt-reverse-proxy.local/v1";
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
@@ -128,6 +137,120 @@ struct GatewayApiKeyResolveResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CodexAuthAccountUploadRequest {
+    pub display_name: String,
+    #[serde(default)]
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub provider_resource_id: Option<String>,
+    #[serde(default)]
+    pub endpoint_base_url: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    pub auth_json: Value,
+}
+
+#[allow(clippy::struct_field_names)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CodexAuthAccountLeaseRequest {
+    #[serde(default)]
+    pub provider_resource_id: Option<String>,
+    #[serde(default)]
+    pub pool_id: Option<String>,
+    #[serde(default)]
+    pub lease_id: Option<String>,
+    #[serde(default)]
+    pub carpool_id: Option<String>,
+    #[serde(default)]
+    pub borrower_workspace_id: Option<String>,
+    #[serde(default)]
+    pub borrower_user_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CodexAuthAccountLeaseResponse {
+    pub codex_account_id: String,
+    pub tenant_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub provider_resource_id: String,
+    pub display_name: String,
+    pub leased_until: String,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub carpool_id: Option<String>,
+    pub auth_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OAuthSharingLeaseUpsertRequest {
+    pub lease_id: String,
+    #[serde(default)]
+    pub owner_workspace_id: Option<String>,
+    #[serde(default)]
+    pub owner_user_id: Option<String>,
+    pub borrower_workspace_id: String,
+    #[serde(default)]
+    pub borrower_user_id: Option<String>,
+    pub provider: String,
+    pub pool_id: String,
+    #[serde(default)]
+    pub allowed_account_ids: Option<Vec<String>>,
+    pub status: String,
+    pub starts_at: String,
+    pub expires_at: String,
+    pub max_concurrent_runs: u32,
+    #[serde(default)]
+    pub usage_budget: OAuthSharingUsageBudget,
+    pub policy: String,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OAuthCarpoolUpsertRequest {
+    pub carpool_id: String,
+    pub provider: String,
+    pub name: String,
+    #[serde(default)]
+    pub member_workspace_ids: Vec<String>,
+    #[serde(default)]
+    pub pool_ids: Vec<String>,
+    pub strategy: String,
+    #[serde(default)]
+    pub member_weights: std::collections::BTreeMap<String, u32>,
+    #[serde(default)]
+    pub per_member_concurrency_limit: Option<u32>,
+    #[serde(default)]
+    pub per_member_turn_budget: Option<u64>,
+    pub enabled: bool,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OAuthSharingUsageQuery {
+    #[serde(default)]
+    pub lease_id: Option<String>,
+    #[serde(default)]
+    pub carpool_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -471,8 +594,37 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route("/v1/api-keys", get(list_api_keys).post(create_api_key))
         .route("/v1/api-keys/{api_key_id}/revoke", post(revoke_api_key))
         .route(
+            "/v1/codex-auth-accounts",
+            get(list_codex_auth_accounts).post(upload_codex_auth_account),
+        )
+        .route(
+            "/v1/oauth-sharing-leases",
+            get(list_oauth_sharing_leases).post(upsert_oauth_sharing_lease),
+        )
+        .route(
+            "/v1/oauth-sharing-leases/{lease_id}/revoke",
+            post(revoke_oauth_sharing_lease),
+        )
+        .route(
+            "/v1/oauth-carpools",
+            get(list_oauth_carpools).post(upsert_oauth_carpool),
+        )
+        .route(
+            "/v1/oauth-carpools/{carpool_id}",
+            put(upsert_oauth_carpool).delete(remove_oauth_carpool),
+        )
+        .route("/v1/oauth-sharing-usage", get(read_oauth_sharing_usage))
+        .route(
             "/internal/gateway/api-keys/resolve",
             post(resolve_api_key_for_gateway),
+        )
+        .route(
+            "/internal/gateway/oauth-pool/select",
+            post(select_oauth_pool_account_for_gateway),
+        )
+        .route(
+            "/internal/gateway/codex-account-pool/lease",
+            post(lease_codex_auth_account_for_gateway),
         )
         .route(
             "/internal/gateway/config/current",
@@ -1507,6 +1659,416 @@ async fn create_api_key(
     ))
 }
 
+async fn list_codex_auth_accounts(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Json<CodexAuthAccountsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let mut response = state
+        .store
+        .list_codex_auth_accounts()
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list Codex auth accounts: {error}"),
+                &context,
+            )
+        })?;
+
+    if !authz.is_platform_admin() {
+        response.data.retain(|account| {
+            authz
+                .membership(account.tenant_id.as_str())
+                .is_some_and(|membership| membership.status == TenantMembershipStatus::Active)
+        });
+    }
+
+    Ok(Json(response))
+}
+
+async fn upload_codex_auth_account(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CodexAuthAccountUploadRequest>,
+) -> Result<Json<CodexAuthAccount>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let display_name = request.display_name.trim();
+    if display_name.is_empty() {
+        return Err(ApiError::bad_request(
+            "codex_auth_display_name_required",
+            "display_name is required".to_string(),
+            &context,
+        ));
+    }
+    validate_codex_auth_json(&request.auth_json, &context)?;
+
+    let tenant_id = request
+        .tenant_id
+        .as_deref()
+        .or_else(|| authz.active_tenant_id())
+        .ok_or_else(|| {
+            ApiError::forbidden(
+                "tenant_required",
+                "a tenant context is required to upload Codex auth accounts".to_string(),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(tenant_id, &context)?;
+    let tenant_id = core_domain::TenantId::parse(tenant_id).map_err(|error| {
+        ApiError::bad_request(
+            "tenant_id_invalid",
+            format!("invalid tenant_id: {error}"),
+            &context,
+        )
+    })?;
+    let project_id = if let Some(project_id) = request.project_id.as_deref() {
+        let project = load_project(&state, project_id, &context).await?;
+        ensure_project_matches_tenant(&project, tenant_id.as_str(), &context)?;
+        authz.ensure_manage_project(&project, &context)?;
+        Some(project.project_id)
+    } else {
+        None
+    };
+
+    let provider_resource_id = ensure_codex_provider_resource(
+        &state,
+        &authz,
+        &context,
+        display_name,
+        &tenant_id,
+        project_id.as_ref(),
+        request.provider_resource_id.as_deref(),
+        request.endpoint_base_url.as_deref(),
+        request.region.as_deref(),
+    )
+    .await?;
+    let serialized_auth_json = serde_json::to_vec(&request.auth_json).map_err(|error| {
+        ApiError::bad_request(
+            "codex_auth_json_invalid",
+            format!("auth_json must be serializable JSON: {error}"),
+            &context,
+        )
+    })?;
+    let auth_json_sha256 = hex_sha256(&serialized_auth_json);
+    let encrypted_auth_json = encrypt_codex_auth_json(&serialized_auth_json, &context)?;
+    let account = CodexAuthAccountRecord {
+        codex_account_id: format!("codexacct_{}", context.sequence),
+        provider: "codex".to_string(),
+        tenant_id,
+        project_id,
+        provider_resource_id,
+        display_name: display_name.to_string(),
+        status: "active".to_string(),
+        schedulable: true,
+        credential_ready: true,
+        concurrency_limit: None,
+        active_runs: 0,
+        rate_limited_until: None,
+        overloaded_until: None,
+        temp_unschedulable_until: None,
+        auth_json_sha256,
+        encrypted_auth_json,
+        leased_until: None,
+        created_at: now_rfc3339(),
+        updated_at: now_rfc3339(),
+        version: 1,
+    };
+
+    Ok(Json(
+        state
+            .store
+            .create_codex_auth_account(account)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to store Codex auth account: {error}"),
+                    &context,
+                )
+            })?,
+    ))
+}
+
+async fn list_oauth_sharing_leases(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Json<OAuthSharingLeasesResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let mut response = state
+        .store
+        .list_oauth_sharing_leases()
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list OAuth sharing leases: {error}"),
+                &context,
+            )
+        })?;
+    if !authz.is_platform_admin() {
+        response.data.retain(|lease| {
+            tenant_visible_to_authorizer(&authz, lease.owner_workspace_id.as_deref())
+                || tenant_visible_to_authorizer(&authz, Some(&lease.borrower_workspace_id))
+        });
+    }
+    Ok(Json(response))
+}
+
+async fn upsert_oauth_sharing_lease(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<OAuthSharingLeaseUpsertRequest>,
+) -> Result<Json<OAuthSharingLeaseRecord>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    validate_oauth_pool_provider(&request.provider, &context)?;
+    validate_lease_status(&request.status, &context)?;
+    validate_lease_policy(&request.policy, &context)?;
+    authz.ensure_manage_tenant(&request.borrower_workspace_id, &context)?;
+    if let Some(owner_workspace_id) = request.owner_workspace_id.as_deref() {
+        authz.ensure_manage_tenant(owner_workspace_id, &context)?;
+    }
+
+    let now = now_rfc3339();
+    let record = OAuthSharingLeaseRecord {
+        lease_id: request.lease_id,
+        owner_workspace_id: request.owner_workspace_id,
+        owner_user_id: request.owner_user_id,
+        borrower_workspace_id: request.borrower_workspace_id,
+        borrower_user_id: request.borrower_user_id,
+        provider: request.provider,
+        pool_id: request.pool_id,
+        allowed_account_ids: request.allowed_account_ids,
+        status: request.status,
+        starts_at: request.starts_at,
+        expires_at: request.expires_at,
+        max_concurrent_runs: request.max_concurrent_runs,
+        usage_budget: request.usage_budget,
+        policy: request.policy,
+        metadata: request.metadata,
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    };
+    let saved = state
+        .store
+        .upsert_oauth_sharing_lease(record)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to upsert OAuth sharing lease: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(saved))
+}
+
+async fn revoke_oauth_sharing_lease(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(lease_id): Path<String>,
+) -> Result<Json<OAuthSharingLeaseRecord>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let lease = state
+        .store
+        .list_oauth_sharing_leases()
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list OAuth sharing leases: {error}"),
+                &context,
+            )
+        })?
+        .data
+        .into_iter()
+        .find(|candidate| candidate.lease_id == lease_id)
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "oauth_sharing_lease_not_found",
+                format!("OAuth sharing lease `{lease_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(&lease.borrower_workspace_id, &context)?;
+    let revoked = state
+        .store
+        .revoke_oauth_sharing_lease(&lease_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to revoke OAuth sharing lease: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "oauth_sharing_lease_not_found",
+                format!("OAuth sharing lease `{lease_id}` was not found"),
+                &context,
+            )
+        })?;
+    Ok(Json(revoked))
+}
+
+async fn list_oauth_carpools(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Json<OAuthCarpoolsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let mut response = state.store.list_oauth_carpools().await.map_err(|error| {
+        ApiError::internal(
+            "storage_unavailable",
+            format!("failed to list OAuth carpools: {error}"),
+            &context,
+        )
+    })?;
+    if !authz.is_platform_admin() {
+        response.data.retain(|carpool| {
+            carpool
+                .member_workspace_ids
+                .iter()
+                .any(|workspace_id| tenant_visible_to_authorizer(&authz, Some(workspace_id)))
+        });
+    }
+    Ok(Json(response))
+}
+
+async fn upsert_oauth_carpool(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<OAuthCarpoolUpsertRequest>,
+) -> Result<Json<OAuthCarpoolRecord>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    validate_oauth_pool_provider(&request.provider, &context)?;
+    validate_carpool_strategy(&request.strategy, &context)?;
+    for workspace_id in &request.member_workspace_ids {
+        authz.ensure_manage_tenant(workspace_id, &context)?;
+    }
+    let now = now_rfc3339();
+    let record = OAuthCarpoolRecord {
+        carpool_id: request.carpool_id,
+        provider: request.provider,
+        name: request.name,
+        member_workspace_ids: request.member_workspace_ids,
+        pool_ids: request.pool_ids,
+        strategy: request.strategy,
+        member_weights: request.member_weights,
+        per_member_concurrency_limit: request.per_member_concurrency_limit,
+        per_member_turn_budget: request.per_member_turn_budget,
+        enabled: request.enabled,
+        metadata: request.metadata,
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    };
+    Ok(Json(
+        state
+            .store
+            .upsert_oauth_carpool(record)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to upsert OAuth carpool: {error}"),
+                    &context,
+                )
+            })?,
+    ))
+}
+
+async fn remove_oauth_carpool(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(carpool_id): Path<String>,
+) -> Result<Json<OAuthCarpoolRecord>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let carpool = state
+        .store
+        .list_oauth_carpools()
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list OAuth carpools: {error}"),
+                &context,
+            )
+        })?
+        .data
+        .into_iter()
+        .find(|candidate| candidate.carpool_id == carpool_id)
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "oauth_carpool_not_found",
+                format!("OAuth carpool `{carpool_id}` was not found"),
+                &context,
+            )
+        })?;
+    for workspace_id in &carpool.member_workspace_ids {
+        authz.ensure_manage_tenant(workspace_id, &context)?;
+    }
+    Ok(Json(
+        state
+            .store
+            .remove_oauth_carpool(&carpool_id)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to remove OAuth carpool: {error}"),
+                    &context,
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "oauth_carpool_not_found",
+                    format!("OAuth carpool `{carpool_id}` was not found"),
+                    &context,
+                )
+            })?,
+    ))
+}
+
+async fn read_oauth_sharing_usage(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<OAuthSharingUsageQuery>,
+) -> Result<Json<OAuthSharingUsageResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    if let Some(workspace_id) = query.workspace_id.as_deref() {
+        authz.ensure_read_tenant(workspace_id, &context)?;
+    }
+    let usage = state
+        .store
+        .read_oauth_sharing_usage(OAuthSharingUsageFilters {
+            lease_id: query.lease_id.as_deref(),
+            carpool_id: query.carpool_id.as_deref(),
+            workspace_id: query.workspace_id.as_deref(),
+            provider: query.provider.as_deref(),
+            account_id: query.account_id.as_deref(),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to read OAuth sharing usage: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(usage))
+}
+
 async fn revoke_api_key(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -1610,6 +2172,90 @@ async fn resolve_api_key_for_gateway(
         project_id: resolved.project_id.map(|project_id| project_id.to_string()),
         status: "active".to_string(),
     }))
+}
+
+async fn lease_codex_auth_account_for_gateway(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CodexAuthAccountLeaseRequest>,
+) -> Result<Json<CodexAuthAccountLeaseResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let selection = state
+        .store
+        .select_oauth_pool_account(OAuthPoolSelectionRequest {
+            provider: Some("codex".to_string()),
+            provider_resource_id: request.provider_resource_id.clone(),
+            pool_id: request.pool_id.or(request.provider_resource_id),
+            lease_id: request.lease_id,
+            carpool_id: request.carpool_id,
+            borrower_workspace_id: request.borrower_workspace_id,
+            borrower_user_id: request.borrower_user_id,
+            session_id: request.session_id,
+            model_id: request.model_id,
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to lease Codex auth account: {error}"),
+                &context,
+            )
+        })?;
+    let account = selection.account.ok_or_else(|| {
+        ApiError::not_found(
+            "codex_auth_account_not_found",
+            format!(
+                "no active Codex auth account is available for the requested pool: {}",
+                selection.reason
+            ),
+            &context,
+        )
+    })?;
+    let auth_json = decrypt_codex_auth_json(&account.encrypted_auth_json, &context)?;
+
+    Ok(Json(CodexAuthAccountLeaseResponse {
+        codex_account_id: account.codex_account_id,
+        tenant_id: account.tenant_id.to_string(),
+        project_id: account.project_id.map(|project_id| project_id.to_string()),
+        provider_resource_id: account.provider_resource_id.to_string(),
+        display_name: account.display_name,
+        leased_until: account
+            .leased_until
+            .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string()),
+        reason: selection.reason,
+        lease_id: selection.lease_id,
+        carpool_id: selection.carpool_id,
+        auth_json,
+    }))
+}
+
+async fn select_oauth_pool_account_for_gateway(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<OAuthPoolSelectionRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let selection = state
+        .store
+        .select_oauth_pool_account(request)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to select OAuth pool account: {error}"),
+                &context,
+            )
+        })?;
+    let account = selection.account.map(|account| account.public_view());
+    Ok(Json(serde_json::json!({
+        "account": account,
+        "blocked": selection.blocked,
+        "reason": selection.reason,
+        "lease_id": selection.lease_id,
+        "carpool_id": selection.carpool_id,
+    })))
 }
 
 async fn get_internal_gateway_config(
@@ -2276,6 +2922,394 @@ fn require_internal_gateway_auth(
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn ensure_codex_provider_resource(
+    state: &ControlPlaneState,
+    authz: &ControlPlaneAuthorizer,
+    context: &RequestContext,
+    display_name: &str,
+    tenant_id: &core_domain::TenantId,
+    project_id: Option<&core_domain::ProjectId>,
+    requested_provider_resource_id: Option<&str>,
+    endpoint_base_url: Option<&str>,
+    region: Option<&str>,
+) -> Result<ProviderResourceId, ApiError> {
+    let provider_resource_id = if let Some(provider_resource_id) = requested_provider_resource_id {
+        ProviderResourceId::parse(provider_resource_id).map_err(|error| {
+            ApiError::bad_request(
+                "provider_resource_id_invalid",
+                format!("invalid provider_resource_id: {error}"),
+                context,
+            )
+        })?
+    } else {
+        ProviderResourceId::parse(format!(
+            "prvrsrc_codex_{}_{}",
+            slug_fragment(display_name),
+            context.sequence
+        ))
+        .expect("generated provider_resource_id should be valid")
+    };
+
+    if let Some(existing) = state
+        .store
+        .get_provider_resource(provider_resource_id.as_str())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load provider resource: {error}"),
+                context,
+            )
+        })?
+    {
+        if existing.tenant_id != *tenant_id {
+            return Err(ApiError::forbidden(
+                "tenant_access_denied",
+                format!(
+                    "provider resource `{}` belongs to tenant `{}`",
+                    existing.provider_resource_id, existing.tenant_id
+                ),
+                context,
+            ));
+        }
+        authz.ensure_manage_tenant(existing.tenant_id.as_str(), context)?;
+        return Ok(existing.provider_resource_id);
+    }
+
+    let now = now_rfc3339();
+    let provider_resource = ProviderResource {
+        provider_resource_id: provider_resource_id.clone(),
+        tenant_id: tenant_id.clone(),
+        project_id: project_id.cloned(),
+        provider_id: "chatgpt_web".to_string(),
+        name: format!("Codex account pool - {display_name}"),
+        status: ProviderResourceStatus::Active,
+        provenance_class: ProvenanceClass::UnofficialClientChannel,
+        credential_owner_type: CredentialOwnerType::Tenant,
+        deployment_scope: if project_id.is_some() {
+            DeploymentScope::ProjectDedicated
+        } else {
+            DeploymentScope::TenantDedicated
+        },
+        region: region
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("global")
+            .to_string(),
+        endpoint_base_url: endpoint_base_url
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_CODEX_REVERSE_PROXY_ENDPOINT)
+            .to_string(),
+        auth_kind: AuthKind::SessionBroker,
+        health_state: HealthState::Healthy,
+        health_message: Some("Codex auth.json account accepted into encrypted pool".to_string()),
+        quarantine_reason: None,
+        budget_policy_id: None,
+        capabilities: ProviderCapabilities {
+            supports_streaming: false,
+            supports_tool_calling: true,
+            supports_json_mode: true,
+            supports_realtime: false,
+            supports_response_model_metadata: true,
+        },
+        supported_protocol_families: vec![
+            "openai_chat".to_string(),
+            "openai_responses".to_string(),
+            "openai_images".to_string(),
+        ],
+        is_transit_gateway: true,
+        version: 1,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    provider_resource.validate().map_err(|error| {
+        ApiError::bad_request(
+            "provider_resource_invalid",
+            format!("Codex reverse proxy provider resource is invalid: {error}"),
+            context,
+        )
+    })?;
+    state
+        .store
+        .create_provider_resource(provider_resource)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to create Codex reverse proxy provider resource: {error}"),
+                context,
+            )
+        })?;
+
+    Ok(provider_resource_id)
+}
+
+fn validate_codex_auth_json(auth_json: &Value, context: &RequestContext) -> Result<(), ApiError> {
+    if !auth_json.is_object() {
+        return Err(ApiError::bad_request(
+            "codex_auth_json_invalid",
+            "auth_json must be a JSON object from Codex auth.json".to_string(),
+            context,
+        ));
+    }
+    let serialized = serde_json::to_vec(auth_json).map_err(|error| {
+        ApiError::bad_request(
+            "codex_auth_json_invalid",
+            format!("auth_json must be serializable JSON: {error}"),
+            context,
+        )
+    })?;
+    if serialized.len() > 512 * 1024 {
+        return Err(ApiError::bad_request(
+            "codex_auth_json_too_large",
+            "auth_json must be 512 KiB or smaller".to_string(),
+            context,
+        ));
+    }
+    Ok(())
+}
+
+fn tenant_visible_to_authorizer(authz: &ControlPlaneAuthorizer, tenant_id: Option<&str>) -> bool {
+    tenant_id.is_some_and(|tenant_id| authz.membership(tenant_id).is_some())
+}
+
+fn validate_oauth_pool_provider(provider: &str, context: &RequestContext) -> Result<(), ApiError> {
+    if matches!(provider, "codex" | "gemini" | "claude_code") {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "oauth_pool_provider_invalid",
+            "provider must be one of codex, gemini, or claude_code".to_string(),
+            context,
+        ))
+    }
+}
+
+fn validate_lease_status(status: &str, context: &RequestContext) -> Result<(), ApiError> {
+    if matches!(
+        status,
+        "pending" | "active" | "paused" | "expired" | "revoked"
+    ) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "oauth_sharing_lease_status_invalid",
+            "lease status is not supported".to_string(),
+            context,
+        ))
+    }
+}
+
+fn validate_lease_policy(policy: &str, context: &RequestContext) -> Result<(), ApiError> {
+    if matches!(
+        policy,
+        "fair_share" | "owner_priority" | "borrower_priority"
+    ) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "oauth_sharing_lease_policy_invalid",
+            "lease policy is not supported".to_string(),
+            context,
+        ))
+    }
+}
+
+fn validate_carpool_strategy(strategy: &str, context: &RequestContext) -> Result<(), ApiError> {
+    if matches!(
+        strategy,
+        "fair_share" | "weighted" | "cheapest_ready" | "fastest_ready"
+    ) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "oauth_carpool_strategy_invalid",
+            "carpool strategy is not supported".to_string(),
+            context,
+        ))
+    }
+}
+
+fn encrypt_codex_auth_json(
+    plaintext: &[u8],
+    context: &RequestContext,
+) -> Result<EncryptedSecretBlob, ApiError> {
+    let (key_id, key_bytes) = credential_encryption_key(context)?;
+    let rng = rand::SystemRandom::new();
+    let mut nonce_bytes = [0_u8; 12];
+    rand::SecureRandom::fill(&rng, &mut nonce_bytes).map_err(|_| {
+        ApiError::internal(
+            "credential_encryption_failed",
+            "failed to generate Codex auth encryption nonce".to_string(),
+            context,
+        )
+    })?;
+    let key = aead_key(&key_bytes, context)?;
+    let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+    let mut in_out = plaintext.to_vec();
+    key.seal_in_place_append_tag(nonce, aead::Aad::empty(), &mut in_out)
+        .map_err(|_| {
+            ApiError::internal(
+                "credential_encryption_failed",
+                "failed to encrypt Codex auth.json".to_string(),
+                context,
+            )
+        })?;
+
+    Ok(EncryptedSecretBlob {
+        algorithm: CODEX_AUTH_ENCRYPTION_ALGORITHM.to_string(),
+        key_id,
+        nonce: BASE64.encode(nonce_bytes),
+        ciphertext: BASE64.encode(in_out),
+    })
+}
+
+fn decrypt_codex_auth_json(
+    encrypted: &EncryptedSecretBlob,
+    context: &RequestContext,
+) -> Result<Value, ApiError> {
+    if encrypted.algorithm != CODEX_AUTH_ENCRYPTION_ALGORITHM {
+        return Err(ApiError::internal(
+            "credential_encryption_unsupported",
+            format!(
+                "unsupported Codex auth encryption algorithm `{}`",
+                encrypted.algorithm
+            ),
+            context,
+        ));
+    }
+    let (key_id, key_bytes) = credential_encryption_key(context)?;
+    if encrypted.key_id != key_id {
+        return Err(ApiError::internal(
+            "credential_encryption_key_mismatch",
+            "Codex auth account was encrypted with a different credential key".to_string(),
+            context,
+        ));
+    }
+    let nonce_bytes = BASE64.decode(&encrypted.nonce).map_err(|_| {
+        ApiError::internal(
+            "credential_decryption_failed",
+            "stored Codex auth nonce is invalid".to_string(),
+            context,
+        )
+    })?;
+    let nonce_bytes: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
+        ApiError::internal(
+            "credential_decryption_failed",
+            "stored Codex auth nonce has an invalid length".to_string(),
+            context,
+        )
+    })?;
+    let mut ciphertext = BASE64.decode(&encrypted.ciphertext).map_err(|_| {
+        ApiError::internal(
+            "credential_decryption_failed",
+            "stored Codex auth ciphertext is invalid".to_string(),
+            context,
+        )
+    })?;
+    let key = aead_key(&key_bytes, context)?;
+    let plaintext = key
+        .open_in_place(
+            aead::Nonce::assume_unique_for_key(nonce_bytes),
+            aead::Aad::empty(),
+            &mut ciphertext,
+        )
+        .map_err(|_| {
+            ApiError::internal(
+                "credential_decryption_failed",
+                "failed to decrypt Codex auth.json".to_string(),
+                context,
+            )
+        })?;
+    serde_json::from_slice(plaintext).map_err(|error| {
+        ApiError::internal(
+            "credential_decryption_failed",
+            format!("decrypted Codex auth.json is not valid JSON: {error}"),
+            context,
+        )
+    })
+}
+
+fn credential_encryption_key(context: &RequestContext) -> Result<(String, [u8; 32]), ApiError> {
+    let configured = configured_credential_encryption_key().map_err(|_| {
+        ApiError::internal(
+            "credential_encryption_unconfigured",
+            "CONTROL_PLANE_CREDENTIAL_ENCRYPTION_KEY must be configured to store Codex auth accounts".to_string(),
+            context,
+        )
+    })?;
+    let digest = Sha256::digest(configured.as_bytes());
+    let mut key = [0_u8; 32];
+    key.copy_from_slice(&digest);
+    Ok((format!("sha256:{}", hex_prefix(&digest, 12)), key))
+}
+
+#[cfg(test)]
+#[allow(clippy::unnecessary_wraps)]
+fn configured_credential_encryption_key() -> Result<String, std::env::VarError> {
+    Ok(std::env::var("CONTROL_PLANE_CREDENTIAL_ENCRYPTION_KEY")
+        .or_else(|_| std::env::var("CODEX_AUTH_ENCRYPTION_KEY"))
+        .unwrap_or_else(|_| "huge-router-local-development-codex-auth-key".to_string()))
+}
+
+#[cfg(not(test))]
+fn configured_credential_encryption_key() -> Result<String, std::env::VarError> {
+    std::env::var("CONTROL_PLANE_CREDENTIAL_ENCRYPTION_KEY")
+        .or_else(|_| std::env::var("CODEX_AUTH_ENCRYPTION_KEY"))
+}
+
+fn aead_key(key_bytes: &[u8; 32], context: &RequestContext) -> Result<aead::LessSafeKey, ApiError> {
+    let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, key_bytes).map_err(|_| {
+        ApiError::internal(
+            "credential_encryption_failed",
+            "failed to initialize Codex auth encryption key".to_string(),
+            context,
+        )
+    })?;
+    Ok(aead::LessSafeKey::new(unbound_key))
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    hex_string(&digest)
+}
+
+fn hex_prefix(bytes: &[u8], len: usize) -> String {
+    hex_string(&bytes[..bytes.len().min(len)])
+}
+
+fn hex_string(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
+fn slug_fragment(value: &str) -> String {
+    let slug = value
+        .chars()
+        .filter_map(|character| {
+            if character.is_ascii_alphanumeric() {
+                Some(character.to_ascii_lowercase())
+            } else if character == '-' || character == '_' {
+                Some('_')
+            } else {
+                None
+            }
+        })
+        .take(24)
+        .collect::<String>();
+    if slug.is_empty() {
+        "account".to_string()
+    } else {
+        slug
+    }
 }
 
 async fn load_project(
@@ -3572,6 +4606,68 @@ mod tests {
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
     }
 
+    async fn upload_codex_account_for_test(
+        app: axum::Router,
+        admin_cookie: &str,
+        provider_resource_id: &str,
+    ) -> Value {
+        let upload = app
+            .oneshot(request(
+                "POST",
+                "/v1/codex-auth-accounts",
+                Some(admin_cookie),
+                Some(json!({
+                    "display_name": format!("Codex {provider_resource_id}"),
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider_resource_id": provider_resource_id,
+                    "endpoint_base_url": "https://codex-proxy.example.com/v1",
+                    "region": "global",
+                    "auth_json": {
+                        "OPENAI_API_KEY": "sk-test-secret"
+                    }
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(upload.status(), StatusCode::OK);
+        response_json(upload).await
+    }
+
+    async fn upsert_lease_for_test(
+        app: axum::Router,
+        admin_cookie: &str,
+        lease_id: &str,
+        pool_id: &str,
+        status: &str,
+        turns: u64,
+        expires_at: &str,
+    ) {
+        let response = app
+            .oneshot(request(
+                "POST",
+                "/v1/oauth-sharing-leases",
+                Some(admin_cookie),
+                Some(json!({
+                    "lease_id": lease_id,
+                    "borrower_workspace_id": "tenant_acme",
+                    "provider": "codex",
+                    "pool_id": pool_id,
+                    "status": status,
+                    "starts_at": "2026-04-22T00:00:00Z",
+                    "expires_at": expires_at,
+                    "max_concurrent_runs": 99,
+                    "usage_budget": {
+                        "turns": turns
+                    },
+                    "policy": "fair_share"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
     async fn assert_error(response: axum::response::Response, status: StatusCode, code: &str) {
         assert_eq!(response.status(), status);
         let body = response_json(response).await;
@@ -4611,6 +5707,388 @@ mod tests {
                 .unwrap();
         assert_eq!(disabled_body["status"], "disabled");
         assert_eq!(disabled_body["version"], 3);
+    }
+
+    #[tokio::test]
+    async fn codex_auth_upload_stores_redacted_account_and_internal_lease_decrypts() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let upload = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/codex-auth-accounts",
+                Some(&admin_cookie),
+                Some(json!({
+                    "display_name": "Codex pooled account",
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider_resource_id": "prvrsrc_codex_pool_test",
+                    "endpoint_base_url": "https://codex-proxy.example.com/v1",
+                    "region": "global",
+                    "auth_json": {
+                        "OPENAI_API_KEY": "sk-uploaded-secret",
+                        "tokens": {
+                            "access_token": "access-secret",
+                            "refresh_token": "refresh-secret"
+                        }
+                    }
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(upload.status(), StatusCode::OK);
+        let uploaded = response_json(upload).await;
+        assert_eq!(uploaded["display_name"], "Codex pooled account");
+        assert_eq!(uploaded["provider_resource_id"], "prvrsrc_codex_pool_test");
+        assert!(
+            uploaded["encrypted_auth_json_key_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("sha256:")
+        );
+        assert!(uploaded.get("auth_json").is_none());
+        assert!(uploaded.get("encrypted_auth_json").is_none());
+
+        let list = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/codex-auth-accounts",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(list.status(), StatusCode::OK);
+        let listed = response_json(list).await;
+        assert_eq!(listed["data"].as_array().unwrap().len(), 1);
+        assert!(listed["data"][0].get("auth_json").is_none());
+
+        let lease = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "provider_resource_id": "prvrsrc_codex_pool_test"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(lease.status(), StatusCode::OK);
+        let leased = response_json(lease).await;
+        assert_eq!(leased["provider_resource_id"], "prvrsrc_codex_pool_test");
+        assert_eq!(leased["auth_json"]["OPENAI_API_KEY"], "sk-uploaded-secret");
+        assert_eq!(
+            leased["auth_json"]["tokens"]["refresh_token"],
+            "refresh-secret"
+        );
+        assert!(leased["leased_until"].as_str().unwrap().ends_with('Z'));
+    }
+
+    #[tokio::test]
+    async fn oauth_sharing_active_lease_selects_authorized_account() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        upload_codex_account_for_test(app.clone(), &admin_cookie, "prvrsrc_codex_share").await;
+        upsert_lease_for_test(
+            app.clone(),
+            &admin_cookie,
+            "lease_codex_share",
+            "prvrsrc_codex_share",
+            "active",
+            10,
+            "2999-01-01T00:00:00Z",
+        )
+        .await;
+
+        let lease = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_share",
+                            "borrower_workspace_id": "tenant_acme"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(lease.status(), StatusCode::OK);
+        let leased = response_json(lease).await;
+        assert_eq!(leased["provider_resource_id"], "prvrsrc_codex_share");
+        assert_eq!(leased["lease_id"], "lease_codex_share");
+        assert!(leased["auth_json"].get("OPENAI_API_KEY").is_some());
+        assert!(
+            leased["reason"]
+                .as_str()
+                .unwrap()
+                .contains("authorized lease")
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_sharing_rejects_expired_revoked_and_exhausted_leases() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        upload_codex_account_for_test(app.clone(), &admin_cookie, "prvrsrc_codex_budget").await;
+        upsert_lease_for_test(
+            app.clone(),
+            &admin_cookie,
+            "lease_codex_expired",
+            "prvrsrc_codex_budget",
+            "active",
+            10,
+            "2000-01-01T00:00:00Z",
+        )
+        .await;
+
+        let expired = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_expired",
+                            "borrower_workspace_id": "tenant_acme"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(expired.status(), StatusCode::NOT_FOUND);
+
+        upsert_lease_for_test(
+            app.clone(),
+            &admin_cookie,
+            "lease_codex_budget",
+            "prvrsrc_codex_budget",
+            "active",
+            1,
+            "2999-01-01T00:00:00Z",
+        )
+        .await;
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_budget",
+                            "borrower_workspace_id": "tenant_acme"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let exhausted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_budget",
+                            "borrower_workspace_id": "tenant_acme"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(exhausted.status(), StatusCode::NOT_FOUND);
+
+        let revoked = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/oauth-sharing-leases/lease_codex_budget/revoke",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoked.status(), StatusCode::OK);
+        let after_revoke = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_budget",
+                            "borrower_workspace_id": "tenant_acme"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(after_revoke.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn oauth_sharing_blocks_rate_limited_and_unauthorized_borrowers() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let uploaded =
+            upload_codex_account_for_test(app.clone(), &admin_cookie, "prvrsrc_codex_guard").await;
+        state
+            .store
+            .set_codex_auth_account_runtime_state(
+                uploaded["codex_account_id"].as_str().unwrap(),
+                Some("2999-01-01T00:00:00Z".to_string()),
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        upsert_lease_for_test(
+            app.clone(),
+            &admin_cookie,
+            "lease_codex_guard",
+            "prvrsrc_codex_guard",
+            "active",
+            10,
+            "2999-01-01T00:00:00Z",
+        )
+        .await;
+
+        let rate_limited = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_guard",
+                            "borrower_workspace_id": "tenant_acme"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rate_limited.status(), StatusCode::NOT_FOUND);
+
+        state
+            .store
+            .set_codex_auth_account_runtime_state(
+                uploaded["codex_account_id"].as_str().unwrap(),
+                None,
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        let unauthorized = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "lease_id": "lease_codex_guard",
+                            "borrower_workspace_id": "tenant_northstar"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn oauth_carpool_fair_share_rotates_ready_accounts() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        upload_codex_account_for_test(app.clone(), &admin_cookie, "prvrsrc_codex_a").await;
+        upload_codex_account_for_test(app.clone(), &admin_cookie, "prvrsrc_codex_b").await;
+        let carpool = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/oauth-carpools",
+                Some(&admin_cookie),
+                Some(json!({
+                    "carpool_id": "carpool_codex_test",
+                    "provider": "codex",
+                    "name": "Codex carpool",
+                    "member_workspace_ids": ["tenant_acme"],
+                    "pool_ids": ["prvrsrc_codex_a", "prvrsrc_codex_b"],
+                    "strategy": "fair_share",
+                    "per_member_concurrency_limit": 99,
+                    "per_member_turn_budget": 99,
+                    "enabled": true
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(carpool.status(), StatusCode::OK);
+
+        let mut selected = Vec::new();
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/internal/gateway/codex-account-pool/lease")
+                        .header(AUTHORIZATION, "Bearer test-internal-token")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "carpool_id": "carpool_codex_test",
+                                "borrower_workspace_id": "tenant_acme"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            selected.push(response_json(response).await["provider_resource_id"].clone());
+        }
+
+        assert_ne!(selected[0], selected[1]);
     }
 
     #[tokio::test]

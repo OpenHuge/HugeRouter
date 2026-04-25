@@ -79,6 +79,17 @@ GET    /v1/provider-resources
 POST   /v1/provider-resources
 GET    /v1/provider-resources/:providerResourceId
 PATCH  /v1/provider-resources/:providerResourceId
+GET    /v1/codex-auth-accounts
+POST   /v1/codex-auth-accounts
+GET    /v1/oauth-sharing-leases
+POST   /v1/oauth-sharing-leases
+POST   /v1/oauth-sharing-leases/:leaseId/revoke
+GET    /v1/oauth-carpools
+POST   /v1/oauth-carpools
+DELETE /v1/oauth-carpools/:carpoolId
+GET    /v1/oauth-sharing-usage
+POST   /internal/gateway/oauth-pool/select
+POST   /internal/gateway/codex-account-pool/lease
 
 GET    /v1/budget-policies
 POST   /v1/budget-policies
@@ -146,7 +157,78 @@ Bedrock provider resources use the same payload shape with `provider_id="bedrock
 
 The native Bedrock adapter ignores the generic provider API key and uses the AWS SDK credential chain for credentials and SigV4 signing.
 
-### 21.3.3 Route Simulation Request and Response
+### 21.3.3 Codex Auth Account Pool
+
+`POST /v1/codex-auth-accounts` accepts an uploaded Codex `auth.json`, creates or reuses a `chatgpt_web` transit provider resource, and stores the credential payload encrypted with AES-256-GCM. Public responses only include account metadata, the SHA-256 fingerprint, and the encryption key id.
+
+```json
+{
+  "display_name": "Team Codex account",
+  "tenant_id": "tenant_acme",
+  "project_id": "proj_core",
+  "provider_resource_id": "prvrsrc_codex_team",
+  "endpoint_base_url": "https://chatgpt-reverse-proxy.example.com/v1",
+  "region": "global",
+  "auth_json": {
+    "tokens": {
+      "access_token": "redacted",
+      "refresh_token": "redacted"
+    }
+  }
+}
+```
+
+Reverse-proxy workers lease an account through `POST /internal/gateway/codex-account-pool/lease` with `Authorization: Bearer $CONTROL_PLANE_INTERNAL_TOKEN`. That internal response includes the decrypted `auth_json` and must stay on a private network path. The lease path now delegates to the runtime-owned OAuth pool selector and accepts optional `lease_id`, `carpool_id`, `borrower_workspace_id`, `session_id`, and `model_id` fields. Selection is strict: an expired, revoked, paused, over-budget, over-concurrency, rate-limited, overloaded, temp-unschedulable, disabled, or unauthorized pool context returns a blocked reason and never falls back to an unrelated account.
+
+`POST /internal/gateway/oauth-pool/select` exposes the same selector without decrypted credentials. It returns a public account view plus `reason`, `lease_id`, and `carpool_id` diagnostics, and never includes plaintext API keys or OAuth tokens.
+
+### 21.3.4 Authorized Account Pool Sharing
+
+Sharing is modeled as authorized account pool sharing, team quota carpools, and router scheduling. It is not a public account resale surface and must not be used to hide real usage, bypass provider controls, or avoid rate limits.
+
+`POST /v1/oauth-sharing-leases` upserts a runtime-owned sharing lease:
+
+```json
+{
+  "lease_id": "lease_codex_acme_support",
+  "owner_workspace_id": "tenant_acme",
+  "borrower_workspace_id": "tenant_acme",
+  "provider": "codex",
+  "pool_id": "prvrsrc_codex_team",
+  "allowed_account_ids": ["codexacct_123"],
+  "status": "active",
+  "starts_at": "2026-04-22T00:00:00Z",
+  "expires_at": "2026-05-22T00:00:00Z",
+  "max_concurrent_runs": 2,
+  "usage_budget": {
+    "turns": 100
+  },
+  "policy": "fair_share",
+  "metadata": {}
+}
+```
+
+`POST /v1/oauth-carpools` upserts a team quota carpool:
+
+```json
+{
+  "carpool_id": "carpool_codex_acme",
+  "provider": "codex",
+  "name": "Acme Codex Team Share",
+  "member_workspace_ids": ["tenant_acme"],
+  "pool_ids": ["prvrsrc_codex_team"],
+  "strategy": "fair_share",
+  "member_weights": {},
+  "per_member_concurrency_limit": 2,
+  "per_member_turn_budget": 50,
+  "enabled": true,
+  "metadata": {}
+}
+```
+
+`GET /v1/oauth-sharing-usage` returns runtime-owned usage aggregates and audit events for selects, revokes, and budget blocks. Audit metadata is intentionally secret-free.
+
+### 21.3.5 Route Simulation Request and Response
 
 `POST /v1/route-simulations`
 

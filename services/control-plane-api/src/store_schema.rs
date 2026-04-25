@@ -20,6 +20,10 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "route_receipt_diagnostics",
     "billing_export_jobs",
     "pricing_catalog_entries",
+    "codex_auth_accounts",
+    "oauth_sharing_leases",
+    "oauth_carpools",
+    "oauth_sharing_audit_events",
 ];
 
 pub const MIGRATIONS: &[&str] = &[
@@ -195,5 +199,49 @@ pub const MIGRATIONS: &[&str] = &[
             model_alias_key,
             region_key
         )
+    )",
+    r"CREATE TABLE IF NOT EXISTS codex_auth_accounts (
+        codex_account_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NULL,
+        provider_resource_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        auth_json_sha256 TEXT NOT NULL,
+        encrypted_auth_json JSONB NOT NULL,
+        leased_until TEXT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS oauth_sharing_leases (
+        lease_id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        pool_id TEXT NOT NULL,
+        borrower_workspace_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS oauth_carpools (
+        carpool_id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS oauth_sharing_audit_events (
+        audit_event_id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        lease_id TEXT NULL,
+        carpool_id TEXT NULL,
+        workspace_id TEXT NULL,
+        account_id TEXT NULL,
+        pool_id TEXT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL
     )",
 ];
