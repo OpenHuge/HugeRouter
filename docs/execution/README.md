@@ -4,6 +4,8 @@
 
 This folder turns the architecture specification into an **agent-ready development plan** for the Rust + TanStack Start monorepo, with Turbo for JavaScript workspace orchestration and Mantine as the console UI foundation.
 
+Status note: this pack is retained as historical planning material. The Phase 1 main branch has been narrowed to the trusted AI resource trading platform; route gateway runtime work should continue from the standalone branch documented in [`../product/route-gateway-standalone-branch.md`](../product/route-gateway-standalone-branch.md).
+
 ## What this pack contains
 
 - a multi-phase delivery roadmap

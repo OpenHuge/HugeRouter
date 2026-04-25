@@ -4,6 +4,7 @@ import type {
   MerchantShopView,
   MerchantWorkspaceData,
   ReplayCapsuleView,
+  TradeOrderView,
   TrialConnectionView,
 } from "../control-plane/types";
 import { EmptyCollectionState } from "../control-plane/route-state";
@@ -12,11 +13,11 @@ export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
   return (
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
-        <Text fw={700}>Shops</Text>
+        <Text fw={700}>Account Library Vendors</Text>
         {shops.length === 0 ? (
           <EmptyCollectionState
-            description="Open your first small shop to start listing card-secret products."
-            title="No shops"
+            description="Create a vendor profile before submitting account or access listings."
+            title="No vendor profiles"
           />
         ) : (
           <Table striped withRowBorders>
@@ -24,6 +25,9 @@ export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
               <Table.Tr>
                 <Table.Th>Shop</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th>Identity</Table.Th>
+                <Table.Th>Deposit</Table.Th>
+                <Table.Th>Disputes</Table.Th>
                 <Table.Th>Slug</Table.Th>
                 <Table.Th>Fulfillment</Table.Th>
               </Table.Tr>
@@ -38,6 +42,9 @@ export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
                     </Text>
                   </Table.Td>
                   <Table.Td>{shop.status}</Table.Td>
+                  <Table.Td>{shop.identityLevel}</Table.Td>
+                  <Table.Td>${shop.guaranteeDepositUsd}</Table.Td>
+                  <Table.Td>{(shop.disputeRateBps / 100).toFixed(2)}%</Table.Td>
                   <Table.Td>{shop.slug}</Table.Td>
                   <Table.Td>{shop.fulfillmentMode}</Table.Td>
                 </Table.Tr>
@@ -58,11 +65,11 @@ export function CardProductTable({
   return (
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
-        <Text fw={700}>Card Products</Text>
+        <Text fw={700}>Account Library Listings</Text>
         {products.length === 0 ? (
           <EmptyCollectionState
-            description="Create a card-secret product after your merchant shop is ready."
-            title="No card products"
+            description="Create an approved listing after the vendor profile is ready."
+            title="No account listings"
           />
         ) : (
           <Table striped withRowBorders>
@@ -70,6 +77,7 @@ export function CardProductTable({
               <Table.Tr>
                 <Table.Th>Product</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th>Trust</Table.Th>
                 <Table.Th>Inventory</Table.Th>
                 <Table.Th>Face Value</Table.Th>
                 <Table.Th>Retail Price</Table.Th>
@@ -85,9 +93,61 @@ export function CardProductTable({
                     </Text>
                   </Table.Td>
                   <Table.Td>{product.status}</Table.Td>
+                  <Table.Td>
+                    <Text>{product.reviewStatus}</Text>
+                    <Text c="dimmed" size="sm">
+                      {product.riskTier} / {product.escrowMode}
+                    </Text>
+                  </Table.Td>
                   <Table.Td>{product.inventoryCount}</Table.Td>
                   <Table.Td>${product.faceValueUsd}</Table.Td>
                   <Table.Td>${product.retailPriceUsd}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
+export function TradeOrderTable({ orders }: { orders: TradeOrderView[] }) {
+  return (
+    <Card padding="lg" radius="md" shadow="sm">
+      <Stack>
+        <Text fw={700}>Account Library Orders</Text>
+        {orders.length === 0 ? (
+          <EmptyCollectionState
+            description="Protected orders appear after a buyer funds an approved account listing."
+            title="No protected orders"
+          />
+        ) : (
+          <Table striped withRowBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Order</Table.Th>
+                <Table.Th>State</Table.Th>
+                <Table.Th>Escrow</Table.Th>
+                <Table.Th>Evidence</Table.Th>
+                <Table.Th>Dispute</Table.Th>
+                <Table.Th>Amount</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {orders.map((order) => (
+                <Table.Tr key={order.tradeOrderId}>
+                  <Table.Td>
+                    <Text fw={600}>{order.tradeOrderId}</Text>
+                    <Text c="dimmed" size="sm">
+                      {order.buyerAlias} / {order.sellerAlias}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>{order.state}</Table.Td>
+                  <Table.Td>{order.escrowMode}</Table.Td>
+                  <Table.Td>{order.evidenceState}</Table.Td>
+                  <Table.Td>{order.disputeState}</Table.Td>
+                  <Table.Td>${order.orderAmountUsd}</Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
@@ -106,11 +166,11 @@ export function TrialConnectionTable({
   return (
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
-        <Text fw={700}>Trial Connections</Text>
+        <Text fw={700}>Relay Library Sources</Text>
         {connections.length === 0 ? (
           <EmptyCollectionState
-            description="Attach a dedicated test relay before running evaluation."
-            title="No trial connections"
+            description="Register a dedicated test relay before running quality checks."
+            title="No relay sources"
           />
         ) : (
           <Table striped withRowBorders>
@@ -158,11 +218,11 @@ export function RelayEvaluationTable({
   return (
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
-        <Text fw={700}>Recent Evaluations</Text>
+        <Text fw={700}>Relay Library Evaluations</Text>
         {workspace.recentEvaluations.length === 0 ? (
           <EmptyCollectionState
-            description="Run your first evaluation to produce replay-backed merchant evidence."
-            title="No evaluations"
+            description="Run your first evaluation to produce replay-backed relay trust evidence."
+            title="No relay evaluations"
           />
         ) : (
           <Table striped withRowBorders>
@@ -228,7 +288,7 @@ export function ReplayCapsuleDetailCard({
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
         <Group justify="space-between">
-          <Text fw={700}>Replay Capsule</Text>
+          <Text fw={700}>Info Library Evidence Capsule</Text>
           {replayCapsule ? (
             <Badge color="teal" variant="light">
               {replayCapsule.redactionTier}
@@ -237,8 +297,8 @@ export function ReplayCapsuleDetailCard({
         </Group>
         {!replayCapsule ? (
           <EmptyCollectionState
-            description="Open a replay capsule from the evaluation table to inspect the redacted request shape and upstream error hint."
-            title="No replay capsule selected"
+            description="Open a relay evidence capsule to inspect the redacted request shape and upstream error hint."
+            title="No evidence capsule selected"
           />
         ) : (
           <>

@@ -29,7 +29,7 @@ stack_services_for_mode() {
     runtime)
       printf '%s\n' \
         postgres redis nats \
-        control-plane-api gateway-api ledger-worker route-receipt-worker \
+        control-plane-api ledger-worker route-receipt-worker \
         routing-worker edge-probe audit-worker notification-worker
       ;;
     observability)
@@ -38,7 +38,7 @@ stack_services_for_mode() {
     full)
       printf '%s\n' \
         postgres redis nats \
-        control-plane-api gateway-api ledger-worker route-receipt-worker \
+        control-plane-api ledger-worker route-receipt-worker \
         routing-worker edge-probe audit-worker notification-worker \
         otel-collector alertmanager prometheus grafana
       ;;

@@ -74,7 +74,6 @@ Feature implementation should not begin until these files or directories exist:
 - `crates/runtime-composition`
 - `crates/protocol-ir`
 - `crates/provider-traits`
-- `services/gateway-api`
 - `services/control-plane-api`
 
 ## 5. First Week Implementation Order
@@ -88,7 +87,7 @@ Recommended implementation order:
 5. add `src/start.ts` with global TanStack Start middleware
 6. scaffold `crates/plugin-sdk`, `plugin-registry`, and `runtime-composition`
 7. scaffold `crates/protocol-ir` and `provider-traits`
-8. scaffold `services/gateway-api` and `services/control-plane-api`
+8. scaffold `services/control-plane-api`
 9. wire Turbo tasks, outputs, and CI cache settings
 10. add local stack profiles, telemetry bootstrap, and schema generation pipeline
 

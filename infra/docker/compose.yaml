@@ -70,40 +70,6 @@ services:
       retries: 10
     restart: unless-stopped
 
-  gateway-api:
-    profiles: ["runtime"]
-    build:
-      context: ../..
-      dockerfile: Dockerfile.rust-service
-      args:
-        SERVICE_NAME: gateway-api
-        BIN_NAME: gateway-api
-    environment:
-      GATEWAY_API_ADDR: 0.0.0.0:8080
-      CONTROL_PLANE_BASE_URL: http://control-plane-api:8081
-      CONTROL_PLANE_INTERNAL_TOKEN: ${CONTROL_PLANE_INTERNAL_TOKEN:-change-me}
-      GATEWAY_NATS_URL: nats://nats:4222
-      GATEWAY_OPENAI_API_KEY: ${GATEWAY_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
-      GATEWAY_ANTHROPIC_API_KEY: ${GATEWAY_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}
-      GATEWAY_GEMINI_API_KEY: ${GATEWAY_GEMINI_API_KEY:-${GEMINI_API_KEY:-}}
-      GATEWAY_OPENAI_MODEL: ${GATEWAY_OPENAI_MODEL:-gpt-4.1-mini}
-      GATEWAY_ANTHROPIC_MODEL: ${GATEWAY_ANTHROPIC_MODEL:-claude-3-opus}
-      GATEWAY_GEMINI_MODEL: ${GATEWAY_GEMINI_MODEL:-gemini-1.5-pro}
-      RUST_LOG: ${GATEWAY_RUST_LOG:-info}
-    ports:
-      - "${GATEWAY_PORT:-8080}:8080"
-    depends_on:
-      nats:
-        condition: service_healthy
-      control-plane-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
   ledger-worker:
     profiles: ["runtime"]
     build:
@@ -172,7 +138,7 @@ services:
         BIN_NAME: edge-probe
     environment:
       EDGE_PROBE_NATS_URL: nats://nats:4222
-      EDGE_PROBE_TARGET_URL: ${EDGE_PROBE_TARGET_URL:-http://gateway-api:8080/healthz}
+      EDGE_PROBE_TARGET_URL: ${EDGE_PROBE_TARGET_URL:-http://control-plane-api:8081/healthz}
       EDGE_PROBE_PROVIDER_RESOURCE_ID: ${EDGE_PROBE_PROVIDER_RESOURCE_ID:-prvrsrc_openai_primary}
       EDGE_PROBE_PROBE_MODE: ${EDGE_PROBE_PROBE_MODE:-cheap_health}
       EDGE_PROBE_INTERVAL_MS: ${EDGE_PROBE_INTERVAL_MS:-30000}
@@ -182,7 +148,7 @@ services:
     depends_on:
       nats:
         condition: service_healthy
-      gateway-api:
+      control-plane-api:
         condition: service_healthy
     restart: unless-stopped
 

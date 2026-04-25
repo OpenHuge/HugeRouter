@@ -7,9 +7,7 @@
 /crates/ @byoungd
 /services/ @byoungd
 
-# Gateway and protocol-sensitive paths.
-/services/gateway-api/ @byoungd
-/services/realtime-gateway/ @byoungd
+# Protocol-sensitive paths.
 /crates/protocol-*/ @byoungd
 /crates/provider-*/ @byoungd
 /schemas/ @byoungd

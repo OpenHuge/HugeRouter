@@ -12,12 +12,6 @@ import {
   emailLoginCompleteRequestSchema,
   emailLoginStartRequestSchema,
   emailLoginStartResponseSchema,
-  gatewayAnthropicMessagesRequestSchema,
-  gatewayAnthropicMessagesResponseSchema,
-  gatewayChatRequestSchema,
-  gatewayChatResponseSchema,
-  gatewayGeminiGenerateContentRequestSchema,
-  gatewayGeminiGenerateContentResponseSchema,
   logoutResponseSchema,
   oauthCallbackRequestSchema,
   oauthLoginStartRequestSchema,
@@ -52,12 +46,6 @@ import {
   type EmailLoginStartRequest,
   type EmailLoginStartResponse,
   type ErrorEnvelope,
-  type GatewayAnthropicMessagesRequest,
-  type GatewayAnthropicMessagesResponse,
-  type GatewayChatRequest,
-  type GatewayChatResponse,
-  type GatewayGeminiGenerateContentRequest,
-  type GatewayGeminiGenerateContentResponse,
   type LogoutResponse,
   type OAuthCallbackRequest,
   type OAuthLoginStartRequest,
@@ -82,13 +70,11 @@ import {
 import {
   CONTRACT_DIGEST,
   CONTRACT_VERSION,
-  CONTROL_PLANE_OPERATIONS,
-  GATEWAY_OPERATIONS
+  CONTROL_PLANE_OPERATIONS
 } from './generated/operation-meta.ts'
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 type OperationId = (typeof CONTROL_PLANE_OPERATIONS)[number]['id']
-type GatewayOperationId = (typeof GATEWAY_OPERATIONS)[number]['id']
 
 export class ContractApiError extends Error {
   readonly status: number
@@ -208,32 +194,10 @@ export type ControlPlaneClient = {
   downloadBillingExport: (exportJobId: string) => Promise<string>
 }
 
-export type GatewayClient = {
-  readonly contractVersion: typeof CONTRACT_VERSION
-  readonly contractDigest: typeof CONTRACT_DIGEST
-  createChatCompletion: (
-    request: GatewayChatRequest
-  ) => Promise<GatewayChatResponse>
-  createAnthropicMessages: (
-    request: GatewayAnthropicMessagesRequest
-  ) => Promise<GatewayAnthropicMessagesResponse>
-  createGeminiGenerateContent: (
-    request: GatewayGeminiGenerateContentRequest
-  ) => Promise<GatewayGeminiGenerateContentResponse>
-}
-
 const resolveOperation = (id: OperationId) => {
   const operation = CONTROL_PLANE_OPERATIONS.find((candidate) => candidate.id === id)
   if (!operation) {
     throw new Error(`Missing control-plane operation metadata for ${id}`)
-  }
-  return operation
-}
-
-const resolveGatewayOperation = (id: GatewayOperationId) => {
-  const operation = GATEWAY_OPERATIONS.find((candidate) => candidate.id === id)
-  if (!operation) {
-    throw new Error(`Missing gateway operation metadata for ${id}`)
   }
   return operation
 }
@@ -769,59 +733,6 @@ export const createControlPlaneClient = (
   }
 }
 
-export const createGatewayClient = (
-  options: ClientOptions = {
-    baseUrl: ''
-  }
-): GatewayClient => {
-  const fetchImpl = options.fetch ?? defaultFetch()
-
-  return {
-    contractVersion: CONTRACT_VERSION,
-    contractDigest: CONTRACT_DIGEST,
-    async createChatCompletion(request) {
-      const operation = resolveGatewayOperation('createChatCompletion')
-      return requestJson({
-        baseUrl: options.baseUrl,
-        fetchImpl,
-        headers: options.headers,
-        method: operation.method,
-        path: operation.path,
-        body: gatewayChatRequestSchema.parse(request),
-        parse: (payload) => gatewayChatResponseSchema.parse(payload)
-      })
-    },
-    async createAnthropicMessages(request) {
-      const operation = resolveGatewayOperation('createAnthropicMessages')
-      return requestJson({
-        baseUrl: options.baseUrl,
-        fetchImpl,
-        headers: options.headers,
-        method: operation.method,
-        path: operation.path,
-        body: gatewayAnthropicMessagesRequestSchema.parse(request),
-        parse: (payload) => gatewayAnthropicMessagesResponseSchema.parse(payload)
-      })
-    },
-    async createGeminiGenerateContent(request) {
-      const operation = resolveGatewayOperation('createGeminiGenerateContent')
-      const parsedRequest = gatewayGeminiGenerateContentRequestSchema.parse(request)
-      return requestJson({
-        baseUrl: options.baseUrl,
-        fetchImpl,
-        headers: options.headers,
-        method: operation.method,
-        path: operation.path,
-        params: {
-          model: parsedRequest.model
-        },
-        body: parsedRequest,
-        parse: (payload) => gatewayGeminiGenerateContentResponseSchema.parse(payload)
-      })
-    }
-  }
-}
-
 const expectType = <Expected>(value: Expected) => value
 
 void expectType<Project[]>([] as Awaited<ReturnType<ControlPlaneClient['listProjects']>>)
@@ -850,10 +761,3 @@ void expectType<BillingExportJobsResponse>(
 void expectType<BillingExportJobResponse>(
   {} as Awaited<ReturnType<ControlPlaneClient['getBillingExport']>>
 )
-void expectType<GatewayAnthropicMessagesRequest>(
-  {} as Parameters<GatewayClient['createAnthropicMessages']>[0]
-)
-void expectType<GatewayGeminiGenerateContentRequest>(
-  {} as Parameters<GatewayClient['createGeminiGenerateContent']>[0]
-)
-void expectType<GatewayChatRequest>({} as Parameters<GatewayClient['createChatCompletion']>[0])

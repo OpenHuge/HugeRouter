@@ -329,7 +329,7 @@ mod tests {
             message_type: RouteReceiptRecordedMessageType::RouteReceiptRecorded,
             schema_version: 1,
             occurred_at: "2026-04-23T10:00:00Z".to_string(),
-            producer: core_domain::ServiceName::parse("gateway-api").unwrap(),
+            producer: core_domain::ServiceName::parse("control-plane-api").unwrap(),
             trace_id: Some("trace_123".to_string()),
             request_id: Some("req_123".to_string()),
             idempotency_key: "routercpt_123:recorded".to_string(),

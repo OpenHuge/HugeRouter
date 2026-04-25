@@ -1,5 +1,5 @@
 export const CONTRACT_VERSION = "v1" as const;
-export const CONTRACT_DIGEST = "5fe6283775951264b29ffcc97f92496356c265f5e7e6a7e201dedab4c7ce3f78" as const;
+export const CONTRACT_DIGEST = "19ed811c7a14ca8e968def62d706afd7fe2f0e492527319689210351e05a3f8f" as const;
 export const CONTROL_PLANE_OPERATIONS = [
 { id: 'listTenants', method: 'GET', path: '/v1/tenants' },
 { id: 'listProjects', method: 'GET', path: '/v1/projects' },
@@ -21,9 +21,4 @@ export const CONTROL_PLANE_OPERATIONS = [
 { id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{route_receipt_id}' },
 { id: 'getRouteDiagnostics', method: 'GET', path: '/v1/route-diagnostics/{route_policy_id}' },
 { id: 'getRouteReceiptDiagnostics', method: 'GET', path: '/v1/route-receipts/{route_receipt_id}/diagnostics' },
-] as const;
-export const GATEWAY_OPERATIONS = [
-{ id: 'createChatCompletion', method: 'POST', path: '/v1/chat/completions' },
-{ id: 'createAnthropicMessages', method: 'POST', path: '/v1/messages' },
-{ id: 'createGeminiGenerateContent', method: 'POST', path: '/v1beta/models/{model}:generateContent' },
 ] as const;

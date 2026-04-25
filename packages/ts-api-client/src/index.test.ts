@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import {
-  ContractApiError,
-  createControlPlaneClient,
-  createGatewayClient
-} from './index.ts'
+import { createControlPlaneClient } from './index.ts'
 
 const readJson = (relativePath: string) =>
   JSON.parse(
@@ -19,6 +15,13 @@ const jsonResponse = (status: number, payload: unknown) =>
       'content-type': 'application/json'
     }
   })
+
+const errorResponse = {
+  error: {
+    code: 'not_found',
+    message: 'Not found'
+  }
+}
 
 const resolveRequestUrl = (input: RequestInfo | URL) =>
   typeof input === 'string'
@@ -97,9 +100,7 @@ void test('control-plane client resolves the documented endpoints and parses res
     if (url.endsWith('/v1/route-receipts/routercpt_123/diagnostics')) {
       return Promise.resolve(jsonResponse(200, routeReceiptDiagnosticsResponse))
     }
-    return Promise.resolve(
-      jsonResponse(404, readJson('../../../schemas/examples/gateway/error.response.json'))
-    )
+    return Promise.resolve(jsonResponse(404, errorResponse))
   }
 
   const client = createControlPlaneClient({
@@ -166,82 +167,6 @@ void test('control-plane client resolves the documented endpoints and parses res
   ])
 })
 
-void test('gateway client validates requests and normalizes contract errors', async () => {
-  const gatewayRequest = readJson('../../../schemas/examples/gateway/chat.request.json')
-  const gatewayResponse = readJson('../../../schemas/examples/gateway/chat.response.json')
-  const anthropicRequest = readJson('../../../schemas/examples/gateway/anthropic-messages.request.json')
-  const anthropicResponse = readJson('../../../schemas/examples/gateway/anthropic-messages.response.json')
-  const geminiRequest = readJson('../../../schemas/examples/gateway/gemini-generate-content.request.json')
-  const geminiResponse = readJson('../../../schemas/examples/gateway/gemini-generate-content.response.json')
-  const errorResponse = readJson('../../../schemas/examples/gateway/error.response.json')
-  const calls: Array<{ url: string; method?: string }> = []
-
-  const client = createGatewayClient({
-    baseUrl: 'https://gateway.example.test',
-    fetch: (url, init) => {
-      calls.push({ url: resolveRequestUrl(url), method: init?.method })
-
-      return Promise.resolve(jsonResponse(200, gatewayResponse))
-    }
-  })
-
-  const response = await client.createChatCompletion(gatewayRequest as never)
-  assert.equal(response.provider_response_id, 'resp_openai_123')
-  assert.equal(calls[0]?.url, 'https://gateway.example.test/v1/chat/completions')
-  assert.equal(calls[0]?.method, 'POST')
-
-  const failingClient = createGatewayClient({
-    baseUrl: 'https://gateway.example.test',
-    fetch: (url, init) => {
-      calls.push({ url: resolveRequestUrl(url), method: init?.method })
-
-      return Promise.resolve(jsonResponse(422, errorResponse))
-    }
-  })
-
-  await assert.rejects(
-    () => failingClient.createChatCompletion(gatewayRequest as never),
-    (error: unknown) => {
-      assert.ok(error instanceof ContractApiError)
-      assert.equal(error.status, 422)
-      assert.equal(error.envelope.error.code, 'validation_failed')
-      return true
-    }
-  )
-  assert.equal(calls[1]?.url, 'https://gateway.example.test/v1/chat/completions')
-
-  const anthropicClient = createGatewayClient({
-    baseUrl: 'https://gateway.example.test',
-    fetch: (url, init) => {
-      calls.push({ url: resolveRequestUrl(url), method: init?.method })
-
-      return Promise.resolve(jsonResponse(200, anthropicResponse))
-    }
-  })
-
-  const anthropicResult = await anthropicClient.createAnthropicMessages(anthropicRequest as never)
-  assert.equal(anthropicResult.id, 'msg_123')
-  assert.equal(calls[2]?.url, 'https://gateway.example.test/v1/messages')
-  assert.equal(calls[2]?.method, 'POST')
-
-  const geminiClient = createGatewayClient({
-    baseUrl: 'https://gateway.example.test',
-    fetch: (url, init) => {
-      calls.push({ url: resolveRequestUrl(url), method: init?.method })
-
-      return Promise.resolve(jsonResponse(200, geminiResponse))
-    }
-  })
-
-  const geminiResult = await geminiClient.createGeminiGenerateContent(geminiRequest as never)
-  assert.equal(geminiResult.responseId, 'resp_gemini_123')
-  assert.equal(
-    calls[3]?.url,
-    'https://gateway.example.test/v1beta/models/gemini-1.5-pro:generateContent'
-  )
-  assert.equal(calls[3]?.method, 'POST')
-})
-
 void test('control-plane auth session endpoint is requested and parsed', async () => {
   const sessionResponse = readJson('../../../schemas/examples/auth/session-response.json')
   const requests: Array<{ url: string; init?: RequestInit }> = []
@@ -256,9 +181,7 @@ void test('control-plane auth session endpoint is requested and parsed', async (
         return Promise.resolve(jsonResponse(200, sessionResponse))
       }
 
-      return Promise.resolve(
-        jsonResponse(404, readJson('../../../schemas/examples/gateway/error.response.json'))
-      )
+      return Promise.resolve(jsonResponse(404, errorResponse))
     }
   })
 

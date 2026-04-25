@@ -49,25 +49,25 @@ export function CardProductCard({
   return (
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
-        <Text fw={700}>Add a card product</Text>
+        <Text fw={700}>Add an account-library listing</Text>
         {shops.length === 0 ? (
           <EmptyCollectionState
-            description="Create a shop first, then attach card-secret products for that storefront."
-            title="No merchant shop yet"
+            description="Create a vendor profile before submitting account or access listings."
+            title="No vendor profile yet"
           />
         ) : (
           <>
             <Group align="flex-start" grow>
               <Stack gap="xs">
                 <TextInput
-                  label="Card product id"
+                  label="Listing id"
                   onChange={(event) =>
                     setCardForm((current) => ({
                       ...current,
                       cardProductId: event.currentTarget.value,
                     }))
                   }
-                  placeholder="cardprod_trial_pack"
+                  placeholder="cardprod_ai_trial_pack"
                   value={cardForm.cardProductId}
                 />
                 <FieldErrorText error={cardErrors.cardProductId} />
@@ -78,7 +78,7 @@ export function CardProductCard({
                     label: `${shop.displayName} (${shop.merchantShopId})`,
                     value: shop.merchantShopId,
                   }))}
-                  label="Merchant shop"
+                  label="Vendor profile"
                   onChange={(value) =>
                     setCardForm((current) => ({
                       ...current,
@@ -100,7 +100,7 @@ export function CardProductCard({
                       title: event.currentTarget.value,
                     }))
                   }
-                  placeholder="Claude Trial Pack"
+                  placeholder="Claude Sonnet Access Pack"
                   value={cardForm.title}
                 />
                 <FieldErrorText error={cardErrors.title} />
@@ -108,10 +108,10 @@ export function CardProductCard({
               <Stack gap="xs">
                 <Select
                   data={[
-                    { label: "Trial enabled", value: "true" },
-                    { label: "Regular product", value: "false" },
+                    { label: "Trial access", value: "true" },
+                    { label: "Standard inventory", value: "false" },
                   ]}
-                  label="Product mode"
+                  label="Listing mode"
                   onChange={(value) =>
                     setCardForm((current) => ({
                       ...current,
@@ -131,7 +131,7 @@ export function CardProductCard({
                   description: event.currentTarget.value,
                 }))
               }
-              placeholder="Starter batch for relay verification"
+              placeholder="Reviewed AI account or access supply with replay-backed trust evidence"
               value={cardForm.description}
             />
             <FieldErrorText error={cardErrors.description} />
@@ -183,7 +183,7 @@ export function CardProductCard({
                 loading={isSubmittingCard}
                 onClick={() => void onCreateCardProduct()}
               >
-                Create card product
+                Create account listing
               </Button>
             </Group>
           </>
@@ -204,19 +204,19 @@ export function RelayEvaluationCard({
     <Card padding="lg" radius="md" shadow="sm">
       <Stack>
         <Group justify="space-between">
-          <Text fw={700}>Run relay evaluation</Text>
+          <Text fw={700}>Run relay-library evaluation</Text>
           <Badge color="blue" variant="light">
             Runner: simulated
           </Badge>
         </Group>
         <Text c="dimmed" size="sm">
-          Each run records a replay capsule so follow-up review can reuse
-          captured evidence instead of repeatedly spending live tokens.
+          Each run records a replay capsule so the relay library can publish
+          trust evidence without repeatedly spending live tokens.
         </Text>
         {trialConnections.length === 0 ? (
           <EmptyCollectionState
-            description="Attach at least one trial relay before running replay-backed evaluation."
-            title="No trial relay yet"
+            description="Register at least one relay source before running replay-backed evaluation."
+            title="No relay source yet"
           />
         ) : (
           <Group align="flex-end">
@@ -225,7 +225,7 @@ export function RelayEvaluationCard({
                 label: `${connection.providerLabel} (${connection.trialConnectionId})`,
                 value: connection.trialConnectionId,
               }))}
-              label="Trial connection"
+              label="Relay source"
               onChange={(value) =>
                 setEvaluationForm({
                   trialConnectionId: value ?? "",
@@ -237,7 +237,7 @@ export function RelayEvaluationCard({
               loading={isSubmittingEvaluation}
               onClick={() => void onRunEvaluation()}
             >
-              Run evaluation
+              Run relay check
             </Button>
           </Group>
         )}

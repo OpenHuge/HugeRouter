@@ -2,7 +2,7 @@
   "contract_version": "v1",
   "generation_command": "pnpm generate",
   "source_of_truth": "Rust crates `core-domain` and `protocol-ir`",
-  "contract_digest": "5fe6283775951264b29ffcc97f92496356c265f5e7e6a7e201dedab4c7ce3f78",
+  "contract_digest": "19ed811c7a14ca8e968def62d706afd7fe2f0e492527319689210351e05a3f8f",
   "stable_contracts": [
     "tenant",
     "project",
@@ -10,8 +10,6 @@
     "route_policy",
     "config_snapshot",
     "chat_request",
-    "gateway_anthropic_messages",
-    "gateway_gemini_generate_content",
     "route_receipt_diagnostics",
     "usage_summary",
     "usage_breakdown",
@@ -38,8 +36,7 @@
     "packages/ts-api-client/src/generated/operation-meta.ts"
   ],
   "openapi_documents": [
-    "schemas/openapi/control-plane-v1.openapi.json",
-    "schemas/openapi/gateway-v1.openapi.json"
+    "schemas/openapi/control-plane-v1.openapi.json"
   ],
   "json_schema_documents": [
     "schemas/jsonschema/tenant.v1.schema.json",
@@ -54,14 +51,6 @@
     "schemas/jsonschema/normalized-error.v1.schema.json",
     "schemas/jsonschema/error-envelope.v1.schema.json",
     "schemas/jsonschema/chat-request.v1.schema.json",
-    "schemas/jsonschema/gateway-chat-request.v1.schema.json",
-    "schemas/jsonschema/gateway-chat-response.v1.schema.json",
-    "schemas/jsonschema/gateway-anthropic-messages-request.v1.schema.json",
-    "schemas/jsonschema/gateway-anthropic-messages-response.v1.schema.json",
-    "schemas/jsonschema/gateway-anthropic-messages-error.v1.schema.json",
-    "schemas/jsonschema/gateway-gemini-generate-content-request.v1.schema.json",
-    "schemas/jsonschema/gateway-gemini-generate-content-response.v1.schema.json",
-    "schemas/jsonschema/gateway-gemini-generate-content-error.v1.schema.json",
     "schemas/jsonschema/route-receipt-diagnostics-response.v1.schema.json",
     "schemas/jsonschema/usage-summary-response.v1.schema.json",
     "schemas/jsonschema/usage-breakdown-response.v1.schema.json",
@@ -88,15 +77,6 @@
     "schemas/examples/control-plane/route-receipt.response.json",
     "schemas/examples/control-plane/route-receipts.response.json",
     "schemas/examples/control-plane/route-diagnostics.response.json",
-    "schemas/examples/gateway/chat.request.json",
-    "schemas/examples/gateway/chat.response.json",
-    "schemas/examples/gateway/anthropic-messages.request.json",
-    "schemas/examples/gateway/anthropic-messages.response.json",
-    "schemas/examples/gateway/anthropic-messages.error.response.json",
-    "schemas/examples/gateway/gemini-generate-content.request.json",
-    "schemas/examples/gateway/gemini-generate-content.response.json",
-    "schemas/examples/gateway/gemini-generate-content.error.response.json",
-    "schemas/examples/gateway/error.response.json",
     "schemas/examples/control-plane/route-receipt-diagnostics.response.json",
     "schemas/examples/control-plane/usage-summary.response.json",
     "schemas/examples/control-plane/usage-breakdown.response.json",

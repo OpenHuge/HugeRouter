@@ -128,7 +128,12 @@ describe("console data service", () => {
 
     expect(workspace.merchantEnabled).toBe(true);
     expect(workspace.shops[0]?.merchantShopId).toBe("mshop_acme");
-    expect(workspace.cardProducts[0]?.cardProductId).toBe("cardprod_acme_trial");
+    expect(workspace.shops[0]?.identityLevel).toBe("l2_kyc");
+    expect(workspace.cardProducts[0]?.cardProductId).toBe(
+      "cardprod_acme_trial",
+    );
+    expect(workspace.cardProducts[0]?.escrowMode).toBe("platform_ledger");
+    expect(workspace.recentOrders[0]?.state).toBe("escrow_funded");
     expect(workspace.trialConnections[0]?.trialConnectionId).toBe(
       "trialconn_acme_relay",
     );
@@ -249,6 +254,7 @@ describe("console data service", () => {
           tenantId: "tenant_override",
           shops: [],
           cardProducts: [],
+          recentOrders: [],
           trialConnections: [],
           recentEvaluations: [],
         });

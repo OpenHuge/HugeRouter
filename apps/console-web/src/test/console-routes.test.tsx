@@ -113,6 +113,29 @@ describe("console routes", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the public product home at the root route", async () => {
+    await renderRoute("/");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /ku0\.com - 库/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "账户库、中转库、信息库构成 ku0 的资源入口",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "三大板块" })).toHaveAttribute(
+      "href",
+      "#categories",
+    );
+    expect(screen.getByRole("link", { name: "登录" })).toHaveAttribute(
+      "href",
+      "/login",
+    );
+  });
+
   it("redirects authenticated tenant users away from admin routes", async () => {
     signIn({
       email: "tenant@acme.dev",
@@ -534,7 +557,9 @@ describe("console routes", () => {
 
     await renderRoute("/app/providers");
 
-    expect(await screen.findByText("Providers unavailable")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Providers unavailable"),
+    ).toBeInTheDocument();
   });
 
   it("renders routes success state for tenant sessions", async () => {
@@ -563,7 +588,9 @@ describe("console routes", () => {
     });
 
     const deferred =
-      createDeferred<Awaited<ReturnType<ConsoleDataService["listRoutePolicies"]>>>();
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["listRoutePolicies"]>>
+      >();
     const baseService = getConsoleDataService();
 
     setConsoleDataServiceForTests({
@@ -643,7 +670,9 @@ describe("console routes", () => {
     expect(
       screen.getByRole("link", { name: "Open route receipts" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Inspect" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Inspect" }).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("admitted")).toBeInTheDocument();
   });
 
@@ -658,16 +687,19 @@ describe("console routes", () => {
     setConsoleDataServiceForTests({
       ...baseService,
       getRouteDiagnostics: async (routePolicyId: string) => {
-        const diagnostics = await baseService.getRouteDiagnostics(routePolicyId);
+        const diagnostics =
+          await baseService.getRouteDiagnostics(routePolicyId);
 
         return {
           ...diagnostics,
           diagnostics: {
             ...diagnostics.diagnostics,
-            recent_receipts: diagnostics.diagnostics.recent_receipts.map((receipt) => ({
-              ...receipt,
-              failure_reason: undefined,
-            })),
+            recent_receipts: diagnostics.diagnostics.recent_receipts.map(
+              (receipt) => ({
+                ...receipt,
+                failure_reason: undefined,
+              }),
+            ),
             route_policy: {
               ...diagnostics.diagnostics.route_policy,
               display_name: "Anthropic Summary",
@@ -678,7 +710,9 @@ describe("console routes", () => {
               provider_resource: {
                 ...target.provider_resource,
                 health_message:
-                  index === 0 ? undefined : target.provider_resource.health_message,
+                  index === 0
+                    ? undefined
+                    : target.provider_resource.health_message,
                 quarantine_reason: undefined,
               },
             })),

@@ -60,7 +60,7 @@ Recommended minimum envelope:
   "message_type": "usage_event.recorded",
   "schema_version": 1,
   "occurred_at": "2026-04-20T00:00:00Z",
-  "producer": "gateway-api",
+  "producer": "control-plane-api",
   "trace_id": "trace_123",
   "request_id": "req_123",
   "idempotency_key": "usageevt_123:final",
@@ -105,14 +105,14 @@ Recommended default:
 
 Examples:
 
-- `route_receipt.recorded` means a gateway routing decision was materialized into a durable receipt payload
+- `route_receipt.recorded` means a resource evaluation or standalone gateway routing decision was materialized into a durable receipt payload
 - `usage_event.recorded` means a usage record was accepted into the authoritative write path
 - `ledger_entry.created` means an immutable ledger artifact now exists
 - `config_snapshot.activated` means a snapshot became eligible for request selection
 
 Current runtime subject convention:
 
-- `events.route_receipt.recorded` carries `route_receipt.recorded` envelopes from `gateway-api` to the receipt persistence worker
+- `events.route_receipt.recorded` carries `route_receipt.recorded` envelopes from the producing control-plane or standalone gateway process to the receipt persistence worker
 
 Should avoid:
 

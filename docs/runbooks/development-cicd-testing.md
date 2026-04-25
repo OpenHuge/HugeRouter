@@ -228,7 +228,7 @@ Shipped baseline:
 - ledger idempotency
 - policy enforcement
 - degraded-mode behavior
-- PI-3 load baselines and deterministic failure scenarios via [`infra/scripts/load-baseline.sh`](../../infra/scripts/load-baseline.sh), [`infra/scripts/failure-injection.sh`](../../infra/scripts/failure-injection.sh), and [`docs/runbooks/load-and-failure-baseline.md`](load-and-failure-baseline.md)
+- PI-3 load baselines and deterministic failure scenarios are deferred to the standalone gateway branch; the Phase 1 main branch keeps only marketplace smoke coverage.
 
 ### 31.3 Frontend Test Focus
 

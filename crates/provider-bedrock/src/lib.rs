@@ -527,7 +527,7 @@ mod tests {
         ProviderExecutionContext {
             request_id: "req_123".to_string(),
             trace_id: "trace_123".to_string(),
-            gateway_service_name: "gateway-api".to_string(),
+            gateway_service_name: "control-plane-api".to_string(),
             gateway_origin: None,
             request_headers: BTreeMap::new(),
             endpoint: ProviderEndpoint {

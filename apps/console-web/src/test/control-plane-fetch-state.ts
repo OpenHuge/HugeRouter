@@ -11,11 +11,13 @@ import {
   merchantShopsInitialState,
   relayEvaluationsInitialState,
   replayCapsulesInitialState,
+  tradeOrdersInitialState,
   trialConnectionsInitialState,
   type CardProductRecord,
   type MerchantShopRecord,
   type RelayEvaluationRecord,
   type ReplayCapsuleRecord,
+  type TradeOrderRecord,
   type TrialConnectionRecord,
 } from "./control-plane-fetch-merchant-fixtures";
 
@@ -37,6 +39,7 @@ export type ControlPlaneMockState = {
   relayEvaluations: RelayEvaluationRecord[];
   replayCapsules: ReplayCapsuleRecord[];
   routePolicies: RoutePolicyRecord[];
+  tradeOrders: TradeOrderRecord[];
   trialConnections: TrialConnectionRecord[];
 };
 
@@ -52,6 +55,7 @@ export function createInitialControlPlaneMockState(): ControlPlaneMockState {
     relayEvaluations: structuredClone(relayEvaluationsInitialState),
     replayCapsules: structuredClone(replayCapsulesInitialState),
     routePolicies: structuredClone(routePoliciesResponse.data),
+    tradeOrders: structuredClone(tradeOrdersInitialState),
     trialConnections: structuredClone(trialConnectionsInitialState),
   };
 }

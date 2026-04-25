@@ -21,6 +21,7 @@ import {
   routePolicySchema,
   routeReceiptSchema,
   type RouteSimulationResponse,
+  tradeOrderSchema,
   trialConnectionSchema,
 } from "@huge-router/ts-shared-schema";
 import type { AuthSessionEnvelope } from "../auth/auth-contract";
@@ -44,6 +45,7 @@ import type {
   RouteReceiptView,
   TenantDetail,
   TenantSummary,
+  TradeOrderView,
   TrialConnectionView,
   UsageBreakdownView,
   UsageDashboardData,
@@ -172,12 +174,7 @@ export type ProviderResourceMutationInput = {
   createdAt?: string;
   deploymentScope: "shared" | "tenant_dedicated" | "project_dedicated";
   endpointBaseUrl: string;
-  healthState:
-    | "healthy"
-    | "degraded"
-    | "quarantined"
-    | "draining"
-    | "disabled";
+  healthState: "healthy" | "degraded" | "quarantined" | "draining" | "disabled";
   name: string;
   projectId?: string;
   providerId: string;
@@ -587,7 +584,10 @@ function mapRoutePolicies(
 
 function routePolicyLabelById(routePolicies: RoutePolicy[]) {
   return new Map(
-    routePolicies.map((policy) => [policy.route_policy_id, policy.display_name]),
+    routePolicies.map((policy) => [
+      policy.route_policy_id,
+      policy.display_name,
+    ]),
   );
 }
 
@@ -793,13 +793,19 @@ function parseApiKeyList(payload: unknown) {
   ]).map(parseApiKeyRecord);
 }
 
-function toMerchantShopView(shop: ReturnType<typeof merchantShopSchema.parse>): MerchantShopView {
+function toMerchantShopView(
+  shop: ReturnType<typeof merchantShopSchema.parse>,
+): MerchantShopView {
   return {
     announcement: shop.announcement,
     createdAt: shop.created_at,
     displayName: shop.display_name,
+    disputeRateBps: shop.dispute_rate_bps,
     fulfillmentMode: shop.fulfillment_mode,
+    guaranteeDepositUsd: shop.guarantee_deposit_usd,
+    identityLevel: shop.identity_level,
     merchantShopId: shop.merchant_shop_id,
+    sellerAlias: shop.seller_alias,
     slug: shop.slug,
     status: shop.status,
     updatedAt: shop.updated_at,
@@ -818,12 +824,36 @@ function toCardProductView(
     faceValueUsd: product.face_value_usd,
     inventoryCount: product.inventory_count,
     merchantShopId: product.merchant_shop_id,
+    escrowMode: product.escrow_mode,
+    evidenceRequirement: product.evidence_requirement,
+    requiredKycLevel: product.required_kyc_level,
+    reviewStatus: product.review_status,
     retailPriceUsd: product.retail_price_usd,
+    riskTier: product.risk_tier,
     status: product.status,
     supportsTrial: product.supports_trial,
     title: product.title,
     updatedAt: product.updated_at,
     version: product.version,
+  };
+}
+
+function toTradeOrderView(
+  order: ReturnType<typeof tradeOrderSchema.parse>,
+): TradeOrderView {
+  return {
+    buyerAlias: order.buyer_alias,
+    cardProductId: order.card_product_id,
+    createdAt: order.created_at,
+    disputeState: order.dispute_state,
+    escrowMode: order.escrow_mode,
+    evidenceState: order.evidence_state,
+    merchantShopId: order.merchant_shop_id,
+    orderAmountUsd: order.order_amount_usd,
+    sellerAlias: order.seller_alias,
+    state: order.state,
+    tradeOrderId: order.trade_order_id,
+    updatedAt: order.updated_at,
   };
 }
 
@@ -877,6 +907,7 @@ function parseMerchantWorkspace(payload: unknown): MerchantWorkspaceData {
     cardProducts: parsed.card_products.map(toCardProductView),
     merchantEnabled: parsed.merchant_enabled,
     recentEvaluations: parsed.recent_evaluations.map(toRelayEvaluationView),
+    recentOrders: parsed.recent_orders.map(toTradeOrderView),
     shops: parsed.shops.map(toMerchantShopView),
     tenantId: parsed.tenant_id,
     trialConnections: parsed.trial_connections.map(toTrialConnectionView),
@@ -1833,9 +1864,9 @@ const defaultConsoleDataService: ConsoleDataService = {
     const tenantRoutePolicies = routePolicies.filter(
       (policy) => policy.tenant_id === tenantId,
     );
-    const tenantRouteReceipts = filterByTenant(await listRouteReceiptsFromControlPlane()).filter(
-      (receipt) => receipt.tenant_id === tenantId,
-    );
+    const tenantRouteReceipts = filterByTenant(
+      await listRouteReceiptsFromControlPlane(),
+    ).filter((receipt) => receipt.tenant_id === tenantId);
     const simulation = await getRouteSimulationOrNull(
       client,
       activeSnapshot?.tenant_id === tenantId ? activeSnapshot : null,
@@ -1893,11 +1924,13 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async listRouteReceipts() {
-    const [routeReceipts, providerResources, routePolicies] = await Promise.all([
-      listRouteReceiptsFromControlPlane(),
-      client.listProviderResources(),
-      client.listRoutePolicies(),
-    ]);
+    const [routeReceipts, providerResources, routePolicies] = await Promise.all(
+      [
+        listRouteReceiptsFromControlPlane(),
+        client.listProviderResources(),
+        client.listRoutePolicies(),
+      ],
+    );
     const filteredReceipts = filterByTenant(routeReceipts).slice(0, 20);
 
     return mapRouteReceipts(
@@ -1949,7 +1982,9 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async createConfigSnapshot(snapshot) {
-    return createConfigSnapshotInControlPlane(toConfigSnapshotPayload(snapshot));
+    return createConfigSnapshotInControlPlane(
+      toConfigSnapshotPayload(snapshot),
+    );
   },
 
   async activateConfigSnapshot(configSnapshotId) {

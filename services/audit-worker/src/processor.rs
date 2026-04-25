@@ -156,11 +156,11 @@ mod tests {
 
     #[test]
     fn parses_json_envelope_metadata() {
-        let payload = br#"{"message_type":"audit_event.created","message_id":"msg_1","producer":"gateway-api"}"#;
+        let payload = br#"{"message_type":"audit_event.created","message_id":"msg_1","producer":"control-plane-api"}"#;
         let envelope = parse_audit_envelope(payload).expect("parse");
         assert_eq!(envelope.message_type, "audit_event.created");
         assert_eq!(envelope.message_id, "msg_1");
-        assert_eq!(envelope.producer, "gateway-api");
+        assert_eq!(envelope.producer, "control-plane-api");
         assert_eq!(envelope.occurred_at, None);
     }
 

@@ -25,7 +25,7 @@ dev-frontend:
   pnpm turbo run dev --filter=console-web
 
 dev-backend:
-  node ./scripts/run-cargo.mjs run -p gateway-api
+  node ./scripts/run-cargo.mjs run -p control-plane-api
 
 dev-ui:
   pnpm turbo run storybook --filter=storybook

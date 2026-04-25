@@ -16,13 +16,14 @@ use axum::{
     routing::{get, post, put},
 };
 use core_domain::{
-    AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, CardDeliveryKind, CardProduct,
-    CardProductId, CardProductStatus, ConfigSnapshot, EmailLoginCompleteRequest,
-    EmailLoginStartRequest, EmailLoginStartResponse, MerchantFulfillmentMode, MerchantShop,
-    MerchantShopId, MerchantShopStatus, OAuthCallbackRequest, OAuthLoginStartRequest,
-    OAuthLoginStartResponse, Project, ProviderResource, ProviderResourceId, RoutePolicy,
-    RoutePolicyId, Tenant, TenantMembership, TenantMembershipRole, TenantMembershipStatus,
-    TrialConnection, TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse,
+    AiProductRiskTier, AuthProvider, AuthProviderLinksResponse, AuthSessionResponse,
+    CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
+    EmailLoginCompleteRequest, EmailLoginStartRequest, EmailLoginStartResponse, EscrowMode,
+    MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus,
+    OAuthCallbackRequest, OAuthLoginStartRequest, OAuthLoginStartResponse, ProductReviewStatus,
+    Project, ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, SellerIdentityLevel,
+    Tenant, TenantMembership, TenantMembershipRole, TenantMembershipStatus, TrialConnection,
+    TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
@@ -406,9 +407,14 @@ pub async fn status() -> Result<String> {
 }
 
 fn app_with_state(state: ControlPlaneState) -> Router {
-    let allow_origin = AllowOrigin::exact(
-        HeaderValue::from_str(&state.frontend_base_url)
-            .unwrap_or_else(|_| HeaderValue::from_static(FRONTEND_BASE_URL)),
+    let allow_origin = AllowOrigin::list(
+        [
+            state.frontend_base_url.as_str(),
+            FRONTEND_BASE_URL,
+            "http://localhost:3000",
+        ]
+        .into_iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok()),
     );
 
     Router::new()
@@ -1124,6 +1130,10 @@ async fn create_merchant_shop(
         tenant_id,
         slug: request.slug,
         display_name: request.display_name,
+        seller_alias: "seller-l2-pending".to_string(),
+        identity_level: SellerIdentityLevel::L2Kyc,
+        guarantee_deposit_usd: "0.00".to_string(),
+        dispute_rate_bps: 0,
         status: MerchantShopStatus::Active,
         announcement: request.announcement,
         fulfillment_mode: MerchantFulfillmentMode::AutoCardSecret,
@@ -1184,6 +1194,12 @@ async fn create_card_product(
         retail_price_usd: request.retail_price_usd,
         delivery_kind: CardDeliveryKind::DirectSecret,
         supports_trial: request.supports_trial,
+        risk_tier: AiProductRiskTier::Green,
+        review_status: ProductReviewStatus::Approved,
+        escrow_mode: EscrowMode::PlatformLedger,
+        required_kyc_level: SellerIdentityLevel::L1Basic,
+        evidence_requirement: "Replay-backed quality evaluation required before promoted listing."
+            .to_string(),
         version: 1,
         created_at: now_rfc3339(),
         updated_at: now_rfc3339(),
@@ -5214,6 +5230,8 @@ mod tests {
 
         assert_eq!(body["data"]["merchant_enabled"], true);
         assert_eq!(body["data"]["shops"][0]["merchant_shop_id"], "mshop_acme");
+        assert_eq!(body["data"]["shops"][0]["identity_level"], "l2_kyc");
+        assert_eq!(body["data"]["recent_orders"][0]["state"], "escrow_funded");
         assert_eq!(
             body["data"]["recent_evaluations"][0]["replay_capsule_id"],
             "replay_acme_relay_eval"

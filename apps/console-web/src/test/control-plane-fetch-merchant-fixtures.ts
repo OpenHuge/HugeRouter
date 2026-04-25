@@ -2,8 +2,12 @@ export type MerchantShopRecord = {
   announcement?: string;
   created_at: string;
   display_name: string;
+  dispute_rate_bps: number;
   fulfillment_mode: string;
+  guarantee_deposit_usd: string;
+  identity_level: string;
   merchant_shop_id: string;
+  seller_alias: string;
   slug: string;
   status: string;
   tenant_id: string;
@@ -16,16 +20,37 @@ export type CardProductRecord = {
   created_at: string;
   delivery_kind: string;
   description: string;
+  escrow_mode: string;
+  evidence_requirement: string;
   face_value_usd: string;
   inventory_count: number;
   merchant_shop_id: string;
+  required_kyc_level: string;
   retail_price_usd: string;
+  review_status: string;
+  risk_tier: string;
   status: string;
   supports_trial: boolean;
   tenant_id: string;
   title: string;
   updated_at: string;
   version: number;
+};
+
+export type TradeOrderRecord = {
+  trade_order_id: string;
+  tenant_id: string;
+  merchant_shop_id: string;
+  card_product_id: string;
+  buyer_alias: string;
+  seller_alias: string;
+  state: string;
+  escrow_mode: string;
+  evidence_state: string;
+  dispute_state: string;
+  order_amount_usd: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type TrialConnectionRecord = {
@@ -88,6 +113,10 @@ export const merchantShopsInitialState: MerchantShopRecord[] = [
     tenant_id: "tenant_acme",
     slug: "acme-small-shop",
     display_name: "Acme Small Shop",
+    seller_alias: "acme-verified",
+    identity_level: "l2_kyc",
+    guarantee_deposit_usd: "250.00",
+    dispute_rate_bps: 125,
     status: "active",
     announcement: "Fresh relay trial cards with replay-backed evaluation.",
     fulfillment_mode: "auto_card_secret",
@@ -111,7 +140,31 @@ export const cardProductsInitialState: CardProductRecord[] = [
     retail_price_usd: "1.99",
     delivery_kind: "direct_secret",
     supports_trial: true,
+    risk_tier: "green",
+    review_status: "approved",
+    escrow_mode: "platform_ledger",
+    required_kyc_level: "l1_basic",
+    evidence_requirement:
+      "Replay capsule and trial-key proof required before exposure.",
     version: 1,
+    created_at: "2026-04-22T00:00:00Z",
+    updated_at: "2026-04-22T00:00:00Z",
+  },
+];
+
+export const tradeOrdersInitialState: TradeOrderRecord[] = [
+  {
+    trade_order_id: "tradeord_acme_trial_001",
+    tenant_id: "tenant_acme",
+    merchant_shop_id: "mshop_acme",
+    card_product_id: "cardprod_acme_trial",
+    buyer_alias: "buyer-l1-8291",
+    seller_alias: "acme-verified",
+    state: "escrow_funded",
+    escrow_mode: "platform_ledger",
+    evidence_state: "required",
+    dispute_state: "none",
+    order_amount_usd: "1.99",
     created_at: "2026-04-22T00:00:00Z",
     updated_at: "2026-04-22T00:00:00Z",
   },

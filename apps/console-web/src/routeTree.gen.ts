@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginCallbackRouteImport } from './routes/login.callback'
 import { Route as AppUsageRouteImport } from './routes/app.usage'
 import { Route as AppSnapshotsRouteImport } from './routes/app.snapshots'
@@ -39,6 +40,11 @@ const AppRoute = AppRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginCallbackRoute = LoginCallbackRouteImport.update({
@@ -109,6 +115,7 @@ const AdminTenantsTenantIdRoute = AdminTenantsTenantIdRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
@@ -127,6 +134,7 @@ export interface FileRoutesByFullPath {
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
@@ -146,6 +154,7 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRouteWithChildren
@@ -166,6 +175,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
     | '/admin'
     | '/app'
     | '/login'
@@ -184,6 +194,7 @@ export interface FileRouteTypes {
     | '/app/route-diagnostics/$routePolicyId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
     | '/admin'
     | '/app'
     | '/login'
@@ -202,6 +213,7 @@ export interface FileRouteTypes {
     | '/app/route-diagnostics/$routePolicyId'
   id:
     | '__root__'
+    | '/'
     | '/admin'
     | '/app'
     | '/login'
@@ -221,6 +233,7 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRouteWithChildren
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login/callback': {
@@ -404,6 +424,7 @@ const LoginRouteChildren: LoginRouteChildren = {
 const LoginRouteWithChildren = LoginRoute._addFileChildren(LoginRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRouteWithChildren,

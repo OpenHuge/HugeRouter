@@ -233,6 +233,10 @@ export type MerchantShopView = {
   merchantShopId: string;
   slug: string;
   displayName: string;
+  sellerAlias: string;
+  identityLevel: "l1_basic" | "l2_kyc" | "l3_kyb";
+  guaranteeDepositUsd: string;
+  disputeRateBps: number;
   status: "draft" | "active" | "suspended";
   announcement?: string;
   fulfillmentMode: "auto_card_secret";
@@ -252,9 +256,42 @@ export type CardProductView = {
   retailPriceUsd: string;
   deliveryKind: "direct_secret";
   supportsTrial: boolean;
+  riskTier: "green" | "yellow" | "red";
+  reviewStatus: "pending_review" | "approved" | "rejected" | "suspended";
+  escrowMode: "platform_ledger" | "psp_escrow" | "ton_contract";
+  requiredKycLevel: "l1_basic" | "l2_kyc" | "l3_kyb";
+  evidenceRequirement: string;
   createdAt: string;
   updatedAt: string;
   version: number;
+};
+
+export type TradeOrderView = {
+  tradeOrderId: string;
+  merchantShopId: string;
+  cardProductId: string;
+  buyerAlias: string;
+  sellerAlias: string;
+  state:
+    | "created"
+    | "escrow_funded"
+    | "fulfillment_submitted"
+    | "in_review"
+    | "released"
+    | "disputed"
+    | "refunded"
+    | "cancelled";
+  escrowMode: "platform_ledger" | "psp_escrow" | "ton_contract";
+  evidenceState:
+    | "not_required"
+    | "required"
+    | "submitted"
+    | "accepted"
+    | "rejected";
+  disputeState: "none" | "open" | "buyer_won" | "seller_won" | "resolved";
+  orderAmountUsd: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type TrialConnectionView = {
@@ -297,6 +334,7 @@ export type MerchantWorkspaceData = {
   tenantId: string;
   shops: MerchantShopView[];
   cardProducts: CardProductView[];
+  recentOrders: TradeOrderView[];
   trialConnections: TrialConnectionView[];
   recentEvaluations: RelayEvaluationView[];
 };

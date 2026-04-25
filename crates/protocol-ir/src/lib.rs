@@ -9,7 +9,6 @@ use core_domain::{
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -289,183 +288,6 @@ impl ChatRequest {
 
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayChatRequest {
-    pub request: RequestEnvelope,
-    pub chat: ChatRequest,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayChatResponse {
-    pub route_receipt: RouteReceipt,
-    pub usage_event: UsageEvent,
-    pub provider_response_id: String,
-    pub output_text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayAnthropicMessage {
-    pub role: String,
-    pub content: GatewayAnthropicMessageContent,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(untagged)]
-pub enum GatewayAnthropicMessageContent {
-    PlainText(String),
-    Blocks(Vec<GatewayAnthropicMessageContentBlock>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum GatewayAnthropicMessageContentBlock {
-    Text { text: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayAnthropicResponseContentBlock {
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayAnthropicMessagesRequest {
-    pub model: String,
-    pub messages: Vec<GatewayAnthropicMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stream: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<u16>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayAnthropicMessagesResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    pub content: Vec<GatewayAnthropicResponseContentBlock>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<GatewayAnthropicUsage>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayAnthropicMessagesError {
-    pub error: core_domain::NormalizedError,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum GatewayGeminiRole {
-    User,
-    Assistant,
-    Model,
-    System,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiPart {
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiContent {
-    pub role: GatewayGeminiRole,
-    pub parts: Vec<GatewayGeminiPart>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiSystemInstruction {
-    pub parts: Vec<GatewayGeminiPart>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GatewayGeminiGenerationConfig {
-    #[serde(rename = "maxOutputTokens")]
-    pub max_output_tokens: Option<u32>,
-    #[serde(default)]
-    pub temperature: Option<f32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiGenerateContentRequest {
-    pub model: String,
-    pub contents: Vec<GatewayGeminiContent>,
-    #[serde(default)]
-    pub tools: Vec<Value>,
-    #[serde(default)]
-    pub stream: bool,
-    #[serde(
-        rename = "systemInstruction",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub system_instruction: Option<GatewayGeminiSystemInstruction>,
-    #[serde(
-        rename = "generationConfig",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub generation_config: Option<GatewayGeminiGenerationConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiGenerateContentResponse {
-    #[serde(rename = "responseId", skip_serializing_if = "Option::is_none")]
-    pub response_id: Option<String>,
-    pub candidates: Vec<GatewayGeminiCandidate>,
-    #[serde(rename = "usageMetadata", skip_serializing_if = "Option::is_none")]
-    pub usage_metadata: Option<GatewayGeminiUsageMetadata>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "modelVersion")]
-    pub model_version: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiGenerateContentError {
-    pub error: core_domain::NormalizedError,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayAnthropicUsage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct GatewayGeminiCandidate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<GatewayGeminiContent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "finishReason")]
-    pub finish_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GatewayGeminiUsageMetadata {
-    #[serde(rename = "promptTokenCount")]
-    pub prompt_token_count: u32,
-    #[serde(rename = "candidatesTokenCount")]
-    pub candidates_token_count: u32,
-    #[serde(rename = "totalTokenCount")]
-    pub total_token_count: u32,
-    #[serde(rename = "cachedContentTokenCount")]
-    pub cached_content_token_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -887,56 +709,6 @@ pub struct ContractManifest {
 )]
 pub struct ControlPlaneApiDoc;
 
-#[allow(clippy::needless_for_each)]
-#[derive(OpenApi)]
-#[openapi(
-    info(
-        title = "HugeRouter Gateway API",
-        version = "v1",
-        description = "Stable gateway contracts for chat routing and normalized failures."
-    ),
-    paths(
-        gateway_chat_completion,
-        gateway_anthropic_messages,
-        gateway_gemini_generate_content,
-    ),
-    components(
-        schemas(
-            ErrorEnvelope,
-            GatewayChatRequest,
-            GatewayChatResponse,
-            GatewayAnthropicMessagesError,
-            GatewayAnthropicMessagesRequest,
-            GatewayAnthropicMessagesResponse,
-            GatewayGeminiGenerateContentError,
-            GatewayGeminiGenerateContentRequest,
-            GatewayGeminiGenerateContentResponse,
-            GatewayAnthropicMessage,
-            GatewayAnthropicMessageContent,
-            GatewayAnthropicMessageContentBlock,
-            GatewayAnthropicResponseContentBlock,
-            GatewayGeminiContent,
-            GatewayGeminiGenerationConfig,
-            GatewayGeminiPart,
-            GatewayGeminiRole,
-            GatewayGeminiSystemInstruction,
-            ProtocolFamily,
-            RequestEnvelope,
-            RouteReceipt,
-            UsageEvent,
-            ChatRequest,
-            ChatMessage,
-            ChatMessageRole,
-            ToolDefinition,
-            RouteReceiptDecisionTraceStep,
-            RouteReceiptProviderAttempt,
-            RouteReceiptPolicyCheck,
-        )
-    ),
-    tags((name = "gateway", description = "Protocol ingress contracts")))
-]
-pub struct GatewayApiDoc;
-
 #[utoipa::path(
     get,
     path = "/v1/tenants",
@@ -1224,48 +996,6 @@ const fn get_route_diagnostics() {}
 #[allow(dead_code)]
 const fn get_route_receipt_diagnostics() {}
 
-#[utoipa::path(
-    post,
-    path = "/v1/chat/completions",
-    tag = "gateway",
-    request_body = GatewayChatRequest,
-    responses(
-        (status = 200, description = "Chat routed successfully", body = GatewayChatResponse),
-        (status = 422, description = "Normalized error", body = ErrorEnvelope),
-    )
-)]
-#[allow(dead_code)]
-const fn gateway_chat_completion() {}
-
-#[utoipa::path(
-    post,
-    path = "/v1/messages",
-    tag = "gateway",
-    request_body = GatewayAnthropicMessagesRequest,
-    responses(
-        (status = 200, description = "Anthropic messages routed successfully", body = GatewayAnthropicMessagesResponse),
-        (status = 422, description = "Normalized error", body = GatewayAnthropicMessagesError),
-    )
-)]
-#[allow(dead_code)]
-const fn gateway_anthropic_messages() {}
-
-#[utoipa::path(
-    post,
-    path = "/v1beta/models/{model}:generateContent",
-    tag = "gateway",
-    params(
-        ("model" = String, Path, description = "Gemini model name")
-    ),
-    request_body = GatewayGeminiGenerateContentRequest,
-    responses(
-        (status = 200, description = "Gemini generate-content routed successfully", body = GatewayGeminiGenerateContentResponse),
-        (status = 422, description = "Normalized error", body = GatewayGeminiGenerateContentError),
-    )
-)]
-#[allow(dead_code)]
-const fn gateway_gemini_generate_content() {}
-
 fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let schemas = vec![
         schema_artifact::<Tenant>("schemas/jsonschema/tenant.v1.schema.json")?,
@@ -1286,30 +1016,6 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         )?,
         schema_artifact::<ErrorEnvelope>("schemas/jsonschema/error-envelope.v1.schema.json")?,
         schema_artifact::<ChatRequest>("schemas/jsonschema/chat-request.v1.schema.json")?,
-        schema_artifact::<GatewayChatRequest>(
-            "schemas/jsonschema/gateway-chat-request.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayChatResponse>(
-            "schemas/jsonschema/gateway-chat-response.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayAnthropicMessagesRequest>(
-            "schemas/jsonschema/gateway-anthropic-messages-request.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayAnthropicMessagesResponse>(
-            "schemas/jsonschema/gateway-anthropic-messages-response.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayAnthropicMessagesError>(
-            "schemas/jsonschema/gateway-anthropic-messages-error.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayGeminiGenerateContentRequest>(
-            "schemas/jsonschema/gateway-gemini-generate-content-request.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayGeminiGenerateContentResponse>(
-            "schemas/jsonschema/gateway-gemini-generate-content-response.v1.schema.json",
-        )?,
-        schema_artifact::<GatewayGeminiGenerateContentError>(
-            "schemas/jsonschema/gateway-gemini-generate-content-error.v1.schema.json",
-        )?,
         schema_artifact::<RouteReceiptDiagnosticsResponse>(
             "schemas/jsonschema/route-receipt-diagnostics-response.v1.schema.json",
         )?,
@@ -1360,19 +1066,11 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
 fn openapi_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let control_plane = serde_json::to_string_pretty(&ControlPlaneApiDoc::openapi())
         .context("serialize control-plane openapi")?;
-    let gateway = serde_json::to_string_pretty(&GatewayApiDoc::openapi())
-        .context("serialize gateway openapi")?;
 
-    Ok(vec![
-        ArtifactFile {
-            relative_path: "schemas/openapi/control-plane-v1.openapi.json",
-            contents: control_plane,
-        },
-        ArtifactFile {
-            relative_path: "schemas/openapi/gateway-v1.openapi.json",
-            contents: gateway,
-        },
-    ])
+    Ok(vec![ArtifactFile {
+        relative_path: "schemas/openapi/control-plane-v1.openapi.json",
+        contents: control_plane,
+    }])
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1391,14 +1089,6 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let usage_event = sample_usage_event();
     let simulation_request = sample_route_simulation_request();
     let simulation_response = sample_route_simulation_response();
-    let gateway_request = sample_gateway_chat_request();
-    let gateway_response = sample_gateway_chat_response();
-    let anthropic_request = sample_gateway_anthropic_messages_request();
-    let anthropic_response = sample_gateway_anthropic_messages_response();
-    let anthropic_error = sample_gateway_anthropic_messages_error();
-    let gemini_request = sample_gateway_gemini_generate_content_request();
-    let gemini_response = sample_gateway_gemini_generate_content_response();
-    let gemini_error = sample_gateway_gemini_generate_content_error();
     let route_receipt_diagnostics = sample_route_receipt_diagnostics();
     let usage_summary = sample_usage_summary_response();
     let usage_breakdown = sample_usage_breakdown_response();
@@ -1413,7 +1103,6 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     };
     let usage_message = sample_usage_event_recorded_message();
     let snapshot_message = sample_config_snapshot_activated_message();
-    let error_envelope = sample_error_envelope();
 
     let examples = vec![
         example_artifact(
@@ -1461,42 +1150,6 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         example_artifact(
             "schemas/examples/control-plane/route-diagnostics.response.json",
             &route_diagnostics,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/chat.request.json",
-            &gateway_request,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/chat.response.json",
-            &gateway_response,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/anthropic-messages.request.json",
-            &anthropic_request,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/anthropic-messages.response.json",
-            &anthropic_response,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/anthropic-messages.error.response.json",
-            &anthropic_error,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/gemini-generate-content.request.json",
-            &gemini_request,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/gemini-generate-content.response.json",
-            &gemini_response,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/gemini-generate-content.error.response.json",
-            &gemini_error,
-        )?,
-        example_artifact(
-            "schemas/examples/gateway/error.response.json",
-            &error_envelope,
         )?,
         example_artifact(
             "schemas/examples/control-plane/route-receipt-diagnostics.response.json",
@@ -1593,11 +1246,6 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}' }},\n\
   {{ id: 'getRouteDiagnostics', method: 'GET', path: '/v1/route-diagnostics/{{route_policy_id}}' }},\n\
   {{ id: 'getRouteReceiptDiagnostics', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}/diagnostics' }},\n\
-] as const;\n\
-export const GATEWAY_OPERATIONS = [\n\
-  {{ id: 'createChatCompletion', method: 'POST', path: '/v1/chat/completions' }},\n\
-  {{ id: 'createAnthropicMessages', method: 'POST', path: '/v1/messages' }},\n\
-  {{ id: 'createGeminiGenerateContent', method: 'POST', path: '/v1beta/models/{{model}}:generateContent' }},\n\
 ] as const;\n",
     );
 
@@ -1631,8 +1279,6 @@ fn stable_contracts() -> Vec<String> {
         "route_policy".to_string(),
         "config_snapshot".to_string(),
         "chat_request".to_string(),
-        "gateway_anthropic_messages".to_string(),
-        "gateway_gemini_generate_content".to_string(),
         "route_receipt_diagnostics".to_string(),
         "usage_summary".to_string(),
         "usage_breakdown".to_string(),
@@ -1938,27 +1584,6 @@ fn sample_usage_event() -> UsageEvent {
     }
 }
 
-fn sample_error_envelope() -> ErrorEnvelope {
-    ErrorEnvelope {
-        error: core_domain::NormalizedError {
-            code: "validation_failed".to_string(),
-            message: "Route policy requires at least one capability.".to_string(),
-            request_id: "req_123".to_string(),
-            retryable: false,
-            upstream_code: None,
-            upstream_status_code: None,
-            validation_issues: vec![core_domain::ValidationIssue {
-                field: "required_capabilities".to_string(),
-                message: "expected at least one value".to_string(),
-            }],
-            details: std::collections::BTreeMap::from([(
-                "resource".to_string(),
-                "route_policy".to_string(),
-            )]),
-        },
-    }
-}
-
 fn sample_route_simulation_request() -> RouteSimulationRequest {
     RouteSimulationRequest {
         tenant_id: TenantId::parse("tenant_acme").unwrap(),
@@ -1998,144 +1623,6 @@ fn sample_route_simulation_response() -> RouteSimulationResponse {
             currency: "USD".to_string(),
             amount: "0.1420".to_string(),
         },
-    }
-}
-
-fn sample_gateway_chat_request() -> GatewayChatRequest {
-    GatewayChatRequest {
-        request: RequestEnvelope::new(
-            ProtocolFamily::OpenAiChat,
-            ServiceName::parse("gateway-api").unwrap(),
-            "req_123",
-            "trace_123",
-            TenantId::parse("tenant_acme").unwrap(),
-            ProjectId::parse("proj_core").unwrap(),
-        ),
-        chat: ChatRequest {
-            model_alias: "reasoning-fast".to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: ChatMessageRole::System,
-                    content: "You are a concise routing assistant.".to_string(),
-                },
-                ChatMessage {
-                    role: ChatMessageRole::User,
-                    content: "Summarize the last deployment incident.".to_string(),
-                },
-            ],
-            required_capabilities: vec!["tool_calling".to_string(), "json_mode".to_string()],
-            expected_prompt_tokens: 12_000,
-            max_output_tokens: 1_024,
-            temperature_milli: 200,
-            tools: vec![ToolDefinition {
-                name: "incident_lookup".to_string(),
-                description: "Look up incident summaries from the operations system.".to_string(),
-            }],
-            conversation_id: Some("conv_ops_42".to_string()),
-        },
-    }
-}
-
-fn sample_gateway_chat_response() -> GatewayChatResponse {
-    GatewayChatResponse {
-        route_receipt: sample_route_receipt(),
-        usage_event: sample_usage_event(),
-        provider_response_id: "resp_openai_123".to_string(),
-        output_text: "The incident was caused by a stale config snapshot activation.".to_string(),
-    }
-}
-
-fn sample_gateway_anthropic_messages_request() -> GatewayAnthropicMessagesRequest {
-    GatewayAnthropicMessagesRequest {
-        model: "claude-3-opus".to_string(),
-        messages: vec![GatewayAnthropicMessage {
-            role: "user".to_string(),
-            content: GatewayAnthropicMessageContent::Blocks(vec![
-                GatewayAnthropicMessageContentBlock::Text {
-                    text: "Summarize the last outage.".to_string(),
-                },
-            ]),
-        }],
-        max_tokens: Some(768),
-        system: Some("You are an observability analyst.".to_string()),
-        stream: Some(false),
-        temperature: Some(0.3),
-        top_p: Some(0.95),
-        top_k: Some(40),
-    }
-}
-
-fn sample_gateway_anthropic_messages_response() -> GatewayAnthropicMessagesResponse {
-    GatewayAnthropicMessagesResponse {
-        id: Some("msg_123".to_string()),
-        model: Some("claude-3-opus".to_string()),
-        content: vec![GatewayAnthropicResponseContentBlock {
-            kind: "text".to_string(),
-            text: "The outage was caused by a transient worker restart in eu-west.".to_string(),
-        }],
-        stop_reason: Some("end_turn".to_string()),
-        usage: Some(GatewayAnthropicUsage {
-            input_tokens: 123,
-            output_tokens: 42,
-        }),
-    }
-}
-
-fn sample_gateway_anthropic_messages_error() -> GatewayAnthropicMessagesError {
-    GatewayAnthropicMessagesError {
-        error: sample_normalized_error("Anthropic messages validation failed"),
-    }
-}
-
-fn sample_gateway_gemini_generate_content_request() -> GatewayGeminiGenerateContentRequest {
-    GatewayGeminiGenerateContentRequest {
-        model: "gemini-1.5-pro".to_string(),
-        contents: vec![GatewayGeminiContent {
-            role: GatewayGeminiRole::User,
-            parts: vec![GatewayGeminiPart {
-                text: "Summarize the last outage incident and mitigation steps.".to_string(),
-            }],
-        }],
-        tools: Vec::new(),
-        stream: false,
-        system_instruction: Some(GatewayGeminiSystemInstruction {
-            parts: vec![GatewayGeminiPart {
-                text: "Be concise and technical.".to_string(),
-            }],
-        }),
-        generation_config: Some(GatewayGeminiGenerationConfig {
-            max_output_tokens: Some(1024),
-            temperature: Some(0.4),
-        }),
-    }
-}
-
-fn sample_gateway_gemini_generate_content_response() -> GatewayGeminiGenerateContentResponse {
-    GatewayGeminiGenerateContentResponse {
-        response_id: Some("resp_gemini_123".to_string()),
-        candidates: vec![GatewayGeminiCandidate {
-            content: Some(GatewayGeminiContent {
-                role: GatewayGeminiRole::Model,
-                parts: vec![GatewayGeminiPart {
-                    text: "The outage was likely triggered by routing policy misconfiguration."
-                        .to_string(),
-                }],
-            }),
-            finish_reason: Some("STOP".to_string()),
-        }],
-        usage_metadata: Some(GatewayGeminiUsageMetadata {
-            prompt_token_count: 88,
-            candidates_token_count: 27,
-            total_token_count: 115,
-            cached_content_token_count: 0,
-        }),
-        model_version: Some("gemini-1.5-pro-latest".to_string()),
-    }
-}
-
-fn sample_gateway_gemini_generate_content_error() -> GatewayGeminiGenerateContentError {
-    GatewayGeminiGenerateContentError {
-        error: sample_normalized_error("Gemini generate-content validation failed"),
     }
 }
 
@@ -2490,28 +1977,12 @@ fn sample_billing_export_job_response() -> BillingExportJobResponse {
     }
 }
 
-fn sample_normalized_error(message: &str) -> core_domain::NormalizedError {
-    core_domain::NormalizedError {
-        code: "validation_failed".to_string(),
-        message: message.to_string(),
-        request_id: "req_123".to_string(),
-        retryable: false,
-        upstream_code: None,
-        upstream_status_code: None,
-        validation_issues: vec![core_domain::ValidationIssue {
-            field: "messages".to_string(),
-            message: "expected valid payload".to_string(),
-        }],
-        details: BTreeMap::from([("service".to_string(), "gateway-api".to_string())]),
-    }
-}
-
 fn sample_usage_event_recorded_message() -> UsageEventRecordedMessage {
     let envelope = MessageEnvelope::new(
         "msg_usage_123",
         MessageType::UsageEventRecorded,
         "2026-04-21T12:16:05Z",
-        ServiceName::parse("gateway-api").unwrap(),
+        ServiceName::parse("control-plane-api").unwrap(),
         "usageevt_123:final",
         UsageEventRecorded {
             usage_event: sample_usage_event(),
@@ -2541,7 +2012,7 @@ fn sample_route_receipt_recorded_message() -> RouteReceiptRecordedMessage {
         message_type: RouteReceiptRecordedMessageType::RouteReceiptRecorded,
         schema_version: 1,
         occurred_at: route_receipt.created_at.clone(),
-        producer: ServiceName::parse("gateway-api").unwrap(),
+        producer: ServiceName::parse("control-plane-api").unwrap(),
         trace_id: Some("trace_123".to_string()),
         request_id: Some("req_123".to_string()),
         idempotency_key: format!("{}:recorded", route_receipt.route_receipt_id),
@@ -2596,10 +2067,7 @@ mod tests {
     use super::{
         ChatRequest, ConfigSnapshotActivated, MessageEnvelope, MessageType, ProtocolFamily,
         RequestEnvelope, RouteReceiptRecordedMessage, collect_contract_artifacts,
-        sample_gateway_anthropic_messages_request, sample_gateway_anthropic_messages_response,
-        sample_gateway_chat_request, sample_gateway_gemini_generate_content_request,
-        sample_gateway_gemini_generate_content_response, sample_route_receipt_diagnostics,
-        sample_route_receipt_recorded_message, sample_usage_event_recorded_message, workspace_root,
+        sample_route_receipt_diagnostics, sample_route_receipt_recorded_message, workspace_root,
     };
     use core_domain::{ConfigSnapshot, ProjectId, ServiceName, TenantId};
 
@@ -2607,7 +2075,7 @@ mod tests {
     fn request_envelope_uses_stable_public_protocol_names() {
         let envelope = RequestEnvelope::new(
             ProtocolFamily::OpenAiChat,
-            ServiceName::parse("gateway-api").unwrap(),
+            ServiceName::parse("control-plane-api").unwrap(),
             "req_123",
             "trace_123",
             TenantId::parse("tenant_acme").unwrap(),
@@ -2617,7 +2085,7 @@ mod tests {
         let json = serde_json::to_value(&envelope).unwrap();
 
         assert_eq!(json["protocol_family"], "openai_chat");
-        assert_eq!(json["source_service"], "gateway-api");
+        assert_eq!(json["source_service"], "control-plane-api");
         assert_eq!(json["tenant_id"], "tenant_acme");
     }
 
@@ -2705,49 +2173,6 @@ mod tests {
                 artifact.relative_path
             );
         }
-    }
-
-    #[test]
-    fn gateway_examples_round_trip_to_json() {
-        let request = sample_gateway_chat_request();
-        request.chat.validate().unwrap();
-
-        let value = serde_json::to_value(&request).unwrap();
-        assert_eq!(value["request"]["protocol_family"], "openai_chat");
-        assert_eq!(value["chat"]["messages"][0]["role"], "system");
-
-        let event = sample_usage_event_recorded_message();
-        let event_json = serde_json::to_value(&event).unwrap();
-        assert_eq!(event_json["message_type"], "usage_event.recorded");
-
-        let route_receipt_event = sample_route_receipt_recorded_message();
-        let route_receipt_event_json = serde_json::to_value(&route_receipt_event).unwrap();
-        assert_eq!(
-            route_receipt_event_json["message_type"],
-            "route_receipt.recorded"
-        );
-
-        let anthropic_request = sample_gateway_anthropic_messages_request();
-        let anthropic_response = sample_gateway_anthropic_messages_response();
-        assert_eq!(
-            serde_json::to_value(&anthropic_request).unwrap()["messages"][0]["role"],
-            "user"
-        );
-        assert_eq!(
-            serde_json::to_value(&anthropic_response).unwrap()["content"][0]["type"],
-            "text"
-        );
-
-        let gemini_request = sample_gateway_gemini_generate_content_request();
-        let gemini_response = sample_gateway_gemini_generate_content_response();
-        assert_eq!(
-            serde_json::to_value(&gemini_request).unwrap()["contents"][0]["role"],
-            "user"
-        );
-        assert_eq!(
-            serde_json::to_value(&gemini_response).unwrap()["candidates"][0]["content"]["role"],
-            "model"
-        );
     }
 
     #[test]

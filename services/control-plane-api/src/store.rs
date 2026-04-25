@@ -27,19 +27,20 @@ use crate::pricing_catalog::{
 };
 use anyhow::{Context, Result, anyhow};
 use core_domain::{
-    AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
-    AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId,
-    CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
-    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, HealthState,
-    LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus,
-    MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project, ProjectId, ProvenanceClass,
-    ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
-    RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode,
-    RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy, RoutePolicyId,
-    RouteReceipt, RouteReceiptId, Tenant, TenantId, TenantMembership, TenantMembershipId,
-    TenantMembershipRole, TenantMembershipStatus, TenantSummary, TrialConnection,
-    TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary,
-    UserId, UserIdentity,
+    AdmissionResult, AiProductRiskTier, AuthKind, AuthLoginResult, AuthProvider,
+    AuthProviderAvailability, AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState,
+    BudgetPolicyId, CardDeliveryKind, CardProduct, CardProductId, CardProductStatus,
+    ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope,
+    DisputeState, EscrowMode, EvidenceState, HealthState, LogoutResponse, MerchantFulfillmentMode,
+    MerchantShop, MerchantShopId, MerchantShopStatus, MonetaryAmount, NormalizedRequestSummary,
+    OAuthProvider, ProductReviewStatus, Project, ProjectId, ProvenanceClass, ProviderCapabilities,
+    ProviderResource, ProviderResourceId, ProviderResourceStatus, RedactionTier, RelayCheckStatus,
+    RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode, RelayEvaluationVerdict,
+    ReplayCapsule, ReplayCapsuleId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId,
+    SellerIdentityLevel, Tenant, TenantId, TenantMembership, TenantMembershipId,
+    TenantMembershipRole, TenantMembershipStatus, TenantSummary, TradeOrder, TradeOrderId,
+    TradeOrderState, TrialConnection, TrialConnectionId, TrialConnectionStatus,
+    UnlinkAuthProviderResponse, UpstreamErrorSummary, UserId, UserIdentity,
 };
 use metering::{PricingCatalog, default_budget_micros};
 use protocol_ir::{
@@ -118,6 +119,7 @@ pub struct MemoryStore {
     config_snapshots: Vec<ConfigSnapshot>,
     merchant_shops: Vec<MerchantShop>,
     card_products: Vec<CardProduct>,
+    trade_orders: Vec<TradeOrder>,
     trial_connections: Vec<TrialConnection>,
     relay_evaluations: Vec<RelayEvaluation>,
     replay_capsules: HashMap<String, ReplayCapsule>,
@@ -203,6 +205,7 @@ pub struct MerchantWorkspaceResponse {
     pub tenant_id: TenantId,
     pub shops: Vec<MerchantShop>,
     pub card_products: Vec<CardProduct>,
+    pub recent_orders: Vec<TradeOrder>,
     pub trial_connections: Vec<TrialConnection>,
     pub recent_evaluations: Vec<RelayEvaluation>,
 }
@@ -287,6 +290,7 @@ pub struct SeedData {
     pub config_snapshots: Vec<ConfigSnapshot>,
     pub merchant_shops: Vec<MerchantShop>,
     pub card_products: Vec<CardProduct>,
+    pub trade_orders: Vec<TradeOrder>,
     pub trial_connections: Vec<TrialConnection>,
     pub relay_evaluations: Vec<RelayEvaluation>,
     pub replay_capsules: Vec<ReplayCapsule>,
@@ -623,6 +627,10 @@ impl SeedData {
             tenant_id: tenant_acme.tenant_id.clone(),
             slug: "acme-small-shop".to_string(),
             display_name: "Acme Small Shop".to_string(),
+            seller_alias: "acme-verified".to_string(),
+            identity_level: SellerIdentityLevel::L2Kyc,
+            guarantee_deposit_usd: "250.00".to_string(),
+            dispute_rate_bps: 125,
             status: MerchantShopStatus::Active,
             announcement: Some(
                 "Fresh relay trial cards with replay-backed evaluation.".to_string(),
@@ -645,7 +653,28 @@ impl SeedData {
             retail_price_usd: "1.99".to_string(),
             delivery_kind: CardDeliveryKind::DirectSecret,
             supports_trial: true,
+            risk_tier: AiProductRiskTier::Green,
+            review_status: ProductReviewStatus::Approved,
+            escrow_mode: EscrowMode::PlatformLedger,
+            required_kyc_level: SellerIdentityLevel::L1Basic,
+            evidence_requirement: "Replay capsule and trial-key proof required before exposure."
+                .to_string(),
             version: 1,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let trade_order = TradeOrder {
+            trade_order_id: TradeOrderId::parse("tradeord_acme_trial_001").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            merchant_shop_id: merchant_shop.merchant_shop_id.clone(),
+            card_product_id: card_product.card_product_id.clone(),
+            buyer_alias: "buyer-l1-8291".to_string(),
+            seller_alias: merchant_shop.seller_alias.clone(),
+            state: TradeOrderState::EscrowFunded,
+            escrow_mode: EscrowMode::PlatformLedger,
+            evidence_state: EvidenceState::Required,
+            dispute_state: DisputeState::None,
+            order_amount_usd: card_product.retail_price_usd.clone(),
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -765,6 +794,7 @@ impl SeedData {
             config_snapshots: vec![config_active.clone(), config_bedrock, config_research],
             merchant_shops: vec![merchant_shop],
             card_products: vec![card_product],
+            trade_orders: vec![trade_order],
             trial_connections: vec![trial_connection],
             relay_evaluations: vec![relay_evaluation],
             replay_capsules: vec![replay_capsule],
@@ -834,6 +864,7 @@ impl MemoryStore {
             config_snapshots: seed.config_snapshots,
             merchant_shops: seed.merchant_shops,
             card_products: seed.card_products,
+            trade_orders: seed.trade_orders,
             trial_connections: seed.trial_connections,
             relay_evaluations: seed.relay_evaluations,
             replay_capsules: seed
@@ -1231,6 +1262,13 @@ impl StoreMode {
                     .cloned()
                     .collect::<Vec<_>>();
                 recent_evaluations.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+                let mut recent_orders = store
+                    .trade_orders
+                    .iter()
+                    .filter(|item| item.tenant_id.as_str() == tenant_id_str)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                recent_orders.sort_by(|left, right| right.created_at.cmp(&left.created_at));
 
                 Ok(MerchantWorkspaceEnvelope {
                     data: MerchantWorkspaceResponse {
@@ -1251,6 +1289,7 @@ impl StoreMode {
                             .filter(|item| item.tenant_id.as_str() == tenant_id_str)
                             .cloned()
                             .collect(),
+                        recent_orders,
                         trial_connections: store
                             .trial_connections
                             .iter()

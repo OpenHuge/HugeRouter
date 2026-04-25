@@ -11,9 +11,6 @@ services:
   control-plane-api:
     restart: "no"
 
-  gateway-api:
-    restart: "no"
-
   ledger-worker:
     restart: "no"
 

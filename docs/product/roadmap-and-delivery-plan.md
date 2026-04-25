@@ -15,16 +15,19 @@ Deliver:
 - code-first review of similar project source or official technical material
 - a strengths-to-spec mapping that identifies which borrowed behaviors are implemented, bootstrap-only, or planned
 
-### 32.2 Phase 1: Minimal Viable Gateway
+### 32.2 Phase 1: Trusted AI Resource Trading Platform
 
 Deliver:
 
-- OpenAI-compatible northbound ingress
-- at least one native upstream adapter
-- API key auth
-- basic route policy
-- usage capture
-- simple admin console
+- `ku0.com` trusted AI resource library framing
+- `Account Library` workflows for verified vendors, reviewed listings, and escrow-ready orders
+- `Relay Library` workflows for trial connection onboarding and replay-backed quality evaluation
+- `Info Library` disclosure surfaces derived from announcements, trust metadata, and evaluation evidence
+- buyer/seller aliases instead of raw identity exposure
+- marketplace audit records and dispute-ready evidence
+- a resource-library console focused on trusted AI supply, not route-operator workflows
+
+The route gateway / AI relay product is no longer part of the Phase 1 main product line. Gateway runtime services and transit gateway adapters are removed from `main` and should continue only on a standalone feature branch that integrates with the main site through explicit evidence and diagnostics summary APIs.
 
 ### 32.3 Phase 2: Multi-Protocol Gateway & Semantic Edge
 
@@ -204,19 +207,20 @@ If the team wants the smallest strategically correct first milestone, ship the f
 
 - Rust monorepo workspace
 - TanStack Start console shell
-- `gateway-api` and `control-plane-api`
-- OpenAI-compatible northbound ingress
-- OpenAI native upstream adapter
-- API key auth
+- `control-plane-api` marketplace and quality-evidence endpoints
+- verified seller profile workflow
+- `Account Library` listing and escrow-order workflow
+- `Relay Library` trial connection workflow
+- replay-backed quality evaluation
+- `Info Library` disclosure-first evidence surfaces inside the console
+- escrow/order evidence model
 - PostgreSQL + Redis + NATS local stack
-- a reference-study output tied to routing, config snapshots, admission, and observability
-- basic route policy engine
-- immutable usage events and simple ledger entries
-- basic usage dashboard
-- basic route diagnostics
+- a reference-study output tied to account trust, relay evidence, disclosure boundaries, and auditability
+- immutable marketplace audit events and dispute-ready evidence records
+- basic marketplace dashboard
 - OpenTelemetry tracing
 
-This is enough to prove the architecture without prematurely committing to every advanced feature.
+This is enough to prove the trusted AI resource trading platform without carrying the standalone route gateway runtime in the Phase 1 main branch.
 
 ---
 

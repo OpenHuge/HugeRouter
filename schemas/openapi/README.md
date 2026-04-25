@@ -12,7 +12,6 @@ pnpm generate
 Current stable documents:
 
 - `control-plane-v1.openapi.json`
-- `gateway-v1.openapi.json`
 
 Compatibility rules for `v1`:
 

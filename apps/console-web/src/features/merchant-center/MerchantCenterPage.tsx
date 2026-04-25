@@ -21,6 +21,7 @@ import {
   MerchantShopTable,
   RelayEvaluationTable,
   ReplayCapsuleDetailCard,
+  TradeOrderTable,
   TrialConnectionTable,
 } from "./MerchantCenterTables";
 import {
@@ -49,14 +50,14 @@ export function MerchantCenterPage({
     return (
       <Stack>
         <PageHeader
-          description="Manage small-shop setup, card-secret listings, trial relay connections, and replay-backed evaluations."
-          title="Merchant Center"
+          description="Trusted AI resource library for account supply, relay quality evidence, and disclosure-first operator workflows."
+          title="ku0.com - Ku"
         />
         <RouteErrorState
           kind={result?.kind}
           message={result?.state === "error" ? result.message : undefined}
-          description="Merchant data could not be loaded from the control-plane service."
-          title="Merchant center unavailable"
+          description="Resource-library data could not be loaded from the control-plane service."
+          title="Library workspace unavailable"
         />
       </Stack>
     );
@@ -132,7 +133,7 @@ export function MerchantCenterPage({
         merchantShopId: shopForm.merchantShopId.trim(),
         slug: shopForm.slug.trim(),
       });
-      setStatusSuccess(`Created merchant shop ${created.displayName}.`);
+      setStatusSuccess(`Created vendor profile ${created.displayName}.`);
       setShopForm(createShopForm());
       await refreshWorkspace();
     } catch (error) {
@@ -167,7 +168,7 @@ export function MerchantCenterPage({
         supportsTrial: cardForm.supportsTrial === "true",
         title: cardForm.title.trim(),
       });
-      setStatusSuccess(`Created card product ${created.title}.`);
+      setStatusSuccess(`Created account listing ${created.title}.`);
       setCardForm(createCardProductForm());
       await refreshWorkspace();
     } catch (error) {
@@ -200,7 +201,7 @@ export function MerchantCenterPage({
         targetModel: trialForm.targetModel.trim(),
         trialConnectionId: trialForm.trialConnectionId.trim(),
       });
-      setStatusSuccess(`Connected trial provider ${created.providerLabel}.`);
+      setStatusSuccess(`Connected relay source ${created.providerLabel}.`);
       setTrialForm(createTrialConnectionForm());
       setEvaluationForm({ trialConnectionId: created.trialConnectionId });
       await refreshWorkspace();
@@ -264,8 +265,8 @@ export function MerchantCenterPage({
   return (
     <Stack>
       <PageHeader
-        description="Operate a small shop, attach dedicated trial relays, and keep replay-backed evidence so repeated review does not burn live tokens."
-        title="Merchant Center"
+        description="Operate a trusted AI resource library with account listings, relay checks, protected orders, and disclosure-ready evidence."
+        title="ku0.com - Ku"
       />
       <MerchantCenterIntro
         statusNotice={{
@@ -314,6 +315,7 @@ export function MerchantCenterPage({
       />
       <MerchantShopTable shops={workspace.shops} />
       <CardProductTable products={workspace.cardProducts} />
+      <TradeOrderTable orders={workspace.recentOrders} />
       <TrialConnectionTable connections={workspace.trialConnections} />
       <RelayEvaluationTable
         isLoadingReplayCapsule={isLoadingReplayCapsule}

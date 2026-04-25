@@ -16,6 +16,7 @@ export function handleMerchantRequest(
         tenant_id: "tenant_acme",
         shops: state.merchantShops,
         card_products: state.cardProducts,
+        recent_orders: state.tradeOrders,
         trial_connections: state.trialConnections,
         recent_evaluations: state.relayEvaluations,
       },
@@ -32,11 +33,15 @@ export function handleMerchantRequest(
         typeof body.display_name === "string"
           ? body.display_name
           : "Merchant Shop",
+      dispute_rate_bps: 0,
       fulfillment_mode: "auto_card_secret",
+      guarantee_deposit_usd: "0.00",
+      identity_level: "l2_kyc",
       merchant_shop_id:
         typeof body.merchant_shop_id === "string"
           ? body.merchant_shop_id
           : `mshop_${state.merchantShops.length + 1}`,
+      seller_alias: `seller-l2-${state.merchantShops.length + 1}`,
       slug:
         typeof body.slug === "string"
           ? body.slug
@@ -63,6 +68,9 @@ export function handleMerchantRequest(
         typeof body.description === "string"
           ? body.description
           : "Merchant product",
+      escrow_mode: "platform_ledger",
+      evidence_requirement:
+        "Replay-backed quality evaluation required before promoted listing.",
       face_value_usd:
         typeof body.face_value_usd === "string" ? body.face_value_usd : "1.00",
       inventory_count:
@@ -75,6 +83,9 @@ export function handleMerchantRequest(
         typeof body.retail_price_usd === "string"
           ? body.retail_price_usd
           : "1.99",
+      required_kyc_level: "l1_basic",
+      review_status: "approved",
+      risk_tier: "green",
       status: "active",
       supports_trial:
         typeof body.supports_trial === "boolean" ? body.supports_trial : true,

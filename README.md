@@ -1,6 +1,6 @@
 # HugeRouter
 
-Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `Mantine` as the frontend component foundation for the console.
+Rust backend + TanStack Start frontend monorepo for a trusted AI resource trading platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `Mantine` as the frontend component foundation for the console.
 
 ## Document Structure
 
@@ -32,7 +32,6 @@ Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway
 - [Monorepo Boundaries and Bootstrap Contracts](docs/runbooks/monorepo-boundaries-and-bootstrap-contracts.md)
 - [Maintainer Triage](docs/runbooks/maintainer-triage.md)
 - [Control Plane API](docs/api/control-plane-api.md)
-- [Public Gateway API](docs/api/public-gateway-api.md)
 - [Roadmap and Delivery Plan](docs/product/roadmap-and-delivery-plan.md)
 - [Execution Roadmap Pack](docs/execution/README.md)
 - [ADR Index](docs/adr/README.md)
@@ -46,11 +45,11 @@ This split specification preserves the original engineering intent:
 - TanStack Start for a typed frontend console
 - Mantine for the shared frontend design system and console primitives
 - Turbo-managed monorepo workflows for incremental local development and CI
-- protocol-native ingress and adapter-based egress (optimized for 2026 multi-modal and agentic traffic)
-- native support for Model Context Protocol (MCP) via Streamable HTTP and Agent-to-Agent (A2A) protocol with Agent Card discovery
-- Realtime WebRTC proxying targeting OpenAI Realtime API GA
-- immutable usage and ledger design
-- first-class routing, semantic caching, policy, security, and observability
+- trusted AI resource listings and seller verification
+- replay-backed quality evidence for trial connections
+- marketplace auditability and dispute-ready evidence
+- immutable usage and ledger design for marketplace evidence
+- policy, security, and observability for first-phase trading workflows
 
 ## Development Baseline
 

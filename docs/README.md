@@ -4,7 +4,7 @@
 
 Recent priority docs for the source-backed spec deepening pass:
 
-- [Routing System](architecture/routing-system.md) for named strategy families, admission outcomes, and route receipts
+- [Routing System](architecture/routing-system.md) for the standalone gateway branch's strategy families, admission outcomes, and route receipts
 - [Policy System](architecture/policy-system.md) for normalized reason codes and policy/routing/admission boundaries
 - [Protocol IR and Protocol Support](architecture/protocol-ir-and-protocols.md) for typed protocol and route resource modeling
 - [Provider Adapter System](architecture/provider-adapter-system.md) for manifest boundaries and compatibility contracts
@@ -37,9 +37,7 @@ Recent priority docs for the source-backed spec deepening pass:
 ## API
 
 - [Control Plane API](api/control-plane-api.md)
-- [Public Gateway API](api/public-gateway-api.md)
 - [AWS Bedrock Provider Adapter](provider-bedrock.md)
-- [Provider Gateway Adapter](provider-gateway.md)
 
 ## Runbooks
 
@@ -57,7 +55,9 @@ Recent priority docs for the source-backed spec deepening pass:
 ## Product
 
 - [Roadmap and Delivery Plan](product/roadmap-and-delivery-plan.md)
-- [Merchant Marketplace And Relay Evaluation Spec](product/merchant-marketplace-and-relay-evaluation-spec.md)
+- [ku0.com - Ku: Trusted AI Resource Library Phase 1](product/trusted-ai-marketplace-phase-1.md)
+- [AI Resource Library And Relay Evidence Spec](product/merchant-marketplace-and-relay-evaluation-spec.md)
+- [Route Gateway Standalone Branch](product/route-gateway-standalone-branch.md)
 - [Parallel Development Tracks](tasks/README.md)
 
 ## ADR

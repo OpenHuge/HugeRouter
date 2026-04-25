@@ -127,7 +127,6 @@ const exactBudgetOverrides = new Map([
     },
   ],
   [
-    "services/gateway-api/src/lib.rs",
     {
       maxLines: 5000,
       reason:

@@ -1,8 +1,10 @@
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Group,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -53,14 +55,58 @@ export function MerchantCenterIntro({
       <Alert
         color="yellow"
         radius="md"
-        title="Trial key guardrail"
+        title="Phase 1 Boundary"
         variant="light"
       >
-        Use a dedicated trial key only. Merchant evaluations now record
-        replayable data so support and comparison can reuse prior runs instead
-        of repeatedly spending live tokens.
+        ku0.com currently ships a private trusted AI resource library. Phase 1
+        covers reviewed account-style listings, escrow order evidence, relay
+        quality checks, and disclosure-first operator notes. Use a dedicated
+        trial key only.
       </Alert>
+      <SimpleGrid cols={{ base: 1, md: 3 }}>
+        <LibraryScopeCard
+          description="Verified vendors, reviewed listings, and escrow-ready order records for account or access supply."
+          status="Live"
+          title="Account Library"
+        />
+        <LibraryScopeCard
+          description="Trial relay onboarding, replay-backed quality checks, and gateway-facing trust evidence."
+          status="Live"
+          title="Relay Library"
+        />
+        <LibraryScopeCard
+          description="Disclosure, operator notes, and risk communication layered on top of listings and evaluations."
+          status="Next"
+          title="Info Library"
+        />
+      </SimpleGrid>
     </>
+  );
+}
+
+function LibraryScopeCard({
+  description,
+  status,
+  title,
+}: {
+  description: string;
+  status: "Live" | "Next";
+  title: string;
+}) {
+  return (
+    <Card padding="lg" radius="md" shadow="sm">
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <Text fw={700}>{title}</Text>
+          <Badge color={status === "Live" ? "teal" : "blue"} variant="light">
+            {status}
+          </Badge>
+        </Group>
+        <Text c="dimmed" size="sm">
+          {description}
+        </Text>
+      </Stack>
+    </Card>
   );
 }
 
@@ -80,9 +126,9 @@ export function ShopAndTrialCards({
     <Group align="stretch" grow>
       <Card padding="lg" radius="md" shadow="sm">
         <Stack>
-          <Text fw={700}>Open a shop</Text>
+          <Text fw={700}>Open an account-library vendor profile</Text>
           <TextInput
-            label="Merchant shop id"
+            label="Vendor profile id"
             onChange={(event) =>
               setShopForm((current) => ({
                 ...current,
@@ -113,12 +159,12 @@ export function ShopAndTrialCards({
                 displayName: event.currentTarget.value,
               }))
             }
-            placeholder="Acme Small Shop"
+            placeholder="Acme Verified AI Tools"
             value={shopForm.displayName}
           />
           <FieldErrorText error={shopErrors.displayName} />
           <Textarea
-            label="Announcement"
+            label="Disclosure note"
             minRows={2}
             onChange={(event) =>
               setShopForm((current) => ({
@@ -126,7 +172,7 @@ export function ShopAndTrialCards({
                 announcement: event.currentTarget.value,
               }))
             }
-            placeholder="Fresh trial cards with replay-backed evaluation"
+            placeholder="Approved listings only; escrow orders stay on-platform"
             value={shopForm.announcement}
           />
           <Group justify="flex-end">
@@ -134,7 +180,7 @@ export function ShopAndTrialCards({
               loading={isSubmittingShop}
               onClick={() => void onCreateShop()}
             >
-              Create shop
+              Create vendor profile
             </Button>
           </Group>
         </Stack>
@@ -142,7 +188,7 @@ export function ShopAndTrialCards({
 
       <Card padding="lg" radius="md" shadow="sm">
         <Stack>
-          <Text fw={700}>Attach a trial relay</Text>
+          <Text fw={700}>Register a relay-library source</Text>
           <TextInput
             label="Trial connection id"
             onChange={(event) =>
@@ -220,7 +266,7 @@ export function ShopAndTrialCards({
               loading={isSubmittingTrial}
               onClick={() => void onCreateTrialConnection()}
             >
-              Save trial relay
+              Save relay source
             </Button>
           </Group>
         </Stack>

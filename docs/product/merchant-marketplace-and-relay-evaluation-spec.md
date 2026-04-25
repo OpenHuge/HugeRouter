@@ -1,291 +1,152 @@
-# Merchant Marketplace And Relay Evaluation Spec
+# AI Resource Library And Relay Evidence Spec
 
 [Back to Docs Index](../README.md)
 
 ## 1. Problem
 
-HugeRouter currently models tenants, projects, provider resources, API keys, routes, usage, and billing, but it does not yet expose a merchant-facing workflow for:
+HugeRouter already has strong control-plane primitives for tenancy, provider resources, API keys, routes, usage, and billing, but the main branch has shifted away from being a pure route-operator console.
 
-- opening a small shop inside the console
-- selling card-secret style products with automatic fulfillment
-- attaching trial keys and relay providers for pre-sale quality checks
-- showing buyers and operators whether a relay is trustworthy enough to buy from
+The current gap is product framing:
 
-This gap matters because AI relay commerce is increasingly bundled with lightweight storefronts, trial access, and third-party quality claims. If HugeRouter only manages routing and billing, merchants still need separate tools to sell, test, and explain their upstream quality.
+- the codebase now exposes seller profiles, listings, escrow-ready orders, trial relay connections, and replay-backed evaluations
+- the product spec still describes a narrow merchant center for card-secret style goods
+- the user-facing positioning now needs to reflect `ku0.com`, a trusted AI resource library with account, relay, and information surfaces
 
-## 2. External Reference Notes
+Without this spec update, implementation will drift between old merchant vocabulary and the newer resource-library model.
 
-As of **April 23, 2026**, `cctest.ai` emphasizes a narrow but important product idea: relay evaluation should not be a generic ping or benchmark page. Its public pages describe:
+## 2. Product Positioning
 
-- black-box verification rather than self-reported merchant claims
-- multiple probe requests covering fingerprint, protocol structure, signature/channel clues, and multimodal behavior
-- explicit warnings around counterfeit models, protocol inconsistency, token abuse, and data leakage
-- guidance to use a dedicated test key instead of a production key
+Phase 1 should be positioned as:
 
-Relevant sources:
+`ku0.com - Ku`
 
-- [cctest.ai home](https://cctest.ai/en)
-- [cctest.ai FAQ](https://cctest.ai/en/faq)
+`Trusted AI Resource Library`
 
-Implication for HugeRouter:
+The first product line is organized into three libraries:
 
-- merchant tooling should couple sales with quality evidence
-- trial-provider onboarding must be first-class, not an operator-only workaround
-- evaluation results must explain risk, not just print a score
-- the first implementation should distinguish real probe-based checks from simulated or manually confirmed checks
+- `Account Library`
+  Covers account recharge, purchase, and inventory-style supply. Phase 1 implements the control-plane side of this through vendor profiles, listings, and escrow orders.
+- `Relay Library`
+  Covers relay quality inspection, trust summaries, and future unified gateway access. Phase 1 implements this through trial connections, evaluations, and replay capsules.
+- `Info Library`
+  Covers disclosure, announcements, operator notes, and risk communication around AI resources. Phase 1 implements only the minimum disclosure layer, not a full content product.
 
-## 3. Product Positioning
+## 3. Phase 1 Goals
 
-HugeRouter should add a tenant-facing `Merchant Center` that sits beside existing route, provider, billing, and API-key surfaces.
+- make the existing main-branch marketplace code read as a trusted AI resource library rather than a generic merchant tool
+- preserve the current trust model: platform-visible seller identity, reviewed listings, escrow-ready orders, and replay-backed quality evidence
+- keep relay quality evidence first-class because it is the most defensible trust surface in the current implementation
+- scope the info library to structured disclosure and audit support instead of launching a social or forum product too early
 
-The V1 product is not a full payment marketplace. It is a merchant operations slice that lets a tenant:
+## 4. Non-Goals
 
-- open one or more storefronts
-- publish card-secret products
-- register trial relay endpoints and masked test keys
-- run and retain relay quality evaluations before or during sale
+- anonymous peer-to-peer chat trading
+- public buyer storefronts
+- free-form account resale without review or escrow
+- rumor-style community feeds without operator accountability
+- external payment settlement, payout, or refund rails
+- general-purpose public gateway runtime inside the main branch
 
-## 4. Goals
+## 5. Current Implementation Boundary
 
-- Let tenant admins become merchants without leaving HugeRouter.
-- Make card-secret inventory and trial-provider configuration visible in one workspace.
-- Attach relay quality evidence to merchant assets so storefront operations are not blind.
-- Reuse HugeRouter tenancy, auth, typed schema, and control-plane patterns instead of inventing a parallel system.
+The current codebase already supports:
 
-## 5. Non-Goals For V1
+- verified seller profiles
+- reviewed AI resource listings
+- escrow-ready order records
+- relay trial connection onboarding
+- replay-backed relay quality evaluation
+- replay capsule detail inspection
 
-- payment acquisition, settlement, refunds, invoicing, or payout ledgers
-- buyer-facing public storefront pages
-- full black-box detection parity with `cctest.ai`
-- upstream signature reverse-engineering or forensic proof claims
-- automatic secret inventory import from third-party发卡平台
+The current codebase does not yet support:
 
-## 6. Core Personas
+- dedicated recharge flows
+- pool wholesale operations
+- dedicated info posts or disclosure feed objects
+- public search, discovery, or buyer self-service views
+- production unified external gateway access for third parties
 
-### 6.1 Merchant Operator
+Phase 1 spec and implementation should stay inside that boundary.
 
-Needs to open a shop, create sellable card products, attach trial channels, and understand whether an upstream relay is safe enough to list.
+## 6. Functional Scope
 
-### 6.2 Platform Admin
+### 6.1 Account Library
 
-Needs to inspect merchant readiness, risky relay verdicts, and whether a tenant is selling through degraded or suspicious channels.
+Tenant admins can:
 
-### 6.3 Buyer Support / Ops
+- open a verified vendor profile
+- create reviewed account or access listings
+- inspect listing trust metadata
+- see escrow-ready order history with evidence and dispute state
 
-Needs quick visibility into what was sold, which trial provider was evaluated, and why a relay is marked healthy, warning, or failed.
+Current technical mapping:
 
-## 7. V1 Functional Scope
+- `MerchantShop` is the vendor profile
+- `CardProduct` is the account or access listing
+- `TradeOrder` is the protected order record
 
-### 7.1 Merchant Center
+### 6.2 Relay Library
 
-Add tenant route:
+Tenant admins can:
 
-- `/app/merchant`
+- register relay endpoints with dedicated trial credentials
+- run replay-backed quality evaluation
+- inspect verdict, score, quality dimensions, and replay evidence
 
-Primary sections:
+Current technical mapping:
 
-- shop profile and status
-- card-secret products
-- trial provider connections
-- recent relay evaluations
+- `TrialConnection` is the relay source registration
+- `RelayEvaluation` is the quality result
+- `ReplayCapsule` is the redacted support artifact
 
-### 7.2 Shop Management
+### 6.3 Info Library
 
-Merchant admins can:
+Phase 1 supports operator-facing disclosure only:
 
-- create a shop
-- define slug, display name, announcement, and operating status
-- declare fulfillment mode as `auto_card_secret`
+- seller announcement text
+- listing trust metadata
+- evaluation summary text
+- replay-backed evidence references
 
-### 7.3 Card-Secret Products
+The first implementation should not add a standalone forum or newsfeed. Instead, it should make disclosure visible inside the existing library views.
 
-Merchant admins can:
+## 7. Trust Model
 
-- create products attached to a shop
-- define title, description, inventory count, retail price, face value, and status
-- mark products as trial-friendly or regular paid inventory
+- counterparties are pseudonymous to each other but auditable by the platform
+- only reviewed listings may be associated with protected orders
+- relay trust must be supported by replay-backed evidence rather than self-report
+- dispute handling must use order state and evidence records, not screenshots as the primary source
+- info-library content must be attributable to a vendor profile, evaluation artifact, or operator workflow
 
-V1 stores product metadata only. Secret stock and payment fulfillment are intentionally out of scope.
+## 8. Control Plane Contract
 
-### 7.4 Trial Provider Connections
-
-Merchant admins can register a trial relay target with:
-
-- provider label
-- endpoint base URL
-- masked key prefix only in returned payloads
-- target model
-- connection status
-- optional notes
-
-Guardrail:
-
-- UI copy must tell merchants to use dedicated trial keys, not production keys
-
-### 7.5 Relay Evaluation
-
-Merchants can trigger an evaluation against a registered trial connection.
-
-V1 evaluation dimensions:
-
-- model fingerprint confidence
-- protocol consistency
-- stream/non-stream structure readiness
-- token reasonability
-- multimodal readiness
-- channel hint or provenance hint when available
-
-### 7.6 Replayable Test Record
-
-Each merchant evaluation should produce a replayable support artifact so operators do not need to repeatedly spend live tokens for:
-
-- support review
-- merchant dispute handling
-- regression comparison
-- buyer-facing risk explanation
-
-The artifact should be redacted-first and reuse HugeRouter's replay-capsule direction instead of inventing a merchant-only debug format.
-
-V1 runner mode:
-
-- `simulated`
-
-This means the first implementation returns a deterministic preview result shaped like the future real evaluator contract. It must be labeled clearly in docs and UI.
-
-## 8. Domain Additions
-
-### 8.1 Merchant Shop
-
-Attributes:
-
-- `merchant_shop_id`
-- `tenant_id`
-- `slug`
-- `display_name`
-- `status` as `draft | active | suspended`
-- `announcement` nullable
-- `fulfillment_mode` as `auto_card_secret`
-- `version`
-- `created_at`
-- `updated_at`
-
-### 8.2 Card Product
-
-Attributes:
-
-- `card_product_id`
-- `tenant_id`
-- `merchant_shop_id`
-- `title`
-- `description`
-- `status` as `draft | active | sold_out`
-- `inventory_count`
-- `face_value_usd`
-- `retail_price_usd`
-- `delivery_kind` as `direct_secret`
-- `supports_trial`
-- `version`
-- `created_at`
-- `updated_at`
-
-### 8.3 Trial Provider Connection
-
-Attributes:
-
-- `trial_connection_id`
-- `tenant_id`
-- `provider_label`
-- `endpoint_base_url`
-- `api_key_masked`
-- `target_model`
-- `status` as `active | paused | needs_rotation`
-- `notes` nullable
-- `last_verified_at` nullable
-- `version`
-- `created_at`
-- `updated_at`
-
-### 8.4 Relay Evaluation
-
-Attributes:
-
-- `relay_evaluation_id`
-- `tenant_id`
-- `trial_connection_id`
-- `replay_capsule_id`
-- `provider_label`
-- `endpoint_base_url`
-- `target_model`
-- `runner_mode`
-- `sample_request_count`
-- `estimated_tokens_saved`
-- `overall_score`
-- `verdict` as `healthy | warning | fail`
-- `fingerprint_status`
-- `protocol_status`
-- `token_status`
-- `multimodal_status`
-- `detected_channel` nullable
-- `summary`
-- `created_at`
-
-## 9. Control Plane API Additions
-
-Suggested V1 endpoints:
-
-```text
-GET   /v1/merchant/workspace
-POST  /v1/merchant/shops
-POST  /v1/merchant/card-products
-POST  /v1/merchant/trial-connections
-POST  /v1/merchant/evaluations
-GET   /v1/replay-capsules/:replayCapsuleId
-```
-
-Response contract for workspace:
+The Phase 1 workspace contract should continue to expose:
 
 - `merchant_enabled`
 - `tenant_id`
 - `shops`
 - `card_products`
+- `recent_orders`
 - `trial_connections`
 - `recent_evaluations`
 
-Authorization:
+This contract is already the correct Phase 1 backbone for the resource-library product.
 
-- any tenant member may read workspace data
-- only tenant admins or owners may mutate merchant resources
+## 9. Console UX Direction
 
-## 10. Console UX
+The `/app/merchant` route should be treated as the `ku0.com` resource-library workspace.
 
-Merchant Center should surface:
+The UI should make three things obvious:
 
-- one-page operational overview instead of separate deep navigation first
-- clear warning banner for dedicated trial keys
-- product inventory table
-- trial-connection list with masked credential presentation
-- evaluation timeline with score, verdict, replay capsule id, and summary
+- `Account Library`
+  Vendor profile, reviewed listings, and escrow orders are the live account-supply surface.
+- `Relay Library`
+  Trial connections, evaluations, and replay capsules are the live relay-inspection surface.
+- `Info Library`
+  Disclosure and risk communication exist today as announcement and evidence surfaces, with a richer content model deferred.
 
-V1 UX rule:
+## 10. Implementation Sequence
 
-- every evaluation result must show `runner_mode`
-- every evaluation result should show whether the displayed outcome came from a live run or replayed artifact
-
-## 11. Delivery Slice For This Repository
-
-The first implementation in this repo should ship:
-
-- typed shared schemas for shop, card product, trial connection, relay evaluation, and workspace aggregate
-- core-domain structs with basic validation
-- replay-capsule recording for merchant evaluations with redacted summaries
-- memory-backed control-plane endpoints for merchant workspace, replay lookup, and create actions
-- tenant console route `/app/merchant`
-- minimal tests for shared schema, control-plane behavior, and console service wiring
-
-## 12. Follow-Ups
-
-- secret stock ingestion and fulfillment ledger
-- public storefront publishing
-- order lifecycle and buyer access control
-- probe-based real relay evaluator
-- admin moderation and merchant risk rules
+1. Update product docs and UX copy to use the resource-library framing
+2. Keep extending the current seller, listing, order, and relay evidence objects instead of introducing a second parallel domain
+3. Add explicit info-library domain objects only after the account and relay workflows are stable and internally coherent

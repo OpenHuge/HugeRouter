@@ -10,7 +10,6 @@ members = [
   "crates/protocol-realtime",
   "crates/provider-anthropic",
   "crates/provider-bedrock",
-  "crates/provider-gateway",
   "crates/provider-gemini",
   "crates/provider-traits",
   "crates/routing-engine",
@@ -18,10 +17,8 @@ members = [
   "services/audit-worker",
   "services/control-plane-api",
   "services/edge-probe",
-  "services/gateway-api",
   "services/ledger-worker",
   "services/notification-worker",
-  "services/realtime-gateway",
   "services/route-receipt-worker",
   "services/routing-worker",
 ]

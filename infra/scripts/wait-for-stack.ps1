@@ -12,9 +12,9 @@ function Get-ServiceList {
 
   switch ($RequestedMode) {
     'core' { return @('postgres', 'redis', 'nats') }
-    'runtime' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker', 'routing-worker', 'edge-probe', 'audit-worker', 'notification-worker') }
+    'runtime' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'ledger-worker', 'route-receipt-worker', 'routing-worker', 'edge-probe', 'audit-worker', 'notification-worker') }
     'observability' { return @('otel-collector', 'alertmanager', 'prometheus', 'grafana') }
-    'full' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'gateway-api', 'ledger-worker', 'route-receipt-worker', 'routing-worker', 'edge-probe', 'audit-worker', 'notification-worker', 'otel-collector', 'alertmanager', 'prometheus', 'grafana') }
+    'full' { return @('postgres', 'redis', 'nats', 'control-plane-api', 'ledger-worker', 'route-receipt-worker', 'routing-worker', 'edge-probe', 'audit-worker', 'notification-worker', 'otel-collector', 'alertmanager', 'prometheus', 'grafana') }
     default { throw "Unsupported stack mode: $RequestedMode" }
   }
 }

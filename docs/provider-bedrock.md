@@ -77,7 +77,7 @@ The built-in metering catalog includes a provider-level `bedrock` rate card so l
 Run:
 
 ```bash
-cargo test -p provider-bedrock -p provider-traits -p gateway-api
+cargo test -p provider-bedrock -p provider-traits
 pnpm rust:check
 ```
 

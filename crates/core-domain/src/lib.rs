@@ -220,6 +220,7 @@ prefixed_id!(AuthProviderLinkId, "authlink_");
 prefixed_id!(AuthFlowId, "authflow_");
 prefixed_id!(MerchantShopId, "mshop_");
 prefixed_id!(CardProductId, "cardprod_");
+prefixed_id!(TradeOrderId, "tradeord_");
 prefixed_id!(TrialConnectionId, "trialconn_");
 prefixed_id!(RelayEvaluationId, "reval_");
 
@@ -361,6 +362,72 @@ pub enum CardProductStatus {
 #[serde(rename_all = "snake_case")]
 pub enum CardDeliveryKind {
     DirectSecret,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SellerIdentityLevel {
+    L1Basic,
+    L2Kyc,
+    L3Kyb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiProductRiskTier {
+    Green,
+    Yellow,
+    Red,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductReviewStatus {
+    PendingReview,
+    Approved,
+    Rejected,
+    Suspended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EscrowMode {
+    PlatformLedger,
+    PspEscrow,
+    TonContract,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeOrderState {
+    Created,
+    EscrowFunded,
+    FulfillmentSubmitted,
+    InReview,
+    Released,
+    Disputed,
+    Refunded,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceState {
+    NotRequired,
+    Required,
+    Submitted,
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DisputeState {
+    None,
+    Open,
+    BuyerWon,
+    SellerWon,
+    Resolved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -827,6 +894,10 @@ pub struct MerchantShop {
     pub tenant_id: TenantId,
     pub slug: String,
     pub display_name: String,
+    pub seller_alias: String,
+    pub identity_level: SellerIdentityLevel,
+    pub guarantee_deposit_usd: String,
+    pub dispute_rate_bps: u32,
     pub status: MerchantShopStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub announcement: Option<String>,
@@ -843,6 +914,8 @@ impl MerchantShop {
     pub fn validate(&self) -> Result<(), DomainError> {
         validate_slug("slug", &self.slug)?;
         validate_non_empty("display_name", &self.display_name)?;
+        validate_non_empty("seller_alias", &self.seller_alias)?;
+        validate_non_empty("guarantee_deposit_usd", &self.guarantee_deposit_usd)?;
         Ok(())
     }
 }
@@ -860,6 +933,11 @@ pub struct CardProduct {
     pub retail_price_usd: String,
     pub delivery_kind: CardDeliveryKind,
     pub supports_trial: bool,
+    pub risk_tier: AiProductRiskTier,
+    pub review_status: ProductReviewStatus,
+    pub escrow_mode: EscrowMode,
+    pub required_kyc_level: SellerIdentityLevel,
+    pub evidence_requirement: String,
     pub version: u64,
     pub created_at: String,
     pub updated_at: String,
@@ -874,6 +952,36 @@ impl CardProduct {
         validate_non_empty("description", &self.description)?;
         validate_non_empty("face_value_usd", &self.face_value_usd)?;
         validate_non_empty("retail_price_usd", &self.retail_price_usd)?;
+        validate_non_empty("evidence_requirement", &self.evidence_requirement)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct TradeOrder {
+    pub trade_order_id: TradeOrderId,
+    pub tenant_id: TenantId,
+    pub merchant_shop_id: MerchantShopId,
+    pub card_product_id: CardProductId,
+    pub buyer_alias: String,
+    pub seller_alias: String,
+    pub state: TradeOrderState,
+    pub escrow_mode: EscrowMode,
+    pub evidence_state: EvidenceState,
+    pub dispute_state: DisputeState,
+    pub order_amount_usd: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl TradeOrder {
+    /// # Errors
+    ///
+    /// Returns an error when the trade order payload is invalid.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_non_empty("buyer_alias", &self.buyer_alias)?;
+        validate_non_empty("seller_alias", &self.seller_alias)?;
+        validate_non_empty("order_amount_usd", &self.order_amount_usd)?;
         Ok(())
     }
 }
@@ -1109,19 +1217,20 @@ pub struct ReplayCapsule {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdmissionResult, AuthFlowId, AuthKind, AuthLoginResult, AuthProvider, AuthProviderLink,
-        AuthProviderLinkId, AuthSession, AuthSessionId, AuthSessionState, CardDeliveryKind,
-        CardProduct, CardProductId, CardProductStatus, ConfigSnapshotId, CredentialOwnerType,
-        DeploymentScope, DomainError, EmailLoginCompleteRequest, ErrorEnvelope, HealthState,
-        MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus, MonetaryAmount,
-        NormalizedError, OAuthCallbackRequest, ProjectId, ProvenanceClass, ProviderCapabilities,
-        ProviderResource, ProviderResourceId, ProviderResourceStatus, RelayCheckStatus,
-        RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode, RelayEvaluationVerdict,
-        ReplayCapsuleId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown,
-        Tenant, TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole,
-        TenantMembershipStatus, TenantSummary, TrialConnection, TrialConnectionId,
-        TrialConnectionStatus, UsageEvent, UsageEventId, UsageMetrics, UsagePhase, UserId,
-        UserIdentity,
+        AdmissionResult, AiProductRiskTier, AuthFlowId, AuthKind, AuthLoginResult, AuthProvider,
+        AuthProviderLink, AuthProviderLinkId, AuthSession, AuthSessionId, AuthSessionState,
+        CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshotId,
+        CredentialOwnerType, DeploymentScope, DomainError, EmailLoginCompleteRequest,
+        ErrorEnvelope, EscrowMode, HealthState, MerchantFulfillmentMode, MerchantShop,
+        MerchantShopId, MerchantShopStatus, MonetaryAmount, NormalizedError, OAuthCallbackRequest,
+        ProductReviewStatus, ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource,
+        ProviderResourceId, ProviderResourceStatus, RelayCheckStatus, RelayEvaluation,
+        RelayEvaluationId, RelayEvaluationRunnerMode, RelayEvaluationVerdict, ReplayCapsuleId,
+        RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown,
+        SellerIdentityLevel, Tenant, TenantId, TenantMembership, TenantMembershipId,
+        TenantMembershipRole, TenantMembershipStatus, TenantSummary, TrialConnection,
+        TrialConnectionId, TrialConnectionStatus, UsageEvent, UsageEventId, UsageMetrics,
+        UsagePhase, UserId, UserIdentity,
     };
     use serde_json::{Value, json};
 
@@ -1231,6 +1340,10 @@ mod tests {
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             slug: "Acme Shop".to_string(),
             display_name: "Acme Shop".to_string(),
+            seller_alias: "acme-verified".to_string(),
+            identity_level: SellerIdentityLevel::L2Kyc,
+            guarantee_deposit_usd: "250.00".to_string(),
+            dispute_rate_bps: 0,
             status: MerchantShopStatus::Draft,
             announcement: None,
             fulfillment_mode: MerchantFulfillmentMode::AutoCardSecret,
@@ -1563,6 +1676,11 @@ mod tests {
             retail_price_usd: "0.99".to_string(),
             delivery_kind: CardDeliveryKind::DirectSecret,
             supports_trial: true,
+            risk_tier: AiProductRiskTier::Green,
+            review_status: ProductReviewStatus::Approved,
+            escrow_mode: EscrowMode::PlatformLedger,
+            required_kyc_level: SellerIdentityLevel::L1Basic,
+            evidence_requirement: "Replay capsule required before listing.".to_string(),
             version: 1,
             created_at: "2026-04-22T00:00:00Z".to_string(),
             updated_at: "2026-04-22T00:00:00Z".to_string(),

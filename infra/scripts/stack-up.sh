@@ -41,7 +41,6 @@ case "${mode}" in
 
     stack_compose "${mode}" up -d --remove-orphans \
       control-plane-api \
-      gateway-api \
       ledger-worker \
       route-receipt-worker \
       routing-worker \
