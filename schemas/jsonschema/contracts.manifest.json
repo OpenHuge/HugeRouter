@@ -2,7 +2,7 @@
   "contract_version": "v1",
   "generation_command": "pnpm generate",
   "source_of_truth": "Rust crates `core-domain` and `protocol-ir`",
-  "contract_digest": "5fe6283775951264b29ffcc97f92496356c265f5e7e6a7e201dedab4c7ce3f78",
+  "contract_digest": "c21eb801f936e0f865682899d028ee4e73e412dcdcd91da076fc9ae59ae8eac4",
   "stable_contracts": [
     "tenant",
     "project",

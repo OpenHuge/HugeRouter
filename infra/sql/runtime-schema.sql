@@ -103,6 +103,41 @@ CREATE TABLE IF NOT EXISTS login_flows (
     payload JSONB NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS merchant_shops (
+    merchant_shop_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    UNIQUE (tenant_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS card_products (
+    card_product_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    merchant_shop_id TEXT NOT NULL,
+    payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trial_connections (
+    trial_connection_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS relay_evaluations (
+    relay_evaluation_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    trial_connection_id TEXT NOT NULL,
+    replay_capsule_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS replay_capsules (
+    replay_capsule_id TEXT PRIMARY KEY,
+    payload JSONB NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS route_receipts (
     route_receipt_id TEXT PRIMARY KEY,
     payload JSONB NOT NULL

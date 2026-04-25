@@ -534,7 +534,9 @@ describe("console routes", () => {
 
     await renderRoute("/app/providers");
 
-    expect(await screen.findByText("Providers unavailable")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Providers unavailable"),
+    ).toBeInTheDocument();
   });
 
   it("renders routes success state for tenant sessions", async () => {
@@ -563,7 +565,9 @@ describe("console routes", () => {
     });
 
     const deferred =
-      createDeferred<Awaited<ReturnType<ConsoleDataService["listRoutePolicies"]>>>();
+      createDeferred<
+        Awaited<ReturnType<ConsoleDataService["listRoutePolicies"]>>
+      >();
     const baseService = getConsoleDataService();
 
     setConsoleDataServiceForTests({
@@ -643,7 +647,9 @@ describe("console routes", () => {
     expect(
       screen.getByRole("link", { name: "Open route receipts" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Inspect" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Inspect" }).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("admitted")).toBeInTheDocument();
   });
 
@@ -658,16 +664,19 @@ describe("console routes", () => {
     setConsoleDataServiceForTests({
       ...baseService,
       getRouteDiagnostics: async (routePolicyId: string) => {
-        const diagnostics = await baseService.getRouteDiagnostics(routePolicyId);
+        const diagnostics =
+          await baseService.getRouteDiagnostics(routePolicyId);
 
         return {
           ...diagnostics,
           diagnostics: {
             ...diagnostics.diagnostics,
-            recent_receipts: diagnostics.diagnostics.recent_receipts.map((receipt) => ({
-              ...receipt,
-              failure_reason: undefined,
-            })),
+            recent_receipts: diagnostics.diagnostics.recent_receipts.map(
+              (receipt) => ({
+                ...receipt,
+                failure_reason: undefined,
+              }),
+            ),
             route_policy: {
               ...diagnostics.diagnostics.route_policy,
               display_name: "Anthropic Summary",
@@ -678,7 +687,9 @@ describe("console routes", () => {
               provider_resource: {
                 ...target.provider_resource,
                 health_message:
-                  index === 0 ? undefined : target.provider_resource.health_message,
+                  index === 0
+                    ? undefined
+                    : target.provider_resource.health_message,
                 quarantine_reason: undefined,
               },
             })),

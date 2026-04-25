@@ -8,6 +8,7 @@ import {
 } from "../control-plane/service";
 import type {
   MerchantWorkspaceData,
+  RelayEvaluationView,
   ReplayCapsuleView,
 } from "../control-plane/types";
 import { RouteErrorState } from "../control-plane/route-state";
@@ -16,6 +17,7 @@ import {
   CardProductCard,
   RelayEvaluationCard,
 } from "./MerchantCenterProductForms";
+import { MerchantEvidenceSummary } from "./MerchantEvidenceSummary";
 import {
   CardProductTable,
   MerchantShopTable,
@@ -39,6 +41,7 @@ import {
 } from "./forms";
 
 type MerchantCenterLoaderResult = RouteDataResult<MerchantWorkspaceData>;
+type RelayEvaluationVerdictFilter = "all" | RelayEvaluationView["verdict"];
 
 export function MerchantCenterPage({
   result,
@@ -62,9 +65,13 @@ export function MerchantCenterPage({
     );
   }
 
-  const [workspace, setWorkspace] = useState<MerchantWorkspaceData>(
-    result.data,
-  );
+  return <MerchantCenterContent data={result.data} />;
+}
+
+function MerchantCenterContent({ data }: { data: MerchantWorkspaceData }) {
+  const [workspace, setWorkspace] = useState<MerchantWorkspaceData>(data);
+  const [evaluationVerdictFilter, setEvaluationVerdictFilter] =
+    useState<RelayEvaluationVerdictFilter>("all");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
   const [shopErrors, setShopErrors] = useState<FormErrors>({});
@@ -92,22 +99,22 @@ export function MerchantCenterPage({
   >(null);
 
   useEffect(() => {
-    setWorkspace(result.data);
-  }, [result.data]);
+    setWorkspace(data);
+  }, [data]);
 
   useEffect(() => {
     setCardForm((current) => ({
       ...current,
       merchantShopId:
-        current.merchantShopId || result.data.shops[0]?.merchantShopId || "",
+        current.merchantShopId || data.shops[0]?.merchantShopId || "",
     }));
     setEvaluationForm((current) => ({
       trialConnectionId:
         current.trialConnectionId ||
-        result.data.trialConnections[0]?.trialConnectionId ||
+        data.trialConnections[0]?.trialConnectionId ||
         "",
     }));
-  }, [result.data.shops, result.data.trialConnections]);
+  }, [data.shops, data.trialConnections]);
 
   async function refreshWorkspace() {
     setWorkspace(await getConsoleDataService().getMerchantWorkspace());
@@ -254,7 +261,7 @@ export function MerchantCenterPage({
     } catch (error) {
       setSelectedReplayCapsule(null);
       setStatusError(
-        getControlPlaneActionErrorMessage(error, "relay-evaluation-create"),
+        getControlPlaneActionErrorMessage(error, "replay-capsule-load"),
       );
     } finally {
       setIsLoadingReplayCapsule(false);
@@ -312,12 +319,15 @@ export function MerchantCenterPage({
         setEvaluationForm={setEvaluationForm}
         trialConnections={workspace.trialConnections}
       />
+      <MerchantEvidenceSummary workspace={workspace} />
       <MerchantShopTable shops={workspace.shops} />
       <CardProductTable products={workspace.cardProducts} />
       <TrialConnectionTable connections={workspace.trialConnections} />
       <RelayEvaluationTable
+        evaluationVerdictFilter={evaluationVerdictFilter}
         isLoadingReplayCapsule={isLoadingReplayCapsule}
         onViewReplayCapsule={onViewReplayCapsule}
+        setEvaluationVerdictFilter={setEvaluationVerdictFilter}
         selectedReplayCapsuleId={selectedReplayCapsuleId}
         workspace={workspace}
       />

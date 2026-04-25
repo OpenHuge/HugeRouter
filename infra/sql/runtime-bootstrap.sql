@@ -132,6 +132,78 @@ VALUES ('default', 'cfgsnap_gateway_v1')
 ON CONFLICT (pointer_key) DO UPDATE
 SET config_snapshot_id = EXCLUDED.config_snapshot_id;
 
+INSERT INTO merchant_shops (merchant_shop_id, tenant_id, slug, payload)
+VALUES (
+    'mshop_acme',
+    'tenant_acme',
+    'acme-small-shop',
+    $json${"merchant_shop_id":"mshop_acme","tenant_id":"tenant_acme","slug":"acme-small-shop","display_name":"Acme Small Shop","status":"active","announcement":"Fresh relay trial cards with replay-backed evaluation.","fulfillment_mode":"auto_card_secret","version":1,"created_at":"2026-04-22T00:00:00Z","updated_at":"2026-04-22T00:00:00Z"}$json$::jsonb
+)
+ON CONFLICT (merchant_shop_id) DO UPDATE
+SET tenant_id = EXCLUDED.tenant_id,
+    slug = EXCLUDED.slug,
+    payload = EXCLUDED.payload;
+
+INSERT INTO card_products (card_product_id, tenant_id, merchant_shop_id, payload)
+VALUES (
+    'cardprod_acme_trial',
+    'tenant_acme',
+    'mshop_acme',
+    $json${"card_product_id":"cardprod_acme_trial","tenant_id":"tenant_acme","merchant_shop_id":"mshop_acme","title":"Claude Trial Pack","description":"Starter batch for relay verification and low-risk onboarding.","status":"active","inventory_count":32,"face_value_usd":"1.00","retail_price_usd":"1.99","delivery_kind":"direct_secret","supports_trial":true,"version":1,"created_at":"2026-04-22T00:00:00Z","updated_at":"2026-04-22T00:00:00Z"}$json$::jsonb
+)
+ON CONFLICT (card_product_id) DO UPDATE
+SET tenant_id = EXCLUDED.tenant_id,
+    merchant_shop_id = EXCLUDED.merchant_shop_id,
+    payload = EXCLUDED.payload;
+
+INSERT INTO trial_connections (trial_connection_id, tenant_id, payload)
+VALUES (
+    'trialconn_acme_relay',
+    'tenant_acme',
+    $json${"trial_connection_id":"trialconn_acme_relay","tenant_id":"tenant_acme","provider_label":"Acme Relay","endpoint_base_url":"https://relay.acme.example/v1","api_key_masked":"sk-trial...acme","target_model":"claude-sonnet","status":"active","notes":"Dedicated trial key only; never attach production traffic.","last_verified_at":"2026-04-22T00:00:00Z","version":1,"created_at":"2026-04-22T00:00:00Z","updated_at":"2026-04-22T00:00:00Z"}$json$::jsonb
+)
+ON CONFLICT (trial_connection_id) DO UPDATE
+SET tenant_id = EXCLUDED.tenant_id,
+    payload = EXCLUDED.payload;
+
+INSERT INTO replay_capsules (replay_capsule_id, payload)
+VALUES (
+    'replay_acme_relay_eval',
+    $json${"replay_capsule_id":"replay_acme_relay_eval","request_id":"req_merchant_eval_acme","trace_id":"trace_merchant_eval_acme","route_receipt_id":"routercpt_acme_relay_eval","config_snapshot_id":"cfgsnap_gateway_v1","redaction_tier":"structured_redacted","normalized_request_summary":{"protocol_family":"openai_chat","model_alias":"claude-sonnet","estimated_prompt_tokens":480},"upstream_error_summary":{"code":"provider_signature_mismatch"}}$json$::jsonb
+)
+ON CONFLICT (replay_capsule_id) DO UPDATE
+SET payload = EXCLUDED.payload;
+
+INSERT INTO route_receipts (route_receipt_id, payload)
+VALUES (
+    'routercpt_acme_relay_eval',
+    $json${"route_receipt_id":"routercpt_acme_relay_eval","tenant_id":"tenant_acme","project_id":"proj_core","route_policy_id":"routepol_acme_default","request_id":"req_merchant_eval_acme","trace_id":"trace_merchant_eval_acme","protocol_family":"openai_chat","model_alias":"claude-sonnet","config_snapshot_id":"cfgsnap_gateway_v1","admission_result":"admitted","selected_target":"prvrsrc_openai_primary","excluded_targets":[],"score_breakdown":{"latency":0.8,"cost":0.7,"health":1.0,"trust":0.9},"fallback_transitions":[],"created_at":"2026-04-22T00:00:00Z"}$json$::jsonb
+)
+ON CONFLICT (route_receipt_id) DO UPDATE
+SET payload = EXCLUDED.payload;
+
+INSERT INTO relay_evaluations (
+    relay_evaluation_id,
+    tenant_id,
+    trial_connection_id,
+    replay_capsule_id,
+    created_at,
+    payload
+)
+VALUES (
+    'reval_acme_relay',
+    'tenant_acme',
+    'trialconn_acme_relay',
+    'replay_acme_relay_eval',
+    '2026-04-22T00:00:00Z',
+    $json${"relay_evaluation_id":"reval_acme_relay","tenant_id":"tenant_acme","trial_connection_id":"trialconn_acme_relay","replay_capsule_id":"replay_acme_relay_eval","provider_label":"Acme Relay","endpoint_base_url":"https://relay.acme.example/v1","target_model":"claude-sonnet","runner_mode":"simulated","sample_request_count":5,"estimated_tokens_saved":2400,"overall_score":82,"verdict":"warning","fingerprint_status":"pass","protocol_status":"warning","token_status":"warning","multimodal_status":"not_tested","detected_channel":"vertex","summary":"Replay capsule captured; protocol and token behavior still need manual follow-up.","created_at":"2026-04-22T00:00:00Z"}$json$::jsonb
+)
+ON CONFLICT (relay_evaluation_id) DO UPDATE
+SET tenant_id = EXCLUDED.tenant_id,
+    trial_connection_id = EXCLUDED.trial_connection_id,
+    replay_capsule_id = EXCLUDED.replay_capsule_id,
+    created_at = EXCLUDED.created_at,
+    payload = EXCLUDED.payload;
 INSERT INTO pricing_catalog_entries (
     catalog_id,
     catalog_version,

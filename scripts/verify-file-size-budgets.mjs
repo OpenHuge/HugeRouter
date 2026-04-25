@@ -89,7 +89,7 @@ const exactBudgetOverrides = new Map([
   [
     "crates/core-domain/src/lib.rs",
     {
-      maxLines: 1700,
+      maxLines: 1600,
       reason:
         "Core domain types still live in one module. New domain areas should land in dedicated submodules.",
     },
@@ -97,9 +97,9 @@ const exactBudgetOverrides = new Map([
   [
     "crates/protocol-ir/src/lib.rs",
     {
-      maxLines: 2800,
+      maxLines: 1000,
       reason:
-        "Protocol IR definitions are still centralized. Keep it capped while protocol families are split out.",
+        "Protocol IR root now composes focused contract, artifact, docs, and example modules. Keep new contract families out of the root.",
     },
   ],
   [
@@ -113,25 +113,25 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/lib.rs",
     {
-      maxLines: 5850,
+      maxLines: 5600,
       reason:
-        "Control-plane API crate is still a monolith. Replay hardening temporarily expanded it; new endpoints and handlers should be moved into modules.",
+        "Control-plane API wiring is still oversized. New endpoint groups must move into focused handler modules.",
     },
   ],
   [
     "services/control-plane-api/src/store.rs",
     {
-      maxLines: 6000,
+      maxLines: 5800,
       reason:
-        "Store implementation is a known monolith. Keep it from expanding further until persistence code is split.",
+        "Store implementation is a known monolith. Persistence and domain-specific store code should move into focused modules; replay receipt regression coverage raised the temporary ceiling slightly.",
     },
   ],
   [
     "services/gateway-api/src/lib.rs",
     {
-      maxLines: 5000,
+      maxLines: 3400,
       reason:
-        "Gateway API wiring is still centralized. New protocols and handlers should be factored into modules.",
+        "Gateway API wiring is still centralized. Route receipt attempt diagnostics temporarily raised the ceiling; new protocols and handlers should be factored into modules.",
     },
   ],
 ]);
@@ -264,7 +264,7 @@ function getBudget(relativePath) {
   if (isRustFile(relativePath)) {
     return {
       category: "rust-source",
-      maxLines: 900,
+      maxLines: 800,
       reason:
         "Rust modules larger than this usually hide multiple responsibilities.",
     };
