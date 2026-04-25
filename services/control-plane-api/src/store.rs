@@ -5546,7 +5546,10 @@ mod tests {
         assert_eq!(all[0].route_receipt_id.as_str(), "routercpt_store_b");
         assert_eq!(all[1].route_receipt_id.as_str(), "routercpt_store_c");
         assert_eq!(all[2].route_receipt_id.as_str(), "routercpt_store_a");
-        assert_eq!(all[3].route_receipt_id.as_str(), "routercpt_acme_relay_eval");
+        assert_eq!(
+            all[3].route_receipt_id.as_str(),
+            "routercpt_acme_relay_eval"
+        );
 
         let tenant_filtered = store
             .list_route_receipts(&RouteReceiptFilters {
