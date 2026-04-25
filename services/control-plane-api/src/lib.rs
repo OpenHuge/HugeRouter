@@ -751,7 +751,17 @@ async fn start_oauth_login(
             provider,
             &state_token,
             &redirect_query,
-        ),
+        )
+        .ok_or_else(|| {
+            ApiError::forbidden(
+                "provider_disabled",
+                format!(
+                    "{} login is enabled but missing OAuth client configuration",
+                    oauth_provider_slug(provider)
+                ),
+                &context,
+            )
+        })?,
         state: state_token,
         expires_at: expires_at(600),
     }))
@@ -852,15 +862,20 @@ async fn complete_oauth_login(
                 display_name: Some(format!("{} operator", oauth_provider_slug(provider))),
             }
         } else {
-            exchange_oauth_identity(provider, &request.code, request.redirect_uri.as_deref())
-                .await
-                .map_err(|error| {
-                    ApiError::unauthorized(
-                        "auth_invalid_code",
-                        format!("oauth callback exchange failed: {error}"),
-                        &context,
-                    )
-                })?
+            exchange_oauth_identity(
+                provider,
+                &request.code,
+                request.redirect_uri.as_deref(),
+                &state.frontend_base_url,
+            )
+            .await
+            .map_err(|error| {
+                ApiError::unauthorized(
+                    "auth_invalid_code",
+                    format!("oauth callback exchange failed: {error}"),
+                    &context,
+                )
+            })?
         };
 
         state
@@ -2471,36 +2486,64 @@ fn oauth_authorization_url(
     provider: core_domain::OAuthProvider,
     state_token: &str,
     redirect_query: &str,
-) -> String {
+) -> Option<String> {
     if provider == core_domain::OAuthProvider::Oidc
         && let Ok(base) = std::env::var("CONTROL_PLANE_OIDC_AUTHORIZATION_URL")
         && !base.trim().is_empty()
     {
         let redirect_uri = std::env::var("CONTROL_PLANE_OIDC_REDIRECT_URI")
             .unwrap_or_else(|_| format!("{frontend_base_url}/login/callback?provider=oidc"));
-        return format!(
+        return Some(format!(
             "{base}?response_type=code&client_id={}&scope=openid%20profile%20email%20groups&state={state_token}&redirect_uri={}",
             std::env::var("CONTROL_PLANE_OIDC_CLIENT_ID")
                 .unwrap_or_else(|_| "huge-router-console".to_string()),
             urlencoding::encode(&redirect_uri),
-        );
+        ));
     }
 
     if let Some(config) = oauth_provider_config(provider, frontend_base_url) {
+        return Some(oauth_authorization_url_from_config(
+            provider,
+            &config,
+            state_token,
+            redirect_query,
+        ));
+    }
+
+    if !mock_auth_enabled() {
+        return None;
+    }
+
+    Some(format!(
+        "{frontend_base_url}/login/callback?provider={}&state={state_token}&code=mock-{}-code{redirect_query}",
+        oauth_provider_slug(provider),
+        oauth_provider_slug(provider),
+    ))
+}
+
+fn oauth_authorization_url_from_config(
+    provider: core_domain::OAuthProvider,
+    config: &OAuthProviderConfig,
+    state_token: &str,
+    redirect_query: &str,
+) -> String {
+    if provider == core_domain::OAuthProvider::Wechat {
         return format!(
-            "{}?response_type=code&client_id={}&scope={}&state={state_token}&redirect_uri={}{}",
+            "{}?appid={}&redirect_uri={}&response_type=code&scope={}&state={state_token}{redirect_query}#wechat_redirect",
             config.authorization_url,
             urlencoding::encode(&config.client_id),
-            urlencoding::encode(&config.scope),
             urlencoding::encode(&config.redirect_uri),
-            redirect_query,
+            urlencoding::encode(&config.scope),
         );
     }
 
     format!(
-        "{frontend_base_url}/login/callback?provider={}&state={state_token}&code=mock-{}-code{redirect_query}",
-        oauth_provider_slug(provider),
-        oauth_provider_slug(provider),
+        "{}?response_type=code&client_id={}&scope={}&state={state_token}&redirect_uri={}{}",
+        config.authorization_url,
+        urlencoding::encode(&config.client_id),
+        urlencoding::encode(&config.scope),
+        urlencoding::encode(&config.redirect_uri),
+        redirect_query,
     )
 }
 
@@ -2624,11 +2667,16 @@ async fn exchange_oauth_identity(
     provider: core_domain::OAuthProvider,
     code: &str,
     redirect_uri: Option<&str>,
+    frontend_base_url: &str,
 ) -> Result<OAuthIdentity> {
-    let config = oauth_provider_config(provider, FRONTEND_BASE_URL)
+    let config = oauth_provider_config(provider, frontend_base_url)
         .context("oauth provider is not configured for external login")?;
     let http = HttpClient::new();
-    let mut form = vec![
+    if provider == core_domain::OAuthProvider::Wechat {
+        return exchange_wechat_identity(&http, &config, code).await;
+    }
+
+    let form = vec![
         ("grant_type", "authorization_code".to_string()),
         ("code", code.to_string()),
         ("client_id", config.client_id.clone()),
@@ -2638,10 +2686,6 @@ async fn exchange_oauth_identity(
             redirect_uri.unwrap_or(&config.redirect_uri).to_string(),
         ),
     ];
-    if provider == core_domain::OAuthProvider::Wechat {
-        form.push(("appid", config.client_id.clone()));
-        form.push(("secret", config.client_secret.clone()));
-    }
 
     let token_response = http
         .post(&config.token_url)
@@ -2656,6 +2700,7 @@ async fn exchange_oauth_identity(
         .json::<Value>()
         .await
         .context("oauth token payload was not valid json")?;
+    ensure_oauth_payload_ok(provider, &token_payload)?;
     let access_token = token_payload
         .get("access_token")
         .and_then(Value::as_str)
@@ -2681,6 +2726,7 @@ async fn exchange_oauth_identity(
         .json::<Value>()
         .await
         .context("oauth userinfo payload was not valid json")?;
+    ensure_oauth_payload_ok(provider, &claims)?;
 
     let subject = subject
         .or_else(|| {
@@ -2705,7 +2751,8 @@ async fn exchange_oauth_identity(
     let email = claims
         .get("email")
         .and_then(Value::as_str)
-        .map(str::to_string);
+        .map(str::to_string)
+        .or_else(|| github_primary_email(provider, &claims));
     let display_name = claims
         .get("name")
         .or_else(|| claims.get("login"))
@@ -2718,6 +2765,122 @@ async fn exchange_oauth_identity(
         email,
         display_name,
     })
+}
+
+async fn exchange_wechat_identity(
+    http: &HttpClient,
+    config: &OAuthProviderConfig,
+    code: &str,
+) -> Result<OAuthIdentity> {
+    let token_payload = http
+        .get(&config.token_url)
+        .query(&[
+            ("appid", config.client_id.as_str()),
+            ("secret", config.client_secret.as_str()),
+            ("code", code),
+            ("grant_type", "authorization_code"),
+        ])
+        .send()
+        .await
+        .context("wechat token request failed")?
+        .error_for_status()
+        .context("wechat token endpoint returned error status")?
+        .json::<Value>()
+        .await
+        .context("wechat token payload was not valid json")?;
+    ensure_oauth_payload_ok(core_domain::OAuthProvider::Wechat, &token_payload)?;
+
+    let access_token = token_payload
+        .get("access_token")
+        .and_then(Value::as_str)
+        .context("wechat token payload missing access_token")?;
+    let openid = token_payload
+        .get("openid")
+        .and_then(Value::as_str)
+        .context("wechat token payload missing openid")?;
+
+    let claims = http
+        .get(&config.userinfo_url)
+        .query(&[
+            ("access_token", access_token),
+            ("openid", openid),
+            ("lang", "zh_CN"),
+        ])
+        .send()
+        .await
+        .context("wechat userinfo request failed")?
+        .error_for_status()
+        .context("wechat userinfo endpoint returned error status")?
+        .json::<Value>()
+        .await
+        .context("wechat userinfo payload was not valid json")?;
+    ensure_oauth_payload_ok(core_domain::OAuthProvider::Wechat, &claims)?;
+
+    let subject = claims
+        .get("unionid")
+        .and_then(Value::as_str)
+        .or_else(|| claims.get("openid").and_then(Value::as_str))
+        .unwrap_or(openid)
+        .to_string();
+    let display_name = claims
+        .get("nickname")
+        .or_else(|| claims.get("name"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    Ok(OAuthIdentity {
+        subject,
+        email: None,
+        display_name,
+    })
+}
+
+fn ensure_oauth_payload_ok(provider: core_domain::OAuthProvider, payload: &Value) -> Result<()> {
+    if let Some(error) = payload.get("error").and_then(Value::as_str) {
+        let error_message = payload
+            .get("error_description")
+            .or_else(|| payload.get("errmsg"))
+            .and_then(Value::as_str)
+            .unwrap_or(error);
+        anyhow::bail!(
+            "{} oauth error: {}",
+            oauth_provider_slug(provider),
+            error_message
+        )
+    }
+
+    let Some(error_code) = payload.get("errcode") else {
+        return Ok(());
+    };
+    let is_ok = error_code
+        .as_i64()
+        .map_or_else(|| error_code.as_str() == Some("0"), |code| code == 0);
+    if is_ok {
+        return Ok(());
+    }
+
+    let error_message = payload
+        .get("errmsg")
+        .or_else(|| payload.get("error_description"))
+        .or_else(|| payload.get("error"))
+        .and_then(Value::as_str)
+        .unwrap_or("oauth provider returned an error payload");
+    anyhow::bail!(
+        "{} oauth error: {}",
+        oauth_provider_slug(provider),
+        error_message
+    )
+}
+
+fn github_primary_email(provider: core_domain::OAuthProvider, claims: &Value) -> Option<String> {
+    if provider != core_domain::OAuthProvider::Github {
+        return None;
+    }
+
+    claims
+        .get("email")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn resolve_oidc_membership(
@@ -3151,7 +3314,10 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlPlaneState, app_with_state, resolve_oidc_membership};
+    use super::{
+        ControlPlaneState, OAuthProviderConfig, app_with_state, ensure_oauth_payload_ok,
+        oauth_authorization_url_from_config, resolve_oidc_membership,
+    };
     use crate::store::{IdentityLookup, SESSION_TTL_SECONDS, UserIdentityKey, UserSeed};
     use axum::{
         body::{Body, to_bytes},
@@ -3421,6 +3587,84 @@ mod tests {
             .collect()
     }
     use tower::ServiceExt;
+
+    #[test]
+    fn github_authorization_url_uses_standard_oauth_parameters() {
+        let config = OAuthProviderConfig {
+            authorization_url: "https://github.com/login/oauth/authorize".to_string(),
+            token_url: "https://github.com/login/oauth/access_token".to_string(),
+            userinfo_url: "https://api.github.com/user".to_string(),
+            client_id: "github-client".to_string(),
+            client_secret: "github-secret".to_string(),
+            redirect_uri: "http://localhost:3000/login/callback?provider=github".to_string(),
+            scope: "read:user user:email".to_string(),
+        };
+
+        let url = oauth_authorization_url_from_config(
+            core_domain::OAuthProvider::Github,
+            &config,
+            "oauth_state_1",
+            "",
+        );
+
+        assert!(url.starts_with("https://github.com/login/oauth/authorize?"));
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("client_id=github-client"));
+        assert!(url.contains("scope=read%3Auser%20user%3Aemail"));
+        assert!(url.contains("state=oauth_state_1"));
+        assert!(url.contains(
+            "redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Flogin%2Fcallback%3Fprovider%3Dgithub"
+        ));
+    }
+
+    #[test]
+    fn wechat_authorization_url_uses_qrconnect_parameters() {
+        let config = OAuthProviderConfig {
+            authorization_url: "https://open.weixin.qq.com/connect/qrconnect".to_string(),
+            token_url: "https://api.weixin.qq.com/sns/oauth2/access_token".to_string(),
+            userinfo_url: "https://api.weixin.qq.com/sns/userinfo".to_string(),
+            client_id: "wx-client".to_string(),
+            client_secret: "wx-secret".to_string(),
+            redirect_uri: "https://ku0.com/login/callback?provider=wechat".to_string(),
+            scope: "snsapi_login".to_string(),
+        };
+
+        let url = oauth_authorization_url_from_config(
+            core_domain::OAuthProvider::Wechat,
+            &config,
+            "oauth_state_1",
+            "",
+        );
+
+        assert!(url.starts_with("https://open.weixin.qq.com/connect/qrconnect?"));
+        assert!(url.contains("appid=wx-client"));
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("scope=snsapi_login"));
+        assert!(url.contains("state=oauth_state_1"));
+        assert!(
+            url.contains(
+                "redirect_uri=https%3A%2F%2Fku0.com%2Flogin%2Fcallback%3Fprovider%3Dwechat"
+            )
+        );
+        assert!(url.ends_with("#wechat_redirect"));
+        assert!(!url.contains("client_id="));
+    }
+
+    #[test]
+    fn oauth_error_payloads_are_rejected() {
+        let error = ensure_oauth_payload_ok(
+            core_domain::OAuthProvider::Wechat,
+            &json!({
+                "errcode": 40029,
+                "errmsg": "invalid code"
+            }),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("wechat oauth error"));
+        assert!(error.contains("invalid code"));
+    }
 
     #[tokio::test]
     async fn health_endpoint_returns_ok() {

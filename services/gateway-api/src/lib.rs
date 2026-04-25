@@ -1,6 +1,7 @@
 mod adapter_manifests;
 mod composition;
 mod openai;
+mod relay_capabilities;
 mod route_evaluation;
 mod route_receipts;
 
@@ -305,6 +306,10 @@ pub fn app_with_state(state: GatewayState) -> Router {
         .route(
             "/internal/provider-adapters/{provider_kind}",
             get(adapter_manifests::provider_adapter),
+        )
+        .route(
+            "/internal/relay/capabilities",
+            get(relay_capabilities::relay_capabilities),
         )
         .route("/v1/images/generations", post(image_generations))
         .route("/v1/responses", post(responses))

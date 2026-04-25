@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "turbo run dev --parallel",
+    "dev:auth-local": "node ./scripts/dev-auth-local.mjs",
     "build": "node ./scripts/run-quality-pipeline.mjs build",
     "lint": "node ./scripts/run-quality-pipeline.mjs lint",
     "typecheck": "node ./scripts/run-quality-pipeline.mjs typecheck",
