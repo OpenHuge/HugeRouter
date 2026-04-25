@@ -1,6 +1,6 @@
-import '@testing-library/jest-dom/vitest'
+import "@testing-library/jest-dom/vitest";
 
-Object.defineProperty(window, 'matchMedia', {
+Object.defineProperty(window, "matchMedia", {
   value: (query: string) => ({
     addEventListener: () => undefined,
     addListener: () => undefined,
@@ -9,12 +9,36 @@ Object.defineProperty(window, 'matchMedia', {
     media: query,
     onchange: null,
     removeEventListener: () => undefined,
-    removeListener: () => undefined
+    removeListener: () => undefined,
   }),
-  writable: true
-})
+  writable: true,
+});
 
-Object.defineProperty(window, 'scrollTo', {
+Object.defineProperty(window, "scrollTo", {
   value: () => undefined,
-  writable: true
-})
+  writable: true,
+});
+
+class ResizeObserverMock {
+  disconnect() {
+    return undefined;
+  }
+
+  observe() {
+    return undefined;
+  }
+
+  unobserve() {
+    return undefined;
+  }
+}
+
+Object.defineProperty(window, "ResizeObserver", {
+  value: ResizeObserverMock,
+  writable: true,
+});
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+  value: ResizeObserverMock,
+  writable: true,
+});

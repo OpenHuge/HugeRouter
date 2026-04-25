@@ -1,8 +1,12 @@
 #![allow(clippy::too_many_lines, clippy::uninlined_format_args)]
 
+mod merchant_api;
+mod merchant_replay;
+mod merchant_store;
 mod pricing_catalog;
 mod route_receipts;
 mod store;
+mod store_schema;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -16,13 +20,11 @@ use axum::{
     routing::{get, post, put},
 };
 use core_domain::{
-    AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, CardDeliveryKind, CardProduct,
-    CardProductId, CardProductStatus, ConfigSnapshot, EmailLoginCompleteRequest,
-    EmailLoginStartRequest, EmailLoginStartResponse, MerchantFulfillmentMode, MerchantShop,
-    MerchantShopId, MerchantShopStatus, OAuthCallbackRequest, OAuthLoginStartRequest,
-    OAuthLoginStartResponse, Project, ProviderResource, ProviderResourceId, RoutePolicy,
-    RoutePolicyId, Tenant, TenantMembership, TenantMembershipRole, TenantMembershipStatus,
-    TrialConnection, TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse,
+    AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, ConfigSnapshot,
+    EmailLoginCompleteRequest, EmailLoginStartRequest, EmailLoginStartResponse,
+    OAuthCallbackRequest, OAuthLoginStartRequest, OAuthLoginStartResponse, Project,
+    ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, Tenant, TenantMembership,
+    TenantMembershipRole, TenantMembershipStatus, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
@@ -37,9 +39,8 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
     ApiKey, ApiKeysResponse, ConcurrencyResult, ConfigSnapshotsResponse, IdentityLookup,
-    MerchantWorkspaceEnvelope, ProviderResourceFilters, ReplayCapsuleResponse, SESSION_TTL_SECONDS,
-    StoreMode, auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339,
-    oauth_provider_slug,
+    ProviderResourceFilters, SESSION_TTL_SECONDS, StoreMode, auth_provider_enabled, expires_at,
+    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -55,7 +56,7 @@ static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 pub struct ControlPlaneState {
     frontend_base_url: String,
     internal_gateway_token: Option<String>,
-    store: StoreMode,
+    pub(crate) store: StoreMode,
 }
 
 impl ControlPlaneState {
@@ -113,41 +114,6 @@ struct CreateApiKeyRequest {
     pub provider_resource_id: String,
     pub display_name: String,
     pub api_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateMerchantShopRequest {
-    pub merchant_shop_id: String,
-    pub slug: String,
-    pub display_name: String,
-    pub announcement: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateCardProductRequest {
-    pub card_product_id: String,
-    pub merchant_shop_id: String,
-    pub title: String,
-    pub description: String,
-    pub inventory_count: u32,
-    pub face_value_usd: String,
-    pub retail_price_usd: String,
-    pub supports_trial: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateTrialConnectionRequest {
-    pub trial_connection_id: String,
-    pub provider_label: String,
-    pub endpoint_base_url: String,
-    pub api_key: String,
-    pub target_model: String,
-    pub notes: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateRelayEvaluationRequest {
-    pub trial_connection_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,7 +194,7 @@ struct ErrorEnvelope {
 }
 
 #[derive(Debug, Clone)]
-struct ApiError {
+pub(crate) struct ApiError {
     code: &'static str,
     message: String,
     request_id: String,
@@ -237,14 +203,14 @@ struct ApiError {
 }
 
 #[derive(Debug, Clone)]
-struct RequestContext {
+pub(crate) struct RequestContext {
     request_id: String,
     trace_id: String,
     sequence: u64,
 }
 
 #[derive(Debug, Clone)]
-struct ControlPlaneAuthorizer {
+pub(crate) struct ControlPlaneAuthorizer {
     session: core_domain::AuthLoginResult,
 }
 
@@ -258,7 +224,7 @@ impl ControlPlaneAuthorizer {
             .is_some_and(|membership| membership_can_manage(membership.role))
     }
 
-    fn ensure_read_tenant(
+    pub(crate) fn ensure_read_tenant(
         &self,
         tenant_id: &str,
         context: &RequestContext,
@@ -270,7 +236,7 @@ impl ControlPlaneAuthorizer {
         }
     }
 
-    fn ensure_manage_tenant(
+    pub(crate) fn ensure_manage_tenant(
         &self,
         tenant_id: &str,
         context: &RequestContext,
@@ -360,7 +326,7 @@ impl ControlPlaneAuthorizer {
         })
     }
 
-    fn active_tenant_id(&self) -> Option<&str> {
+    pub(crate) fn active_tenant_id(&self) -> Option<&str> {
         self.session
             .session
             .active_tenant_id
@@ -442,17 +408,29 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         )
         .route("/v1/tenants", get(list_tenants))
         .route("/v1/projects", get(list_projects))
-        .route("/v1/merchant/workspace", get(get_merchant_workspace))
-        .route("/v1/merchant/shops", post(create_merchant_shop))
-        .route("/v1/merchant/card-products", post(create_card_product))
+        .route(
+            "/v1/merchant/workspace",
+            get(merchant_api::get_merchant_workspace),
+        )
+        .route(
+            "/v1/merchant/shops",
+            post(merchant_api::create_merchant_shop),
+        )
+        .route(
+            "/v1/merchant/card-products",
+            post(merchant_api::create_card_product),
+        )
         .route(
             "/v1/merchant/trial-connections",
-            post(create_trial_connection),
+            post(merchant_api::create_trial_connection),
         )
-        .route("/v1/merchant/evaluations", post(create_relay_evaluation))
+        .route(
+            "/v1/merchant/evaluations",
+            post(merchant_api::create_relay_evaluation),
+        )
         .route(
             "/v1/replay-capsules/{replay_capsule_id}",
-            get(get_replay_capsule),
+            get(merchant_api::get_replay_capsule),
         )
         .route(
             "/v1/provider-resources",
@@ -1036,287 +1014,6 @@ async fn list_projects(
         )
     })?;
     response.data = authz.filter_projects(response.data);
-    Ok(Json(response))
-}
-
-fn resolve_active_tenant(
-    authz: &ControlPlaneAuthorizer,
-    context: &RequestContext,
-) -> Result<core_domain::TenantId, ApiError> {
-    let tenant_id = authz.active_tenant_id().ok_or_else(|| {
-        bad_request_error(
-            "tenant_required",
-            "an active tenant is required for merchant operations",
-            context,
-        )
-    })?;
-
-    authz.ensure_manage_tenant(tenant_id, context)?;
-
-    core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
-        bad_request_error(
-            "tenant_required",
-            format!("invalid active tenant id: {error}"),
-            context,
-        )
-    })
-}
-
-async fn get_merchant_workspace(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-) -> Result<Json<MerchantWorkspaceEnvelope>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = authz
-        .active_tenant_id()
-        .ok_or_else(|| {
-            bad_request_error(
-                "tenant_required",
-                "an active tenant is required for merchant operations",
-                &context,
-            )
-        })
-        .and_then(|tenant_id| {
-            authz.ensure_read_tenant(tenant_id, &context)?;
-            core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
-                bad_request_error(
-                    "tenant_required",
-                    format!("invalid active tenant id: {error}"),
-                    &context,
-                )
-            })
-        })?;
-
-    let response = state
-        .store
-        .get_merchant_workspace(&tenant_id)
-        .await
-        .map_err(|error| {
-            internal_error(
-                "merchant_workspace_load_failed",
-                format!("failed to load merchant workspace: {error}"),
-                &context,
-            )
-        })?;
-
-    Ok(Json(response))
-}
-
-async fn create_merchant_shop(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Json(request): Json<CreateMerchantShopRequest>,
-) -> Result<Json<MerchantShop>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = resolve_active_tenant(&authz, &context)?;
-    let shop_id = MerchantShopId::parse(request.merchant_shop_id.clone()).map_err(|error| {
-        bad_request_error(
-            "validation_failed",
-            format!("invalid merchant_shop_id: {error}"),
-            &context,
-        )
-    })?;
-
-    let shop = MerchantShop {
-        merchant_shop_id: shop_id,
-        tenant_id,
-        slug: request.slug,
-        display_name: request.display_name,
-        status: MerchantShopStatus::Active,
-        announcement: request.announcement,
-        fulfillment_mode: MerchantFulfillmentMode::AutoCardSecret,
-        version: 1,
-        created_at: now_rfc3339(),
-        updated_at: now_rfc3339(),
-    };
-
-    let created = state
-        .store
-        .create_merchant_shop(shop)
-        .await
-        .map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("failed to create merchant shop: {error}"),
-                &context,
-            )
-        })?;
-
-    Ok(Json(created))
-}
-
-async fn create_card_product(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Json(request): Json<CreateCardProductRequest>,
-) -> Result<Json<CardProduct>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = resolve_active_tenant(&authz, &context)?;
-    let card_product_id =
-        CardProductId::parse(request.card_product_id.clone()).map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("invalid card_product_id: {error}"),
-                &context,
-            )
-        })?;
-    let merchant_shop_id =
-        MerchantShopId::parse(request.merchant_shop_id.clone()).map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("invalid merchant_shop_id: {error}"),
-                &context,
-            )
-        })?;
-
-    let product = CardProduct {
-        card_product_id,
-        tenant_id,
-        merchant_shop_id,
-        title: request.title,
-        description: request.description,
-        status: CardProductStatus::Active,
-        inventory_count: request.inventory_count,
-        face_value_usd: request.face_value_usd,
-        retail_price_usd: request.retail_price_usd,
-        delivery_kind: CardDeliveryKind::DirectSecret,
-        supports_trial: request.supports_trial,
-        version: 1,
-        created_at: now_rfc3339(),
-        updated_at: now_rfc3339(),
-    };
-
-    let created = state
-        .store
-        .create_card_product(product)
-        .await
-        .map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("failed to create card product: {error}"),
-                &context,
-            )
-        })?;
-
-    Ok(Json(created))
-}
-
-async fn create_trial_connection(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Json(request): Json<CreateTrialConnectionRequest>,
-) -> Result<Json<TrialConnection>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = resolve_active_tenant(&authz, &context)?;
-    let trial_connection_id = TrialConnectionId::parse(request.trial_connection_id.clone())
-        .map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("invalid trial_connection_id: {error}"),
-                &context,
-            )
-        })?;
-
-    let connection = TrialConnection {
-        trial_connection_id,
-        tenant_id,
-        provider_label: request.provider_label,
-        endpoint_base_url: request.endpoint_base_url,
-        api_key_masked: mask_trial_api_key(&request.api_key),
-        target_model: request.target_model,
-        status: TrialConnectionStatus::Active,
-        notes: request.notes,
-        last_verified_at: None,
-        version: 1,
-        created_at: now_rfc3339(),
-        updated_at: now_rfc3339(),
-    };
-
-    let created = state
-        .store
-        .create_trial_connection(connection)
-        .await
-        .map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("failed to create trial connection: {error}"),
-                &context,
-            )
-        })?;
-
-    Ok(Json(created))
-}
-
-async fn create_relay_evaluation(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Json(request): Json<CreateRelayEvaluationRequest>,
-) -> Result<Json<core_domain::RelayEvaluation>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = resolve_active_tenant(&authz, &context)?;
-
-    let created = state
-        .store
-        .create_relay_evaluation(&tenant_id, &request.trial_connection_id)
-        .await
-        .map_err(|error| {
-            bad_request_error(
-                "validation_failed",
-                format!("failed to create relay evaluation: {error}"),
-                &context,
-            )
-        })?;
-
-    Ok(Json(created))
-}
-
-async fn get_replay_capsule(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Path(replay_capsule_id): Path<String>,
-) -> Result<Json<ReplayCapsuleResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = authz.active_tenant_id().ok_or_else(|| {
-        bad_request_error(
-            "tenant_required",
-            "an active tenant is required for replay access",
-            &context,
-        )
-    })?;
-    authz.ensure_read_tenant(tenant_id, &context)?;
-    let tenant_id = core_domain::TenantId::parse(tenant_id.to_string()).map_err(|error| {
-        bad_request_error(
-            "tenant_required",
-            format!("invalid active tenant id: {error}"),
-            &context,
-        )
-    })?;
-
-    let response = state
-        .store
-        .get_replay_capsule(&tenant_id, &replay_capsule_id)
-        .await
-        .map_err(|error| {
-            internal_error(
-                "replay_capsule_load_failed",
-                format!("failed to load replay capsule: {error}"),
-                &context,
-            )
-        })?
-        .ok_or_else(|| {
-            not_found_error(
-                "not_found",
-                format!("replay capsule {replay_capsule_id} was not found"),
-                &context,
-            )
-        })?;
-
     Ok(Json(response))
 }
 
@@ -2495,7 +2192,7 @@ fn validate_route_policy_protocol_and_capabilities(
     Ok(())
 }
 
-async fn authorize_v1_request(
+pub(crate) async fn authorize_v1_request(
     state: &ControlPlaneState,
     headers: &HeaderMap,
     context: &RequestContext,
@@ -3284,7 +2981,7 @@ fn secure_cookies_enabled() -> bool {
         )
 }
 
-fn next_request_context() -> RequestContext {
+pub(crate) fn next_request_context() -> RequestContext {
     let sequence = REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     RequestContext {
         request_id: format!("req_{sequence}"),
@@ -3308,7 +3005,7 @@ fn tenant_access_denied(action: &str, tenant_id: &str, context: &RequestContext)
     )
 }
 
-fn bad_request_error(
+pub(crate) fn bad_request_error(
     code: &'static str,
     message: impl Into<String>,
     context: &RequestContext,
@@ -3316,7 +3013,7 @@ fn bad_request_error(
     ApiError::bad_request(code, message.into(), context)
 }
 
-fn not_found_error(
+pub(crate) fn not_found_error(
     code: &'static str,
     message: impl Into<String>,
     context: &RequestContext,
@@ -3324,7 +3021,7 @@ fn not_found_error(
     ApiError::not_found(code, message.into(), context)
 }
 
-fn internal_error(
+pub(crate) fn internal_error(
     code: &'static str,
     message: impl Into<String>,
     context: &RequestContext,
@@ -3332,15 +3029,40 @@ fn internal_error(
     ApiError::internal(code, message.into(), context)
 }
 
-fn mask_trial_api_key(api_key: &str) -> String {
-    let trimmed = api_key.trim();
-    if trimmed.len() <= 10 {
-        return format!("{trimmed}...");
+pub(crate) fn merchant_mutation_error(error: &anyhow::Error, context: &RequestContext) -> ApiError {
+    let message = error.to_string();
+    for code in [
+        "merchant_shop_already_exists",
+        "card_product_already_exists",
+        "trial_connection_already_exists",
+    ] {
+        if message.contains(code) {
+            return ApiError::conflict(
+                code,
+                "merchant resource already exists for this tenant".to_string(),
+                context,
+            );
+        }
+    }
+    for code in [
+        "merchant_shop_not_found",
+        "trial_connection_not_found",
+        "config_snapshot_not_found",
+    ] {
+        if message.contains(code) {
+            return ApiError::not_found(
+                code,
+                "merchant resource was not found for this tenant".to_string(),
+                context,
+            );
+        }
     }
 
-    let prefix = &trimmed[..7];
-    let suffix = &trimmed[trimmed.len() - 4..];
-    format!("{prefix}...{suffix}")
+    bad_request_error(
+        "validation_failed",
+        format!("failed to apply merchant mutation: {message}"),
+        context,
+    )
 }
 
 impl ApiError {
@@ -3430,7 +3152,7 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::{ControlPlaneState, app_with_state, resolve_oidc_membership};
-    use crate::store::{IdentityLookup, UserIdentityKey, UserSeed};
+    use crate::store::{IdentityLookup, SESSION_TTL_SECONDS, UserIdentityKey, UserSeed};
     use axum::{
         body::{Body, to_bytes},
         http::{
@@ -3447,10 +3169,13 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::{Arc, RwLock};
 
-    const TEST_SESSION_EXPIRES_AT: &str = "2099-01-01T00:00:00Z";
+    fn fresh_session_window() -> (String, String) {
+        (crate::now_rfc3339(), crate::expires_at(SESSION_TTL_SECONDS))
+    }
 
     async fn platform_admin_cookie(state: &ControlPlaneState) -> String {
         let session_id = "sess_platform_admin_test";
+        let (authenticated_at, expires_at) = fresh_session_window();
         state
             .store
             .issue_session(
@@ -3458,8 +3183,8 @@ mod tests {
                 AuthProvider::Email,
                 &IdentityLookup::Email("ops@huge-router.dev".to_string()),
                 "platform-admin",
-                "2026-04-23T00:00:00Z",
-                TEST_SESSION_EXPIRES_AT,
+                &authenticated_at,
+                &expires_at,
             )
             .await
             .expect("platform admin session should issue");
@@ -3475,6 +3200,7 @@ mod tests {
 
     async fn issue_cookie(state: &ControlPlaneState, email: &str, workspace_slug: &str) -> String {
         let session_id = format!("sess_{}_{}", workspace_slug, email.replace(['@', '.'], "_"));
+        let (authenticated_at, expires_at) = fresh_session_window();
         state
             .store
             .issue_session(
@@ -3482,8 +3208,8 @@ mod tests {
                 AuthProvider::Email,
                 &IdentityLookup::Email(email.to_string()),
                 workspace_slug,
-                "2026-04-23T00:00:00Z",
-                TEST_SESSION_EXPIRES_AT,
+                &authenticated_at,
+                &expires_at,
             )
             .await
             .expect("test session should issue");
@@ -4078,7 +3804,7 @@ mod tests {
         let list_all: Value =
             serde_json::from_slice(&to_bytes(list_all.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        assert_eq!(list_all["data"].as_array().unwrap().len(), 3);
+        assert_eq!(list_all["data"].as_array().unwrap().len(), 4);
         let receipt_ids: Vec<_> = list_all["data"]
             .as_array()
             .unwrap()
@@ -4087,7 +3813,12 @@ mod tests {
             .collect();
         assert_eq!(
             receipt_ids,
-            vec!["routercpt_cp_b", "routercpt_cp_c", "routercpt_cp_a"]
+            vec![
+                "routercpt_cp_b",
+                "routercpt_cp_c",
+                "routercpt_cp_a",
+                "routercpt_acme_relay_eval",
+            ]
         );
 
         let diagnostics = app
@@ -4136,7 +3867,10 @@ mod tests {
             .iter()
             .map(|entry| entry["route_receipt_id"].as_str().unwrap())
             .collect();
-        assert_eq!(filtered_ids, vec!["routercpt_cp_a"]);
+        assert_eq!(
+            filtered_ids,
+            vec!["routercpt_cp_a", "routercpt_acme_relay_eval"]
+        );
     }
 
     #[tokio::test]
@@ -5121,9 +4855,11 @@ mod tests {
                 .unwrap(),
         )
         .await;
+        let mut route_receipt_ids = ids(&route_receipts["data"], "route_receipt_id");
+        route_receipt_ids.sort();
         assert_eq!(
-            ids(&route_receipts["data"], "route_receipt_id"),
-            vec!["routercpt_acme_1"]
+            route_receipt_ids,
+            vec!["routercpt_acme_1", "routercpt_acme_relay_eval"]
         );
 
         let usage = response_json(

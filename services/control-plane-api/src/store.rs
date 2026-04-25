@@ -21,10 +21,15 @@
     clippy::trivially_copy_pass_by_ref
 )]
 
+use crate::merchant_replay::{
+    build_merchant_replay_route_receipt, build_relay_evaluation, next_id_suffix,
+    replay_upstream_error_code,
+};
 use crate::pricing_catalog::{
     default_pricing_catalog_response, load_pricing_catalog, pricing_catalog_response,
     seed_default_pricing_catalog, simulate_pricing, simulate_pricing_with_catalog,
 };
+use crate::store_schema::{MIGRATIONS, REQUIRED_TABLES};
 use anyhow::{Context, Result, anyhow};
 use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
@@ -106,7 +111,7 @@ pub enum StoreMode {
 
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
-    pool: Pool<Postgres>,
+    pub(crate) pool: Pool<Postgres>,
 }
 
 #[derive(Debug, Default)]
@@ -679,6 +684,15 @@ impl SeedData {
                 code: "provider_signature_mismatch".to_string(),
             }),
         };
+        let route_receipt = build_merchant_replay_route_receipt(
+            &tenant_acme.tenant_id,
+            &config_active,
+            replay_capsule.route_receipt_id.clone(),
+            replay_capsule.request_id.clone(),
+            replay_capsule.trace_id.clone(),
+            trial_connection.target_model.clone(),
+            now.clone(),
+        );
         let relay_evaluation = RelayEvaluation {
             relay_evaluation_id: RelayEvaluationId::parse("reval_acme_relay").unwrap(),
             tenant_id: tenant_acme.tenant_id.clone(),
@@ -768,7 +782,7 @@ impl SeedData {
             trial_connections: vec![trial_connection],
             relay_evaluations: vec![relay_evaluation],
             replay_capsules: vec![replay_capsule],
-            route_receipts: Vec::new(),
+            route_receipts: vec![route_receipt],
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
             users: vec![UserSeed {
                 user: ops_user,
@@ -1261,9 +1275,7 @@ impl StoreMode {
                     },
                 })
             }
-            Self::Postgres(_) => Err(anyhow!(
-                "merchant workspace persistence is not yet implemented for postgres mode"
-            )),
+            Self::Postgres(store) => store.get_merchant_workspace(tenant_id).await,
         }
     }
 
@@ -1274,16 +1286,18 @@ impl StoreMode {
         match self {
             Self::Memory(store) => {
                 shop.validate()?;
-                store
-                    .write()
-                    .expect("memory store write lock")
-                    .merchant_shops
-                    .push(shop.clone());
+                let mut store = store.write().expect("memory store write lock");
+                if store.merchant_shops.iter().any(|existing| {
+                    existing.tenant_id == shop.tenant_id
+                        && (existing.merchant_shop_id == shop.merchant_shop_id
+                            || existing.slug == shop.slug)
+                }) {
+                    return Err(anyhow!("merchant_shop_already_exists"));
+                }
+                store.merchant_shops.push(shop.clone());
                 Ok(shop)
             }
-            Self::Postgres(_) => Err(anyhow!(
-                "merchant shop persistence is not yet implemented for postgres mode"
-            )),
+            Self::Postgres(store) => store.create_merchant_shop(&shop).await,
         }
     }
 
@@ -1294,19 +1308,23 @@ impl StoreMode {
         match self {
             Self::Memory(store) => {
                 let mut store = store.write().expect("memory store write lock");
+                if store.card_products.iter().any(|existing| {
+                    existing.tenant_id == product.tenant_id
+                        && existing.card_product_id == product.card_product_id
+                }) {
+                    return Err(anyhow!("card_product_already_exists"));
+                }
                 if !store.merchant_shops.iter().any(|shop| {
                     shop.merchant_shop_id == product.merchant_shop_id
                         && shop.tenant_id == product.tenant_id
                 }) {
-                    return Err(anyhow!("merchant shop not found for tenant"));
+                    return Err(anyhow!("merchant_shop_not_found"));
                 }
                 product.validate()?;
                 store.card_products.push(product.clone());
                 Ok(product)
             }
-            Self::Postgres(_) => Err(anyhow!(
-                "card product persistence is not yet implemented for postgres mode"
-            )),
+            Self::Postgres(store) => store.create_card_product(&product).await,
         }
     }
 
@@ -1320,16 +1338,17 @@ impl StoreMode {
         match self {
             Self::Memory(store) => {
                 connection.validate()?;
-                store
-                    .write()
-                    .expect("memory store write lock")
-                    .trial_connections
-                    .push(connection.clone());
+                let mut store = store.write().expect("memory store write lock");
+                if store.trial_connections.iter().any(|existing| {
+                    existing.tenant_id == connection.tenant_id
+                        && existing.trial_connection_id == connection.trial_connection_id
+                }) {
+                    return Err(anyhow!("trial_connection_already_exists"));
+                }
+                store.trial_connections.push(connection.clone());
                 Ok(connection)
             }
-            Self::Postgres(_) => Err(anyhow!(
-                "trial connection persistence is not yet implemented for postgres mode"
-            )),
+            Self::Postgres(store) => store.create_trial_connection(&connection).await,
         }
     }
 
@@ -1349,20 +1368,37 @@ impl StoreMode {
                             && item.trial_connection_id.as_str() == trial_connection_id
                     })
                     .cloned()
-                    .context("trial connection not found")?;
+                    .context("trial_connection_not_found")?;
 
                 let created_at = now_rfc3339();
                 let replay_capsule_id =
                     ReplayCapsuleId::parse(format!("replay_{}", next_id_suffix())).unwrap();
                 let route_receipt_id =
                     RouteReceiptId::parse(format!("routercpt_{}", next_id_suffix())).unwrap();
+                let config_snapshot = store
+                    .config_snapshots
+                    .iter()
+                    .find(|snapshot| {
+                        snapshot.tenant_id == *tenant_id
+                            && snapshot.status == ConfigSnapshotStatus::Active
+                    })
+                    .or_else(|| {
+                        store
+                            .config_snapshots
+                            .iter()
+                            .find(|snapshot| snapshot.tenant_id == *tenant_id)
+                    })
+                    .cloned()
+                    .context("config_snapshot_not_found")?;
+                let request_id = format!("req_{}", next_id_suffix());
+                let trace_id = format!("trace_{}", next_id_suffix());
 
                 let replay_capsule = ReplayCapsule {
                     replay_capsule_id: replay_capsule_id.clone(),
-                    request_id: format!("req_{}", next_id_suffix()),
-                    trace_id: format!("trace_{}", next_id_suffix()),
-                    route_receipt_id,
-                    config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_merchant_eval").unwrap(),
+                    request_id: request_id.clone(),
+                    trace_id: trace_id.clone(),
+                    route_receipt_id: route_receipt_id.clone(),
+                    config_snapshot_id: config_snapshot.config_snapshot_id.clone(),
                     redaction_tier: RedactionTier::StructuredRedacted,
                     normalized_request_summary: NormalizedRequestSummary {
                         protocol_family: "openai_chat".to_string(),
@@ -1377,17 +1413,32 @@ impl StoreMode {
                 let evaluation =
                     build_relay_evaluation(tenant_id, &connection, replay_capsule_id, created_at);
                 evaluation.validate()?;
+                let route_receipt = build_merchant_replay_route_receipt(
+                    tenant_id,
+                    &config_snapshot,
+                    route_receipt_id,
+                    request_id,
+                    trace_id,
+                    connection.target_model.clone(),
+                    evaluation.created_at.clone(),
+                );
 
                 store.replay_capsules.insert(
                     replay_capsule.replay_capsule_id.as_str().to_string(),
                     replay_capsule,
                 );
+                store.route_receipts.insert(
+                    route_receipt.route_receipt_id.as_str().to_string(),
+                    route_receipt,
+                );
                 store.relay_evaluations.push(evaluation.clone());
                 Ok(evaluation)
             }
-            Self::Postgres(_) => Err(anyhow!(
-                "relay evaluation persistence is not yet implemented for postgres mode"
-            )),
+            Self::Postgres(store) => {
+                store
+                    .create_relay_evaluation(tenant_id, trial_connection_id)
+                    .await
+            }
         }
     }
 
@@ -1414,9 +1465,7 @@ impl StoreMode {
                     .cloned()
                     .map(|replay_capsule| ReplayCapsuleResponse { replay_capsule }))
             }
-            Self::Postgres(_) => Err(anyhow!(
-                "replay capsule persistence is not yet implemented for postgres mode"
-            )),
+            Self::Postgres(store) => store.get_replay_capsule(tenant_id, replay_capsule_id).await,
         }
     }
 
@@ -2230,6 +2279,16 @@ impl PostgresStore {
         )
         .bind(seed.active_config_snapshot_id)
         .execute(&self.pool)
+        .await?;
+
+        self.seed_merchant(
+            seed.merchant_shops,
+            seed.card_products,
+            seed.trial_connections,
+            seed.relay_evaluations,
+            seed.replay_capsules,
+            seed.route_receipts,
+        )
         .await?;
 
         seed_default_pricing_catalog(&self.pool).await?;
@@ -4411,83 +4470,6 @@ fn hash_api_key(api_key: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn next_id_suffix() -> String {
-    OffsetDateTime::now_utc().unix_timestamp_nanos().to_string()
-}
-
-fn replay_upstream_error_code(connection: &TrialConnection) -> String {
-    let endpoint = connection.endpoint_base_url.to_ascii_lowercase();
-
-    if endpoint.contains("vertex") {
-        "provider_signature_mismatch".to_string()
-    } else if endpoint.contains("bedrock") {
-        "provider_channel_proxy".to_string()
-    } else {
-        "protocol_shape_warning".to_string()
-    }
-}
-
-fn build_relay_evaluation(
-    tenant_id: &TenantId,
-    connection: &TrialConnection,
-    replay_capsule_id: ReplayCapsuleId,
-    created_at: String,
-) -> RelayEvaluation {
-    let endpoint = connection.endpoint_base_url.to_ascii_lowercase();
-    let detected_channel = if endpoint.contains("vertex") {
-        Some("vertex".to_string())
-    } else if endpoint.contains("bedrock") {
-        Some("aws-bedrock".to_string())
-    } else {
-        None
-    };
-    let protocol_status = if detected_channel.is_some() {
-        RelayCheckStatus::Warning
-    } else {
-        RelayCheckStatus::Pass
-    };
-    let token_status = if connection
-        .target_model
-        .to_ascii_lowercase()
-        .contains("flash")
-    {
-        RelayCheckStatus::Warning
-    } else {
-        RelayCheckStatus::Pass
-    };
-    let verdict = if detected_channel.is_some() {
-        RelayEvaluationVerdict::Warning
-    } else {
-        RelayEvaluationVerdict::Healthy
-    };
-    let overall_score = if detected_channel.is_some() { 82 } else { 91 };
-
-    RelayEvaluation {
-        relay_evaluation_id: RelayEvaluationId::parse(format!("reval_{}", next_id_suffix()))
-            .unwrap(),
-        tenant_id: tenant_id.clone(),
-        trial_connection_id: connection.trial_connection_id.clone(),
-        replay_capsule_id,
-        provider_label: connection.provider_label.clone(),
-        endpoint_base_url: connection.endpoint_base_url.clone(),
-        target_model: connection.target_model.clone(),
-        runner_mode: RelayEvaluationRunnerMode::Simulated,
-        sample_request_count: 5,
-        estimated_tokens_saved: 2400,
-        overall_score,
-        verdict,
-        fingerprint_status: RelayCheckStatus::Pass,
-        protocol_status,
-        token_status,
-        multimodal_status: RelayCheckStatus::NotTested,
-        detected_channel,
-        summary:
-            "Replay-ready evaluation recorded. Review protocol consistency before spending live token budget."
-                .to_string(),
-        created_at,
-    }
-}
-
 fn activate_memory_config_snapshot(
     store: &mut MemoryStore,
     config_snapshot_id: &str,
@@ -5529,10 +5511,14 @@ mod tests {
             .await
             .unwrap()
             .data;
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 4);
         assert_eq!(all[0].route_receipt_id.as_str(), "routercpt_store_b");
         assert_eq!(all[1].route_receipt_id.as_str(), "routercpt_store_c");
         assert_eq!(all[2].route_receipt_id.as_str(), "routercpt_store_a");
+        assert_eq!(
+            all[3].route_receipt_id.as_str(),
+            "routercpt_acme_relay_eval"
+        );
 
         let tenant_filtered = store
             .list_route_receipts(&RouteReceiptFilters {
@@ -5542,7 +5528,7 @@ mod tests {
             .await
             .unwrap()
             .data;
-        assert_eq!(tenant_filtered.len(), 2);
+        assert_eq!(tenant_filtered.len(), 3);
         assert_eq!(
             tenant_filtered[0].route_receipt_id.as_str(),
             "routercpt_store_b"
@@ -5556,7 +5542,66 @@ mod tests {
             .await
             .unwrap()
             .data;
-        assert_eq!(protocol_filtered.len(), 2);
+        assert_eq!(protocol_filtered.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn memory_store_bootstrap_replay_capsule_links_to_seeded_route_receipt() {
+        let store = StoreMode::memory();
+        let tenant_id = TenantId::parse("tenant_acme").unwrap();
+
+        let replay_capsule = store
+            .get_replay_capsule(&tenant_id, "replay_acme_relay_eval")
+            .await
+            .unwrap()
+            .expect("seeded replay capsule should exist")
+            .replay_capsule;
+        let route_receipt = store
+            .get_route_receipt(replay_capsule.route_receipt_id.as_str())
+            .await
+            .unwrap()
+            .expect("seeded route receipt should exist")
+            .route_receipt;
+
+        assert_eq!(
+            route_receipt.route_receipt_id,
+            replay_capsule.route_receipt_id
+        );
+        assert_eq!(route_receipt.failure_reason, None);
+        assert_eq!(
+            route_receipt.selected_target,
+            Some(ProviderResourceId::parse("prvrsrc_openai_primary").unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_store_create_relay_evaluation_records_successful_route_receipt() {
+        let store = StoreMode::memory();
+        let tenant_id = TenantId::parse("tenant_acme").unwrap();
+
+        let evaluation = store
+            .create_relay_evaluation(&tenant_id, "trialconn_acme_relay")
+            .await
+            .unwrap();
+        let replay_capsule = store
+            .get_replay_capsule(&tenant_id, evaluation.replay_capsule_id.as_str())
+            .await
+            .unwrap()
+            .expect("created replay capsule should exist")
+            .replay_capsule;
+        let route_receipt = store
+            .get_route_receipt(replay_capsule.route_receipt_id.as_str())
+            .await
+            .unwrap()
+            .expect("created route receipt should exist")
+            .route_receipt;
+
+        assert_eq!(
+            route_receipt.route_receipt_id,
+            replay_capsule.route_receipt_id
+        );
+        assert_eq!(route_receipt.failure_reason, None);
+        assert_eq!(route_receipt.admission_result, AdmissionResult::Admitted);
     }
 
     #[tokio::test]
@@ -5746,167 +5791,3 @@ const fn config_snapshot_status_slug(status: ConfigSnapshotStatus) -> &'static s
         ConfigSnapshotStatus::Superseded => "superseded",
     }
 }
-
-const REQUIRED_TABLES: &[&str] = &[
-    "tenants",
-    "projects",
-    "provider_resources",
-    "route_policies",
-    "api_keys",
-    "config_snapshots",
-    "active_config_pointers",
-    "users",
-    "tenant_memberships",
-    "auth_provider_links",
-    "sessions",
-    "login_flows",
-    "route_receipts",
-    "billing_export_jobs",
-    "pricing_catalog_entries",
-];
-
-const MIGRATIONS: &[&str] = &[
-    r"CREATE TABLE IF NOT EXISTS tenants (
-        tenant_id TEXT PRIMARY KEY,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS projects (
-        project_id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS provider_resources (
-        provider_resource_id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL,
-        project_id TEXT NULL,
-        provider_id TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS route_policies (
-        route_policy_id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS disabled_route_policies (
-        route_policy_id TEXT PRIMARY KEY,
-        disabled_at TEXT NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS api_keys (
-        api_key_id TEXT PRIMARY KEY,
-        provider_resource_id TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,
-        project_id TEXT NULL,
-        display_name TEXT NOT NULL,
-        key_prefix TEXT NOT NULL,
-        hash TEXT NOT NULL UNIQUE,
-        is_active BOOLEAN NOT NULL,
-        version BIGINT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS config_snapshots (
-        config_snapshot_id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS active_config_pointers (
-        pointer_key TEXT PRIMARY KEY,
-        config_snapshot_id TEXT NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY,
-        primary_email TEXT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS tenant_memberships (
-        membership_id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS auth_provider_links (
-        link_id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        provider_subject TEXT NOT NULL,
-        email TEXT NULL,
-        can_unlink BOOLEAN NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE UNIQUE INDEX IF NOT EXISTS auth_provider_links_subject_key
-       ON auth_provider_links (provider, provider_subject)",
-    r"CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        state TEXT NOT NULL,
-        active_tenant_id TEXT NULL,
-        authenticated_by TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS login_flows (
-        flow_id TEXT PRIMARY KEY,
-        flow_kind TEXT NOT NULL,
-        email TEXT NULL,
-        provider TEXT NULL,
-        workspace_slug TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS route_receipts (
-        route_receipt_id TEXT PRIMARY KEY,
-        payload JSONB NOT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS route_receipt_diagnostics (
-        route_receipt_id TEXT PRIMARY KEY,
-        decision_timeline JSONB NOT NULL,
-        policy_checks JSONB NOT NULL,
-        provider_attempts JSONB NOT NULL,
-        source_message_id TEXT NOT NULL,
-        source_producer TEXT NOT NULL,
-        source_request_id TEXT NULL,
-        source_trace_id TEXT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )",
-    r"CREATE TABLE IF NOT EXISTS billing_export_jobs (
-        export_job_id TEXT PRIMARY KEY,
-        tenant_id TEXT NULL,
-        project_id TEXT NULL,
-        window_start TEXT NOT NULL,
-        window_end TEXT NOT NULL,
-        format TEXT NOT NULL,
-        status TEXT NOT NULL,
-        requested_at TEXT NOT NULL,
-        completed_at TEXT NULL,
-        error_message TEXT NULL,
-        export_content TEXT NULL,
-        content_type TEXT NULL
-    )",
-    r"CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
-        catalog_id TEXT NOT NULL,
-        catalog_version INTEGER NOT NULL,
-        currency TEXT NOT NULL,
-        dimension TEXT NOT NULL,
-        provider_id TEXT NOT NULL,
-        model_alias TEXT NULL,
-        model_alias_key TEXT GENERATED ALWAYS AS (COALESCE(model_alias, '')) STORED,
-        region TEXT NULL,
-        region_key TEXT GENERATED ALWAYS AS (COALESCE(region, '')) STORED,
-        micros_per_unit BIGINT NOT NULL,
-        billable_micros_per_unit BIGINT NOT NULL,
-        unit_denominator BIGINT NOT NULL,
-        source TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (
-            catalog_id,
-            catalog_version,
-            dimension,
-            provider_id,
-            model_alias_key,
-            region_key
-        )
-    )",
-];
