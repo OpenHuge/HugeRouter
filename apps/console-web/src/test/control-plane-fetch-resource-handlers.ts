@@ -538,7 +538,10 @@ export function handleMutationRequest(
       (carpool) => carpool.carpool_id === carpoolId,
     );
     if (!current) {
-      return notFoundResponse("oauth_carpool_not_found", "OAuth carpool not found.");
+      return notFoundResponse(
+        "oauth_carpool_not_found",
+        "OAuth carpool not found.",
+      );
     }
     const disabled = {
       ...current,

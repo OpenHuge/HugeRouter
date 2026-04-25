@@ -93,7 +93,9 @@ export type ConsoleDataService = {
     providerResourceId: string,
     expectedVersion: number,
   ) => Promise<ProviderResource>;
-  uploadCodexAuthAccount: (input: CodexAuthAccountUploadInput) => Promise<CodexAuthAccountView>;
+  uploadCodexAuthAccount: (
+    input: CodexAuthAccountUploadInput,
+  ) => Promise<CodexAuthAccountView>;
   listCodexAuthAccounts: () => Promise<CodexAuthAccountView[]>;
   listOAuthSharingLeases: () => Promise<OAuthSharingLeaseView[]>;
   upsertOAuthSharingLease: (
@@ -1297,7 +1299,10 @@ async function disableProviderResourceInControlPlane(
 
 function toCodexAuthAccountView(payload: unknown): CodexAuthAccountView {
   if (!isRecord(payload)) {
-    throw new ControlPlaneClientError("Invalid Codex auth account payload.", 500);
+    throw new ControlPlaneClientError(
+      "Invalid Codex auth account payload.",
+      500,
+    );
   }
 
   return {
@@ -1305,16 +1310,20 @@ function toCodexAuthAccountView(payload: unknown): CodexAuthAccountView {
       stringOrUndefined(pickRecordValue(payload, ["auth_json_sha256"])) ?? "",
     codexAccountId:
       stringOrUndefined(pickRecordValue(payload, ["codex_account_id"])) ?? "",
-    createdAt: stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
-    displayName: stringOrUndefined(pickRecordValue(payload, ["display_name"])) ?? "",
+    createdAt:
+      stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
+    displayName:
+      stringOrUndefined(pickRecordValue(payload, ["display_name"])) ?? "",
     encryptedAuthJsonKeyId:
       stringOrUndefined(
         pickRecordValue(payload, ["encrypted_auth_json_key_id"]),
       ) ?? "",
     providerResourceId:
-      stringOrUndefined(pickRecordValue(payload, ["provider_resource_id"])) ?? "",
+      stringOrUndefined(pickRecordValue(payload, ["provider_resource_id"])) ??
+      "",
     status: stringOrUndefined(pickRecordValue(payload, ["status"])) ?? "",
-    updatedAt: stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
+    updatedAt:
+      stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
   };
 }
 
@@ -1328,19 +1337,26 @@ function parseCodexAuthAccountList(payload: unknown) {
 
 function toOAuthSharingLeaseView(payload: unknown): OAuthSharingLeaseView {
   if (!isRecord(payload)) {
-    throw new ControlPlaneClientError("Invalid OAuth sharing lease payload.", 500);
+    throw new ControlPlaneClientError(
+      "Invalid OAuth sharing lease payload.",
+      500,
+    );
   }
 
   const usageBudget = pickRecordValue(payload, ["usage_budget"]);
   const budget = isRecord(usageBudget) ? usageBudget : {};
 
   return {
-    allowedAccountIds:
-      arrayOrEmpty(pickRecordValue(payload, ["allowed_account_ids"])).map(String),
+    allowedAccountIds: arrayOrEmpty(
+      pickRecordValue(payload, ["allowed_account_ids"]),
+    ).map(String),
     borrowerWorkspaceId:
-      stringOrUndefined(pickRecordValue(payload, ["borrower_workspace_id"])) ?? "",
-    createdAt: stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
-    expiresAt: stringOrUndefined(pickRecordValue(payload, ["expires_at"])) ?? "",
+      stringOrUndefined(pickRecordValue(payload, ["borrower_workspace_id"])) ??
+      "",
+    createdAt:
+      stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
+    expiresAt:
+      stringOrUndefined(pickRecordValue(payload, ["expires_at"])) ?? "",
     leaseId: stringOrUndefined(pickRecordValue(payload, ["lease_id"])) ?? "",
     maxConcurrentRuns:
       numberOrUndefined(pickRecordValue(payload, ["max_concurrent_runs"])) ?? 1,
@@ -1348,18 +1364,22 @@ function toOAuthSharingLeaseView(payload: unknown): OAuthSharingLeaseView {
       pickRecordValue(payload, ["owner_workspace_id"]),
     ),
     policy:
-      (stringOrUndefined(pickRecordValue(payload, ["policy"])) as OAuthSharingLeaseView["policy"]) ??
-      "fair_share",
+      (stringOrUndefined(
+        pickRecordValue(payload, ["policy"]),
+      ) as OAuthSharingLeaseView["policy"]) ?? "fair_share",
     poolId: stringOrUndefined(pickRecordValue(payload, ["pool_id"])) ?? "",
     provider:
-      (stringOrUndefined(pickRecordValue(payload, ["provider"])) as OAuthSharingLeaseView["provider"]) ??
-      "codex",
+      (stringOrUndefined(
+        pickRecordValue(payload, ["provider"]),
+      ) as OAuthSharingLeaseView["provider"]) ?? "codex",
     startsAt: stringOrUndefined(pickRecordValue(payload, ["starts_at"])) ?? "",
     status:
-      (stringOrUndefined(pickRecordValue(payload, ["status"])) as OAuthSharingLeaseView["status"]) ??
-      "pending",
+      (stringOrUndefined(
+        pickRecordValue(payload, ["status"]),
+      ) as OAuthSharingLeaseView["status"]) ?? "pending",
     turnBudget: numberOrUndefined(pickRecordValue(budget, ["turns"])),
-    updatedAt: stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
+    updatedAt:
+      stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
   };
 }
 
@@ -1377,8 +1397,10 @@ function toOAuthCarpoolView(payload: unknown): OAuthCarpoolView {
   }
 
   return {
-    carpoolId: stringOrUndefined(pickRecordValue(payload, ["carpool_id"])) ?? "",
-    createdAt: stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
+    carpoolId:
+      stringOrUndefined(pickRecordValue(payload, ["carpool_id"])) ?? "",
+    createdAt:
+      stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
     enabled: Boolean(pickRecordValue(payload, ["enabled"])),
     memberWorkspaceIds: arrayOrEmpty(
       pickRecordValue(payload, ["member_workspace_ids"]),
@@ -1392,12 +1414,15 @@ function toOAuthCarpoolView(payload: unknown): OAuthCarpoolView {
     ),
     poolIds: arrayOrEmpty(pickRecordValue(payload, ["pool_ids"])).map(String),
     provider:
-      (stringOrUndefined(pickRecordValue(payload, ["provider"])) as OAuthCarpoolView["provider"]) ??
-      "codex",
+      (stringOrUndefined(
+        pickRecordValue(payload, ["provider"]),
+      ) as OAuthCarpoolView["provider"]) ?? "codex",
     strategy:
-      (stringOrUndefined(pickRecordValue(payload, ["strategy"])) as OAuthCarpoolView["strategy"]) ??
-      "fair_share",
-    updatedAt: stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
+      (stringOrUndefined(
+        pickRecordValue(payload, ["strategy"]),
+      ) as OAuthCarpoolView["strategy"]) ?? "fair_share",
+    updatedAt:
+      stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
   };
 }
 
@@ -1419,16 +1444,16 @@ function toOAuthSharingUsageView(payload: unknown): OAuthSharingUsageView {
   return {
     auditEvents: auditEvents.map((event) => ({
       createdAt: isRecord(event)
-        ? stringOrUndefined(pickRecordValue(event, ["created_at"])) ?? ""
+        ? (stringOrUndefined(pickRecordValue(event, ["created_at"])) ?? "")
         : "",
       eventType: isRecord(event)
-        ? stringOrUndefined(pickRecordValue(event, ["event_type"])) ?? ""
+        ? (stringOrUndefined(pickRecordValue(event, ["event_type"])) ?? "")
         : "",
       provider: isRecord(event)
-        ? stringOrUndefined(pickRecordValue(event, ["provider"])) ?? ""
+        ? (stringOrUndefined(pickRecordValue(event, ["provider"])) ?? "")
         : "",
       reason: isRecord(event)
-        ? stringOrUndefined(pickRecordValue(event, ["reason"])) ?? ""
+        ? (stringOrUndefined(pickRecordValue(event, ["reason"])) ?? "")
         : "",
     })),
     rows: rows.map((row) => ({
@@ -1442,10 +1467,10 @@ function toOAuthSharingUsageView(payload: unknown): OAuthSharingUsageView {
         ? stringOrUndefined(pickRecordValue(row, ["lease_id"]))
         : undefined,
       provider: isRecord(row)
-        ? stringOrUndefined(pickRecordValue(row, ["provider"])) ?? ""
+        ? (stringOrUndefined(pickRecordValue(row, ["provider"])) ?? "")
         : "",
       turns: isRecord(row)
-        ? numberOrUndefined(pickRecordValue(row, ["turns"])) ?? 0
+        ? (numberOrUndefined(pickRecordValue(row, ["turns"])) ?? 0)
         : 0,
       workspaceId: isRecord(row)
         ? stringOrUndefined(pickRecordValue(row, ["workspace_id"]))
@@ -1502,7 +1527,9 @@ async function upsertOAuthSharingLeaseInControlPlane(
     {
       body: JSON.stringify({
         allowed_account_ids:
-          input.allowedAccountIds.length > 0 ? input.allowedAccountIds : undefined,
+          input.allowedAccountIds.length > 0
+            ? input.allowedAccountIds
+            : undefined,
         borrower_workspace_id: input.borrowerWorkspaceId,
         expires_at: input.expiresAt,
         lease_id: input.leaseId,
@@ -1555,7 +1582,9 @@ async function listOAuthCarpoolsFromControlPlane() {
   }
 }
 
-async function upsertOAuthCarpoolInControlPlane(input: OAuthCarpoolMutationInput) {
+async function upsertOAuthCarpoolInControlPlane(
+  input: OAuthCarpoolMutationInput,
+) {
   return requestControlPlaneJson("/v1/oauth-carpools", toOAuthCarpoolView, {
     body: JSON.stringify({
       carpool_id: input.carpoolId,
