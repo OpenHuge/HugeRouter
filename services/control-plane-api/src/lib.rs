@@ -3447,6 +3447,8 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::{Arc, RwLock};
 
+    const TEST_SESSION_EXPIRES_AT: &str = "2099-01-01T00:00:00Z";
+
     async fn platform_admin_cookie(state: &ControlPlaneState) -> String {
         let session_id = "sess_platform_admin_test";
         state
@@ -3457,7 +3459,7 @@ mod tests {
                 &IdentityLookup::Email("ops@huge-router.dev".to_string()),
                 "platform-admin",
                 "2026-04-23T00:00:00Z",
-                "2026-04-25T00:00:00Z",
+                TEST_SESSION_EXPIRES_AT,
             )
             .await
             .expect("platform admin session should issue");
@@ -3481,7 +3483,7 @@ mod tests {
                 &IdentityLookup::Email(email.to_string()),
                 workspace_slug,
                 "2026-04-23T00:00:00Z",
-                "2026-04-25T00:00:00Z",
+                TEST_SESSION_EXPIRES_AT,
             )
             .await
             .expect("test session should issue");
