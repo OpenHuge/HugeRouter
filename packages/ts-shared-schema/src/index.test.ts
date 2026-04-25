@@ -235,6 +235,7 @@ void test("merchant workspace payload accepts replay-linked evaluations", () => 
           card_product_id: "cardprod_trial_pack",
           tenant_id: "tenant_acme",
           merchant_shop_id: "mshop_acme",
+          resource_type: "access_pack",
           title: "Trial Claude Pack",
           description: "Five low-cost test cards",
           status: "active",
@@ -306,6 +307,19 @@ void test("merchant workspace payload accepts replay-linked evaluations", () => 
           created_at: "2026-04-22T00:00:00Z",
         },
       ],
+      disclosures: [
+        {
+          disclosure_note_id: "disc_acme_watch",
+          tenant_id: "tenant_acme",
+          source_kind: "relay_evaluation",
+          source_id: "reval_acme",
+          title: "Relay review note",
+          body: "Replay evidence needs operator follow-up.",
+          risk_level: "watch",
+          visibility: "operator_only",
+          created_at: "2026-04-22T00:00:00Z",
+        },
+      ],
     },
   });
 
@@ -315,6 +329,7 @@ void test("merchant workspace payload accepts replay-linked evaluations", () => 
   );
   assert.equal(parsed.data.card_products[0]?.delivery_kind, "direct_secret");
   assert.equal(parsed.data.recent_orders[0]?.state, "escrow_funded");
+  assert.equal(parsed.data.disclosures[0]?.risk_level, "watch");
 });
 
 void test("replay capsule payload keeps redacted summary shape", () => {

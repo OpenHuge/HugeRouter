@@ -223,6 +223,7 @@ prefixed_id!(CardProductId, "cardprod_");
 prefixed_id!(TradeOrderId, "tradeord_");
 prefixed_id!(TrialConnectionId, "trialconn_");
 prefixed_id!(RelayEvaluationId, "reval_");
+prefixed_id!(DisclosureNoteId, "disc_");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -366,6 +367,15 @@ pub enum CardDeliveryKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum AiResourceType {
+    AccountRecharge,
+    AccountPurchase,
+    PoolWholesale,
+    AccessPack,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum SellerIdentityLevel {
     L1Basic,
     L2Kyc,
@@ -460,6 +470,30 @@ pub enum RelayCheckStatus {
     Warning,
     Fail,
     NotTested,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DisclosureSourceKind {
+    MerchantShop,
+    CardProduct,
+    RelayEvaluation,
+    ReplayCapsule,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DisclosureRiskLevel {
+    Info,
+    Watch,
+    Warning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DisclosureVisibility {
+    OperatorOnly,
+    PublicSummary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -925,6 +959,7 @@ pub struct CardProduct {
     pub card_product_id: CardProductId,
     pub tenant_id: TenantId,
     pub merchant_shop_id: MerchantShopId,
+    pub resource_type: AiResourceType,
     pub title: String,
     pub description: String,
     pub status: CardProductStatus,
@@ -970,6 +1005,12 @@ pub struct TradeOrder {
     pub evidence_state: EvidenceState,
     pub dispute_state: DisputeState,
     pub order_amount_usd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_submitted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1050,6 +1091,31 @@ impl RelayEvaluation {
         validate_https_url("endpoint_base_url", &self.endpoint_base_url)?;
         validate_non_empty("target_model", &self.target_model)?;
         validate_non_empty("summary", &self.summary)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DisclosureNote {
+    pub disclosure_note_id: DisclosureNoteId,
+    pub tenant_id: TenantId,
+    pub source_kind: DisclosureSourceKind,
+    pub source_id: String,
+    pub title: String,
+    pub body: String,
+    pub risk_level: DisclosureRiskLevel,
+    pub visibility: DisclosureVisibility,
+    pub created_at: String,
+}
+
+impl DisclosureNote {
+    /// # Errors
+    ///
+    /// Returns an error when the disclosure note payload is invalid.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_non_empty("source_id", &self.source_id)?;
+        validate_non_empty("title", &self.title)?;
+        validate_non_empty("body", &self.body)?;
         Ok(())
     }
 }
@@ -1217,9 +1283,10 @@ pub struct ReplayCapsule {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdmissionResult, AiProductRiskTier, AuthFlowId, AuthKind, AuthLoginResult, AuthProvider,
-        AuthProviderLink, AuthProviderLinkId, AuthSession, AuthSessionId, AuthSessionState,
-        CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshotId,
+        AdmissionResult, AiProductRiskTier, AiResourceType, AuthFlowId, AuthKind,
+        AuthLoginResult, AuthProvider, AuthProviderLink, AuthProviderLinkId, AuthSession,
+        AuthSessionId, AuthSessionState, CardDeliveryKind, CardProduct, CardProductId,
+        CardProductStatus, ConfigSnapshotId,
         CredentialOwnerType, DeploymentScope, DomainError, EmailLoginCompleteRequest,
         ErrorEnvelope, EscrowMode, HealthState, MerchantFulfillmentMode, MerchantShop,
         MerchantShopId, MerchantShopStatus, MonetaryAmount, NormalizedError, OAuthCallbackRequest,
@@ -1668,6 +1735,7 @@ mod tests {
             card_product_id: CardProductId::parse("cardprod_trial").unwrap(),
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             merchant_shop_id: MerchantShopId::parse("mshop_acme").unwrap(),
+            resource_type: AiResourceType::AccessPack,
             title: "Trial Claude Card".to_string(),
             description: "Starter inventory".to_string(),
             status: CardProductStatus::Active,

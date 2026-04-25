@@ -8,12 +8,14 @@ import {
 } from "./control-plane-fetch-fixtures";
 import {
   cardProductsInitialState,
+  disclosureNotesInitialState,
   merchantShopsInitialState,
   relayEvaluationsInitialState,
   replayCapsulesInitialState,
   tradeOrdersInitialState,
   trialConnectionsInitialState,
   type CardProductRecord,
+  type DisclosureNoteRecord,
   type MerchantShopRecord,
   type RelayEvaluationRecord,
   type ReplayCapsuleRecord,
@@ -34,6 +36,7 @@ export type ControlPlaneMockState = {
   billingExportPollCount: number;
   cardProducts: CardProductRecord[];
   configSnapshots: ConfigSnapshotRecord[];
+  disclosureNotes: DisclosureNoteRecord[];
   merchantShops: MerchantShopRecord[];
   providerResources: ProviderResourceRecord[];
   relayEvaluations: RelayEvaluationRecord[];
@@ -50,6 +53,7 @@ export function createInitialControlPlaneMockState(): ControlPlaneMockState {
     billingExportPollCount: 0,
     cardProducts: structuredClone(cardProductsInitialState),
     configSnapshots: structuredClone(configSnapshotsResponse.data),
+    disclosureNotes: structuredClone(disclosureNotesInitialState),
     merchantShops: structuredClone(merchantShopsInitialState),
     providerResources: structuredClone(providerResourcesResponse.data),
     relayEvaluations: structuredClone(relayEvaluationsInitialState),

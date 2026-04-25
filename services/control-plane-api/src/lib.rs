@@ -13,16 +13,18 @@ use axum::{
         header::{AUTHORIZATION, COOKIE, SET_COOKIE},
     },
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
 };
 use core_domain::{
-    AiProductRiskTier, AuthProvider, AuthProviderLinksResponse, AuthSessionResponse,
+    AiProductRiskTier, AiResourceType, AuthProvider, AuthProviderLinksResponse, AuthSessionResponse,
     CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
-    EmailLoginCompleteRequest, EmailLoginStartRequest, EmailLoginStartResponse, EscrowMode,
-    MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus,
-    OAuthCallbackRequest, OAuthLoginStartRequest, OAuthLoginStartResponse, ProductReviewStatus,
-    Project, ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, SellerIdentityLevel,
-    Tenant, TenantMembership, TenantMembershipRole, TenantMembershipStatus, TrialConnection,
+    DisclosureNote, DisclosureNoteId, DisclosureRiskLevel, DisclosureSourceKind,
+    DisclosureVisibility, EmailLoginCompleteRequest, EmailLoginStartRequest,
+    EmailLoginStartResponse, EscrowMode, MerchantFulfillmentMode, MerchantShop, MerchantShopId,
+    MerchantShopStatus, OAuthCallbackRequest, OAuthLoginStartRequest, OAuthLoginStartResponse,
+    ProductReviewStatus, Project, ProviderResource, ProviderResourceId, RoutePolicy,
+    RoutePolicyId, SellerIdentityLevel, Tenant, TenantMembership, TenantMembershipRole,
+    TenantMembershipStatus, TradeOrder, TradeOrderId, TradeOrderState, TrialConnection,
     TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse,
 };
 use protocol_ir::{
@@ -128,12 +130,47 @@ struct CreateMerchantShopRequest {
 struct CreateCardProductRequest {
     pub card_product_id: String,
     pub merchant_shop_id: String,
+    pub resource_type: AiResourceType,
     pub title: String,
     pub description: String,
     pub inventory_count: u32,
     pub face_value_usd: String,
     pub retail_price_usd: String,
     pub supports_trial: bool,
+    pub risk_tier: AiProductRiskTier,
+    pub escrow_mode: EscrowMode,
+    pub required_kyc_level: SellerIdentityLevel,
+    pub evidence_requirement: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewCardProductRequest {
+    pub review_status: ProductReviewStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateTradeOrderRequest {
+    pub trade_order_id: String,
+    pub card_product_id: String,
+    pub buyer_alias: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UpdateTradeOrderStateRequest {
+    pub state: TradeOrderState,
+    pub evidence_summary: Option<String>,
+    pub evidence_uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateDisclosureNoteRequest {
+    pub disclosure_note_id: String,
+    pub source_kind: DisclosureSourceKind,
+    pub source_id: String,
+    pub title: String,
+    pub body: String,
+    pub risk_level: DisclosureRiskLevel,
+    pub visibility: DisclosureVisibility,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -451,6 +488,16 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route("/v1/merchant/workspace", get(get_merchant_workspace))
         .route("/v1/merchant/shops", post(create_merchant_shop))
         .route("/v1/merchant/card-products", post(create_card_product))
+        .route(
+            "/v1/merchant/card-products/{card_product_id}/review",
+            patch(review_card_product),
+        )
+        .route("/v1/merchant/orders", post(create_trade_order))
+        .route(
+            "/v1/merchant/orders/{trade_order_id}/state",
+            patch(update_trade_order_state),
+        )
+        .route("/v1/merchant/disclosures", post(create_disclosure_note))
         .route(
             "/v1/merchant/trial-connections",
             post(create_trial_connection),
@@ -1186,20 +1233,20 @@ async fn create_card_product(
         card_product_id,
         tenant_id,
         merchant_shop_id,
+        resource_type: request.resource_type,
         title: request.title,
         description: request.description,
-        status: CardProductStatus::Active,
+        status: CardProductStatus::Draft,
         inventory_count: request.inventory_count,
         face_value_usd: request.face_value_usd,
         retail_price_usd: request.retail_price_usd,
         delivery_kind: CardDeliveryKind::DirectSecret,
         supports_trial: request.supports_trial,
-        risk_tier: AiProductRiskTier::Green,
-        review_status: ProductReviewStatus::Approved,
-        escrow_mode: EscrowMode::PlatformLedger,
-        required_kyc_level: SellerIdentityLevel::L1Basic,
-        evidence_requirement: "Replay-backed quality evaluation required before promoted listing."
-            .to_string(),
+        risk_tier: request.risk_tier,
+        review_status: ProductReviewStatus::PendingReview,
+        escrow_mode: request.escrow_mode,
+        required_kyc_level: request.required_kyc_level,
+        evidence_requirement: request.evidence_requirement,
         version: 1,
         created_at: now_rfc3339(),
         updated_at: now_rfc3339(),
@@ -1213,6 +1260,142 @@ async fn create_card_product(
             bad_request_error(
                 "validation_failed",
                 format!("failed to create card product: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(created))
+}
+
+async fn review_card_product(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(card_product_id): Path<String>,
+    Json(request): Json<ReviewCardProductRequest>,
+) -> Result<Json<CardProduct>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+
+    let reviewed = state
+        .store
+        .review_card_product(&tenant_id, &card_product_id, request.review_status)
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to review card product: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(reviewed))
+}
+
+async fn create_trade_order(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateTradeOrderRequest>,
+) -> Result<Json<TradeOrder>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+    let trade_order_id = TradeOrderId::parse(request.trade_order_id.clone()).map_err(|error| {
+        bad_request_error(
+            "validation_failed",
+            format!("invalid trade_order_id: {error}"),
+            &context,
+        )
+    })?;
+
+    let created = state
+        .store
+        .create_trade_order(
+            &tenant_id,
+            trade_order_id,
+            &request.card_product_id,
+            request.buyer_alias,
+        )
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to create trade order: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(created))
+}
+
+async fn update_trade_order_state(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(trade_order_id): Path<String>,
+    Json(request): Json<UpdateTradeOrderStateRequest>,
+) -> Result<Json<TradeOrder>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+
+    let updated = state
+        .store
+        .update_trade_order_state(
+            &tenant_id,
+            &trade_order_id,
+            request.state,
+            request.evidence_summary,
+            request.evidence_uri,
+        )
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to update trade order: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(updated))
+}
+
+async fn create_disclosure_note(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDisclosureNoteRequest>,
+) -> Result<Json<DisclosureNote>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let tenant_id = resolve_active_tenant(&authz, &context)?;
+    let disclosure_note_id =
+        DisclosureNoteId::parse(request.disclosure_note_id.clone()).map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("invalid disclosure_note_id: {error}"),
+                &context,
+            )
+        })?;
+
+    let note = DisclosureNote {
+        disclosure_note_id,
+        tenant_id,
+        source_kind: request.source_kind,
+        source_id: request.source_id,
+        title: request.title,
+        body: request.body,
+        risk_level: request.risk_level,
+        visibility: request.visibility,
+        created_at: now_rfc3339(),
+    };
+
+    let created = state
+        .store
+        .create_disclosure_note(note)
+        .await
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("failed to create disclosure note: {error}"),
                 &context,
             )
         })?;

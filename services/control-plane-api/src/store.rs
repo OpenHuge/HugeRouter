@@ -27,20 +27,21 @@ use crate::pricing_catalog::{
 };
 use anyhow::{Context, Result, anyhow};
 use core_domain::{
-    AdmissionResult, AiProductRiskTier, AuthKind, AuthLoginResult, AuthProvider,
+    AdmissionResult, AiProductRiskTier, AiResourceType, AuthKind, AuthLoginResult, AuthProvider,
     AuthProviderAvailability, AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState,
     BudgetPolicyId, CardDeliveryKind, CardProduct, CardProductId, CardProductStatus,
     ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope,
-    DisputeState, EscrowMode, EvidenceState, HealthState, LogoutResponse, MerchantFulfillmentMode,
-    MerchantShop, MerchantShopId, MerchantShopStatus, MonetaryAmount, NormalizedRequestSummary,
-    OAuthProvider, ProductReviewStatus, Project, ProjectId, ProvenanceClass, ProviderCapabilities,
-    ProviderResource, ProviderResourceId, ProviderResourceStatus, RedactionTier, RelayCheckStatus,
-    RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode, RelayEvaluationVerdict,
-    ReplayCapsule, ReplayCapsuleId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId,
-    SellerIdentityLevel, Tenant, TenantId, TenantMembership, TenantMembershipId,
-    TenantMembershipRole, TenantMembershipStatus, TenantSummary, TradeOrder, TradeOrderId,
-    TradeOrderState, TrialConnection, TrialConnectionId, TrialConnectionStatus,
-    UnlinkAuthProviderResponse, UpstreamErrorSummary, UserId, UserIdentity,
+    DisclosureNote, DisclosureNoteId, DisclosureRiskLevel, DisclosureSourceKind,
+    DisclosureVisibility, DisputeState, EscrowMode, EvidenceState, HealthState, LogoutResponse,
+    MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus, MonetaryAmount,
+    NormalizedRequestSummary, OAuthProvider, ProductReviewStatus, Project, ProjectId,
+    ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
+    ProviderResourceStatus, RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId,
+    RelayEvaluationRunnerMode, RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId,
+    RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId, SellerIdentityLevel, Tenant,
+    TenantId, TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
+    TenantSummary, TradeOrder, TradeOrderId, TradeOrderState, TrialConnection, TrialConnectionId,
+    TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary, UserId, UserIdentity,
 };
 use metering::{PricingCatalog, default_budget_micros};
 use protocol_ir::{
@@ -122,6 +123,7 @@ pub struct MemoryStore {
     trade_orders: Vec<TradeOrder>,
     trial_connections: Vec<TrialConnection>,
     relay_evaluations: Vec<RelayEvaluation>,
+    disclosure_notes: Vec<DisclosureNote>,
     replay_capsules: HashMap<String, ReplayCapsule>,
     active_config_snapshot_id: String,
     users: HashMap<String, UserIdentity>,
@@ -208,6 +210,7 @@ pub struct MerchantWorkspaceResponse {
     pub recent_orders: Vec<TradeOrder>,
     pub trial_connections: Vec<TrialConnection>,
     pub recent_evaluations: Vec<RelayEvaluation>,
+    pub disclosures: Vec<DisclosureNote>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,6 +296,7 @@ pub struct SeedData {
     pub trade_orders: Vec<TradeOrder>,
     pub trial_connections: Vec<TrialConnection>,
     pub relay_evaluations: Vec<RelayEvaluation>,
+    pub disclosure_notes: Vec<DisclosureNote>,
     pub replay_capsules: Vec<ReplayCapsule>,
     pub route_receipts: Vec<RouteReceipt>,
     pub active_config_snapshot_id: String,
@@ -644,6 +648,7 @@ impl SeedData {
             card_product_id: CardProductId::parse("cardprod_acme_trial").unwrap(),
             tenant_id: tenant_acme.tenant_id.clone(),
             merchant_shop_id: merchant_shop.merchant_shop_id.clone(),
+            resource_type: AiResourceType::AccessPack,
             title: "Claude Trial Pack".to_string(),
             description: "Starter batch for relay verification and low-risk onboarding."
                 .to_string(),
@@ -675,6 +680,9 @@ impl SeedData {
             evidence_state: EvidenceState::Required,
             dispute_state: DisputeState::None,
             order_amount_usd: card_product.retail_price_usd.clone(),
+            evidence_summary: Some("Escrow funded; awaiting replay-backed delivery evidence.".to_string()),
+            evidence_uri: Some("internal://orders/tradeord_acme_trial_001/evidence".to_string()),
+            evidence_submitted_at: None,
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -729,6 +737,18 @@ impl SeedData {
             summary:
                 "Replay capsule captured; protocol and token behavior still need manual follow-up."
                     .to_string(),
+            created_at: now.clone(),
+        };
+        let disclosure_note = DisclosureNote {
+            disclosure_note_id: DisclosureNoteId::parse("disc_acme_relay_watch").unwrap(),
+            tenant_id: tenant_acme.tenant_id.clone(),
+            source_kind: DisclosureSourceKind::RelayEvaluation,
+            source_id: relay_evaluation.relay_evaluation_id.as_str().to_string(),
+            title: "Relay evaluation requires follow-up".to_string(),
+            body: "Replay evidence flagged protocol and token behavior for operator review."
+                .to_string(),
+            risk_level: DisclosureRiskLevel::Watch,
+            visibility: DisclosureVisibility::OperatorOnly,
             created_at: now.clone(),
         };
 
@@ -797,6 +817,7 @@ impl SeedData {
             trade_orders: vec![trade_order],
             trial_connections: vec![trial_connection],
             relay_evaluations: vec![relay_evaluation],
+            disclosure_notes: vec![disclosure_note],
             replay_capsules: vec![replay_capsule],
             route_receipts: Vec::new(),
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
@@ -867,6 +888,7 @@ impl MemoryStore {
             trade_orders: seed.trade_orders,
             trial_connections: seed.trial_connections,
             relay_evaluations: seed.relay_evaluations,
+            disclosure_notes: seed.disclosure_notes,
             replay_capsules: seed
                 .replay_capsules
                 .into_iter()
@@ -1269,6 +1291,8 @@ impl StoreMode {
                     .cloned()
                     .collect::<Vec<_>>();
                 recent_orders.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+                let mut disclosures = collect_disclosures_for_tenant(&store, tenant_id);
+                disclosures.sort_by(|left, right| right.created_at.cmp(&left.created_at));
 
                 Ok(MerchantWorkspaceEnvelope {
                     data: MerchantWorkspaceResponse {
@@ -1297,6 +1321,7 @@ impl StoreMode {
                             .cloned()
                             .collect(),
                         recent_evaluations,
+                        disclosures,
                     },
                 })
             }
@@ -1345,6 +1370,181 @@ impl StoreMode {
             }
             Self::Postgres(_) => Err(anyhow!(
                 "card product persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn review_card_product(
+        &self,
+        tenant_id: &TenantId,
+        card_product_id: &str,
+        review_status: ProductReviewStatus,
+    ) -> Result<CardProduct> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let product = store
+                    .card_products
+                    .iter_mut()
+                    .find(|item| {
+                        item.tenant_id == *tenant_id
+                            && item.card_product_id.as_str() == card_product_id
+                    })
+                    .context("card product not found for tenant")?;
+                product.review_status = review_status;
+                product.status = match review_status {
+                    ProductReviewStatus::Approved => CardProductStatus::Active,
+                    ProductReviewStatus::Rejected | ProductReviewStatus::Suspended => {
+                        CardProductStatus::Draft
+                    }
+                    ProductReviewStatus::PendingReview => CardProductStatus::Draft,
+                };
+                product.version += 1;
+                product.updated_at = now_rfc3339();
+                Ok(product.clone())
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "card product review persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn create_trade_order(
+        &self,
+        tenant_id: &TenantId,
+        trade_order_id: TradeOrderId,
+        card_product_id: &str,
+        buyer_alias: String,
+    ) -> Result<TradeOrder> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let product = store
+                    .card_products
+                    .iter()
+                    .find(|item| {
+                        item.tenant_id == *tenant_id
+                            && item.card_product_id.as_str() == card_product_id
+                    })
+                    .cloned()
+                    .context("card product not found for tenant")?;
+
+                if product.review_status != ProductReviewStatus::Approved {
+                    return Err(anyhow!("card product must be approved before protected orders"));
+                }
+
+                let shop = store
+                    .merchant_shops
+                    .iter()
+                    .find(|item| {
+                        item.tenant_id == *tenant_id
+                            && item.merchant_shop_id == product.merchant_shop_id
+                    })
+                    .cloned()
+                    .context("merchant shop not found for tenant")?;
+
+                let now = now_rfc3339();
+                let order = TradeOrder {
+                    trade_order_id,
+                    tenant_id: tenant_id.clone(),
+                    merchant_shop_id: product.merchant_shop_id,
+                    card_product_id: product.card_product_id,
+                    buyer_alias,
+                    seller_alias: shop.seller_alias,
+                    state: TradeOrderState::Created,
+                    escrow_mode: product.escrow_mode,
+                    evidence_state: EvidenceState::Required,
+                    dispute_state: DisputeState::None,
+                    order_amount_usd: product.retail_price_usd,
+                    evidence_summary: None,
+                    evidence_uri: None,
+                    evidence_submitted_at: None,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+                order.validate()?;
+                store.trade_orders.push(order.clone());
+                Ok(order)
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "trade order persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn update_trade_order_state(
+        &self,
+        tenant_id: &TenantId,
+        trade_order_id: &str,
+        state: TradeOrderState,
+        evidence_summary: Option<String>,
+        evidence_uri: Option<String>,
+    ) -> Result<TradeOrder> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let order = store
+                    .trade_orders
+                    .iter_mut()
+                    .find(|item| {
+                        item.tenant_id == *tenant_id && item.trade_order_id.as_str() == trade_order_id
+                    })
+                    .context("trade order not found for tenant")?;
+
+                if !is_valid_order_transition(order.state, state) {
+                    return Err(anyhow!("invalid trade order state transition"));
+                }
+
+                order.state = state;
+                order.updated_at = now_rfc3339();
+                if let Some(summary) = evidence_summary {
+                    order.evidence_summary = Some(summary);
+                    order.evidence_state = EvidenceState::Submitted;
+                    order.evidence_submitted_at = Some(order.updated_at.clone());
+                }
+                if let Some(uri) = evidence_uri {
+                    order.evidence_uri = Some(uri);
+                }
+                match state {
+                    TradeOrderState::EscrowFunded => order.evidence_state = EvidenceState::Required,
+                    TradeOrderState::InReview => {
+                        if order.evidence_state == EvidenceState::Required {
+                            order.evidence_state = EvidenceState::Submitted;
+                        }
+                    }
+                    TradeOrderState::Released => {
+                        order.evidence_state = EvidenceState::Accepted;
+                        order.dispute_state = DisputeState::Resolved;
+                    }
+                    TradeOrderState::Disputed => order.dispute_state = DisputeState::Open,
+                    TradeOrderState::Refunded => order.dispute_state = DisputeState::BuyerWon,
+                    _ => {}
+                }
+                order.validate()?;
+                Ok(order.clone())
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "trade order state persistence is not yet implemented for postgres mode"
+            )),
+        }
+    }
+
+    pub async fn create_disclosure_note(
+        &self,
+        note: DisclosureNote,
+    ) -> Result<DisclosureNote> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if !disclosure_source_exists(&store, &note) {
+                    return Err(anyhow!("disclosure source not found for tenant"));
+                }
+                note.validate()?;
+                store.disclosure_notes.push(note.clone());
+                Ok(note)
+            }
+            Self::Postgres(_) => Err(anyhow!(
+                "disclosure note persistence is not yet implemented for postgres mode"
             )),
         }
     }
@@ -4525,6 +4725,138 @@ fn build_relay_evaluation(
                 .to_string(),
         created_at,
     }
+}
+
+fn is_valid_order_transition(current: TradeOrderState, next: TradeOrderState) -> bool {
+    current == next
+        || matches!(
+            (current, next),
+            (TradeOrderState::Created, TradeOrderState::EscrowFunded)
+                | (
+                    TradeOrderState::EscrowFunded,
+                    TradeOrderState::FulfillmentSubmitted
+                )
+                | (
+                    TradeOrderState::FulfillmentSubmitted,
+                    TradeOrderState::InReview
+                )
+                | (TradeOrderState::InReview, TradeOrderState::Released)
+                | (TradeOrderState::InReview, TradeOrderState::Disputed)
+                | (TradeOrderState::Disputed, TradeOrderState::Refunded)
+                | (TradeOrderState::Disputed, TradeOrderState::Released)
+                | (TradeOrderState::Created, TradeOrderState::Cancelled)
+                | (TradeOrderState::EscrowFunded, TradeOrderState::Cancelled)
+        )
+}
+
+fn disclosure_source_exists(store: &MemoryStore, note: &DisclosureNote) -> bool {
+    match note.source_kind {
+        DisclosureSourceKind::MerchantShop => store.merchant_shops.iter().any(|item| {
+            item.tenant_id == note.tenant_id && item.merchant_shop_id.as_str() == note.source_id
+        }),
+        DisclosureSourceKind::CardProduct => store.card_products.iter().any(|item| {
+            item.tenant_id == note.tenant_id && item.card_product_id.as_str() == note.source_id
+        }),
+        DisclosureSourceKind::RelayEvaluation => store.relay_evaluations.iter().any(|item| {
+            item.tenant_id == note.tenant_id && item.relay_evaluation_id.as_str() == note.source_id
+        }),
+        DisclosureSourceKind::ReplayCapsule => store.relay_evaluations.iter().any(|item| {
+            item.tenant_id == note.tenant_id && item.replay_capsule_id.as_str() == note.source_id
+        }),
+    }
+}
+
+fn collect_disclosures_for_tenant(store: &MemoryStore, tenant_id: &TenantId) -> Vec<DisclosureNote> {
+    let mut disclosures = store
+        .disclosure_notes
+        .iter()
+        .filter(|item| item.tenant_id == *tenant_id)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for shop in store
+        .merchant_shops
+        .iter()
+        .filter(|item| item.tenant_id == *tenant_id)
+    {
+        if let Some(announcement) = &shop.announcement {
+            disclosures.push(DisclosureNote {
+                disclosure_note_id: DisclosureNoteId::parse(format!(
+                    "disc_auto_shop_{}",
+                    shop.merchant_shop_id.as_str().trim_start_matches("mshop_")
+                ))
+                .unwrap(),
+                tenant_id: tenant_id.clone(),
+                source_kind: DisclosureSourceKind::MerchantShop,
+                source_id: shop.merchant_shop_id.as_str().to_string(),
+                title: format!("{} disclosure", shop.display_name),
+                body: announcement.clone(),
+                risk_level: DisclosureRiskLevel::Info,
+                visibility: DisclosureVisibility::PublicSummary,
+                created_at: shop.updated_at.clone(),
+            });
+        }
+    }
+
+    for product in store
+        .card_products
+        .iter()
+        .filter(|item| item.tenant_id == *tenant_id)
+    {
+        disclosures.push(DisclosureNote {
+            disclosure_note_id: DisclosureNoteId::parse(format!(
+                "disc_auto_product_{}",
+                product
+                    .card_product_id
+                    .as_str()
+                    .trim_start_matches("cardprod_")
+            ))
+            .unwrap(),
+            tenant_id: tenant_id.clone(),
+            source_kind: DisclosureSourceKind::CardProduct,
+            source_id: product.card_product_id.as_str().to_string(),
+            title: format!("{} evidence requirement", product.title),
+            body: product.evidence_requirement.clone(),
+            risk_level: match product.risk_tier {
+                AiProductRiskTier::Green => DisclosureRiskLevel::Info,
+                AiProductRiskTier::Yellow => DisclosureRiskLevel::Watch,
+                AiProductRiskTier::Red => DisclosureRiskLevel::Warning,
+            },
+            visibility: DisclosureVisibility::OperatorOnly,
+            created_at: product.updated_at.clone(),
+        });
+    }
+
+    for evaluation in store
+        .relay_evaluations
+        .iter()
+        .filter(|item| item.tenant_id == *tenant_id)
+    {
+        disclosures.push(DisclosureNote {
+            disclosure_note_id: DisclosureNoteId::parse(format!(
+                "disc_auto_eval_{}",
+                evaluation
+                    .relay_evaluation_id
+                    .as_str()
+                    .trim_start_matches("reval_")
+            ))
+            .unwrap(),
+            tenant_id: tenant_id.clone(),
+            source_kind: DisclosureSourceKind::RelayEvaluation,
+            source_id: evaluation.relay_evaluation_id.as_str().to_string(),
+            title: format!("{} relay evaluation", evaluation.provider_label),
+            body: evaluation.summary.clone(),
+            risk_level: match evaluation.verdict {
+                RelayEvaluationVerdict::Healthy => DisclosureRiskLevel::Info,
+                RelayEvaluationVerdict::Warning => DisclosureRiskLevel::Watch,
+                RelayEvaluationVerdict::Fail => DisclosureRiskLevel::Warning,
+            },
+            visibility: DisclosureVisibility::PublicSummary,
+            created_at: evaluation.created_at.clone(),
+        });
+    }
+
+    disclosures
 }
 
 fn activate_memory_config_snapshot(

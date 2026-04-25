@@ -8,12 +8,21 @@ export type ShopFormState = {
 export type CardProductFormState = {
   cardProductId: string;
   merchantShopId: string;
+  resourceType:
+    | "account_recharge"
+    | "account_purchase"
+    | "pool_wholesale"
+    | "access_pack";
   title: string;
   description: string;
   inventoryCount: string;
   faceValueUsd: string;
   retailPriceUsd: string;
   supportsTrial: string;
+  riskTier: "green" | "yellow" | "red";
+  escrowMode: "platform_ledger" | "psp_escrow" | "ton_contract";
+  requiredKycLevel: "l1_basic" | "l2_kyc" | "l3_kyb";
+  evidenceRequirement: string;
 };
 
 export type TrialConnectionFormState = {
@@ -44,10 +53,15 @@ export function createCardProductForm(): CardProductFormState {
   return {
     cardProductId: "",
     description: "",
+    escrowMode: "platform_ledger",
+    evidenceRequirement: "",
     faceValueUsd: "",
     inventoryCount: "10",
     merchantShopId: "",
+    requiredKycLevel: "l1_basic",
     retailPriceUsd: "",
+    resourceType: "access_pack",
+    riskTier: "green",
     supportsTrial: "true",
     title: "",
   };
@@ -107,6 +121,10 @@ export function validateCardProductForm(
 
   if (!form.description.trim()) {
     errors.description = "Enter a product description.";
+  }
+
+  if (!form.evidenceRequirement.trim()) {
+    errors.evidenceRequirement = "Enter the required evidence.";
   }
 
   if (!/^\d+(\.\d+)?$/.test(form.faceValueUsd)) {

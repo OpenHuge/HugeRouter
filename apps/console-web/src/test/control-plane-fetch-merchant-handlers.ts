@@ -19,6 +19,7 @@ export function handleMerchantRequest(
         recent_orders: state.tradeOrders,
         trial_connections: state.trialConnections,
         recent_evaluations: state.relayEvaluations,
+        disclosures: state.disclosureNotes,
       },
     });
   }
@@ -83,10 +84,17 @@ export function handleMerchantRequest(
         typeof body.retail_price_usd === "string"
           ? body.retail_price_usd
           : "1.99",
-      required_kyc_level: "l1_basic",
-      review_status: "approved",
-      risk_tier: "green",
-      status: "active",
+      required_kyc_level:
+        typeof body.required_kyc_level === "string"
+          ? body.required_kyc_level
+          : "l1_basic",
+      resource_type:
+        typeof body.resource_type === "string"
+          ? body.resource_type
+          : "access_pack",
+      review_status: "pending_review",
+      risk_tier: typeof body.risk_tier === "string" ? body.risk_tier : "green",
+      status: "draft",
       supports_trial:
         typeof body.supports_trial === "boolean" ? body.supports_trial : true,
       tenant_id: "tenant_acme",
@@ -97,6 +105,138 @@ export function handleMerchantRequest(
     };
     state.cardProducts = [...state.cardProducts, nextProduct];
     return jsonResponse(200, nextProduct);
+  }
+
+  if (
+    path.startsWith("/v1/merchant/card-products/") &&
+    path.endsWith("/review") &&
+    init?.method === "PATCH"
+  ) {
+    const body = parseRequestBody(init) ?? {};
+    const cardProductId = decodeURIComponent(path.split("/")[4] ?? "");
+    const reviewStatus =
+      typeof body.review_status === "string"
+        ? body.review_status
+        : "pending_review";
+    const product = state.cardProducts.find(
+      (item) => item.card_product_id === cardProductId,
+    );
+
+    if (!product) {
+      return jsonResponse(404, {
+        error: {
+          code: "not_found",
+          message: "Card product not found.",
+          request_id: "req_test",
+          retryable: false,
+        },
+      });
+    }
+
+    product.review_status = reviewStatus;
+    product.status = reviewStatus === "approved" ? "active" : "draft";
+    product.updated_at = "2026-04-23T00:00:00Z";
+    product.version += 1;
+    return jsonResponse(200, product);
+  }
+
+  if (path === "/v1/merchant/orders" && init?.method === "POST") {
+    const body = parseRequestBody(init) ?? {};
+    const product = state.cardProducts.find(
+      (item) => item.card_product_id === body.card_product_id,
+    );
+    const shop = state.merchantShops.find(
+      (item) => item.merchant_shop_id === product?.merchant_shop_id,
+    );
+    const nextOrder = {
+      buyer_alias:
+        typeof body.buyer_alias === "string" ? body.buyer_alias : "buyer-l1",
+      card_product_id:
+        typeof body.card_product_id === "string"
+          ? body.card_product_id
+          : (state.cardProducts[0]?.card_product_id ?? "cardprod_unknown"),
+      created_at: "2026-04-23T00:00:00Z",
+      dispute_state: "none",
+      escrow_mode: product?.escrow_mode ?? "platform_ledger",
+      evidence_state: "required",
+      merchant_shop_id: product?.merchant_shop_id ?? "mshop_unknown",
+      order_amount_usd: product?.retail_price_usd ?? "1.99",
+      seller_alias: shop?.seller_alias ?? "seller-l2-1",
+      state: "created",
+      tenant_id: "tenant_acme",
+      trade_order_id:
+        typeof body.trade_order_id === "string"
+          ? body.trade_order_id
+          : `tradeord_${state.tradeOrders.length + 1}`,
+      updated_at: "2026-04-23T00:00:00Z",
+    };
+    state.tradeOrders = [nextOrder, ...state.tradeOrders];
+    return jsonResponse(200, nextOrder);
+  }
+
+  if (
+    path.startsWith("/v1/merchant/orders/") &&
+    path.endsWith("/state") &&
+    init?.method === "PATCH"
+  ) {
+    const body = parseRequestBody(init) ?? {};
+    const tradeOrderId = decodeURIComponent(path.split("/")[4] ?? "");
+    const order = state.tradeOrders.find(
+      (item) => item.trade_order_id === tradeOrderId,
+    );
+
+    if (!order) {
+      return jsonResponse(404, {
+        error: {
+          code: "not_found",
+          message: "Trade order not found.",
+          request_id: "req_test",
+          retryable: false,
+        },
+      });
+    }
+
+    order.state = typeof body.state === "string" ? body.state : order.state;
+    order.evidence_summary =
+      typeof body.evidence_summary === "string"
+        ? body.evidence_summary
+        : order.evidence_summary;
+    order.evidence_uri =
+      typeof body.evidence_uri === "string"
+        ? body.evidence_uri
+        : order.evidence_uri;
+    if (order.evidence_summary) {
+      order.evidence_state = "submitted";
+      order.evidence_submitted_at = "2026-04-23T00:00:00Z";
+    }
+    order.updated_at = "2026-04-23T00:00:00Z";
+    return jsonResponse(200, order);
+  }
+
+  if (path === "/v1/merchant/disclosures" && init?.method === "POST") {
+    const body = parseRequestBody(init) ?? {};
+    const nextDisclosure = {
+      body: typeof body.body === "string" ? body.body : "Disclosure body",
+      created_at: "2026-04-23T00:00:00Z",
+      disclosure_note_id:
+        typeof body.disclosure_note_id === "string"
+          ? body.disclosure_note_id
+          : `disc_${state.disclosureNotes.length + 1}`,
+      risk_level:
+        typeof body.risk_level === "string" ? body.risk_level : "info",
+      source_id:
+        typeof body.source_id === "string" ? body.source_id : "mshop_acme",
+      source_kind:
+        typeof body.source_kind === "string"
+          ? body.source_kind
+          : "merchant_shop",
+      tenant_id: "tenant_acme",
+      title: typeof body.title === "string" ? body.title : "Disclosure",
+      visibility:
+        typeof body.visibility === "string" ? body.visibility : "operator_only",
+    };
+    state.disclosureNotes = [nextDisclosure, ...state.disclosureNotes];
+    return jsonResponse(200, nextDisclosure);
   }
 
   if (path === "/v1/merchant/trial-connections" && init?.method === "POST") {

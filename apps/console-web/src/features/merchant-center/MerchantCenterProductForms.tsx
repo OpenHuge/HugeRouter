@@ -108,6 +108,26 @@ export function CardProductCard({
               <Stack gap="xs">
                 <Select
                   data={[
+                    { label: "Access pack", value: "access_pack" },
+                    { label: "Account recharge", value: "account_recharge" },
+                    { label: "Account purchase", value: "account_purchase" },
+                    { label: "Pool wholesale", value: "pool_wholesale" },
+                  ]}
+                  label="Resource type"
+                  onChange={(value) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      resourceType:
+                        (value as CardProductFormState["resourceType"]) ??
+                        "access_pack",
+                    }))
+                  }
+                  value={cardForm.resourceType}
+                />
+              </Stack>
+              <Stack gap="xs">
+                <Select
+                  data={[
                     { label: "Trial access", value: "true" },
                     { label: "Standard inventory", value: "false" },
                   ]}
@@ -135,6 +155,77 @@ export function CardProductCard({
               value={cardForm.description}
             />
             <FieldErrorText error={cardErrors.description} />
+            <Group align="flex-start" grow>
+              <Stack gap="xs">
+                <Select
+                  data={[
+                    { label: "Green", value: "green" },
+                    { label: "Yellow", value: "yellow" },
+                    { label: "Red", value: "red" },
+                  ]}
+                  label="Risk tier"
+                  onChange={(value) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      riskTier:
+                        (value as CardProductFormState["riskTier"]) ?? "green",
+                    }))
+                  }
+                  value={cardForm.riskTier}
+                />
+              </Stack>
+              <Stack gap="xs">
+                <Select
+                  data={[
+                    { label: "Platform ledger", value: "platform_ledger" },
+                    { label: "PSP escrow", value: "psp_escrow" },
+                    { label: "TON contract", value: "ton_contract" },
+                  ]}
+                  label="Escrow mode"
+                  onChange={(value) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      escrowMode:
+                        (value as CardProductFormState["escrowMode"]) ??
+                        "platform_ledger",
+                    }))
+                  }
+                  value={cardForm.escrowMode}
+                />
+              </Stack>
+              <Stack gap="xs">
+                <Select
+                  data={[
+                    { label: "L1 basic", value: "l1_basic" },
+                    { label: "L2 KYC", value: "l2_kyc" },
+                    { label: "L3 KYB", value: "l3_kyb" },
+                  ]}
+                  label="Required KYC"
+                  onChange={(value) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      requiredKycLevel:
+                        (value as CardProductFormState["requiredKycLevel"]) ??
+                        "l1_basic",
+                    }))
+                  }
+                  value={cardForm.requiredKycLevel}
+                />
+              </Stack>
+            </Group>
+            <Textarea
+              label="Evidence requirement"
+              minRows={2}
+              onChange={(event) =>
+                setCardForm((current) => ({
+                  ...current,
+                  evidenceRequirement: event.currentTarget.value,
+                }))
+              }
+              placeholder="Replay capsule, trial-key proof, and fulfillment evidence before exposure"
+              value={cardForm.evidenceRequirement}
+            />
+            <FieldErrorText error={cardErrors.evidenceRequirement} />
             <Group align="flex-start" grow>
               <Stack gap="xs">
                 <TextInput

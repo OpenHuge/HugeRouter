@@ -55,6 +55,7 @@ export const tradeOrderIdSchema = prefixedId("tradeord_");
 export const trialConnectionIdSchema = prefixedId("trialconn_");
 export const relayEvaluationIdSchema = prefixedId("reval_");
 export const replayCapsuleIdSchema = prefixedId("replay_");
+export const disclosureNoteIdSchema = prefixedId("disc_");
 
 export const serviceNameSchema = z.string().min(1);
 export const merchantShopStatusSchema = z.enum([
@@ -65,6 +66,12 @@ export const merchantShopStatusSchema = z.enum([
 export const merchantFulfillmentModeSchema = z.enum(["auto_card_secret"]);
 export const cardProductStatusSchema = z.enum(["draft", "active", "sold_out"]);
 export const cardDeliveryKindSchema = z.enum(["direct_secret"]);
+export const aiResourceTypeSchema = z.enum([
+  "account_recharge",
+  "account_purchase",
+  "pool_wholesale",
+  "access_pack",
+]);
 export const sellerIdentityLevelSchema = z.enum([
   "l1_basic",
   "l2_kyc",
@@ -122,6 +129,17 @@ export const relayCheckStatusSchema = z.enum([
   "warning",
   "fail",
   "not_tested",
+]);
+export const disclosureSourceKindSchema = z.enum([
+  "merchant_shop",
+  "card_product",
+  "relay_evaluation",
+  "replay_capsule",
+]);
+export const disclosureRiskLevelSchema = z.enum(["info", "watch", "warning"]);
+export const disclosureVisibilitySchema = z.enum([
+  "operator_only",
+  "public_summary",
 ]);
 export const providerCapabilitySchema = z.object({
   supports_streaming: z.boolean(),
@@ -240,6 +258,7 @@ export const cardProductSchema = z.object({
   card_product_id: cardProductIdSchema,
   tenant_id: tenantIdSchema,
   merchant_shop_id: merchantShopIdSchema,
+  resource_type: aiResourceTypeSchema,
   title: z.string().min(1),
   description: z.string().min(1),
   status: cardProductStatusSchema,
@@ -270,6 +289,9 @@ export const tradeOrderSchema = z.object({
   evidence_state: evidenceStateSchema,
   dispute_state: disputeStateSchema,
   order_amount_usd: z.string().regex(/^\d+(\.\d+)?$/),
+  evidence_summary: z.string().min(1).optional(),
+  evidence_uri: z.string().min(1).optional(),
+  evidence_submitted_at: dateTimeSchema.optional(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema,
 });
@@ -334,6 +356,18 @@ export const relayEvaluationSchema = z.object({
   created_at: dateTimeSchema,
 });
 
+export const disclosureNoteSchema = z.object({
+  disclosure_note_id: disclosureNoteIdSchema,
+  tenant_id: tenantIdSchema,
+  source_kind: disclosureSourceKindSchema,
+  source_id: z.string().min(1),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  risk_level: disclosureRiskLevelSchema,
+  visibility: disclosureVisibilitySchema,
+  created_at: dateTimeSchema,
+});
+
 export const merchantWorkspaceSchema = z.object({
   merchant_enabled: z.boolean(),
   tenant_id: tenantIdSchema,
@@ -342,6 +376,7 @@ export const merchantWorkspaceSchema = z.object({
   recent_orders: z.array(tradeOrderSchema),
   trial_connections: z.array(trialConnectionSchema),
   recent_evaluations: z.array(relayEvaluationSchema),
+  disclosures: z.array(disclosureNoteSchema),
 });
 
 export const monetaryAmountSchema = z.object({
@@ -890,6 +925,7 @@ export type TradeOrder = z.infer<typeof tradeOrderSchema>;
 export type TrialConnection = z.infer<typeof trialConnectionSchema>;
 export type ReplayCapsule = z.infer<typeof replayCapsuleSchema>;
 export type RelayEvaluation = z.infer<typeof relayEvaluationSchema>;
+export type DisclosureNote = z.infer<typeof disclosureNoteSchema>;
 export type MerchantWorkspace = z.infer<typeof merchantWorkspaceSchema>;
 export type NormalizedError = z.infer<typeof normalizedErrorSchema>;
 export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>;

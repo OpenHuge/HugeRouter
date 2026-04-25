@@ -27,6 +27,7 @@ export type CardProductRecord = {
   merchant_shop_id: string;
   required_kyc_level: string;
   retail_price_usd: string;
+  resource_type: string;
   review_status: string;
   risk_tier: string;
   status: string;
@@ -49,6 +50,9 @@ export type TradeOrderRecord = {
   evidence_state: string;
   dispute_state: string;
   order_amount_usd: string;
+  evidence_summary?: string;
+  evidence_uri?: string;
+  evidence_submitted_at?: string;
   created_at: string;
   updated_at: string;
 };
@@ -107,6 +111,18 @@ export type ReplayCapsuleRecord = {
   };
 };
 
+export type DisclosureNoteRecord = {
+  body: string;
+  created_at: string;
+  disclosure_note_id: string;
+  risk_level: string;
+  source_id: string;
+  source_kind: string;
+  tenant_id: string;
+  title: string;
+  visibility: string;
+};
+
 export const merchantShopsInitialState: MerchantShopRecord[] = [
   {
     merchant_shop_id: "mshop_acme",
@@ -131,6 +147,7 @@ export const cardProductsInitialState: CardProductRecord[] = [
     card_product_id: "cardprod_acme_trial",
     tenant_id: "tenant_acme",
     merchant_shop_id: "mshop_acme",
+    resource_type: "access_pack",
     title: "Claude Trial Pack",
     description:
       "Starter batch for relay verification and low-risk onboarding.",
@@ -165,6 +182,9 @@ export const tradeOrdersInitialState: TradeOrderRecord[] = [
     evidence_state: "required",
     dispute_state: "none",
     order_amount_usd: "1.99",
+    evidence_summary:
+      "Escrow funded; awaiting replay-backed delivery evidence.",
+    evidence_uri: "internal://orders/tradeord_acme_trial_001/evidence",
     created_at: "2026-04-22T00:00:00Z",
     updated_at: "2026-04-22T00:00:00Z",
   },
@@ -228,5 +248,19 @@ export const replayCapsulesInitialState: ReplayCapsuleRecord[] = [
     upstream_error_summary: {
       code: "provider_signature_mismatch",
     },
+  },
+];
+
+export const disclosureNotesInitialState: DisclosureNoteRecord[] = [
+  {
+    disclosure_note_id: "disc_acme_relay_watch",
+    tenant_id: "tenant_acme",
+    source_kind: "relay_evaluation",
+    source_id: "reval_acme_relay",
+    title: "Relay evaluation requires follow-up",
+    body: "Replay evidence flagged protocol and token behavior for operator review.",
+    risk_level: "watch",
+    visibility: "operator_only",
+    created_at: "2026-04-22T00:00:00Z",
   },
 ];

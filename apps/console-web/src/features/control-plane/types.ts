@@ -248,6 +248,11 @@ export type MerchantShopView = {
 export type CardProductView = {
   cardProductId: string;
   merchantShopId: string;
+  resourceType:
+    | "account_recharge"
+    | "account_purchase"
+    | "pool_wholesale"
+    | "access_pack";
   title: string;
   description: string;
   status: "draft" | "active" | "sold_out";
@@ -290,6 +295,9 @@ export type TradeOrderView = {
     | "rejected";
   disputeState: "none" | "open" | "buyer_won" | "seller_won" | "resolved";
   orderAmountUsd: string;
+  evidenceSummary?: string;
+  evidenceUri?: string;
+  evidenceSubmittedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -337,6 +345,22 @@ export type MerchantWorkspaceData = {
   recentOrders: TradeOrderView[];
   trialConnections: TrialConnectionView[];
   recentEvaluations: RelayEvaluationView[];
+  disclosures: DisclosureNoteView[];
+};
+
+export type DisclosureNoteView = {
+  disclosureNoteId: string;
+  sourceKind:
+    | "merchant_shop"
+    | "card_product"
+    | "relay_evaluation"
+    | "replay_capsule";
+  sourceId: string;
+  title: string;
+  body: string;
+  riskLevel: "info" | "watch" | "warning";
+  visibility: "operator_only" | "public_summary";
+  createdAt: string;
 };
 
 export type ReplayCapsuleView = {

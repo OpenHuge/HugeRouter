@@ -141,6 +141,68 @@ describe("console data service", () => {
       "replay_acme_relay_eval",
     );
     expect(workspace.recentEvaluations[0]?.estimatedTokensSaved).toBe(2400);
+    expect(workspace.disclosures[0]?.disclosureNoteId).toBe(
+      "disc_acme_relay_watch",
+    );
+  });
+
+  it("creates merchant workflow resources with schema-compatible payloads", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const product = await getConsoleDataService().createCardProduct({
+      cardProductId: "cardprod_schema_aligned",
+      description: "Schema-aligned listing",
+      escrowMode: "platform_ledger",
+      evidenceRequirement: "Replay capsule and fulfillment evidence required.",
+      faceValueUsd: "2.00",
+      inventoryCount: 5,
+      merchantShopId: "mshop_acme",
+      requiredKycLevel: "l1_basic",
+      retailPriceUsd: "2.50",
+      resourceType: "access_pack",
+      riskTier: "green",
+      supportsTrial: true,
+      title: "Schema Aligned Pack",
+    });
+    expect(product.resourceType).toBe("access_pack");
+    expect(product.reviewStatus).toBe("pending_review");
+
+    const reviewed = await getConsoleDataService().reviewCardProduct(
+      product.cardProductId,
+      "approved",
+    );
+    expect(reviewed.reviewStatus).toBe("approved");
+
+    const order = await getConsoleDataService().createTradeOrder({
+      buyerAlias: "buyer-l1-schema",
+      cardProductId: product.cardProductId,
+      tradeOrderId: "tradeord_schema_aligned",
+    });
+    expect(order.state).toBe("created");
+
+    const advanced = await getConsoleDataService().updateTradeOrderState(
+      order.tradeOrderId,
+      {
+        evidenceSummary: "Replay capsule attached.",
+        evidenceUri: "internal://orders/tradeord_schema_aligned/evidence",
+        state: "escrow_funded",
+      },
+    );
+    expect(advanced.evidenceState).toBe("submitted");
+
+    const disclosure = await getConsoleDataService().createDisclosureNote({
+      body: "Schema parse covers disclosure creation.",
+      disclosureNoteId: "disc_schema_aligned",
+      riskLevel: "info",
+      sourceId: product.cardProductId,
+      sourceKind: "card_product",
+      title: "Schema aligned disclosure",
+      visibility: "operator_only",
+    });
+    expect(disclosure.disclosureNoteId).toBe("disc_schema_aligned");
   });
 
   it("loads a replay capsule detail for merchant review", async () => {
@@ -254,6 +316,7 @@ describe("console data service", () => {
           tenantId: "tenant_override",
           shops: [],
           cardProducts: [],
+          disclosures: [],
           recentOrders: [],
           trialConnections: [],
           recentEvaluations: [],
@@ -353,6 +416,18 @@ describe("console data service", () => {
         return Promise.reject(new Error("unused"));
       },
       createCardProduct() {
+        return Promise.reject(new Error("unused"));
+      },
+      reviewCardProduct() {
+        return Promise.reject(new Error("unused"));
+      },
+      createTradeOrder() {
+        return Promise.reject(new Error("unused"));
+      },
+      updateTradeOrderState() {
+        return Promise.reject(new Error("unused"));
+      },
+      createDisclosureNote() {
         return Promise.reject(new Error("unused"));
       },
       createTrialConnection() {

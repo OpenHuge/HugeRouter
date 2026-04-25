@@ -161,10 +161,15 @@ export function MerchantCenterPage({
       const created = await getConsoleDataService().createCardProduct({
         cardProductId: cardForm.cardProductId.trim(),
         description: cardForm.description.trim(),
+        escrowMode: cardForm.escrowMode,
+        evidenceRequirement: cardForm.evidenceRequirement.trim(),
         faceValueUsd: cardForm.faceValueUsd.trim(),
         inventoryCount: Number(cardForm.inventoryCount),
         merchantShopId: cardForm.merchantShopId,
+        requiredKycLevel: cardForm.requiredKycLevel,
         retailPriceUsd: cardForm.retailPriceUsd.trim(),
+        resourceType: cardForm.resourceType,
+        riskTier: cardForm.riskTier,
         supportsTrial: cardForm.supportsTrial === "true",
         title: cardForm.title.trim(),
       });

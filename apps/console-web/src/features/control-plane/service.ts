@@ -8,6 +8,7 @@ import {
   cardProductSchema,
   type BillingExportJob,
   configSnapshotSchema,
+  disclosureNoteSchema,
   type ConfigSnapshot,
   merchantShopSchema,
   merchantWorkspaceResponseSchema,
@@ -34,6 +35,7 @@ import type {
   BillingDashboardData,
   CardProductView,
   ConfigSnapshotView,
+  DisclosureNoteView,
   MerchantShopView,
   MerchantWorkspaceData,
   OverviewData,
@@ -122,13 +124,60 @@ export type ConsoleDataService = {
   createCardProduct: (input: {
     cardProductId: string;
     merchantShopId: string;
+    resourceType:
+      | "account_recharge"
+      | "account_purchase"
+      | "pool_wholesale"
+      | "access_pack";
     title: string;
     description: string;
     inventoryCount: number;
     faceValueUsd: string;
     retailPriceUsd: string;
     supportsTrial: boolean;
+    riskTier: "green" | "yellow" | "red";
+    escrowMode: "platform_ledger" | "psp_escrow" | "ton_contract";
+    requiredKycLevel: "l1_basic" | "l2_kyc" | "l3_kyb";
+    evidenceRequirement: string;
   }) => Promise<CardProductView>;
+  reviewCardProduct: (
+    cardProductId: string,
+    reviewStatus: "pending_review" | "approved" | "rejected" | "suspended",
+  ) => Promise<CardProductView>;
+  createTradeOrder: (input: {
+    tradeOrderId: string;
+    cardProductId: string;
+    buyerAlias: string;
+  }) => Promise<TradeOrderView>;
+  updateTradeOrderState: (
+    tradeOrderId: string,
+    input: {
+      state:
+        | "created"
+        | "escrow_funded"
+        | "fulfillment_submitted"
+        | "in_review"
+        | "released"
+        | "disputed"
+        | "refunded"
+        | "cancelled";
+      evidenceSummary?: string;
+      evidenceUri?: string;
+    },
+  ) => Promise<TradeOrderView>;
+  createDisclosureNote: (input: {
+    disclosureNoteId: string;
+    sourceKind:
+      | "merchant_shop"
+      | "card_product"
+      | "relay_evaluation"
+      | "replay_capsule";
+    sourceId: string;
+    title: string;
+    body: string;
+    riskLevel: "info" | "watch" | "warning";
+    visibility: "operator_only" | "public_summary";
+  }) => Promise<DisclosureNoteView>;
   createTrialConnection: (input: {
     trialConnectionId: string;
     providerLabel: string;
@@ -824,6 +873,7 @@ function toCardProductView(
     faceValueUsd: product.face_value_usd,
     inventoryCount: product.inventory_count,
     merchantShopId: product.merchant_shop_id,
+    resourceType: product.resource_type,
     escrowMode: product.escrow_mode,
     evidenceRequirement: product.evidence_requirement,
     requiredKycLevel: product.required_kyc_level,
@@ -847,7 +897,10 @@ function toTradeOrderView(
     createdAt: order.created_at,
     disputeState: order.dispute_state,
     escrowMode: order.escrow_mode,
+    evidenceSubmittedAt: order.evidence_submitted_at,
+    evidenceSummary: order.evidence_summary,
     evidenceState: order.evidence_state,
+    evidenceUri: order.evidence_uri,
     merchantShopId: order.merchant_shop_id,
     orderAmountUsd: order.order_amount_usd,
     sellerAlias: order.seller_alias,
@@ -900,11 +953,27 @@ function toRelayEvaluationView(
   };
 }
 
+function toDisclosureNoteView(
+  note: ReturnType<typeof disclosureNoteSchema.parse>,
+): DisclosureNoteView {
+  return {
+    body: note.body,
+    createdAt: note.created_at,
+    disclosureNoteId: note.disclosure_note_id,
+    riskLevel: note.risk_level,
+    sourceId: note.source_id,
+    sourceKind: note.source_kind,
+    title: note.title,
+    visibility: note.visibility,
+  };
+}
+
 function parseMerchantWorkspace(payload: unknown): MerchantWorkspaceData {
   const parsed = merchantWorkspaceResponseSchema.parse(payload).data;
 
   return {
     cardProducts: parsed.card_products.map(toCardProductView),
+    disclosures: parsed.disclosures.map(toDisclosureNoteView),
     merchantEnabled: parsed.merchant_enabled,
     recentEvaluations: parsed.recent_evaluations.map(toRelayEvaluationView),
     recentOrders: parsed.recent_orders.map(toTradeOrderView),
@@ -1345,12 +1414,21 @@ async function createMerchantShopInControlPlane(input: {
 async function createCardProductInControlPlane(input: {
   cardProductId: string;
   merchantShopId: string;
+  resourceType:
+    | "account_recharge"
+    | "account_purchase"
+    | "pool_wholesale"
+    | "access_pack";
   title: string;
   description: string;
   inventoryCount: number;
   faceValueUsd: string;
   retailPriceUsd: string;
   supportsTrial: boolean;
+  riskTier: "green" | "yellow" | "red";
+  escrowMode: "platform_ledger" | "psp_escrow" | "ton_contract";
+  requiredKycLevel: "l1_basic" | "l2_kyc" | "l3_kyb";
+  evidenceRequirement: string;
 }) {
   return requestControlPlaneJson(
     "/v1/merchant/card-products",
@@ -1359,12 +1437,129 @@ async function createCardProductInControlPlane(input: {
       body: JSON.stringify({
         card_product_id: input.cardProductId,
         description: input.description,
+        escrow_mode: input.escrowMode,
+        evidence_requirement: input.evidenceRequirement,
         face_value_usd: input.faceValueUsd,
         inventory_count: input.inventoryCount,
         merchant_shop_id: input.merchantShopId,
+        required_kyc_level: input.requiredKycLevel,
         retail_price_usd: input.retailPriceUsd,
+        resource_type: input.resourceType,
+        risk_tier: input.riskTier,
         supports_trial: input.supportsTrial,
         title: input.title,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function reviewCardProductInControlPlane(
+  cardProductId: string,
+  reviewStatus: "pending_review" | "approved" | "rejected" | "suspended",
+) {
+  return requestControlPlaneJson(
+    `/v1/merchant/card-products/${encodeURIComponent(cardProductId)}/review`,
+    (payload) => toCardProductView(cardProductSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        review_status: reviewStatus,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+    },
+  );
+}
+
+async function createTradeOrderInControlPlane(input: {
+  tradeOrderId: string;
+  cardProductId: string;
+  buyerAlias: string;
+}) {
+  return requestControlPlaneJson(
+    "/v1/merchant/orders",
+    (payload) => toTradeOrderView(tradeOrderSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        buyer_alias: input.buyerAlias,
+        card_product_id: input.cardProductId,
+        trade_order_id: input.tradeOrderId,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function updateTradeOrderStateInControlPlane(
+  tradeOrderId: string,
+  input: {
+    state:
+      | "created"
+      | "escrow_funded"
+      | "fulfillment_submitted"
+      | "in_review"
+      | "released"
+      | "disputed"
+      | "refunded"
+      | "cancelled";
+    evidenceSummary?: string;
+    evidenceUri?: string;
+  },
+) {
+  return requestControlPlaneJson(
+    `/v1/merchant/orders/${encodeURIComponent(tradeOrderId)}/state`,
+    (payload) => toTradeOrderView(tradeOrderSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        evidence_summary: input.evidenceSummary,
+        evidence_uri: input.evidenceUri,
+        state: input.state,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+    },
+  );
+}
+
+async function createDisclosureNoteInControlPlane(input: {
+  disclosureNoteId: string;
+  sourceKind:
+    | "merchant_shop"
+    | "card_product"
+    | "relay_evaluation"
+    | "replay_capsule";
+  sourceId: string;
+  title: string;
+  body: string;
+  riskLevel: "info" | "watch" | "warning";
+  visibility: "operator_only" | "public_summary";
+}) {
+  return requestControlPlaneJson(
+    "/v1/merchant/disclosures",
+    (payload) => toDisclosureNoteView(disclosureNoteSchema.parse(payload)),
+    {
+      body: JSON.stringify({
+        body: input.body,
+        disclosure_note_id: input.disclosureNoteId,
+        risk_level: input.riskLevel,
+        source_id: input.sourceId,
+        source_kind: input.sourceKind,
+        title: input.title,
+        visibility: input.visibility,
       }),
       headers: {
         Accept: "application/json",
@@ -2061,6 +2256,22 @@ const defaultConsoleDataService: ConsoleDataService = {
 
   async createCardProduct(input) {
     return createCardProductInControlPlane(input);
+  },
+
+  async reviewCardProduct(cardProductId, reviewStatus) {
+    return reviewCardProductInControlPlane(cardProductId, reviewStatus);
+  },
+
+  async createTradeOrder(input) {
+    return createTradeOrderInControlPlane(input);
+  },
+
+  async updateTradeOrderState(tradeOrderId, input) {
+    return updateTradeOrderStateInControlPlane(tradeOrderId, input);
+  },
+
+  async createDisclosureNote(input) {
+    return createDisclosureNoteInControlPlane(input);
   },
 
   async createTrialConnection(input) {
