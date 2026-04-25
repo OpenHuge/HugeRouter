@@ -1,5 +1,6 @@
 use anyhow::Result;
 use gateway_api::app;
+use huge_router_config::GatewayApiConfig;
 use runtime_composition::{ServiceRuntime, announce_startup};
 use tokio::net::TcpListener;
 use tracing::info;
@@ -16,8 +17,8 @@ async fn main() -> Result<()> {
         role: "northbound-api",
     });
 
-    let bind_address =
-        std::env::var("GATEWAY_API_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let config = GatewayApiConfig::from_env()?;
+    let bind_address = config.bind_address;
     let listener = TcpListener::bind(&bind_address).await?;
 
     info!(bind_address, "gateway-api bootstrap HTTP server listening");
