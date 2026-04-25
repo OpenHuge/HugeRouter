@@ -506,6 +506,12 @@ pub struct RouteReceiptProviderAttempt {
     pub provider_resource_id: ProviderResourceId,
     pub attempt: u8,
     pub status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason_code: String,
+    #[serde(default)]
+    pub retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_target: Option<ProviderResourceId>,
     pub started_at: String,
     pub finished_at: String,
     pub latency_ms: u32,

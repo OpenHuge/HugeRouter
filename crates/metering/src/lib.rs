@@ -30,6 +30,7 @@ pub struct PricingCatalogEntry {
     pub model_alias: Option<String>,
     pub region: Option<String>,
     pub micros_per_unit: i64,
+    pub billable_micros_per_unit: i64,
     pub unit_denominator: u64,
     pub source: PricingSource,
 }
@@ -173,10 +174,25 @@ fn micros_for_dimension(
     }
 }
 
+fn micros_for_catalog_rate(units: u32, micros_per_unit: i64, unit_denominator: u64) -> i64 {
+    if unit_denominator == 0 {
+        return 0;
+    }
+
+    let micros = (i128::from(units) * i128::from(micros_per_unit)) / i128::from(unit_denominator);
+    i64::try_from(micros).unwrap_or_else(|_| {
+        if micros.is_negative() {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
+}
+
 #[must_use]
 pub fn default_catalog() -> PricingCatalog {
     let mut entries = Vec::new();
-    for rate_card in RATE_CARDS {
+    for rate_card in RATE_CARDS.iter().chain(std::iter::once(&DEFAULT_RATE_CARD)) {
         for (dimension, micros_per_unit, denominator) in [
             (
                 PricingDimension::InputTokens,
@@ -212,6 +228,10 @@ pub fn default_catalog() -> PricingCatalog {
                 model_alias: None,
                 region: Some("global".to_string()),
                 micros_per_unit,
+                billable_micros_per_unit: billable_from_provider_cost(
+                    micros_per_unit,
+                    rate_card.billable_markup_bps,
+                ),
                 unit_denominator: denominator,
                 source: rate_card.source,
             });
@@ -286,6 +306,114 @@ pub fn quote_usage_with_additions(
         billable_cost_micros,
         line_items,
     }
+}
+
+#[must_use]
+pub fn quote_usage_for_catalog(
+    catalog: &PricingCatalog,
+    provider_id: &str,
+    model_alias: Option<&str>,
+    region: Option<&str>,
+    usage: &UsageMetrics,
+    additions: AdditionalUsageDimensions,
+) -> PriceQuote {
+    let mut line_items = Vec::with_capacity(5);
+    let dimensions = [
+        (PricingDimension::InputTokens, usage.input_tokens),
+        (PricingDimension::OutputTokens, usage.output_tokens),
+        (
+            PricingDimension::CachedInputTokens,
+            usage.cached_input_tokens,
+        ),
+        (
+            PricingDimension::ImageGenerations,
+            additions.image_generation_units,
+        ),
+        (PricingDimension::AudioSeconds, additions.audio_seconds),
+    ];
+
+    let mut provider_cost_micros = 0_i64;
+    let mut billable_cost_micros = 0_i64;
+
+    for (dimension, units) in dimensions {
+        if units == 0 {
+            continue;
+        }
+
+        let Some(rate) = select_catalog_rate(catalog, provider_id, model_alias, region, dimension)
+        else {
+            continue;
+        };
+        let line_provider_cost =
+            micros_for_catalog_rate(units, rate.micros_per_unit, rate.unit_denominator);
+        let line_billable_cost =
+            micros_for_catalog_rate(units, rate.billable_micros_per_unit, rate.unit_denominator);
+
+        provider_cost_micros += line_provider_cost;
+        billable_cost_micros += line_billable_cost;
+
+        line_items.push(PricingLineItem {
+            dimension,
+            units: u64::from(units),
+            provider_cost_micros: line_provider_cost,
+            billable_cost_micros: line_billable_cost,
+            rate_source: format!("{:?}", rate.source).to_ascii_lowercase(),
+        });
+    }
+
+    PriceQuote {
+        catalog_id: catalog.catalog_id.clone(),
+        catalog_version: catalog.catalog_version,
+        currency: catalog.currency.clone(),
+        provider_cost_micros,
+        billable_cost_micros,
+        line_items,
+    }
+}
+
+fn select_catalog_rate<'a>(
+    catalog: &'a PricingCatalog,
+    provider_id: &str,
+    model_alias: Option<&str>,
+    region: Option<&str>,
+    dimension: PricingDimension,
+) -> Option<&'a PricingCatalogEntry> {
+    catalog
+        .entries
+        .iter()
+        .filter(|entry| entry.provider_id == provider_id && entry.dimension == dimension)
+        .filter(|entry| match (model_alias, entry.model_alias.as_deref()) {
+            (Some(requested), Some(entry_model)) => requested == entry_model,
+            (_, None) => true,
+            (None, Some(_)) => false,
+        })
+        .filter(|entry| match (region, entry.region.as_deref()) {
+            (Some(requested), Some(entry_region)) => {
+                requested == entry_region || entry_region == "global"
+            }
+            (_, Some("global") | None) => true,
+            (None, Some(_)) => false,
+        })
+        .max_by_key(|entry| {
+            let model_score = match (model_alias, entry.model_alias.as_deref()) {
+                (Some(requested), Some(entry_model)) if requested == entry_model => 2,
+                (_, None) => 1,
+                _ => 0,
+            };
+            let region_score = match (region, entry.region.as_deref()) {
+                (Some(requested), Some(entry_region)) if requested == entry_region => 2,
+                (_, Some("global") | None) => 1,
+                _ => 0,
+            };
+
+            model_score + region_score
+        })
+        .or_else(|| {
+            catalog
+                .entries
+                .iter()
+                .find(|entry| entry.provider_id == "default" && entry.dimension == dimension)
+        })
 }
 
 #[must_use]
@@ -408,6 +536,59 @@ mod tests {
                 .iter()
                 .all(|entry| entry.region.as_deref() == Some("global"))
         );
+    }
+
+    #[test]
+    fn quote_usage_for_catalog_uses_model_and_region_specific_rates() {
+        let catalog = PricingCatalog {
+            catalog_id: "pricing_catalog_test".to_string(),
+            catalog_version: 7,
+            currency: "USD".to_string(),
+            entries: vec![
+                PricingCatalogEntry {
+                    catalog_id: "pricing_catalog_test".to_string(),
+                    catalog_version: 7,
+                    dimension: PricingDimension::InputTokens,
+                    provider_id: "openai".to_string(),
+                    model_alias: None,
+                    region: Some("global".to_string()),
+                    micros_per_unit: 1_000,
+                    billable_micros_per_unit: 1_100,
+                    unit_denominator: 1_000,
+                    source: PricingSource::PlatformCatalog,
+                },
+                PricingCatalogEntry {
+                    catalog_id: "pricing_catalog_test".to_string(),
+                    catalog_version: 7,
+                    dimension: PricingDimension::InputTokens,
+                    provider_id: "openai".to_string(),
+                    model_alias: Some("reasoning-fast".to_string()),
+                    region: Some("us-east-1".to_string()),
+                    micros_per_unit: 2_000,
+                    billable_micros_per_unit: 3_000,
+                    unit_denominator: 1_000,
+                    source: PricingSource::ContractOverride,
+                },
+            ],
+        };
+        let quote = quote_usage_for_catalog(
+            &catalog,
+            "openai",
+            Some("reasoning-fast"),
+            Some("us-east-1"),
+            &UsageMetrics {
+                input_tokens: 1_500,
+                output_tokens: 0,
+                cached_input_tokens: 0,
+            },
+            AdditionalUsageDimensions::default(),
+        );
+
+        assert_eq!(quote.catalog_id, "pricing_catalog_test");
+        assert_eq!(quote.catalog_version, 7);
+        assert_eq!(quote.provider_cost_micros, 3_000);
+        assert_eq!(quote.billable_cost_micros, 4_500);
+        assert_eq!(quote.line_items[0].rate_source, "contractoverride");
     }
 
     #[test]

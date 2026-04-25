@@ -318,6 +318,16 @@
           "format": "uint8",
           "minimum": 0.0
         },
+        "fallback_target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderResourceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "finished_at": {
           "type": "string"
         },
@@ -331,6 +341,13 @@
         },
         "reason": {
           "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "type": "boolean"
         },
         "started_at": {
           "type": "string"

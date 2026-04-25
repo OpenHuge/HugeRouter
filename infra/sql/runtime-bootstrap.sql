@@ -204,6 +204,53 @@ SET tenant_id = EXCLUDED.tenant_id,
     replay_capsule_id = EXCLUDED.replay_capsule_id,
     created_at = EXCLUDED.created_at,
     payload = EXCLUDED.payload;
+INSERT INTO pricing_catalog_entries (
+    catalog_id,
+    catalog_version,
+    currency,
+    dimension,
+    provider_id,
+    model_alias,
+    region,
+    micros_per_unit,
+    billable_micros_per_unit,
+    unit_denominator,
+    source
+)
+VALUES
+    ('pricing_catalog_default', 1, 'USD', 'input_tokens', 'openai', NULL, 'global', 2500, 3000, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'output_tokens', 'openai', NULL, 'global', 8500, 10200, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'cached_input_tokens', 'openai', NULL, 'global', 750, 900, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'image_generations', 'openai', NULL, 'global', 18000, 21600, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'audio_seconds', 'openai', NULL, 'global', 1500, 1800, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'input_tokens', 'anthropic', NULL, 'global', 3000, 3660, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'output_tokens', 'anthropic', NULL, 'global', 9000, 10980, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'cached_input_tokens', 'anthropic', NULL, 'global', 900, 1098, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'image_generations', 'anthropic', NULL, 'global', 21000, 25620, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'audio_seconds', 'anthropic', NULL, 'global', 1800, 2196, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'input_tokens', 'bedrock', NULL, 'global', 6000, 7320, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'output_tokens', 'bedrock', NULL, 'global', 30000, 36600, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'cached_input_tokens', 'bedrock', NULL, 'global', 600, 732, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'image_generations', 'bedrock', NULL, 'global', 20000, 24400, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'audio_seconds', 'bedrock', NULL, 'global', 1600, 1952, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'input_tokens', 'gemini', NULL, 'global', 1800, 2124, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'output_tokens', 'gemini', NULL, 'global', 5500, 6490, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'cached_input_tokens', 'gemini', NULL, 'global', 450, 531, 1000, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'image_generations', 'gemini', NULL, 'global', 14000, 16520, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'audio_seconds', 'gemini', NULL, 'global', 1000, 1180, 1, 'provider_native'),
+    ('pricing_catalog_default', 1, 'USD', 'input_tokens', 'default', NULL, 'global', 2000, 2500, 1000, 'platform_catalog'),
+    ('pricing_catalog_default', 1, 'USD', 'output_tokens', 'default', NULL, 'global', 6000, 7500, 1000, 'platform_catalog'),
+    ('pricing_catalog_default', 1, 'USD', 'cached_input_tokens', 'default', NULL, 'global', 500, 625, 1000, 'platform_catalog'),
+    ('pricing_catalog_default', 1, 'USD', 'image_generations', 'default', NULL, 'global', 15000, 18750, 1, 'platform_catalog'),
+    ('pricing_catalog_default', 1, 'USD', 'audio_seconds', 'default', NULL, 'global', 1200, 1500, 1, 'platform_catalog')
+ON CONFLICT (catalog_id, catalog_version, dimension, provider_id, model_alias_key, region_key)
+DO UPDATE SET
+    currency = EXCLUDED.currency,
+    micros_per_unit = EXCLUDED.micros_per_unit,
+    billable_micros_per_unit = EXCLUDED.billable_micros_per_unit,
+    unit_denominator = EXCLUDED.unit_denominator,
+    source = EXCLUDED.source,
+    updated_at = NOW();
 
 INSERT INTO users (user_id, primary_email, payload)
 VALUES

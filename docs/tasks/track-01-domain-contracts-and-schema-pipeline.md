@@ -2,16 +2,16 @@
 
 ## Mission
 
-Turn the existing domain and protocol scaffolding into a stable contract layer that both Rust services and TypeScript consumers can build against without hand-written placeholders.
+Keep the Rust, schema, and TypeScript contract layer stable as HugeRouter moves from a working gateway MVP toward an AI traffic control plane with cost governance, routing diagnostics, model capabilities, guardrails, and enterprise administration.
 
 ## Current Baseline
 
-- `crates/core-domain` already defines prefixed IDs, core enums, and serialized records for provider resources, route receipts, usage events, ledger entries, audit events, and replay capsules.
-- `crates/protocol-ir` already provides request and message envelopes plus a few event payloads.
-- `packages/ts-shared-schema` contains only `tenantSchema`.
-- `packages/ts-api-client` is a handwritten placeholder client returning mock data.
-- `schemas/openapi`, `schemas/jsonschema`, and `schemas/examples` exist, but there is no real generation pipeline yet.
-- Human auth requirements are now explicit in architecture docs, but there are no shared contracts yet for users, memberships, sessions, provider links, or auth callback payloads.
+- `crates/core-domain` defines prefixed IDs, provider resources, provenance classes, route policies, config snapshots, route receipts, usage events, ledger entries, auth/session records, merchant relay records, replay capsules, and related enums.
+- `crates/protocol-ir` defines gateway/control-plane DTOs, protocol families, event envelopes, route receipt diagnostics, usage/billing/pricing responses, route simulations, and OpenAPI/JSON Schema generation helpers.
+- `schemas/openapi`, `schemas/jsonschema`, and `schemas/examples` are generated and checked in via `pnpm generate`.
+- `packages/ts-shared-schema` exposes meaningful Zod schemas for control-plane and merchant resources.
+- `packages/ts-api-client` exposes a real fetch-based control-plane client with tests for request construction and error handling.
+- The next contract gaps are not the MVP basics; they are richer pricing policy, pre-admission/reserve accounting, model capability matrices, fallback/guardrail decisions, redaction policy, and enterprise/channel governance shapes.
 
 ## Owned Paths
 
@@ -36,37 +36,33 @@ Other tracks should consume the contracts you publish here instead of redefining
 
 ## Deliverables
 
-1. Stable v1 Rust domain and protocol types for the first real gateway and control-plane slice.
+1. Stable v1 Rust domain and protocol types for the shipped gateway and control-plane surface.
 2. OpenAPI and JSON Schema artifacts that match those contracts.
-3. Generated or contract-backed TypeScript schemas and API client modules.
-4. Examples and fixtures that support both backend and frontend tests.
+3. Contract-backed TypeScript schemas and API client modules.
+4. Examples and fixtures that support backend, frontend, and worker tests.
 5. Clear versioning rules for evolving contracts without silent breakage.
-6. Shared auth contracts for email, GitHub, Google, and WeChat login flows.
+6. New contract families for cost governance, model capabilities, reliability/fallback policy, redaction, guardrails, and enterprise/channel administration.
 
 ## Ordered Plan
 
-1. Freeze the first stable scope.
-   - Decide the minimal contract set needed by Tracks `02`, `03`, and `05`.
-   - Keep the scope to the current MVP path: tenants, projects, provider resources, route policies, config snapshots, chat requests, route receipts, usage events, normalized errors, users, memberships, sessions, and auth-provider links.
-2. Normalize Rust contracts.
-   - Review current serialization names, optional fields, and envelope shapes.
-   - Replace bootstrap-only naming where it leaks into public-facing types.
-   - Add semantic validation helpers where raw structs are not enough.
-   - Add stable auth-facing models for user identity, tenant membership lookup, linked providers, session state, and auth audit payloads.
-3. Establish schema sources of truth.
-   - Define which artifacts are authored versus generated.
-   - Add repeatable generation commands under the workspace command surface.
-   - Check in fixtures and examples that prove the contract is usable.
-   - Include auth examples for email login start/complete, GitHub callback, Google callback, WeChat callback, provider-link listing, and logout/session revoke responses.
-4. Replace placeholder TypeScript packages.
-   - Expand `ts-shared-schema` to expose the same validated entities the frontend needs.
-   - Replace the placeholder `ts-api-client` with typed modules derived from real contracts.
-   - Keep the public API small and stable enough for `apps/console-web` to consume directly.
-   - Publish client shapes for login initiation, OAuth callback completion, current-session lookup, and linked-auth-provider management so Track `05` does not invent private request models.
+1. Extend cost governance contracts.
+   - Add explicit pricing catalog records for provider, model, region, token direction, cached token, image, audio, and channel/customer price dimensions.
+   - Add budget policy records for tenant, project, credential, user, app, daily, and monthly scopes.
+   - Add reserve/release usage phases that can support request pre-admission and long-lived sessions without double counting.
+2. Extend routing and reliability contracts.
+   - Add policy fields for cost-first, latency-first, quality-first, availability-first, customer-tier, and region constrained strategies.
+   - Add circuit-breaker, concurrency, rate-window, and fallback condition records.
+   - Preserve route receipt explainability with score breakdowns, exclusions, fallback transitions, provider attempts, policy checks, and validation outcomes.
+3. Add model capability contracts.
+   - Represent per-provider and per-model support for streaming, tool calling, JSON mode, JSON schema, long context, vision, images, audio, embeddings, rerank, batch, realtime, and response metadata.
+   - Model unsupported capability reasons and downgrade guidance instead of flattening provider differences.
+4. Add redaction and guardrail contracts.
+   - Define redaction tier, payload capture policy, PII finding summaries, prompt-injection findings, content safety decisions, output validation results, and audit references.
+   - Keep raw prompt retention opt-in and separable from ordinary route diagnostics.
 5. Document compatibility rules.
    - State how breaking versus additive contract changes are identified.
    - Add guidance for future tracks that need new fields or new protocol families.
-   - Document how new auth providers are added without breaking existing provider enums or callback payloads.
+   - Document how new auth providers, guardrail providers, and capability dimensions are added without breaking existing enums or callback payloads.
 
 ## Required Tests
 
@@ -79,10 +75,9 @@ Other tracks should consume the contracts you publish here instead of redefining
 
 ## Definition Of Done
 
-- No consumer needs to hand-write placeholder contract objects for the MVP flow.
+- No consumer needs to hand-write placeholder contract objects for the shipped gateway, control-plane, auth, merchant, usage, billing, and route diagnostic flows.
 - Rust and TypeScript contracts are generated or maintained from one documented source-of-truth workflow.
-- Examples in `schemas/examples` cover the first real control-plane and gateway flows.
-- Examples in `schemas/examples` also cover the first real human auth flows.
+- Examples in `schemas/examples` cover shipped control-plane, gateway, auth, usage, billing, and event flows.
 - Contract tests fail when serialization shape changes unintentionally.
 - Follow-on tracks can depend on these packages without editing them locally.
 

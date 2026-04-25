@@ -170,6 +170,32 @@ CREATE TABLE IF NOT EXISTS billing_export_jobs (
     content_type TEXT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
+    catalog_id TEXT NOT NULL,
+    catalog_version INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    model_alias TEXT NULL,
+    model_alias_key TEXT GENERATED ALWAYS AS (COALESCE(model_alias, '')) STORED,
+    region TEXT NULL,
+    region_key TEXT GENERATED ALWAYS AS (COALESCE(region, '')) STORED,
+    micros_per_unit BIGINT NOT NULL,
+    billable_micros_per_unit BIGINT NOT NULL,
+    unit_denominator BIGINT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (
+        catalog_id,
+        catalog_version,
+        dimension,
+        provider_id,
+        model_alias_key,
+        region_key
+    )
+);
+
 CREATE TABLE IF NOT EXISTS ledger_entries (
     ledger_entry_id TEXT PRIMARY KEY,
     usage_event_id TEXT NOT NULL,

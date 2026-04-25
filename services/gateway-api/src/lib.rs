@@ -53,6 +53,10 @@ use tracing::{info, warn};
 
 use route_evaluation::{ProviderTargetRuntime, RouteEvaluation, evaluate_route};
 use route_receipts::{
+    PROVIDER_ATTEMPT_MISSING_ADAPTER, PROVIDER_ATTEMPT_NON_RETRYABLE_FAILURE,
+    PROVIDER_ATTEMPT_RETRYABLE_FAILURE, PROVIDER_ATTEMPT_SUCCESS,
+    PROVIDER_ATTEMPT_UNSUPPORTED_PROTOCOL, PROVIDER_REASON_MISSING_ADAPTER,
+    PROVIDER_REASON_SUCCESS, PROVIDER_REASON_UNSUPPORTED_PROTOCOL, ProviderAttemptRecordInput,
     build_image_usage_event, build_route_receipt, build_usage_event, provider_attempt_record,
     publish_route_receipt_or_error,
 };
@@ -773,6 +777,33 @@ fn infer_gateway_origin(headers: &HeaderMap) -> Option<String> {
         })
 }
 
+fn fallback_target_for(
+    route: &RouteEvaluation,
+    index: usize,
+) -> Option<core_domain::ProviderResourceId> {
+    route
+        .ranked_targets
+        .get(index + 1)
+        .map(|ranked| ranked.target.resource.provider_resource_id.clone())
+}
+
+fn provider_error_reason_code(error: &ProviderError) -> String {
+    match error.kind {
+        ProviderErrorKind::Auth | ProviderErrorKind::Unavailable => "provider_unavailable",
+        ProviderErrorKind::InvalidRequest => {
+            if error.details.contains_key("loop_guard") {
+                "transit_loop_detected"
+            } else {
+                "request_validation_failed"
+            }
+        }
+        ProviderErrorKind::RateLimited => "rate_limited",
+        ProviderErrorKind::Timeout => "upstream_timeout",
+        ProviderErrorKind::Protocol => "upstream_protocol_error",
+    }
+    .to_string()
+}
+
 #[allow(clippy::too_many_lines)]
 async fn execute_image_route(
     state: GatewayState,
@@ -803,15 +834,19 @@ async fn execute_image_route(
                 target.resource.provider_resource_id.as_str(),
             );
             let occurred_at = now_rfc3339();
-            provider_attempts.push(provider_attempt_record(
-                target.resource.provider_resource_id.clone(),
-                index + 1,
-                "skipped",
-                occurred_at.clone(),
-                occurred_at,
-                0,
-                provider_error.message.clone(),
-            ));
+            let fallback_target = fallback_target_for(&route, index);
+            provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                provider_resource_id: target.resource.provider_resource_id.clone(),
+                attempt: index + 1,
+                status: PROVIDER_ATTEMPT_MISSING_ADAPTER,
+                reason_code: PROVIDER_REASON_MISSING_ADAPTER.to_string(),
+                retryable: fallback_target.is_some(),
+                fallback_target,
+                started_at: occurred_at.clone(),
+                finished_at: occurred_at,
+                latency_ms: 0,
+                reason: provider_error.message.clone(),
+            }));
             last_error = Some((ranked_target.clone(), provider_error));
             continue;
         };
@@ -834,15 +869,19 @@ async fn execute_image_route(
             .with_detail("protocol_family", request.protocol_family.as_str())
             .with_detail("manifest_boundary", "protocol_family_unsupported");
             let occurred_at = now_rfc3339();
-            provider_attempts.push(provider_attempt_record(
-                target.resource.provider_resource_id.clone(),
-                index + 1,
-                "skipped",
-                occurred_at.clone(),
-                occurred_at,
-                0,
-                provider_error.message.clone(),
-            ));
+            let fallback_target = fallback_target_for(&route, index);
+            provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                provider_resource_id: target.resource.provider_resource_id.clone(),
+                attempt: index + 1,
+                status: PROVIDER_ATTEMPT_UNSUPPORTED_PROTOCOL,
+                reason_code: PROVIDER_REASON_UNSUPPORTED_PROTOCOL.to_string(),
+                retryable: fallback_target.is_some(),
+                fallback_target,
+                started_at: occurred_at.clone(),
+                finished_at: occurred_at,
+                latency_ms: 0,
+                reason: provider_error.message.clone(),
+            }));
             last_error = Some((ranked_target.clone(), provider_error));
             continue;
         }
@@ -879,15 +918,19 @@ async fn execute_image_route(
             .await
         {
             Ok(image_response) => {
-                provider_attempts.push(provider_attempt_record(
-                    target.resource.provider_resource_id.clone(),
-                    index + 1,
-                    "succeeded",
-                    attempt_started_at,
-                    now_rfc3339(),
-                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
-                    "provider returned image output".to_string(),
-                ));
+                provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                    provider_resource_id: target.resource.provider_resource_id.clone(),
+                    attempt: index + 1,
+                    status: PROVIDER_ATTEMPT_SUCCESS,
+                    reason_code: PROVIDER_REASON_SUCCESS.to_string(),
+                    retryable: false,
+                    fallback_target: None,
+                    started_at: attempt_started_at,
+                    finished_at: now_rfc3339(),
+                    latency_ms: u32::try_from(attempt_started.elapsed().as_millis())
+                        .unwrap_or(u32::MAX),
+                    reason: "provider returned image output".to_string(),
+                }));
                 let fallback_count = fallback_transitions.len();
                 let route_receipt = build_route_receipt(
                     &route,
@@ -975,19 +1018,30 @@ async fn execute_image_route(
                 }
 
                 let has_more_candidates = index + 1 < route.ranked_targets.len();
-                provider_attempts.push(provider_attempt_record(
-                    target.resource.provider_resource_id.clone(),
-                    index + 1,
-                    if error.retryable && has_more_candidates {
-                        "retryable_failure"
+                let will_retry = error.retryable && has_more_candidates;
+                provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                    provider_resource_id: target.resource.provider_resource_id.clone(),
+                    attempt: index + 1,
+                    status: if will_retry {
+                        PROVIDER_ATTEMPT_RETRYABLE_FAILURE
                     } else {
-                        "failed"
+                        PROVIDER_ATTEMPT_NON_RETRYABLE_FAILURE
                     },
-                    attempt_started_at,
-                    now_rfc3339(),
-                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
-                    error.message.clone(),
-                ));
+                    reason_code: provider_error_reason_code(&error),
+                    retryable: will_retry,
+                    fallback_target: will_retry.then(|| {
+                        route.ranked_targets[index + 1]
+                            .target
+                            .resource
+                            .provider_resource_id
+                            .clone()
+                    }),
+                    started_at: attempt_started_at,
+                    finished_at: now_rfc3339(),
+                    latency_ms: u32::try_from(attempt_started.elapsed().as_millis())
+                        .unwrap_or(u32::MAX),
+                    reason: error.message.clone(),
+                }));
                 last_error = Some((ranked_target.clone(), error.clone()));
                 if !error.retryable || !has_more_candidates {
                     break;
@@ -1063,15 +1117,19 @@ async fn execute_route(
                 target.resource.provider_resource_id.as_str(),
             );
             let occurred_at = now_rfc3339();
-            provider_attempts.push(provider_attempt_record(
-                target.resource.provider_resource_id.clone(),
-                index + 1,
-                "skipped",
-                occurred_at.clone(),
-                occurred_at,
-                0,
-                provider_error.message.clone(),
-            ));
+            let fallback_target = fallback_target_for(&route, index);
+            provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                provider_resource_id: target.resource.provider_resource_id.clone(),
+                attempt: index + 1,
+                status: PROVIDER_ATTEMPT_MISSING_ADAPTER,
+                reason_code: PROVIDER_REASON_MISSING_ADAPTER.to_string(),
+                retryable: fallback_target.is_some(),
+                fallback_target,
+                started_at: occurred_at.clone(),
+                finished_at: occurred_at,
+                latency_ms: 0,
+                reason: provider_error.message.clone(),
+            }));
 
             if let Some(next_target) = route.ranked_targets.get(index + 1) {
                 fallback_transitions.push(FallbackTransition {
@@ -1114,15 +1172,19 @@ async fn execute_route(
             .with_detail("protocol_family", request.protocol_family.as_str())
             .with_detail("manifest_boundary", "protocol_family_unsupported");
             let occurred_at = now_rfc3339();
-            provider_attempts.push(provider_attempt_record(
-                target.resource.provider_resource_id.clone(),
-                index + 1,
-                "skipped",
-                occurred_at.clone(),
-                occurred_at,
-                0,
-                provider_error.message.clone(),
-            ));
+            let fallback_target = fallback_target_for(&route, index);
+            provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                provider_resource_id: target.resource.provider_resource_id.clone(),
+                attempt: index + 1,
+                status: PROVIDER_ATTEMPT_UNSUPPORTED_PROTOCOL,
+                reason_code: PROVIDER_REASON_UNSUPPORTED_PROTOCOL.to_string(),
+                retryable: fallback_target.is_some(),
+                fallback_target,
+                started_at: occurred_at.clone(),
+                finished_at: occurred_at,
+                latency_ms: 0,
+                reason: provider_error.message.clone(),
+            }));
 
             if let Some(next_target) = route.ranked_targets.get(index + 1) {
                 fallback_transitions.push(FallbackTransition {
@@ -1173,15 +1235,19 @@ async fn execute_route(
             .await
         {
             Ok(provider_response) => {
-                provider_attempts.push(provider_attempt_record(
-                    target.resource.provider_resource_id.clone(),
-                    index + 1,
-                    "succeeded",
-                    attempt_started_at,
-                    now_rfc3339(),
-                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
-                    "provider returned output".to_string(),
-                ));
+                provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                    provider_resource_id: target.resource.provider_resource_id.clone(),
+                    attempt: index + 1,
+                    status: PROVIDER_ATTEMPT_SUCCESS,
+                    reason_code: PROVIDER_REASON_SUCCESS.to_string(),
+                    retryable: false,
+                    fallback_target: None,
+                    started_at: attempt_started_at,
+                    finished_at: now_rfc3339(),
+                    latency_ms: u32::try_from(attempt_started.elapsed().as_millis())
+                        .unwrap_or(u32::MAX),
+                    reason: "provider returned output".to_string(),
+                }));
                 let fallback_count = fallback_transitions.len();
                 let route_receipt = build_route_receipt(
                     &route,
@@ -1269,19 +1335,30 @@ async fn execute_route(
 
                 last_error = Some((ranked_target.clone(), error.clone()));
                 let has_more_candidates = index + 1 < route.ranked_targets.len();
-                provider_attempts.push(provider_attempt_record(
-                    target.resource.provider_resource_id.clone(),
-                    index + 1,
-                    if error.retryable && has_more_candidates {
-                        "retryable_failure"
+                let will_retry = error.retryable && has_more_candidates;
+                provider_attempts.push(provider_attempt_record(ProviderAttemptRecordInput {
+                    provider_resource_id: target.resource.provider_resource_id.clone(),
+                    attempt: index + 1,
+                    status: if will_retry {
+                        PROVIDER_ATTEMPT_RETRYABLE_FAILURE
                     } else {
-                        "failed"
+                        PROVIDER_ATTEMPT_NON_RETRYABLE_FAILURE
                     },
-                    attempt_started_at,
-                    now_rfc3339(),
-                    u32::try_from(attempt_started.elapsed().as_millis()).unwrap_or(u32::MAX),
-                    error.message.clone(),
-                ));
+                    reason_code: provider_error_reason_code(&error),
+                    retryable: will_retry,
+                    fallback_target: will_retry.then(|| {
+                        route.ranked_targets[index + 1]
+                            .target
+                            .resource
+                            .provider_resource_id
+                            .clone()
+                    }),
+                    started_at: attempt_started_at,
+                    finished_at: now_rfc3339(),
+                    latency_ms: u32::try_from(attempt_started.elapsed().as_millis())
+                        .unwrap_or(u32::MAX),
+                    reason: error.message.clone(),
+                }));
                 if !error.retryable || !has_more_candidates {
                     let normalized = map_provider_error(&error, &context);
                     let fallback_count = fallback_transitions.len();

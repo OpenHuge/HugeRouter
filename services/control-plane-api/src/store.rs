@@ -25,42 +25,48 @@ use crate::merchant_replay::{
     build_merchant_replay_route_receipt, build_relay_evaluation, next_id_suffix,
     replay_upstream_error_code,
 };
+use crate::pricing_catalog::{
+    default_pricing_catalog_response, load_pricing_catalog, pricing_catalog_response,
+    seed_default_pricing_catalog, simulate_pricing, simulate_pricing_with_catalog,
+};
 use crate::store_schema::{MIGRATIONS, REQUIRED_TABLES};
 use anyhow::{Context, Result, anyhow};
 use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
     AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId,
     CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
-    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, ExcludedTarget,
-    HealthState, LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId,
-    MerchantShopStatus, MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project,
-    ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource, ProviderResourceId,
-    ProviderResourceStatus, RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId,
-    RelayEvaluationRunnerMode, RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy,
-    RoutePolicyId, RouteReceipt, RouteReceiptId, ScoreBreakdown, Tenant, TenantId,
-    TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
-    TenantSummary, TrialConnection, TrialConnectionId, TrialConnectionStatus,
-    UnlinkAuthProviderResponse, UpstreamErrorSummary, UserId, UserIdentity,
+    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, HealthState,
+    LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus,
+    MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project, ProjectId, ProvenanceClass,
+    ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
+    RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode,
+    RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy, RoutePolicyId,
+    RouteReceipt, RouteReceiptId, Tenant, TenantId, TenantMembership, TenantMembershipId,
+    TenantMembershipRole, TenantMembershipStatus, TenantSummary, TrialConnection,
+    TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary,
+    UserId, UserIdentity,
 };
-use metering::{
-    AdditionalUsageDimensions, PricingCatalog, PricingSource, default_budget_micros,
-    default_catalog, quote_usage_with_additions,
-};
+use metering::{PricingCatalog, default_budget_micros};
 use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
-    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, PricingCatalogEntry,
-    PricingCatalogResponse, PricingSimulationLineItem, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse, ProtocolFamily, ProviderResourcesResponse,
-    RouteDiagnosticDecision, RouteDiagnosticTarget, RouteDiagnosticsResponse,
-    RoutePoliciesResponse, RouteReceiptResponse, RouteReceiptSummary, RouteSimulationRequest,
-    RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow,
-    UsageSummary, UsageSummaryResponse,
+    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse,
+    PricingCatalogResponse, PricingSimulationRequest, PricingSimulationResponse, ProjectsResponse,
+    ProtocolFamily, ProviderResourcesResponse, RouteDiagnosticDecision, RouteDiagnosticTarget,
+    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptDecisionTraceStep,
+    RouteReceiptDiagnosticsResponse, RouteReceiptPolicyCheck, RouteReceiptProviderAttempt,
+    RouteReceiptResponse, RouteReceiptSummary, RouteSimulationRequest, RouteSimulationResponse,
+    TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
+};
+use routing_engine::{
+    ProviderTargetKind, ProviderTargetRuntime, RoutingConfig, RoutingRequest, health_state_slug,
+    is_health_blocked, provider_capability_gaps, provider_supports_capability,
+    provider_supports_protocol_family, route_capability_supported_by_provider_capabilities,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Pool, Postgres, Row, postgres::PgPoolOptions, types::Json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -1831,6 +1837,22 @@ impl StoreMode {
         }
     }
 
+    pub async fn get_route_receipt_diagnostics(
+        &self,
+        route_receipt_id: &str,
+    ) -> Result<Option<RouteReceiptDiagnosticsResponse>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .route_receipts
+                .get(route_receipt_id)
+                .cloned()
+                .map(memory_route_receipt_diagnostics_response)),
+            Self::Postgres(store) => store.get_route_receipt_diagnostics(route_receipt_id).await,
+        }
+    }
+
     pub async fn list_route_receipts(
         &self,
         filters: &RouteReceiptFilters,
@@ -1939,14 +1961,20 @@ impl StoreMode {
     }
 
     pub async fn get_pricing_catalog(&self) -> Result<PricingCatalogResponse> {
-        Ok(sample_pricing_catalog_response())
+        match self {
+            Self::Memory(_) => Ok(default_pricing_catalog_response()),
+            Self::Postgres(store) => store.get_pricing_catalog().await,
+        }
     }
 
     pub async fn create_pricing_simulation(
         &self,
         request: PricingSimulationRequest,
     ) -> Result<PricingSimulationResponse> {
-        Ok(simulate_pricing(request))
+        match self {
+            Self::Memory(_) => Ok(simulate_pricing(&request)),
+            Self::Postgres(store) => store.create_pricing_simulation(&request).await,
+        }
     }
 
     pub async fn create_billing_export(
@@ -2262,6 +2290,8 @@ impl PostgresStore {
             seed.route_receipts,
         )
         .await?;
+
+        seed_default_pricing_catalog(&self.pool).await?;
 
         for user_seed in seed.users {
             let user_id = user_seed.user.user_id.as_str().to_string();
@@ -3218,6 +3248,78 @@ impl PostgresStore {
         }))
     }
 
+    async fn get_route_receipt_diagnostics(
+        &self,
+        route_receipt_id: &str,
+    ) -> Result<Option<RouteReceiptDiagnosticsResponse>> {
+        let row = sqlx::query(
+            r"
+            SELECT
+                receipts.payload AS route_receipt,
+                diagnostics.decision_timeline,
+                diagnostics.policy_checks,
+                diagnostics.provider_attempts,
+                diagnostics.source_message_id,
+                diagnostics.source_producer,
+                diagnostics.source_request_id,
+                diagnostics.source_trace_id,
+                diagnostics.created_at::text AS diagnostics_created_at
+            FROM route_receipts receipts
+            LEFT JOIN route_receipt_diagnostics diagnostics
+              ON diagnostics.route_receipt_id = receipts.route_receipt_id
+            WHERE receipts.route_receipt_id = $1
+            ",
+        )
+        .bind(route_receipt_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| {
+            let route_receipt = row.get::<Json<RouteReceipt>, _>("route_receipt").0;
+            let mut metadata = BTreeMap::new();
+            for (key, value) in [
+                (
+                    "source_message_id",
+                    row.get::<Option<String>, _>("source_message_id"),
+                ),
+                (
+                    "source_producer",
+                    row.get::<Option<String>, _>("source_producer"),
+                ),
+                (
+                    "source_request_id",
+                    row.get::<Option<String>, _>("source_request_id"),
+                ),
+                (
+                    "source_trace_id",
+                    row.get::<Option<String>, _>("source_trace_id"),
+                ),
+                (
+                    "diagnostics_created_at",
+                    row.get::<Option<String>, _>("diagnostics_created_at"),
+                ),
+            ] {
+                if let Some(value) = value {
+                    metadata.insert(key.to_string(), value);
+                }
+            }
+
+            RouteReceiptDiagnosticsResponse {
+                route_receipt,
+                decision_timeline: row
+                    .get::<Option<Json<Vec<RouteReceiptDecisionTraceStep>>>, _>("decision_timeline")
+                    .map_or_else(Vec::new, |value| value.0),
+                policy_checks: row
+                    .get::<Option<Json<Vec<RouteReceiptPolicyCheck>>>, _>("policy_checks")
+                    .map_or_else(Vec::new, |value| value.0),
+                provider_attempts: row
+                    .get::<Option<Json<Vec<RouteReceiptProviderAttempt>>>, _>("provider_attempts")
+                    .map_or_else(Vec::new, |value| value.0),
+                metadata,
+            }
+        }))
+    }
+
     async fn list_route_receipts(
         &self,
         filters: &RouteReceiptFilters,
@@ -3419,6 +3521,22 @@ impl PostgresStore {
         };
 
         Ok(UsageBreakdownResponse { data, next_cursor })
+    }
+
+    async fn get_pricing_catalog(&self) -> Result<PricingCatalogResponse> {
+        Ok(pricing_catalog_response(self.load_pricing_catalog().await?))
+    }
+
+    async fn create_pricing_simulation(
+        &self,
+        request: &PricingSimulationRequest,
+    ) -> Result<PricingSimulationResponse> {
+        let catalog = self.load_pricing_catalog().await?;
+        Ok(simulate_pricing_with_catalog(&catalog, request))
+    }
+
+    async fn load_pricing_catalog(&self) -> Result<PricingCatalog> {
+        load_pricing_catalog(&self.pool).await
     }
 
     async fn get_balance_projection(
@@ -4447,41 +4565,6 @@ fn parse_cursor_offset(cursor: Option<&str>) -> usize {
         .unwrap_or_default()
 }
 
-fn simulate_pricing(request: PricingSimulationRequest) -> PricingSimulationResponse {
-    let quote = quote_usage_with_additions(
-        &request.provider_id,
-        &request.usage,
-        AdditionalUsageDimensions {
-            image_generation_units: request.image_generation_units.unwrap_or_default(),
-            audio_seconds: request.audio_seconds.unwrap_or_default(),
-        },
-    );
-    PricingSimulationResponse {
-        catalog_id: quote.catalog_id,
-        catalog_version: quote.catalog_version,
-        currency: quote.currency.clone(),
-        provider_cost: format_monetary_amount(&quote.currency, quote.provider_cost_micros),
-        billable_price: format_monetary_amount(&quote.currency, quote.billable_cost_micros),
-        line_items: quote
-            .line_items
-            .into_iter()
-            .map(|line_item| PricingSimulationLineItem {
-                dimension: pricing_dimension_slug(line_item.dimension),
-                units: line_item.units,
-                provider_cost: format_monetary_amount(
-                    &quote.currency,
-                    line_item.provider_cost_micros,
-                ),
-                billable_price: format_monetary_amount(
-                    &quote.currency,
-                    line_item.billable_cost_micros,
-                ),
-                rate_source: line_item.rate_source,
-            })
-            .collect(),
-    }
-}
-
 fn sample_usage_summary_response(
     tenant_id: &str,
     project_id: Option<&str>,
@@ -4625,48 +4708,6 @@ fn sample_billing_export_job_response(
             tenant_id: tenant_id.map(|value| TenantId::parse(value.to_string()).unwrap()),
             project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
         },
-    }
-}
-
-fn sample_pricing_catalog_response() -> PricingCatalogResponse {
-    let catalog: PricingCatalog = default_catalog();
-    PricingCatalogResponse {
-        catalog_id: catalog.catalog_id,
-        catalog_version: catalog.catalog_version,
-        currency: catalog.currency,
-        entries: catalog
-            .entries
-            .into_iter()
-            .map(|entry| PricingCatalogEntry {
-                dimension: pricing_dimension_slug(entry.dimension),
-                provider_id: entry.provider_id,
-                model_alias: entry.model_alias,
-                region: entry.region,
-                micros_per_unit: entry.micros_per_unit,
-                unit_denominator: entry.unit_denominator,
-                source: pricing_source_slug(entry.source),
-            })
-            .collect(),
-    }
-}
-
-fn pricing_dimension_slug(dimension: metering::PricingDimension) -> String {
-    match dimension {
-        metering::PricingDimension::InputTokens => "input_tokens".to_string(),
-        metering::PricingDimension::OutputTokens => "output_tokens".to_string(),
-        metering::PricingDimension::CachedInputTokens => "cached_input_tokens".to_string(),
-        metering::PricingDimension::ImageGenerations => "image_generations".to_string(),
-        metering::PricingDimension::AudioSeconds => "audio_seconds".to_string(),
-    }
-}
-
-fn pricing_source_slug(source: PricingSource) -> String {
-    match source {
-        PricingSource::PlatformCatalog => "platform_catalog".to_string(),
-        PricingSource::ProviderNative => "provider_native".to_string(),
-        PricingSource::ContractOverride => "contract_override".to_string(),
-        PricingSource::TenantOverride => "tenant_override".to_string(),
-        PricingSource::Promotional => "promotional".to_string(),
     }
 }
 
@@ -4820,105 +4861,30 @@ fn build_route_simulation_response(
         ));
     }
 
-    let candidates = provider_resources
-        .iter()
-        .filter(|resource| {
-            active_snapshot
-                .provider_resource_ids
+    let route = routing_engine::evaluate_route(
+        &RoutingConfig {
+            config_snapshot: active_snapshot.clone(),
+            route_policy,
+            provider_targets: provider_resources
                 .iter()
-                .any(|id| id == &resource.provider_resource_id)
+                .enumerate()
+                .map(|(index, resource)| provider_resource_to_route_target(index, resource))
+                .collect(),
+        },
+        &RoutingRequest {
+            protocol_family: request_protocol_family.to_string(),
+            model_alias: request.model_alias.clone(),
+        },
+    );
+
+    let eligible_candidates = route
+        .ranked_targets
+        .iter()
+        .map(|candidate| protocol_ir::EligibleCandidate {
+            provider_resource_id: candidate.target.resource.provider_resource_id.clone(),
+            score_breakdown: candidate.score_breakdown.clone(),
         })
-        .cloned()
         .collect::<Vec<_>>();
-
-    let mut excluded_candidates = Vec::new();
-    let mut eligible_candidates = Vec::new();
-
-    for candidate in candidates {
-        if candidate.status != ProviderResourceStatus::Active {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: "provider_inactive".to_string(),
-                reason: format!("provider status is {:?}", candidate.status),
-            });
-            continue;
-        }
-        if !provider_supports_protocol_family(&candidate, &route_policy.protocol_family) {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: "protocol_family_unsupported".to_string(),
-                reason: format!(
-                    "provider does not advertise protocol family `{}`",
-                    route_policy.protocol_family
-                ),
-            });
-            continue;
-        }
-
-        let capability_gaps =
-            provider_capability_gaps(&candidate, &route_policy.required_capabilities);
-        if !capability_gaps.is_empty() {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: format!("capability_gap_{}", capability_gaps[0]),
-                reason: format!(
-                    "required capabilities are not satisfied: {}",
-                    capability_gaps.join(", ")
-                ),
-            });
-            continue;
-        }
-
-        if is_health_blocked(candidate.health_state) {
-            excluded_candidates.push(ExcludedTarget {
-                provider_resource_id: candidate.provider_resource_id.clone(),
-                reason_code: format!("health_{}", health_state_slug(candidate.health_state)),
-                reason: candidate
-                    .health_message
-                    .clone()
-                    .unwrap_or_else(|| "provider health state blocks routing".to_string()),
-            });
-            continue;
-        }
-
-        let preferred = route_policy
-            .preferred_regions
-            .iter()
-            .any(|region| region == &candidate.region);
-        let score_breakdown = ScoreBreakdown {
-            latency: if preferred { 0.95 } else { 0.7 },
-            cost: if candidate.deployment_scope == DeploymentScope::Shared {
-                0.8
-            } else {
-                0.7
-            },
-            health: match candidate.health_state {
-                HealthState::Healthy => 1.0,
-                HealthState::Degraded => 0.6,
-                HealthState::Quarantined | HealthState::Draining | HealthState::Disabled => 0.0,
-            },
-            trust: 1.0,
-        };
-        eligible_candidates.push(protocol_ir::EligibleCandidate {
-            provider_resource_id: candidate.provider_resource_id.clone(),
-            score_breakdown,
-        });
-    }
-
-    eligible_candidates.sort_by(|left, right| {
-        let left_score = left.score_breakdown.latency
-            + left.score_breakdown.cost
-            + left.score_breakdown.health
-            + left.score_breakdown.trust;
-        let right_score = right.score_breakdown.latency
-            + right.score_breakdown.cost
-            + right.score_breakdown.health
-            + right.score_breakdown.trust;
-        right_score
-            .partial_cmp(&left_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
     let selected_target = eligible_candidates
         .first()
         .map(|candidate| candidate.provider_resource_id.clone());
@@ -4926,13 +4892,9 @@ fn build_route_simulation_response(
     Ok(RouteSimulationResponse {
         simulation_id: format!("sim_{}", request.model_alias),
         config_snapshot_id: active_snapshot.config_snapshot_id.clone(),
-        admission_result: if selected_target.is_some() {
-            AdmissionResult::Admitted
-        } else {
-            AdmissionResult::RejectedNoCandidate
-        },
+        admission_result: route.admission_result,
         eligible_candidates,
-        excluded_candidates,
+        excluded_candidates: route.excluded_targets,
         selected_target,
         estimated_cost: MonetaryAmount {
             currency: "USD".to_string(),
@@ -4953,71 +4915,28 @@ const fn protocol_family_slug(protocol_family: &ProtocolFamily) -> &'static str 
     }
 }
 
-fn route_capability_supported_by_provider_capabilities(capability: &str) -> bool {
-    matches!(
-        capability,
-        "streaming"
-            | "tool_calling"
-            | "tool_related"
-            | "json_mode"
-            | "chat_completions"
-            | "image_generation"
-            | "realtime"
-            | "response_model_metadata"
-    )
-}
-
-fn route_capability_supported(capability: &str, target: &ProviderCapabilities) -> bool {
-    match capability {
-        "streaming" => target.supports_streaming,
-        "tool_calling" | "tool_related" => target.supports_tool_calling,
-        "json_mode" => target.supports_json_mode,
-        "chat_completions" | "image_generation" => true,
-        "realtime" => target.supports_realtime,
-        "response_model_metadata" => target.supports_response_model_metadata,
-        _ => false,
-    }
-}
-
-fn provider_supports_protocol_family(
-    provider_resource: &ProviderResource,
-    protocol_family: &str,
-) -> bool {
-    provider_resource
-        .supported_protocol_families
-        .iter()
-        .any(|candidate| candidate == protocol_family)
-}
-
-fn provider_supports_capability(provider_resource: &ProviderResource, capability: &str) -> bool {
-    route_capability_supported(capability, &provider_resource.capabilities)
-}
-
-fn provider_capability_gaps(
-    provider_resource: &ProviderResource,
-    required_capabilities: &[String],
-) -> Vec<String> {
-    required_capabilities
-        .iter()
-        .filter(|capability| !provider_supports_capability(provider_resource, capability))
-        .cloned()
-        .collect()
-}
-
-const fn is_health_blocked(health_state: HealthState) -> bool {
-    matches!(
-        health_state,
-        HealthState::Quarantined | HealthState::Draining | HealthState::Disabled
-    )
-}
-
-const fn health_state_slug(health_state: HealthState) -> &'static str {
-    match health_state {
-        HealthState::Healthy => "healthy",
-        HealthState::Degraded => "degraded",
-        HealthState::Quarantined => "quarantined",
-        HealthState::Draining => "draining",
-        HealthState::Disabled => "disabled",
+fn provider_resource_to_route_target(
+    index: usize,
+    resource: &ProviderResource,
+) -> ProviderTargetRuntime {
+    ProviderTargetRuntime {
+        resource: resource.clone(),
+        target_kind: if resource.is_transit_gateway {
+            ProviderTargetKind::TransitGateway
+        } else {
+            ProviderTargetKind::Native
+        },
+        transit_metadata: None,
+        priority: u32::try_from(index).unwrap_or(u32::MAX),
+        upstream_model: None,
+        api_key: String::new(),
+        static_latency_score: 0.95,
+        static_cost_score: if resource.deployment_scope == DeploymentScope::Shared {
+            0.8
+        } else {
+            0.7
+        },
+        usd_per_1k_tokens: 0.0,
     }
 }
 
@@ -5118,6 +5037,53 @@ fn to_route_receipt_summary(receipt: &RouteReceipt) -> RouteReceiptSummary {
         selected_target: receipt.selected_target.clone(),
         failure_reason: receipt.failure_reason.clone(),
         created_at: receipt.created_at.clone(),
+    }
+}
+
+fn memory_route_receipt_diagnostics_response(
+    route_receipt: RouteReceipt,
+) -> RouteReceiptDiagnosticsResponse {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("source".to_string(), "memory_store".to_string());
+    metadata.insert("request_id".to_string(), route_receipt.request_id.clone());
+    metadata.insert("trace_id".to_string(), route_receipt.trace_id.clone());
+
+    RouteReceiptDiagnosticsResponse {
+        policy_checks: vec![RouteReceiptPolicyCheck {
+            policy_id: route_receipt.route_policy_id.clone(),
+            status: match route_receipt.admission_result {
+                AdmissionResult::Admitted => "passed".to_string(),
+                _ => "failed".to_string(),
+            },
+            reason: route_receipt.failure_reason.clone(),
+        }],
+        decision_timeline: vec![RouteReceiptDecisionTraceStep {
+            stage: "route_receipt".to_string(),
+            status: if route_receipt.normalized_error.is_some() {
+                "failed".to_string()
+            } else {
+                "recorded".to_string()
+            },
+            message: route_receipt.failure_reason.clone().unwrap_or_else(|| {
+                "Route receipt was recorded without persisted worker diagnostics.".to_string()
+            }),
+            score: route_receipt.selected_target.as_ref().map(|_| {
+                route_receipt.score_breakdown.latency
+                    + route_receipt.score_breakdown.cost
+                    + route_receipt.score_breakdown.health
+                    + route_receipt.score_breakdown.trust
+            }),
+            notes: vec![
+                format!("excluded_targets={}", route_receipt.excluded_targets.len()),
+                format!(
+                    "fallback_transitions={}",
+                    route_receipt.fallback_transitions.len()
+                ),
+            ],
+        }],
+        provider_attempts: Vec::new(),
+        metadata,
+        route_receipt,
     }
 }
 
@@ -5324,13 +5290,16 @@ fn link(
 }
 
 #[cfg(test)]
+mod parity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
-        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ExcludedTarget, ProjectId,
-        ProviderResource, ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt,
-        RouteReceiptFilters, ScoreBreakdown, StoreMode, TenantId,
+        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ProjectId, ProviderResource,
+        ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptFilters,
+        StoreMode, TenantId,
     };
-    use core_domain::RouteReceiptId;
+    use core_domain::{ExcludedTarget, RouteReceiptId, ScoreBreakdown};
 
     fn sample_route_receipt(
         route_receipt_id: &str,
@@ -5633,6 +5602,35 @@ mod tests {
         );
         assert_eq!(route_receipt.failure_reason, None);
         assert_eq!(route_receipt.admission_result, AdmissionResult::Admitted);
+    }
+
+    #[tokio::test]
+    async fn memory_store_get_route_receipt_diagnostics_returns_trace_context() {
+        let store = StoreMode::memory();
+        store.insert_route_receipt_for_tests(sample_route_receipt(
+            "routercpt_store_diag",
+            "tenant_acme",
+            "proj_core",
+            "openai_chat",
+            "2026-04-22T00:01:00Z",
+        ));
+
+        let diagnostics = store
+            .get_route_receipt_diagnostics("routercpt_store_diag")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            diagnostics.route_receipt.route_receipt_id.as_str(),
+            "routercpt_store_diag"
+        );
+        assert_eq!(
+            diagnostics.metadata.get("source").map(String::as_str),
+            Some("memory_store")
+        );
+        assert_eq!(diagnostics.policy_checks.len(), 1);
+        assert_eq!(diagnostics.decision_timeline[0].stage, "route_receipt");
     }
 
     #[tokio::test]

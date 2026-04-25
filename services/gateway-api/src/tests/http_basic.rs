@@ -63,6 +63,14 @@ async fn internal_provider_adapters_exposes_runtime_manifests() {
         payload["adapters"][0]["supported_protocol_families"][1],
         "openai_responses"
     );
+    assert_eq!(
+        payload["adapters"][0]["capability_hints"][0],
+        "chat_completions"
+    );
+    assert_eq!(
+        payload["adapters"][0]["capability_hints"][1],
+        "responses_api"
+    );
 }
 
 #[tokio::test]
@@ -97,6 +105,7 @@ async fn internal_provider_adapter_lookup_returns_one_runtime_manifest() {
     assert_eq!(payload["adapter_id"], "mock-openai");
     assert_eq!(payload["provider_kind"], "openai");
     assert_eq!(payload["protocol_family"], "openai_chat");
+    assert_eq!(payload["capability_hints"][0], "chat_completions");
 }
 
 #[tokio::test]

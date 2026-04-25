@@ -15,6 +15,29 @@ use crate::{
     image_usd_per_generation_for_target, normalized_error, now_rfc3339,
 };
 
+pub const PROVIDER_ATTEMPT_SUCCESS: &str = "success";
+pub const PROVIDER_ATTEMPT_RETRYABLE_FAILURE: &str = "retryable_failure";
+pub const PROVIDER_ATTEMPT_NON_RETRYABLE_FAILURE: &str = "non_retryable_failure";
+pub const PROVIDER_ATTEMPT_MISSING_ADAPTER: &str = "missing_adapter";
+pub const PROVIDER_ATTEMPT_UNSUPPORTED_PROTOCOL: &str = "unsupported_protocol";
+
+pub const PROVIDER_REASON_SUCCESS: &str = "provider_success";
+pub const PROVIDER_REASON_MISSING_ADAPTER: &str = "provider_adapter_missing";
+pub const PROVIDER_REASON_UNSUPPORTED_PROTOCOL: &str = "provider_protocol_unsupported";
+
+pub struct ProviderAttemptRecordInput {
+    pub provider_resource_id: core_domain::ProviderResourceId,
+    pub attempt: usize,
+    pub status: &'static str,
+    pub reason_code: String,
+    pub retryable: bool,
+    pub fallback_target: Option<core_domain::ProviderResourceId>,
+    pub started_at: String,
+    pub finished_at: String,
+    pub latency_ms: u32,
+    pub reason: String,
+}
+
 pub fn build_route_receipt(
     route: &RouteEvaluation,
     context: &RequestContext,
@@ -264,23 +287,18 @@ pub fn build_route_receipt_recorded(
     }
 }
 
-pub fn provider_attempt_record(
-    provider_resource_id: core_domain::ProviderResourceId,
-    attempt: usize,
-    status: impl Into<String>,
-    started_at: String,
-    finished_at: String,
-    latency_ms: u32,
-    reason: impl Into<String>,
-) -> RouteReceiptProviderAttempt {
+pub fn provider_attempt_record(input: ProviderAttemptRecordInput) -> RouteReceiptProviderAttempt {
     RouteReceiptProviderAttempt {
-        provider_resource_id,
-        attempt: u8::try_from(attempt).unwrap_or(u8::MAX),
-        status: status.into(),
-        started_at,
-        finished_at,
-        latency_ms,
-        reason: reason.into(),
+        provider_resource_id: input.provider_resource_id,
+        attempt: u8::try_from(input.attempt).unwrap_or(u8::MAX),
+        status: input.status.to_string(),
+        reason_code: input.reason_code,
+        retryable: input.retryable,
+        fallback_target: input.fallback_target,
+        started_at: input.started_at,
+        finished_at: input.finished_at,
+        latency_ms: input.latency_ms,
+        reason: input.reason,
     }
 }
 

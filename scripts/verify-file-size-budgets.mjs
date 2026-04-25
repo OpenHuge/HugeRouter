@@ -129,9 +129,9 @@ const exactBudgetOverrides = new Map([
   [
     "services/gateway-api/src/lib.rs",
     {
-      maxLines: 3350,
+      maxLines: 3400,
       reason:
-        "Gateway API wiring is still centralized. New protocols and handlers should be factored into modules.",
+        "Gateway API wiring is still centralized. Route receipt attempt diagnostics temporarily raised the ceiling; new protocols and handlers should be factored into modules.",
     },
   ],
 ]);

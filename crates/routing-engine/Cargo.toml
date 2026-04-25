@@ -1,0 +1,16 @@
+[package]
+name = "routing-engine"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+core-domain = { path = "../core-domain" }
+provider-traits = { path = "../provider-traits" }
+
+[lints]
+workspace = true

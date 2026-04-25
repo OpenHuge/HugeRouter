@@ -17,7 +17,9 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "relay_evaluations",
     "replay_capsules",
     "route_receipts",
+    "route_receipt_diagnostics",
     "billing_export_jobs",
+    "pricing_catalog_entries",
 ];
 
 pub const MIGRATIONS: &[&str] = &[
@@ -144,6 +146,17 @@ pub const MIGRATIONS: &[&str] = &[
         route_receipt_id TEXT PRIMARY KEY,
         payload JSONB NOT NULL
     )",
+    r"CREATE TABLE IF NOT EXISTS route_receipt_diagnostics (
+        route_receipt_id TEXT PRIMARY KEY,
+        decision_timeline JSONB NOT NULL,
+        policy_checks JSONB NOT NULL,
+        provider_attempts JSONB NOT NULL,
+        source_message_id TEXT NOT NULL,
+        source_producer TEXT NOT NULL,
+        source_request_id TEXT NULL,
+        source_trace_id TEXT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )",
     r"CREATE TABLE IF NOT EXISTS billing_export_jobs (
         export_job_id TEXT PRIMARY KEY,
         tenant_id TEXT NULL,
@@ -157,5 +170,30 @@ pub const MIGRATIONS: &[&str] = &[
         error_message TEXT NULL,
         export_content TEXT NULL,
         content_type TEXT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
+        catalog_id TEXT NOT NULL,
+        catalog_version INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        dimension TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        model_alias TEXT NULL,
+        model_alias_key TEXT GENERATED ALWAYS AS (COALESCE(model_alias, '')) STORED,
+        region TEXT NULL,
+        region_key TEXT GENERATED ALWAYS AS (COALESCE(region, '')) STORED,
+        micros_per_unit BIGINT NOT NULL,
+        billable_micros_per_unit BIGINT NOT NULL,
+        unit_denominator BIGINT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (
+            catalog_id,
+            catalog_version,
+            dimension,
+            provider_id,
+            model_alias_key,
+            region_key
+        )
     )",
 ];
