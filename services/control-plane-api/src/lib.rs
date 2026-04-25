@@ -2049,7 +2049,7 @@ async fn read_oauth_sharing_usage(
     if let Some(workspace_id) = query.workspace_id.as_deref() {
         authz.ensure_read_tenant(workspace_id, &context)?;
     }
-    let usage = state
+    let mut usage = state
         .store
         .read_oauth_sharing_usage(OAuthSharingUsageFilters {
             lease_id: query.lease_id.as_deref(),
@@ -2066,6 +2066,14 @@ async fn read_oauth_sharing_usage(
                 &context,
             )
         })?;
+    if !authz.is_platform_admin() {
+        usage
+            .data
+            .retain(|row| tenant_visible_to_authorizer(&authz, row.workspace_id.as_deref()));
+        usage
+            .audit_events
+            .retain(|event| tenant_visible_to_authorizer(&authz, event.workspace_id.as_deref()));
+    }
     Ok(Json(usage))
 }
 
@@ -6633,6 +6641,33 @@ mod tests {
         )
         .await;
         assert_eq!(api_keys["data"].as_array().unwrap().len(), 1);
+
+        let northstar_lease = request(
+            "POST",
+            "/v1/oauth-sharing-leases",
+            Some(&platform_cookie),
+            Some(
+                json!({"lease_id":"lease_codex_northstar_scope","borrower_workspace_id":"tenant_northstar","provider":"codex","pool_id":"prvrsrc_openai_research","status":"active","starts_at":"2026-04-22T00:00:00Z","expires_at":"2999-01-01T00:00:00Z","max_concurrent_runs":99,"usage_budget":{"turns":99},"policy":"fair_share"}),
+            ),
+        );
+        assert_eq!(
+            app.clone().oneshot(northstar_lease).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let oauth_usage = response_json(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/oauth-sharing-usage",
+                    Some(&tenant_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let events = oauth_usage["audit_events"].as_array().unwrap();
+        assert!(events.is_empty());
 
         let simulation = response_json(
             app.clone()
