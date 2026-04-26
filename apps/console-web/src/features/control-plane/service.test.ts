@@ -319,6 +319,36 @@ describe("console data service", () => {
       disableProviderResource() {
         return Promise.reject(new Error("unused"));
       },
+      listCodexAuthAccounts() {
+        return Promise.resolve([]);
+      },
+      uploadCodexAuthAccount() {
+        return Promise.reject(new Error("unused"));
+      },
+      listOAuthSharingLeases() {
+        return Promise.resolve([]);
+      },
+      upsertOAuthSharingLease() {
+        return Promise.reject(new Error("unused"));
+      },
+      revokeOAuthSharingLease() {
+        return Promise.reject(new Error("unused"));
+      },
+      listOAuthCarpools() {
+        return Promise.resolve([]);
+      },
+      upsertOAuthCarpool() {
+        return Promise.reject(new Error("unused"));
+      },
+      removeOAuthCarpool() {
+        return Promise.reject(new Error("unused"));
+      },
+      readOAuthSharingUsage() {
+        return Promise.resolve({
+          auditEvents: [],
+          rows: [],
+        });
+      },
       createRoutePolicy() {
         return Promise.reject(new Error("unused"));
       },

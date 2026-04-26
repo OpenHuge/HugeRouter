@@ -8,6 +8,7 @@ Recent priority docs for the source-backed spec deepening pass:
 - [Policy System](architecture/policy-system.md) for normalized reason codes and policy/routing/admission boundaries
 - [Protocol IR and Protocol Support](architecture/protocol-ir-and-protocols.md) for typed protocol and route resource modeling
 - [Provider Adapter System](architecture/provider-adapter-system.md) for manifest boundaries and compatibility contracts
+- [Future Relay Capabilities](architecture/future-relay-capabilities.md) for MCP, A2A, realtime, safety, and commerce relay evolution
 - [Multi-Tenancy and Configuration](architecture/multi-tenancy-and-configuration.md) for CP/DP snapshot and rollback behavior
 - [Metering, Ledger, and Pricing](architecture/metering-ledger-pricing.md) for budget reservation lifecycle and pricing catalog sources
 
