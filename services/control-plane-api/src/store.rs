@@ -136,6 +136,7 @@ pub struct MemoryStore {
     login_flows: HashMap<String, LoginFlow>,
     route_receipts: HashMap<String, RouteReceipt>,
     billing_export_jobs: Vec<BillingExportJobRecord>,
+    wechat_payment_orders: HashMap<String, WechatPaymentOrderRecord>,
     route_policy_disabled_ids: HashSet<String>,
     api_keys: Vec<ApiKeyRecord>,
     codex_auth_accounts: Vec<CodexAuthAccountRecord>,
@@ -155,6 +156,40 @@ pub struct ApiKeyRecord {
     pub created_at: String,
     pub updated_at: String,
     pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WechatPaymentOrderRecord {
+    pub out_trade_no: String,
+    pub tenant_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub amount_total: u32,
+    pub currency: String,
+    pub channel: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trade_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prepay_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub expires_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paid_at: Option<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WechatPaymentOrderResponse {
+    pub data: WechatPaymentOrderRecord,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -542,6 +577,8 @@ pub struct LoginFlow {
     pub email: Option<String>,
     pub provider: Option<OAuthProvider>,
     pub workspace_slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_to: Option<String>,
     pub verification_code: Option<String>,
     pub expires_at: String,
 }
@@ -998,7 +1035,15 @@ impl SeedData {
             primary_email: Some("ops@huge-router.dev".to_string()),
             display_name: "Operations Admin".to_string(),
             avatar_url: None,
-            created_at: now,
+            created_at: now.clone(),
+            last_login_at: None,
+        };
+        let developer_user = UserIdentity {
+            user_id: UserId::parse("user_developer").unwrap(),
+            primary_email: Some("developer@huge-router.dev".to_string()),
+            display_name: "Demo Developer".to_string(),
+            avatar_url: None,
+            created_at: now.clone(),
             last_login_at: None,
         };
 
@@ -1043,7 +1088,7 @@ impl SeedData {
         ];
 
         Self {
-            tenants: vec![tenant_platform, tenant_acme, tenant_northstar],
+            tenants: vec![tenant_platform, tenant_acme.clone(), tenant_northstar],
             projects: vec![proj_core, proj_ops, proj_support, proj_research],
             provider_resources: vec![
                 openai_primary,
@@ -1060,26 +1105,45 @@ impl SeedData {
             replay_capsules: vec![replay_capsule],
             route_receipts: vec![route_receipt],
             active_config_snapshot_id: config_active.config_snapshot_id.as_str().to_string(),
-            users: vec![UserSeed {
-                user: ops_user,
-                identities: vec![
-                    UserIdentityKey::Email("ops@huge-router.dev".to_string()),
-                    UserIdentityKey::ProviderSubject(
-                        AuthProvider::Github,
-                        "github_ops".to_string(),
-                    ),
-                    UserIdentityKey::ProviderSubject(
-                        AuthProvider::Google,
-                        "google_ops".to_string(),
-                    ),
-                    UserIdentityKey::ProviderSubject(
-                        AuthProvider::Wechat,
-                        "wechat_ops".to_string(),
-                    ),
-                ],
-                memberships,
-                links,
-            }],
+            users: vec![
+                UserSeed {
+                    user: ops_user,
+                    identities: vec![
+                        UserIdentityKey::Email("ops@huge-router.dev".to_string()),
+                        UserIdentityKey::ProviderSubject(
+                            AuthProvider::Github,
+                            "github_ops".to_string(),
+                        ),
+                        UserIdentityKey::ProviderSubject(
+                            AuthProvider::Google,
+                            "google_ops".to_string(),
+                        ),
+                        UserIdentityKey::ProviderSubject(
+                            AuthProvider::Wechat,
+                            "wechat_ops".to_string(),
+                        ),
+                    ],
+                    memberships,
+                    links,
+                },
+                UserSeed {
+                    user: developer_user,
+                    identities: vec![UserIdentityKey::Email(
+                        "developer@huge-router.dev".to_string(),
+                    )],
+                    memberships: vec![membership(
+                        "tmemb_acme_developer",
+                        &tenant_acme,
+                        TenantMembershipRole::Member,
+                    )],
+                    links: vec![link(
+                        AuthProvider::Email,
+                        "developer@huge-router.dev",
+                        Some("developer@huge-router.dev"),
+                        false,
+                    )],
+                },
+            ],
         }
     }
 }
@@ -1145,6 +1209,7 @@ impl MemoryStore {
                 .map(|receipt| (receipt.route_receipt_id.as_str().to_string(), receipt))
                 .collect(),
             billing_export_jobs: Vec::new(),
+            wechat_payment_orders: HashMap::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
             codex_auth_accounts: Vec::new(),
@@ -1250,6 +1315,7 @@ impl StoreMode {
             email: Some(email.to_lowercase()),
             provider: None,
             workspace_slug: workspace_slug.to_string(),
+            redirect_to: None,
             verification_code: Some(verification_code.to_string()),
             expires_at: expires_at.to_string(),
         };
@@ -1271,6 +1337,7 @@ impl StoreMode {
         flow_id: &str,
         provider: OAuthProvider,
         workspace_slug: &str,
+        redirect_to: Option<&str>,
         expires_at: &str,
     ) -> Result<LoginFlow> {
         let flow = LoginFlow {
@@ -1279,6 +1346,7 @@ impl StoreMode {
             email: None,
             provider: Some(provider),
             workspace_slug: workspace_slug.to_string(),
+            redirect_to: redirect_to.map(str::to_string),
             verification_code: None,
             expires_at: expires_at.to_string(),
         };
@@ -1315,7 +1383,7 @@ impl StoreMode {
                 .expect("memory store read lock")
                 .tenants
                 .iter()
-                .any(|tenant| tenant.slug == workspace_slug)),
+                .any(|tenant| tenant_matches_workspace(tenant, workspace_slug))),
             Self::Postgres(store) => store.workspace_exists(workspace_slug).await,
         }
     }
@@ -1460,9 +1528,9 @@ impl StoreMode {
                     .sessions
                     .remove(session_id)
                     .is_some();
+                let _ = removed;
                 Ok(LogoutResponse {
-                    session_id: AuthSessionId::parse(session_id.to_string()).unwrap(),
-                    revoked: removed,
+                    outcome: "signed_out".to_string(),
                 })
             }
             Self::Postgres(store) => store.revoke_session(session_id).await,
@@ -2558,6 +2626,54 @@ impl StoreMode {
         }
     }
 
+    pub async fn create_wechat_payment_order(
+        &self,
+        record: WechatPaymentOrderRecord,
+    ) -> Result<WechatPaymentOrderResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                store
+                    .wechat_payment_orders
+                    .insert(record.out_trade_no.clone(), record.clone());
+                Ok(WechatPaymentOrderResponse { data: record })
+            }
+            Self::Postgres(store) => store.create_wechat_payment_order(record).await,
+        }
+    }
+
+    pub async fn get_wechat_payment_order(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<WechatPaymentOrderResponse>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .wechat_payment_orders
+                .get(out_trade_no)
+                .cloned()
+                .map(|data| WechatPaymentOrderResponse { data })),
+            Self::Postgres(store) => store.get_wechat_payment_order(out_trade_no).await,
+        }
+    }
+
+    pub async fn update_wechat_payment_order(
+        &self,
+        record: WechatPaymentOrderRecord,
+    ) -> Result<WechatPaymentOrderResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                store
+                    .wechat_payment_orders
+                    .insert(record.out_trade_no.clone(), record.clone());
+                Ok(WechatPaymentOrderResponse { data: record })
+            }
+            Self::Postgres(store) => store.update_wechat_payment_order(record).await,
+        }
+    }
+
     #[cfg(test)]
     pub fn insert_route_receipt_for_tests(&self, route_receipt: RouteReceipt) {
         match self {
@@ -2902,7 +3018,7 @@ impl PostgresStore {
         let memberships = self.list_memberships(&user.user_id).await?;
         let active_membership = memberships
             .iter()
-            .find(|membership| membership.tenant.slug == workspace_slug)
+            .find(|membership| tenant_summary_matches_workspace(&membership.tenant, workspace_slug))
             .or_else(|| memberships.first())
             .cloned()
             .context("no tenant memberships available for login")?;
@@ -2941,7 +3057,11 @@ impl PostgresStore {
         .execute(&self.pool)
         .await?;
 
-        Ok(AuthLoginResult { session, links })
+        Ok(AuthLoginResult {
+            session,
+            links,
+            redirect_to: None,
+        })
     }
 
     async fn ensure_oidc_user(
@@ -2976,7 +3096,11 @@ impl PostgresStore {
         role: TenantMembershipRole,
         now: &str,
     ) -> Result<UserIdentity> {
-        let row = sqlx::query("SELECT payload FROM tenants WHERE payload->>'slug' = $1 LIMIT 1")
+        let row = sqlx::query(
+            "SELECT payload FROM tenants
+             WHERE payload->>'slug' = $1 OR tenant_id = $1 OR ($1 = 'acme' AND tenant_id = 'tenant_acme')
+             LIMIT 1",
+        )
             .bind(workspace_slug)
             .fetch_optional(&self.pool)
             .await?
@@ -3122,6 +3246,7 @@ impl PostgresStore {
                 ..session
             },
             links,
+            redirect_to: None,
         }))
     }
 
@@ -3132,9 +3257,9 @@ impl PostgresStore {
             .await?
             .rows_affected()
             > 0;
+        let _ = revoked;
         Ok(LogoutResponse {
-            session_id: AuthSessionId::parse(session_id.to_string()).unwrap(),
-            revoked,
+            outcome: "signed_out".to_string(),
         })
     }
 
@@ -3165,15 +3290,14 @@ impl PostgresStore {
     }
 
     async fn workspace_exists(&self, workspace_slug: &str) -> Result<bool> {
-        Ok(
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM tenants WHERE payload->>'slug' = $1",
-            )
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tenants
+             WHERE payload->>'slug' = $1 OR tenant_id = $1 OR ($1 = 'acme' AND tenant_id = 'tenant_acme')",
+        )
             .bind(workspace_slug)
             .fetch_one(&self.pool)
             .await?
-                > 0,
-        )
+            > 0)
     }
 
     async fn list_tenants(&self) -> Result<TenantsResponse> {
@@ -4619,6 +4743,108 @@ impl PostgresStore {
         }))
     }
 
+    async fn create_wechat_payment_order(
+        &self,
+        record: WechatPaymentOrderRecord,
+    ) -> Result<WechatPaymentOrderResponse> {
+        sqlx::query(
+            r#"
+            INSERT INTO wechat_payment_orders (
+                out_trade_no,
+                tenant_id,
+                project_id,
+                amount_total,
+                currency,
+                channel,
+                status,
+                trade_state,
+                code_url,
+                prepay_id,
+                transaction_id,
+                notification_id,
+                created_at,
+                updated_at,
+                expires_at,
+                paid_at,
+                payload
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17
+            )
+            "#,
+        )
+        .bind(&record.out_trade_no)
+        .bind(&record.tenant_id)
+        .bind(record.project_id.as_deref())
+        .bind(i64::from(record.amount_total))
+        .bind(&record.currency)
+        .bind(&record.channel)
+        .bind(&record.status)
+        .bind(record.trade_state.as_deref())
+        .bind(record.code_url.as_deref())
+        .bind(record.prepay_id.as_deref())
+        .bind(record.transaction_id.as_deref())
+        .bind(record.notification_id.as_deref())
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .bind(&record.expires_at)
+        .bind(record.paid_at.as_deref())
+        .bind(Json(&record))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(WechatPaymentOrderResponse { data: record })
+    }
+
+    async fn get_wechat_payment_order(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<WechatPaymentOrderResponse>> {
+        let row = sqlx::query("SELECT payload FROM wechat_payment_orders WHERE out_trade_no = $1")
+            .bind(out_trade_no)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.map(|row| WechatPaymentOrderResponse {
+            data: row.get::<Json<WechatPaymentOrderRecord>, _>("payload").0,
+        }))
+    }
+
+    async fn update_wechat_payment_order(
+        &self,
+        record: WechatPaymentOrderRecord,
+    ) -> Result<WechatPaymentOrderResponse> {
+        sqlx::query(
+            r#"
+            UPDATE wechat_payment_orders
+               SET status = $2,
+                   trade_state = $3,
+                   code_url = $4,
+                   prepay_id = $5,
+                   transaction_id = $6,
+                   notification_id = $7,
+                   updated_at = $8,
+                   paid_at = $9,
+                   payload = $10
+             WHERE out_trade_no = $1
+            "#,
+        )
+        .bind(&record.out_trade_no)
+        .bind(&record.status)
+        .bind(record.trade_state.as_deref())
+        .bind(record.code_url.as_deref())
+        .bind(record.prepay_id.as_deref())
+        .bind(record.transaction_id.as_deref())
+        .bind(record.notification_id.as_deref())
+        .bind(&record.updated_at)
+        .bind(record.paid_at.as_deref())
+        .bind(Json(&record))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(WechatPaymentOrderResponse { data: record })
+    }
+
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
         let row = match identity_key {
             IdentityLookup::Email(email) => {
@@ -4698,7 +4924,11 @@ impl PostgresStore {
         role: TenantMembershipRole,
         now: &str,
     ) -> Result<UserIdentity> {
-        let row = sqlx::query("SELECT payload FROM tenants WHERE payload->>'slug' = $1 LIMIT 1")
+        let row = sqlx::query(
+            "SELECT payload FROM tenants
+             WHERE payload->>'slug' = $1 OR tenant_id = $1 OR ($1 = 'acme' AND tenant_id = 'tenant_acme')
+             LIMIT 1",
+        )
             .bind(workspace_slug)
             .fetch_optional(&self.pool)
             .await?
@@ -4865,7 +5095,7 @@ fn issue_memory_session(
         .unwrap_or_default();
     let active_membership = memberships
         .iter()
-        .find(|membership| membership.tenant.slug == workspace_slug)
+        .find(|membership| tenant_summary_matches_workspace(&membership.tenant, workspace_slug))
         .or_else(|| memberships.first())
         .cloned()
         .context("no tenant memberships")?;
@@ -4894,7 +5124,11 @@ fn issue_memory_session(
         },
     );
 
-    Ok(AuthLoginResult { session, links })
+    Ok(AuthLoginResult {
+        session,
+        links,
+        redirect_to: None,
+    })
 }
 
 fn refresh_memory_session(store: &MemoryStore, stored: StoredSession) -> AuthLoginResult {
@@ -4920,6 +5154,7 @@ fn refresh_memory_session(store: &MemoryStore, stored: StoredSession) -> AuthLog
             ..stored.session
         },
         links,
+        redirect_to: None,
     }
 }
 
@@ -4947,7 +5182,7 @@ fn upsert_memory_oidc_user(
     let tenant = store
         .tenants
         .iter()
-        .find(|tenant| tenant.slug == workspace_slug)
+        .find(|tenant| tenant_matches_workspace(tenant, workspace_slug))
         .cloned()
         .context("workspace not found for oidc login")?;
     let primary_email = email
@@ -5033,7 +5268,7 @@ fn upsert_memory_provider_user(
     let tenant = store
         .tenants
         .iter()
-        .find(|tenant| tenant.slug == workspace_slug)
+        .find(|tenant| tenant_matches_workspace(tenant, workspace_slug))
         .cloned()
         .context("workspace not found for oauth login")?;
     let primary_email = email.map_or_else(
@@ -6762,6 +6997,18 @@ fn membership(
     }
 }
 
+fn tenant_matches_workspace(tenant: &Tenant, workspace: &str) -> bool {
+    tenant.slug == workspace
+        || tenant.tenant_id.as_str() == workspace
+        || (workspace == "acme" && tenant.tenant_id.as_str() == "tenant_acme")
+}
+
+fn tenant_summary_matches_workspace(tenant: &TenantSummary, workspace: &str) -> bool {
+    tenant.slug == workspace
+        || tenant.id.as_str() == workspace
+        || (workspace == "acme" && tenant.id.as_str() == "tenant_acme")
+}
+
 fn link(
     provider: AuthProvider,
     provider_subject: &str,
@@ -6875,6 +7122,32 @@ mod tests {
             created_at: "2026-04-22T00:00:00Z".to_string(),
             updated_at: "2026-04-22T00:00:00Z".to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn oauth_login_flow_preserves_redirect_target() {
+        let store = StoreMode::memory();
+        let flow = store
+            .create_oauth_flow(
+                "oauth_state_wechat",
+                core_domain::OAuthProvider::Wechat,
+                "acme-retail",
+                Some("/app/providers"),
+                "2099-01-01T00:00:00Z",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(flow.redirect_to.as_deref(), Some("/app/providers"));
+
+        let consumed = store
+            .consume_login_flow("oauth_state_wechat")
+            .await
+            .unwrap()
+            .expect("oauth flow should be consumable");
+
+        assert_eq!(consumed.provider, Some(core_domain::OAuthProvider::Wechat));
+        assert_eq!(consumed.redirect_to.as_deref(), Some("/app/providers"));
     }
 
     #[tokio::test]
@@ -7228,6 +7501,27 @@ fn env_flag_enabled(name: &str, default: bool) -> bool {
     })
 }
 
+fn env_flag_not_disabled(name: &str) -> bool {
+    std::env::var(name).ok().is_none_or(|value| {
+        !matches!(
+            value.to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        )
+    })
+}
+
+fn env_present(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+}
+
+fn oauth_client_configured(slug: &str) -> bool {
+    env_present(&format!("CONTROL_PLANE_OAUTH_{slug}_CLIENT_ID"))
+        && env_present(&format!("CONTROL_PLANE_OAUTH_{slug}_CLIENT_SECRET"))
+}
+
 pub fn mock_auth_enabled() -> bool {
     env_flag_enabled("CONTROL_PLANE_ALLOW_MOCK_AUTH", false)
 }
@@ -7236,15 +7530,24 @@ pub fn auth_provider_enabled(provider: AuthProvider) -> bool {
     match provider {
         AuthProvider::Email => env_flag_enabled("CONTROL_PLANE_AUTH_EMAIL_ENABLED", true),
         AuthProvider::Github => {
-            env_flag_enabled("CONTROL_PLANE_AUTH_GITHUB_ENABLED", false) || mock_auth_enabled()
+            mock_auth_enabled()
+                || (env_flag_not_disabled("CONTROL_PLANE_AUTH_GITHUB_ENABLED")
+                    && oauth_client_configured("GITHUB"))
         }
         AuthProvider::Google => {
-            env_flag_enabled("CONTROL_PLANE_AUTH_GOOGLE_ENABLED", false) || mock_auth_enabled()
+            mock_auth_enabled()
+                || (env_flag_not_disabled("CONTROL_PLANE_AUTH_GOOGLE_ENABLED")
+                    && oauth_client_configured("GOOGLE"))
         }
         AuthProvider::Wechat => {
-            env_flag_enabled("CONTROL_PLANE_AUTH_WECHAT_ENABLED", false) || mock_auth_enabled()
+            mock_auth_enabled()
+                || (env_flag_not_disabled("CONTROL_PLANE_AUTH_WECHAT_ENABLED")
+                    && oauth_client_configured("WECHAT"))
         }
-        AuthProvider::Oidc => oidc_enabled() || mock_auth_enabled(),
+        AuthProvider::Oidc => {
+            mock_auth_enabled()
+                || (env_flag_not_disabled("CONTROL_PLANE_AUTH_OIDC_ENABLED") && oidc_enabled())
+        }
     }
 }
 
@@ -7268,14 +7571,9 @@ pub const fn auth_provider_slug(provider: AuthProvider) -> &'static str {
 }
 
 pub fn oidc_enabled() -> bool {
-    std::env::var("CONTROL_PLANE_OIDC_ISSUER_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .is_some()
-        || std::env::var("CONTROL_PLANE_OIDC_AUTHORIZATION_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .is_some()
+    env_present("CONTROL_PLANE_OIDC_AUTHORIZATION_URL")
+        && env_present("CONTROL_PLANE_OIDC_TOKEN_URL")
+        && env_present("CONTROL_PLANE_OIDC_CLIENT_ID")
 }
 
 const fn login_flow_kind_slug(kind: LoginFlowKind) -> &'static str {

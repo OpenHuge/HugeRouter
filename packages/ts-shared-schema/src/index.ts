@@ -849,7 +849,8 @@ export const oauthCallbackRequestSchema = z.object({
 
 export const authLoginResultSchema = z.object({
   session: authSessionSchema,
-  links: z.array(authProviderLinkSchema)
+  links: z.array(authProviderLinkSchema),
+  redirectTo: z.string().min(1).optional()
 })
 
 export const authSessionResponseSchema = z.object({
@@ -865,8 +866,7 @@ export const authProvidersResponseSchema = z.object({
 })
 
 export const logoutResponseSchema = z.object({
-  sessionId: authSessionIdSchema,
-  revoked: z.boolean()
+  outcome: z.literal('signed_out')
 })
 
 export const unlinkAuthProviderResponseSchema = z.object({

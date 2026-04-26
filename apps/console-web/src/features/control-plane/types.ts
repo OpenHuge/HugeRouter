@@ -229,6 +229,42 @@ export type BillingDashboardData = {
   thresholdStatus: string;
 };
 
+export type WechatPayPrepayResult = {
+  appId: string;
+  mchid: string;
+  outTradeNo: string;
+  channel: "native" | "jsapi";
+  codeUrl?: string;
+  codeQrSvg?: string;
+  prepayId?: string;
+  jsapiParams?: {
+    appId: string;
+    timeStamp: string;
+    nonceStr: string;
+    package: string;
+    signType: string;
+    paySign: string;
+  };
+};
+
+export type WechatPaymentOrderView = {
+  outTradeNo: string;
+  tenantId: string;
+  projectId?: string;
+  amountTotal: number;
+  currency: string;
+  channel: "native" | "jsapi";
+  status: string;
+  tradeState?: string;
+  codeUrl?: string;
+  prepayId?: string;
+  transactionId?: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  paidAt?: string;
+};
+
 export type MerchantShopView = {
   merchantShopId: string;
   slug: string;

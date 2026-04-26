@@ -94,6 +94,56 @@ describe("createConsoleAuthClient", () => {
     });
   });
 
+  it("uses backend-owned redirect targets after WeChat callback completion", async () => {
+    mockClient.completeOAuthLogin.mockResolvedValue({
+      links: [],
+      redirectTo: "/app/providers",
+      session: {
+        activeTenantId: "tenant_acme",
+        authenticatedBy: "wechat",
+        createdAt: "2026-04-22T09:30:00Z",
+        expiresAt: "2026-04-29T09:30:00Z",
+        lastAuthenticatedAt: "2026-04-22T09:30:00Z",
+        memberships: [
+          {
+            membershipId: "tmemb_acme",
+            role: "member",
+            status: "active",
+            tenant: {
+              displayName: "Acme Retail",
+              id: "tenant_acme",
+              slug: "acme-retail",
+            },
+          },
+        ],
+        sessionId: "sess_wechat",
+        state: "active",
+        user: {
+          createdAt: "2026-04-20T09:00:00Z",
+          displayName: "WeChat Operator",
+          primaryEmail: "wechat-openid.login.local",
+          userId: "user_wechat",
+        },
+      },
+    });
+
+    const client = createConsoleAuthClient();
+    const result = await client.completeAuthCallback("wechat", {
+      code: "wechat-code",
+      state: "oauth_state_wechat",
+    });
+
+    expect(mockClient.completeOAuthLogin).toHaveBeenCalledWith("wechat", {
+      code: "wechat-code",
+      state: "oauth_state_wechat",
+    });
+    expect(result.data.outcome).toBe("authenticated");
+    if (result.data.outcome !== "authenticated") {
+      throw new Error("expected authenticated callback result");
+    }
+    expect(result.data.redirectTo).toBe("/app/providers");
+  });
+
   it("treats the platform-admin workspace as a platform-admin session", async () => {
     mockClient.getCurrentSession.mockResolvedValue({
       session: {

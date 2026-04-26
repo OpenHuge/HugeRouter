@@ -233,6 +233,34 @@ describe('LoginPage', () => {
     expect(redirectToExternalMock).toHaveBeenCalledTimes(3)
   })
 
+  it('renders OIDC when the backend reports enterprise SSO availability', () => {
+    const { client } = createAuthClientStub()
+    setAuthClientForTests(client)
+
+    renderWithProviders(
+      <LoginPage
+        search={{}}
+        sessionEnvelope={{
+          state: {
+            availableProviders: configuredProviders([
+              ...getDefaultProviderAvailability(),
+              {
+                enabled: true,
+                hidden: false,
+                provider: 'oidc'
+              }
+            ]),
+            kind: 'anonymous'
+          }
+        }}
+      />
+    )
+
+    expect(
+      screen.getByRole('button', { name: 'Continue with Enterprise SSO' })
+    ).toBeInTheDocument()
+  })
+
   it('only renders configured providers and hides unconfigured entry points', () => {
     const { client } = createAuthClientStub()
     setAuthClientForTests(client)

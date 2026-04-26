@@ -47,6 +47,8 @@ import type {
   TrialConnectionView,
   UsageBreakdownView,
   UsageDashboardData,
+  WechatPaymentOrderView,
+  WechatPayPrepayResult,
 } from "./types";
 
 export type ConsoleDataService = {
@@ -66,6 +68,17 @@ export type ConsoleDataService = {
     range: "7d" | "30d" | "90d",
     projectId?: string,
   ) => Promise<BillingExportJobView>;
+  createWechatPayPrepay: (input: {
+    amountTotal: number;
+    channel: "native" | "jsapi";
+    description?: string;
+    projectId?: string;
+    payerOpenid?: string;
+  }) => Promise<WechatPayPrepayResult>;
+  getWechatPaymentOrder: (
+    outTradeNo: string,
+    refresh?: boolean,
+  ) => Promise<WechatPaymentOrderView>;
   getRouteDiagnostics: (routePolicyId: string) => Promise<RouteDiagnosticsView>;
   getMerchantWorkspace: () => Promise<MerchantWorkspaceData>;
   getReplayCapsule: (replayCapsuleId: string) => Promise<ReplayCapsuleView>;
@@ -178,7 +191,8 @@ type ActionErrorKind =
   | "sharing"
   | "snapshot-activate"
   | "snapshot-create"
-  | "trial-connection-create";
+  | "trial-connection-create"
+  | "wechat-pay-prepay";
 
 export type ProviderResourceMutationInput = {
   authKind: "api_key" | "oauth_client_credentials" | "session_broker";
@@ -893,6 +907,117 @@ function parseApiKeyList(payload: unknown) {
   ]).map(parseApiKeyRecord);
 }
 
+function parseWechatPayPrepay(payload: unknown): WechatPayPrepayResult {
+  if (!isRecord(payload)) {
+    throw new Error("Invalid WeChat Pay prepay response.");
+  }
+
+  const jsapiParams = pickRecordValue(payload, ["jsapi_params", "jsapiParams"]);
+  const parsedJsapiParams = isRecord(jsapiParams)
+    ? {
+        appId:
+          stringOrUndefined(
+            pickRecordValue(jsapiParams, ["appId", "app_id"]),
+          ) ?? "",
+        nonceStr:
+          stringOrUndefined(
+            pickRecordValue(jsapiParams, ["nonceStr", "nonce_str"]),
+          ) ?? "",
+        package:
+          stringOrUndefined(pickRecordValue(jsapiParams, ["package"])) ?? "",
+        paySign:
+          stringOrUndefined(
+            pickRecordValue(jsapiParams, ["paySign", "pay_sign"]),
+          ) ?? "",
+        signType:
+          stringOrUndefined(
+            pickRecordValue(jsapiParams, ["signType", "sign_type"]),
+          ) ?? "",
+        timeStamp:
+          stringOrUndefined(
+            pickRecordValue(jsapiParams, ["timeStamp", "time_stamp"]),
+          ) ?? "",
+      }
+    : undefined;
+
+  return {
+    appId:
+      stringOrUndefined(pickRecordValue(payload, ["app_id", "appId"])) ?? "",
+    channel:
+      stringOrUndefined(pickRecordValue(payload, ["channel"])) === "jsapi"
+        ? "jsapi"
+        : "native",
+    codeQrSvg: stringOrUndefined(
+      pickRecordValue(payload, ["code_qr_svg", "codeQrSvg"]),
+    ),
+    codeUrl: stringOrUndefined(
+      pickRecordValue(payload, ["code_url", "codeUrl"]),
+    ),
+    jsapiParams: parsedJsapiParams,
+    mchid: stringOrUndefined(pickRecordValue(payload, ["mchid"])) ?? "",
+    outTradeNo:
+      stringOrUndefined(
+        pickRecordValue(payload, ["out_trade_no", "outTradeNo"]),
+      ) ?? "",
+    prepayId: stringOrUndefined(
+      pickRecordValue(payload, ["prepay_id", "prepayId"]),
+    ),
+  };
+}
+
+function parseWechatPaymentOrder(payload: unknown): WechatPaymentOrderView {
+  const record =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+
+  if (!isRecord(record)) {
+    throw new Error("Invalid WeChat Pay order response.");
+  }
+
+  const channel = stringOrUndefined(pickRecordValue(record, ["channel"]));
+
+  return {
+    amountTotal:
+      numberOrUndefined(
+        pickRecordValue(record, ["amount_total", "amountTotal"]),
+      ) ?? 0,
+    channel: channel === "jsapi" ? "jsapi" : "native",
+    codeUrl: stringOrUndefined(
+      pickRecordValue(record, ["code_url", "codeUrl"]),
+    ),
+    createdAt:
+      stringOrUndefined(pickRecordValue(record, ["created_at", "createdAt"])) ??
+      "",
+    currency: stringOrUndefined(pickRecordValue(record, ["currency"])) ?? "CNY",
+    expiresAt:
+      stringOrUndefined(pickRecordValue(record, ["expires_at", "expiresAt"])) ??
+      "",
+    outTradeNo:
+      stringOrUndefined(
+        pickRecordValue(record, ["out_trade_no", "outTradeNo"]),
+      ) ?? "",
+    paidAt: stringOrUndefined(pickRecordValue(record, ["paid_at", "paidAt"])),
+    prepayId: stringOrUndefined(
+      pickRecordValue(record, ["prepay_id", "prepayId"]),
+    ),
+    projectId: stringOrUndefined(
+      pickRecordValue(record, ["project_id", "projectId"]),
+    ),
+    status: stringOrUndefined(pickRecordValue(record, ["status"])) ?? "unknown",
+    tenantId:
+      stringOrUndefined(pickRecordValue(record, ["tenant_id", "tenantId"])) ??
+      "",
+    tradeState: stringOrUndefined(
+      pickRecordValue(record, ["trade_state", "tradeState"]),
+    ),
+    transactionId: stringOrUndefined(
+      pickRecordValue(record, ["transaction_id", "transactionId"]),
+    ),
+    updatedAt:
+      stringOrUndefined(pickRecordValue(record, ["updated_at", "updatedAt"])) ??
+      "",
+  };
+}
+
 function toMerchantShopView(
   shop: ReturnType<typeof merchantShopSchema.parse>,
 ): MerchantShopView {
@@ -1094,6 +1219,10 @@ export function getControlPlaneActionErrorMessage(
 
   if (kind === "billing-export-queue") {
     return "The billing export could not be queued right now.";
+  }
+
+  if (kind === "wechat-pay-prepay") {
+    return "WeChat Pay could not create a payment order right now.";
   }
 
   if (kind === "provider-disable") {
@@ -1757,6 +1886,53 @@ async function getMerchantWorkspaceFromControlPlane() {
   );
 }
 
+async function createWechatPayPrepayInControlPlane(input: {
+  amountTotal: number;
+  channel: "native" | "jsapi";
+  description?: string;
+  projectId?: string;
+  payerOpenid?: string;
+  tenantId: string;
+}) {
+  return requestControlPlaneJson(
+    "/v1/billing/wechat-pay/prepay",
+    parseWechatPayPrepay,
+    {
+      body: JSON.stringify({
+        amount_total: input.amountTotal,
+        channel: input.channel,
+        description: input.description,
+        payer_openid: input.payerOpenid,
+        project_id: input.projectId,
+        tenant_id: input.tenantId,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function getWechatPaymentOrderFromControlPlane(
+  outTradeNo: string,
+  refresh = false,
+) {
+  const query = refresh ? "?refresh=true" : "";
+
+  return requestControlPlaneJson(
+    `/v1/billing/wechat-pay/orders/${encodeURIComponent(outTradeNo)}${query}`,
+    parseWechatPaymentOrder,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+      method: "GET",
+    },
+  );
+}
+
 async function createMerchantShopInControlPlane(input: {
   merchantShopId: string;
   slug: string;
@@ -2253,6 +2429,23 @@ const defaultConsoleDataService: ConsoleDataService = {
     });
 
     return toBillingExportJobView(exportJob.data);
+  },
+
+  async createWechatPayPrepay(input) {
+    const tenantId = getActiveTenantId();
+
+    if (!tenantId) {
+      throw new Error("tenant_not_found");
+    }
+
+    return createWechatPayPrepayInControlPlane({
+      ...input,
+      tenantId,
+    });
+  },
+
+  async getWechatPaymentOrder(outTradeNo, refresh = false) {
+    return getWechatPaymentOrderFromControlPlane(outTradeNo, refresh);
   },
 
   async getRouteDiagnostics(routePolicyId) {

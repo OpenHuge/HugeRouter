@@ -7,13 +7,15 @@ mod pricing_catalog;
 mod route_receipts;
 mod store;
 mod store_schema;
+mod wechat_pay;
 
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{Path, Query, State},
     http::{
-        HeaderMap, HeaderValue, Method,
+        HeaderMap, Method,
         header::{AUTHORIZATION, COOKIE, SET_COOKIE},
     },
     response::{IntoResponse, Response},
@@ -47,10 +49,15 @@ use store::{
     OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolSelectionRequest, OAuthSharingLeaseRecord,
     OAuthSharingLeasesResponse, OAuthSharingUsageBudget, OAuthSharingUsageFilters,
     OAuthSharingUsageResponse, ProviderResourceFilters, SESSION_TTL_SECONDS, StoreMode,
-    auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339, oauth_provider_slug,
+    WechatPaymentOrderRecord, WechatPaymentOrderResponse, auth_provider_enabled, expires_at,
+    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
+use wechat_pay::{
+    WechatPayClient, WechatPayHeaders, WechatPayPrepayRequest, WechatPayPrepayResponse,
+    new_out_trade_no,
+};
 
 const CONTROL_PLANE_SERVICE_NAME: &str = "control-plane-api";
 const FRONTEND_BASE_URL: &str = "http://127.0.0.1:3000";
@@ -291,6 +298,12 @@ struct BillingExportsQuery {
     pub project_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct WechatPaymentOrderQuery {
+    #[serde(default)]
+    pub refresh: bool,
+}
+
 #[derive(Debug, Clone)]
 struct OidcIdentity {
     pub subject: String,
@@ -495,10 +508,15 @@ pub async fn status() -> Result<String> {
 }
 
 fn app_with_state(state: ControlPlaneState) -> Router {
-    let allow_origin = AllowOrigin::exact(
-        HeaderValue::from_str(&state.frontend_base_url)
-            .unwrap_or_else(|_| HeaderValue::from_static(FRONTEND_BASE_URL)),
-    );
+    let configured_frontend_base_url = state.frontend_base_url.clone();
+    let allow_origin = AllowOrigin::predicate(move |origin, _request_parts| {
+        let Ok(origin) = origin.to_str() else {
+            return false;
+        };
+        origin == FRONTEND_BASE_URL
+            || origin == "http://localhost:3000"
+            || origin == configured_frontend_base_url
+    });
 
     Router::new()
         .route("/healthz", get(health))
@@ -650,6 +668,18 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/v1/billing/exports/{export_job_id}/download",
             get(download_billing_export),
+        )
+        .route(
+            "/v1/billing/wechat-pay/prepay",
+            post(create_wechat_pay_prepay),
+        )
+        .route(
+            "/v1/billing/wechat-pay/notify",
+            post(accept_wechat_pay_notification),
+        )
+        .route(
+            "/v1/billing/wechat-pay/orders/{out_trade_no}",
+            get(get_wechat_payment_order),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
         .route("/v1/route-receipts", get(route_receipts::list))
@@ -879,6 +909,7 @@ async fn start_oauth_login(
             &state_token,
             provider,
             &request.workspace_slug,
+            request.redirect_to.as_deref(),
             &expires_at(600),
         )
         .await
@@ -893,7 +924,7 @@ async fn start_oauth_login(
     let redirect_query = request
         .redirect_to
         .as_deref()
-        .map(|redirect| format!("&redirect={redirect}"))
+        .map(|redirect| format!("&redirect={}", urlencoding::encode(redirect)))
         .unwrap_or_default();
 
     Ok(Json(OAuthLoginStartResponse {
@@ -1052,7 +1083,7 @@ async fn complete_oauth_login(
 
         (identity.subject, pending.workspace_slug.clone())
     };
-    let login_result = state
+    let mut login_result = state
         .store
         .issue_session(
             &format!("sess_{}", context.sequence),
@@ -1070,6 +1101,7 @@ async fn complete_oauth_login(
                 &context,
             )
         })?;
+    login_result.redirect_to = pending.redirect_to;
 
     let session_cookie = login_result.session.session_id.to_string();
     Ok(with_session_cookie(&session_cookie, Json(login_result)))
@@ -1080,25 +1112,23 @@ async fn logout(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let context = next_request_context();
-    let session_id = extract_session_cookie(&headers).ok_or_else(|| {
-        ApiError::unauthorized(
-            "auth_invalid",
-            "no HugeRouter session cookie was provided".to_string(),
-            &context,
-        )
-    })?;
-
-    let logout_response = state
-        .store
-        .revoke_session(&session_id)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "storage_unavailable",
-                format!("failed to revoke session: {error}"),
-                &context,
-            )
-        })?;
+    let logout_response = if let Some(session_id) = extract_session_cookie(&headers) {
+        state
+            .store
+            .revoke_session(&session_id)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "storage_unavailable",
+                    format!("failed to revoke session: {error}"),
+                    &context,
+                )
+            })?
+    } else {
+        core_domain::LogoutResponse {
+            outcome: "signed_out".to_string(),
+        }
+    };
 
     Ok(clear_session_cookie(Json(logout_response)))
 }
@@ -2773,6 +2803,248 @@ async fn download_billing_export(
         .into_response())
 }
 
+async fn create_wechat_pay_prepay(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<WechatPayPrepayRequest>,
+) -> Result<Json<WechatPayPrepayResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    validate_wechat_payment_request(&request, &context)?;
+    authz.ensure_manage_tenant(&request.tenant_id, &context)?;
+    if let Some(project_id) = request.project_id.as_deref() {
+        let project = load_project(&state, project_id, &context).await?;
+        ensure_project_matches_tenant(&project, &request.tenant_id, &context)?;
+        authz.ensure_manage_project(&project, &context)?;
+    }
+
+    let client = WechatPayClient::from_env().map_err(|error| {
+        ApiError::internal(
+            "wechat_pay_not_configured",
+            format!("WeChat Pay is not configured: {error}"),
+            &context,
+        )
+    })?;
+    let out_trade_no = new_out_trade_no(&request.tenant_id, request.project_id.as_deref());
+    let now = now_rfc3339();
+    let mut order = WechatPaymentOrderRecord {
+        out_trade_no: out_trade_no.clone(),
+        tenant_id: request.tenant_id.clone(),
+        project_id: request.project_id.clone(),
+        amount_total: request.amount_total,
+        currency: request.currency.clone(),
+        channel: wechat_pay_channel_slug(&request.channel).to_string(),
+        status: "creating".to_string(),
+        trade_state: None,
+        code_url: None,
+        prepay_id: None,
+        transaction_id: None,
+        notification_id: None,
+        created_at: now.clone(),
+        updated_at: now,
+        expires_at: expires_at(30 * 60),
+        paid_at: None,
+        metadata: serde_json::json!({
+            "description": request.description,
+            "attach": request.attach,
+        }),
+    };
+    state
+        .store
+        .create_wechat_payment_order(order.clone())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_order_persist_failed",
+                format!("failed to persist WeChat Pay order: {error}"),
+                &context,
+            )
+        })?;
+
+    let response = match client.create_prepay(request, &out_trade_no).await {
+        Ok(response) => response,
+        Err(error) => {
+            order.status = "failed".to_string();
+            order.updated_at = now_rfc3339();
+            order.metadata = serde_json::json!({
+                "failure_stage": "wechat_prepay",
+                "failure_message": error.to_string(),
+            });
+            let _ = state.store.update_wechat_payment_order(order).await;
+            return Err(ApiError::bad_request(
+                "wechat_pay_prepay_failed",
+                format!("WeChat Pay prepay request failed: {error}"),
+                &context,
+            ));
+        }
+    };
+    order.status = "pending".to_string();
+    order.code_url.clone_from(&response.code_url);
+    order.prepay_id.clone_from(&response.prepay_id);
+    order.updated_at = now_rfc3339();
+    state
+        .store
+        .update_wechat_payment_order(order)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_order_persist_failed",
+                format!("failed to update WeChat Pay order: {error}"),
+                &context,
+            )
+        })?;
+
+    Ok(Json(response))
+}
+
+async fn accept_wechat_pay_notification(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let context = next_request_context();
+    let client = WechatPayClient::from_env().map_err(|error| {
+        ApiError::internal(
+            "wechat_pay_not_configured",
+            format!("WeChat Pay is not configured: {error}"),
+            &context,
+        )
+    })?;
+    let wechat_headers = WechatPayHeaders {
+        timestamp: required_header(&headers, "Wechatpay-Timestamp", &context)?,
+        nonce: required_header(&headers, "Wechatpay-Nonce", &context)?,
+        signature: required_header(&headers, "Wechatpay-Signature", &context)?,
+        serial: required_header(&headers, "Wechatpay-Serial", &context)?,
+    };
+    let notification = client
+        .decode_notification(&wechat_headers, &body)
+        .map_err(|error| {
+            ApiError::bad_request(
+                "wechat_pay_notification_invalid",
+                format!("invalid WeChat Pay notification: {error}"),
+                &context,
+            )
+        })?;
+    let out_trade_no = transaction_out_trade_no(&notification.transaction, &context)?;
+    let Some(existing) = state
+        .store
+        .get_wechat_payment_order(&out_trade_no)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_order_unavailable",
+                format!("failed to load WeChat Pay order: {error}"),
+                &context,
+            )
+        })?
+    else {
+        return Err(ApiError::bad_request(
+            "wechat_pay_order_unknown",
+            format!("WeChat Pay order `{out_trade_no}` is not known"),
+            &context,
+        ));
+    };
+    let updated = apply_wechat_transaction_to_order(
+        existing.data,
+        &notification.transaction,
+        Some(notification.id.clone()),
+        client.app_id(),
+        client.mchid(),
+        &context,
+    )?;
+    state
+        .store
+        .update_wechat_payment_order(updated)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_order_persist_failed",
+                format!("failed to update WeChat Pay order: {error}"),
+                &context,
+            )
+        })?;
+
+    info!(
+        event_type = notification.event_type,
+        notification_id = notification.id,
+        resource_type = notification.resource_type,
+        "accepted WeChat Pay notification"
+    );
+
+    Ok(Json(serde_json::json!({
+        "code": "SUCCESS",
+        "message": "success"
+    })))
+}
+
+async fn get_wechat_payment_order(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(out_trade_no): Path<String>,
+    Query(query): Query<WechatPaymentOrderQuery>,
+) -> Result<Json<WechatPaymentOrderResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let order = state
+        .store
+        .get_wechat_payment_order(&out_trade_no)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_order_unavailable",
+                format!("failed to load WeChat Pay order: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "wechat_pay_order_not_found",
+                format!("WeChat Pay order `{out_trade_no}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(&order.data.tenant_id, &context)?;
+
+    if query.refresh && !wechat_order_status_is_terminal(&order.data.status) {
+        let client = WechatPayClient::from_env().map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_not_configured",
+                format!("WeChat Pay is not configured: {error}"),
+                &context,
+            )
+        })?;
+        let queried = client.query_order(&out_trade_no).await.map_err(|error| {
+            ApiError::bad_request(
+                "wechat_pay_order_query_failed",
+                format!("WeChat Pay order query failed: {error}"),
+                &context,
+            )
+        })?;
+        let updated = apply_wechat_transaction_to_order(
+            order.data,
+            &queried.transaction,
+            None,
+            client.app_id(),
+            client.mchid(),
+            &context,
+        )?;
+        let response = state
+            .store
+            .update_wechat_payment_order(updated)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "wechat_pay_order_persist_failed",
+                    format!("failed to update WeChat Pay order: {error}"),
+                    &context,
+                )
+            })?;
+        return Ok(Json(response));
+    }
+
+    Ok(Json(order))
+}
+
 async fn create_route_simulation(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -3499,15 +3771,25 @@ fn issue_email_verification_code(sequence: u64) -> String {
 }
 
 fn email_code_hint(code: &str) -> Option<String> {
-    if std::env::var("CONTROL_PLANE_EMAIL_DEBUG_CODE_HINTS")
+    let hints_enabled = std::env::var("CONTROL_PLANE_EMAIL_DEBUG_CODE_HINTS")
         .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-    {
+        .map_or_else(
+            || {
+                !std::env::var("CONTROL_PLANE_ENV")
+                    .ok()
+                    .is_some_and(|value| {
+                        matches!(value.to_ascii_lowercase().as_str(), "prod" | "production")
+                    })
+            },
+            |value| {
+                matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            },
+        );
+
+    if hints_enabled {
         Some(format!("Use verification code {code}."))
     } else {
         None
@@ -3548,7 +3830,7 @@ fn oauth_authorization_url(
             provider,
             &config,
             state_token,
-            redirect_query,
+            "",
         ));
     }
 
@@ -4118,6 +4400,190 @@ fn parse_usage_breakdown_group_by(
             context,
         )),
     }
+}
+
+fn required_header(
+    headers: &HeaderMap,
+    name: &'static str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    headers
+        .get(name)
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "required_header_missing",
+                format!("{name} header is required"),
+                context,
+            )
+        })?
+        .to_str()
+        .map(str::to_string)
+        .map_err(|error| {
+            ApiError::bad_request(
+                "required_header_invalid",
+                format!("{name} header is invalid: {error}"),
+                context,
+            )
+        })
+}
+
+fn validate_wechat_payment_request(
+    request: &WechatPayPrepayRequest,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    let min_amount = std::env::var("WECHAT_PAY_MIN_AMOUNT_TOTAL")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(1);
+    let max_amount = std::env::var("WECHAT_PAY_MAX_AMOUNT_TOTAL")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(1_000_000);
+
+    if request.amount_total < min_amount || request.amount_total > max_amount {
+        return Err(ApiError::bad_request(
+            "wechat_pay_amount_invalid",
+            format!("amount_total must be between {min_amount} and {max_amount} cents"),
+            context,
+        ));
+    }
+    if request.description.trim().is_empty() || request.description.chars().count() > 127 {
+        return Err(ApiError::bad_request(
+            "wechat_pay_description_invalid",
+            "description must be present and at most 127 characters".to_string(),
+            context,
+        ));
+    }
+
+    Ok(())
+}
+
+const fn wechat_pay_channel_slug(channel: &wechat_pay::WechatPayChannel) -> &'static str {
+    match channel {
+        wechat_pay::WechatPayChannel::Native => "native",
+        wechat_pay::WechatPayChannel::Jsapi => "jsapi",
+    }
+}
+
+fn wechat_order_status_is_terminal(status: &str) -> bool {
+    matches!(status, "paid" | "closed" | "failed" | "refunded")
+}
+
+fn transaction_out_trade_no(
+    transaction: &Value,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    transaction
+        .get("out_trade_no")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "wechat_pay_transaction_invalid",
+                "WeChat Pay transaction is missing out_trade_no".to_string(),
+                context,
+            )
+        })
+}
+
+fn transaction_string(transaction: &Value, key: &str) -> Option<String> {
+    transaction
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn transaction_amount_total(transaction: &Value) -> Option<u32> {
+    transaction
+        .get("amount")
+        .and_then(|amount| amount.get("total"))
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn apply_wechat_transaction_to_order(
+    mut order: WechatPaymentOrderRecord,
+    transaction: &Value,
+    notification_id: Option<String>,
+    expected_app_id: &str,
+    expected_mchid: &str,
+    context: &RequestContext,
+) -> Result<WechatPaymentOrderRecord, ApiError> {
+    let out_trade_no = transaction_out_trade_no(transaction, context)?;
+    if out_trade_no != order.out_trade_no {
+        return Err(ApiError::bad_request(
+            "wechat_pay_transaction_mismatch",
+            "WeChat Pay transaction does not match the stored order".to_string(),
+            context,
+        ));
+    }
+
+    if transaction_string(transaction, "appid").as_deref() != Some(expected_app_id)
+        || transaction_string(transaction, "mchid").as_deref() != Some(expected_mchid)
+    {
+        return Err(ApiError::bad_request(
+            "wechat_pay_merchant_mismatch",
+            "WeChat Pay transaction appid or mchid does not match configuration".to_string(),
+            context,
+        ));
+    }
+
+    if transaction_amount_total(transaction) != Some(order.amount_total) {
+        return Err(ApiError::bad_request(
+            "wechat_pay_amount_mismatch",
+            "WeChat Pay transaction amount does not match the stored order".to_string(),
+            context,
+        ));
+    }
+
+    let trade_state =
+        transaction_string(transaction, "trade_state").unwrap_or_else(|| "UNKNOWN".to_string());
+    order.trade_state = Some(trade_state.clone());
+    order.transaction_id = transaction_string(transaction, "transaction_id");
+    if notification_id.is_some() {
+        order.notification_id = notification_id;
+    }
+    order.updated_at = now_rfc3339();
+    order.metadata = serde_json::json!({
+        "trade_state_desc": transaction_string(transaction, "trade_state_desc"),
+        "bank_type": transaction_string(transaction, "bank_type"),
+        "success_time": transaction_string(transaction, "success_time"),
+        "payer_openid_sha256": transaction
+            .get("payer")
+            .and_then(|payer| payer.get("openid"))
+            .and_then(Value::as_str)
+            .map(sha256_hex),
+    });
+
+    match trade_state.as_str() {
+        "SUCCESS" => {
+            order.status = "paid".to_string();
+            order.paid_at =
+                transaction_string(transaction, "success_time").or_else(|| Some(now_rfc3339()));
+        }
+        "CLOSED" | "REVOKED" | "PAYERROR" => {
+            order.status = "failed".to_string();
+        }
+        _ => {
+            order.status = "pending".to_string();
+        }
+    }
+
+    Ok(order)
+}
+
+fn sha256_hex(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
 
 fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
@@ -4854,6 +5320,374 @@ mod tests {
         .unwrap();
         assert_eq!(body["session"]["authenticatedBy"], "email");
         assert_eq!(body["links"][0]["provider"], "email");
+    }
+
+    #[tokio::test]
+    async fn auth_providers_report_email_and_provider_availability() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        let body = response_json(
+            app.oneshot(
+                Request::builder()
+                    .uri("/api/control-plane/auth/providers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+
+        let providers = body["providers"].as_array().unwrap();
+        let email = providers
+            .iter()
+            .find(|provider| provider["provider"] == "email")
+            .unwrap();
+        assert_eq!(email["enabled"], true);
+        assert!(
+            providers
+                .iter()
+                .any(|provider| provider["provider"] == "github")
+        );
+        assert!(
+            providers
+                .iter()
+                .any(|provider| provider["provider"] == "oidc")
+        );
+    }
+
+    #[tokio::test]
+    async fn email_login_rejects_unknown_email_and_invalid_code() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        assert_error(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/control-plane/auth/email/start")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "email": "missing@huge-router.dev",
+                                "workspaceSlug": "platform-admin"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_user_not_found",
+        )
+        .await;
+
+        let start = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/control-plane/auth/email/start")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "email": "ops@huge-router.dev",
+                                "workspaceSlug": "platform-admin"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        let flow_id = start["flowId"].as_str().unwrap();
+
+        assert_error(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/control-plane/auth/email/complete")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "flowId": flow_id,
+                                "code": "000000"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_invalid_code",
+        )
+        .await;
+
+        assert_error(
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control-plane/auth/email/complete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "flowId": flow_id,
+                            "code": "111111"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_flow_missing",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn session_lookup_and_logout_round_trip() {
+        let app = app_with_state(ControlPlaneState::memory());
+
+        let anonymous = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/control-plane/auth/session")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(anonymous.get("session").is_some());
+        assert!(anonymous["session"].is_null());
+
+        let start = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/control-plane/auth/email/start")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "email": "developer@huge-router.dev",
+                                "workspaceSlug": "acme"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        let complete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control-plane/auth/email/complete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "flowId": start["flowId"].as_str().unwrap(),
+                            "code": "111111"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let cookie = complete
+            .headers()
+            .get(SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string();
+
+        let session = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/control-plane/auth/session")
+                        .header(COOKIE, &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            session["session"]["user"]["primaryEmail"],
+            "developer@huge-router.dev"
+        );
+        assert_eq!(
+            session["session"]["memberships"][0]["tenant"]["slug"],
+            "acme-retail"
+        );
+
+        let logout = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control-plane/auth/logout")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), StatusCode::OK);
+        assert!(
+            logout
+                .headers()
+                .get(SET_COOKIE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("Max-Age=0")
+        );
+        let logout_body = response_json(logout).await;
+        assert_eq!(logout_body["outcome"], "signed_out");
+
+        assert_error(
+            app.oneshot(request("GET", "/v1/tenants", Some(&cookie), None))
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_invalid",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn logout_without_cookie_is_idempotent() {
+        let app = app_with_state(ControlPlaneState::memory());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control-plane/auth/logout")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["outcome"], "signed_out");
+    }
+
+    #[tokio::test]
+    async fn oauth_start_rejects_disabled_provider_and_callback_state_is_bound() {
+        let state = ControlPlaneState::memory();
+        let app = app_with_state(state.clone());
+
+        assert_error(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/control-plane/auth/oauth/github/start")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "workspaceSlug": "platform-admin",
+                                "redirectTo": "/admin/tenants"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "provider_disabled",
+        )
+        .await;
+
+        state
+            .store
+            .create_oauth_flow(
+                "oauth_state_mismatch_test",
+                core_domain::OAuthProvider::Github,
+                "platform-admin",
+                Some("/admin/tenants"),
+                &crate::expires_at(600),
+            )
+            .await
+            .unwrap();
+
+        assert_error(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/control-plane/auth/oauth/google/callback")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "state": "oauth_state_mismatch_test",
+                                "code": "mock-google-code"
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_provider_mismatch",
+        )
+        .await;
+
+        assert_error(
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control-plane/auth/oauth/github/callback")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "state": "oauth_state_missing",
+                            "code": "mock-github-code"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_state_missing",
+        )
+        .await;
+    }
+
+    #[test]
+    fn oidc_group_role_map_can_resolve_platform_admins() {
+        let groups = vec!["platform-admins".to_string()];
+
+        let (workspace, role) = resolve_oidc_membership(&groups, "acme-retail");
+
+        assert_eq!(workspace, "platform-admin");
+        assert_eq!(role, TenantMembershipRole::Admin);
     }
 
     #[tokio::test]

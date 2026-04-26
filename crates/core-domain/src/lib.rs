@@ -584,12 +584,13 @@ pub struct OAuthCallbackRequest {
 pub struct AuthLoginResult {
     pub session: AuthSession,
     pub links: Vec<AuthProviderLink>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_to: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthSessionResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<AuthSession>,
 }
 
@@ -608,8 +609,7 @@ pub struct AuthProvidersResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutResponse {
-    pub session_id: AuthSessionId,
-    pub revoked: bool,
+    pub outcome: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -1504,6 +1504,7 @@ mod tests {
                 last_used_at: None,
                 can_unlink: false,
             }],
+            redirect_to: Some("/app/overview".to_string()),
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -1515,6 +1516,7 @@ mod tests {
         );
         assert_eq!(parsed.links[0].provider, AuthProvider::Email);
         assert!(!parsed.links[0].can_unlink);
+        assert_eq!(parsed.redirect_to.as_deref(), Some("/app/overview"));
     }
 
     #[test]

@@ -10,16 +10,20 @@ import {
   Input as HeroInput,
   Label as HeroLabel,
   Link as HeroLink,
+  ListBox as HeroListBox,
   NumberField as HeroNumberField,
   NumberFieldDecrementButton as HeroNumberFieldDecrementButton,
   NumberFieldGroup as HeroNumberFieldGroup,
   NumberFieldIncrementButton as HeroNumberFieldIncrementButton,
   NumberFieldInput as HeroNumberFieldInput,
   Separator as HeroSeparator,
+  Select as HeroSelect,
   Spinner as HeroSpinner,
   Switch as HeroSwitch,
   TextArea as HeroTextArea,
   Toast,
+  ToggleButton as HeroToggleButton,
+  ToggleButtonGroup as HeroToggleButtonGroup,
 } from "@heroui/react";
 import { useId } from "react";
 import type {
@@ -42,6 +46,8 @@ const HeroFieldErrorRoot = HeroFieldError as ElementType;
 const HeroInputRoot = HeroInput as ElementType;
 const HeroLabelRoot = HeroLabel as ElementType;
 const HeroLinkRoot = HeroLink as ElementType;
+const HeroListBoxRoot = HeroListBox as ElementType;
+const HeroListBoxItemRoot = HeroListBox.Item as ElementType;
 const HeroNumberFieldDecrementButtonRoot =
   HeroNumberFieldDecrementButton as ElementType;
 const HeroNumberFieldGroupRoot = HeroNumberFieldGroup as ElementType;
@@ -50,9 +56,16 @@ const HeroNumberFieldIncrementButtonRoot =
   HeroNumberFieldIncrementButton as ElementType;
 const HeroNumberFieldRoot = HeroNumberField as ElementType;
 const HeroSeparatorRoot = HeroSeparator as ElementType;
+const HeroSelectIndicatorRoot = HeroSelect.Indicator as ElementType;
+const HeroSelectPopoverRoot = HeroSelect.Popover as ElementType;
+const HeroSelectRoot = HeroSelect as ElementType;
+const HeroSelectTriggerRoot = HeroSelect.Trigger as ElementType;
+const HeroSelectValueRoot = HeroSelect.Value as ElementType;
 const HeroSpinnerRoot = HeroSpinner as ElementType;
 const HeroSwitchRoot = HeroSwitch as ElementType;
 const HeroTextAreaRoot = HeroTextArea as ElementType;
+const HeroToggleButtonGroupRoot = HeroToggleButtonGroup as ElementType;
+const HeroToggleButtonRoot = HeroToggleButton as ElementType;
 
 type Spacing = number | string;
 type Size = number | string;
@@ -660,7 +673,9 @@ type UiSelectProps<T extends string = string> = Omit<
 export function UiSelect<T extends string = string>({
   className,
   data = [],
+  disabled,
   error,
+  id,
   label,
   onChange,
   placeholder,
@@ -669,34 +684,44 @@ export function UiSelect<T extends string = string>({
   value,
   ...props
 }: UiSelectProps<T>) {
-  return (
-    <label
-      className={classNames("hr-field", className)}
-      style={layoutStyle({ ...props, style })}
-    >
-      {label ? <span>{label}</span> : null}
-      <select
-        className={classNames("hr-input", sizeClass(size))}
-        value={value ?? ""}
-        onChange={(event) =>
-          onChange?.((event.currentTarget.value || null) as T | null)
-        }
-        {...props}
-      >
-        {placeholder ? <option value="">{placeholder}</option> : null}
-        {data.map((item) => {
-          const option =
-            typeof item === "string" ? { label: item, value: item } : item;
+  const options = data.map(normalizeSelectItem);
+  const selectedKey =
+    value && options.some((option) => option.value === value) ? value : null;
 
-          return (
-            <option key={option.value} value={option.value}>
+  return (
+    <HeroSelectRoot
+      className={classNames("hr-field", className)}
+      id={id}
+      isDisabled={disabled}
+      onSelectionChange={(key: string | number | null) =>
+        onChange?.((key === null ? null : String(key)) as T | null)
+      }
+      selectedKey={selectedKey}
+      style={layoutStyle({ ...props, style })}
+      {...props}
+    >
+      {label ? <HeroLabelRoot>{label}</HeroLabelRoot> : null}
+      <HeroSelectTriggerRoot
+        className={classNames("hr-input", sizeClass(size))}
+      >
+        <HeroSelectValueRoot>
+          {selectedKey
+            ? options.find((option) => option.value === selectedKey)?.label
+            : placeholder}
+        </HeroSelectValueRoot>
+        <HeroSelectIndicatorRoot />
+      </HeroSelectTriggerRoot>
+      <HeroSelectPopoverRoot>
+        <HeroListBoxRoot>
+          {options.map((option) => (
+            <HeroListBoxItemRoot id={option.value} key={option.value}>
               {option.label}
-            </option>
-          );
-        })}
-      </select>
-      {error ? <small>{error}</small> : null}
-    </label>
+            </HeroListBoxItemRoot>
+          ))}
+        </HeroListBoxRoot>
+      </HeroSelectPopoverRoot>
+      {error ? <HeroFieldErrorRoot>{error}</HeroFieldErrorRoot> : null}
+    </HeroSelectRoot>
   );
 }
 
@@ -773,32 +798,45 @@ export function UiSegmented<T extends string = string>({
   className,
   data,
   onChange,
+  size,
   style,
   value,
   ...props
 }: SegmentedControlProps<T>) {
   return (
-    <div
+    <HeroToggleButtonGroupRoot
       className={classNames("hr-segmented", className)}
+      onSelectionChange={(keys: Set<T>) => {
+        const nextValue = keys.values().next().value;
+        if (nextValue) {
+          onChange?.(nextValue);
+        }
+      }}
+      selectedKeys={value ? new Set([value]) : new Set()}
+      selectionMode="single"
       style={layoutStyle({ ...props, style })}
+      {...props}
     >
       {data.map((item) => {
-        const option =
-          typeof item === "string" ? { label: item, value: item } : item;
+        const option = normalizeSelectItem(item);
 
         return (
-          <button
+          <HeroToggleButtonRoot
             className={option.value === value ? "active" : undefined}
+            id={option.value}
             key={option.value}
-            onClick={() => onChange?.(option.value as T)}
-            type="button"
+            size={size}
           >
             {option.label}
-          </button>
+          </HeroToggleButtonRoot>
         );
       })}
-    </div>
+    </HeroToggleButtonGroupRoot>
   );
+}
+
+function normalizeSelectItem<T extends string>(item: UiSelectItem<T> | T) {
+  return typeof item === "string" ? { label: item, value: item } : item;
 }
 
 type UiDividerProps = LayoutProps & {

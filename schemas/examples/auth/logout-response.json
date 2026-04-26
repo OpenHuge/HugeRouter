@@ -1,4 +1,3 @@
 {
-  "sessionId": "sess_123",
-  "revoked": true
+  "outcome": "signed_out"
 }
