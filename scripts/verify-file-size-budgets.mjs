@@ -129,9 +129,9 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/store.rs",
     {
-      maxLines: 7700,
+      maxLines: 8700,
       reason:
-        "Store implementation is a known monolith. WeChat Pay order persistence temporarily raised the ceiling; extract billing store code next.",
+        "Store implementation is a known monolith. OAuth pool runtime lease persistence temporarily raised the ceiling; extract pool store code next.",
     },
   ],
   [
