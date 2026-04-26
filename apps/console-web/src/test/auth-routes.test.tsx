@@ -138,6 +138,54 @@ describe('auth routes', () => {
     ).toBeInTheDocument()
   })
 
+  it('completes WeChat callback sign-in with the backend redirect target', async () => {
+    const completeAuthCallback = vi.fn<ConsoleAuthClient['completeAuthCallback']>(() =>
+      Promise.resolve({
+        data: {
+          message: 'WeChat sign-in completed.',
+          outcome: 'authenticated' as const,
+          provider: 'wechat',
+          redirectTo: '/admin/tenants',
+          state: {
+            availableProviders: getDefaultProviderAvailability(),
+            kind: 'authenticated' as const,
+            session: {
+              activeTenant: null,
+              expiresAt: '2099-01-01T00:00:00.000Z',
+              memberships: [],
+              sessionId: 'sess_platform_admin',
+              user: {
+                displayName: 'Platform Admin',
+                email: 'admin@huge-router.dev',
+                id: 'user_admin',
+                isPlatformAdmin: true
+              }
+            }
+          }
+        },
+        meta: {}
+      })
+    )
+    setAuthClientForTests(createAuthClientStub({ completeAuthCallback }))
+
+    await renderRoute('/login/callback?provider=wechat&code=wechat-code&state=opaque')
+
+    await waitFor(() => {
+      expect(completeAuthCallback).toHaveBeenCalledWith('wechat', {
+        code: 'wechat-code',
+        error: undefined,
+        errorDescription: undefined,
+        redirectTo: undefined,
+        state: 'opaque'
+      })
+    })
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Tenants'
+      })
+    ).toBeInTheDocument()
+  })
+
   it('shows a provider cancellation state on callback failure', async () => {
     await renderRoute('/login/callback?provider=google&error=access_denied')
 

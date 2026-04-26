@@ -33,6 +33,28 @@ The public gateway API is the request ingress for customer workloads.
 4. **WebSocket / Realtime:** `wss://api.gateway.local/v1/realtime` (for voice/audio and continuous agent interactions)
 5. **Ephemeral Token Generation:** `POST /v1/realtime/client_secrets` (to allow secure browser WebRTC/WS connections without exposing master keys)
 
+### 22.3.1 HugeCode Local Commercial Routing Support
+
+The gateway also exposes the local HugeCode integration contract:
+
+- `GET /health`
+  Lightweight liveness probe. `/healthz` remains supported for compatibility.
+- `GET /ready`
+  Readiness probe returning `service`, `status`, `baseUrl`, `routeBaseUrl`, `capabilities`, and `diagnostics`.
+- `GET /v1/hugerouter/commercial-service`
+  Local HugeRouter commercial service snapshot aligned to HugeCode's `HugeRouterCommercialServiceSnapshot` shape. This endpoint may return dev-backed local account state, but it must not claim to be a production billing or subscription source of truth.
+- `POST /v1/hugerouter/route-tokens`
+  Issues a route token aligned to HugeCode's `HugeRouterRouteTokenIssueRequest` and `HugeRouterRouteTokenIssueResponse` shapes.
+
+Route token invariants:
+
+- issued tokens use the `hgrt_` prefix and are returned only in the issue response
+- commercial service snapshots return only token summary metadata and never the plaintext token
+- gateway storage must retain only a hash or equivalent irreversible token digest
+- `Authorization: Bearer hgrt_...` is accepted by `POST /v1/responses`, `POST /v1/chat/completions`, and `POST /v1/images/generations`
+- invalid, expired, or revoked route tokens return `auth_invalid`
+- route tokens without required routing/provider scopes return `auth_insufficient_scope`
+
 ### 22.4 Preferred Response Metadata
 
 Where protocol compatibility permits, the gateway should emit:

@@ -73,7 +73,10 @@ stack_compose() {
   local mode="$1"
   shift
 
-  local -a compose_args=(-f "${STACK_COMPOSE_FILE}")
+  local -a compose_args=()
+  [[ -f "${STACK_REPO_ROOT}/.env" ]] && compose_args+=(--env-file "${STACK_REPO_ROOT}/.env")
+  [[ -f "${STACK_REPO_ROOT}/.env.local" ]] && compose_args+=(--env-file "${STACK_REPO_ROOT}/.env.local")
+  compose_args+=(-f "${STACK_COMPOSE_FILE}")
 
   while IFS= read -r profile; do
     [[ -n "${profile}" ]] && compose_args+=(--profile "${profile}")

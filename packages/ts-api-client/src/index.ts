@@ -316,6 +316,7 @@ const requestJson = async <T>({
 }) => {
   const response = await fetchImpl(buildUrl(baseUrl, path, params, query), {
     method,
+    credentials: 'include',
     headers: buildHeaders(
       {
         Accept: 'application/json',

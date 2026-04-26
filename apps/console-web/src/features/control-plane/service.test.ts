@@ -128,7 +128,9 @@ describe("console data service", () => {
 
     expect(workspace.merchantEnabled).toBe(true);
     expect(workspace.shops[0]?.merchantShopId).toBe("mshop_acme");
-    expect(workspace.cardProducts[0]?.cardProductId).toBe("cardprod_acme_trial");
+    expect(workspace.cardProducts[0]?.cardProductId).toBe(
+      "cardprod_acme_trial",
+    );
     expect(workspace.trialConnections[0]?.trialConnectionId).toBe(
       "trialconn_acme_relay",
     );
@@ -238,6 +240,29 @@ describe("console data service", () => {
           format: "csv",
           requestedAt: "2026-04-22T00:00:00Z",
           status: "queued",
+        });
+      },
+      createWechatPayPrepay() {
+        return Promise.resolve({
+          appId: "wx_app_override",
+          channel: "native",
+          codeQrSvg: "<svg />",
+          codeUrl: "weixin://wxpay/bizpayurl?pr=override",
+          mchid: "1900000001",
+          outTradeNo: "hr_override",
+        });
+      },
+      getWechatPaymentOrder() {
+        return Promise.resolve({
+          amountTotal: 10000,
+          channel: "native",
+          createdAt: "2026-04-22T00:00:00Z",
+          currency: "CNY",
+          expiresAt: "2026-04-22T00:30:00Z",
+          outTradeNo: "hr_override",
+          status: "pending",
+          tenantId: "tenant_override",
+          updatedAt: "2026-04-22T00:00:00Z",
         });
       },
       getRouteDiagnostics() {

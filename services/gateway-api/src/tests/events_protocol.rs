@@ -22,8 +22,10 @@ async fn returns_forbidden_when_api_key_scope_does_not_match_active_config() {
                 tenant_id: "tenant_platform".to_string(),
                 project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
+                scopes: Vec::new(),
             },
         }),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -88,8 +90,10 @@ async fn allows_tenant_scoped_api_keys_without_project_scope() {
                 tenant_id: "tenant_acme".to_string(),
                 project_id: None,
                 status: "active".to_string(),
+                scopes: Vec::new(),
             },
         }),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -147,6 +151,7 @@ async fn publishes_route_receipt_event_for_successful_request() {
             HealthState::Healthy,
         )]))),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -226,6 +231,7 @@ async fn publishes_route_receipt_event_for_failed_request() {
             HealthState::Healthy,
         )]))),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -324,6 +330,7 @@ async fn route_receipt_attempts_explain_retryable_fallback_chain() {
             ),
         ]))),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -416,6 +423,7 @@ async fn returns_service_unavailable_when_route_receipt_publish_fails() {
             HealthState::Healthy,
         )]))),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -478,6 +486,7 @@ async fn returns_service_unavailable_when_usage_event_publish_fails() {
             HealthState::Healthy,
         )]))),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -547,6 +556,7 @@ async fn anthropic_messages_route_returns_vendor_shaped_response() {
     let state = Arc::new(AppState {
         config_store: Arc::new(StaticConfigStore::new(config)),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
@@ -623,6 +633,7 @@ async fn gemini_generate_content_route_returns_vendor_shaped_response() {
     let state = Arc::new(AppState {
         config_store: Arc::new(StaticConfigStore::new(config)),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),

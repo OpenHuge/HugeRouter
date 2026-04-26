@@ -89,6 +89,9 @@ POST   /v1/oauth-carpools
 DELETE /v1/oauth-carpools/:carpoolId
 GET    /v1/oauth-sharing-usage
 POST   /internal/gateway/oauth-pool/select
+POST   /internal/gateway/oauth-pool/runtime-leases/:runtimeLeaseId/heartbeat
+POST   /internal/gateway/oauth-pool/runtime-leases/:runtimeLeaseId/release
+POST   /internal/gateway/oauth-pool/accounts/:accountId/feedback
 POST   /internal/gateway/codex-account-pool/lease
 
 GET    /v1/budget-policies
@@ -178,9 +181,9 @@ The native Bedrock adapter ignores the generic provider API key and uses the AWS
 }
 ```
 
-Reverse-proxy workers lease an account through `POST /internal/gateway/codex-account-pool/lease` with `Authorization: Bearer $CONTROL_PLANE_INTERNAL_TOKEN`. That internal response includes the decrypted `auth_json` and must stay on a private network path. The lease path now delegates to the runtime-owned OAuth pool selector and accepts optional `lease_id`, `carpool_id`, `borrower_workspace_id`, `session_id`, and `model_id` fields. Selection is strict: an expired, revoked, paused, over-budget, over-concurrency, rate-limited, overloaded, temp-unschedulable, disabled, or unauthorized pool context returns a blocked reason and never falls back to an unrelated account.
+Reverse-proxy workers lease an account through `POST /internal/gateway/codex-account-pool/lease` with `Authorization: Bearer $CONTROL_PLANE_INTERNAL_TOKEN`. That internal response includes the decrypted `auth_json` and must stay on a private network path. The lease path now delegates to the runtime-owned OAuth pool selector and accepts optional `lease_id`, `carpool_id`, `borrower_workspace_id`, `session_id`, `model_id`, `holder_id`, `operation_id`, `lease_ttl_seconds`, and `binding_policy` fields. Selection is strict: an expired, revoked, paused, over-budget, over-concurrency, rate-limited, overloaded, temp-unschedulable, disabled, unhealthy, or unauthorized pool context returns a blocked reason and never falls back to an unrelated account. Successful leases return runtime metadata including `runtime_lease_id`, `binding_id`, `binding_expires_at`, and `fencing_token`.
 
-`POST /internal/gateway/oauth-pool/select` exposes the same selector without decrypted credentials. It returns a public account view plus `reason`, `lease_id`, and `carpool_id` diagnostics, and never includes plaintext API keys or OAuth tokens.
+`POST /internal/gateway/oauth-pool/select` exposes the same selector without decrypted credentials. It returns a public account view plus `reason`, `lease_id`, `carpool_id`, `runtime_lease_id`, `binding_id`, `binding_expires_at`, and `fencing_token` diagnostics, and never includes plaintext API keys or OAuth tokens. Workers keep runtime leases fresh with `POST /internal/gateway/oauth-pool/runtime-leases/:runtimeLeaseId/heartbeat`, release capacity with `POST /internal/gateway/oauth-pool/runtime-leases/:runtimeLeaseId/release`, and report success or provider errors with `POST /internal/gateway/oauth-pool/accounts/:accountId/feedback`.
 
 ### 21.3.4 Authorized Account Pool Sharing
 

@@ -40,8 +40,11 @@ use provider_traits::{
     TransitProviderMetadata,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
+    fs::File,
+    io::Read,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -66,6 +69,16 @@ const GATEWAY_SERVICE_NAME: &str = "gateway-api";
 const DEFAULT_CONTROL_PLANE_BASE_URL: &str = "http://127.0.0.1:8081";
 const DEFAULT_CONTROL_PLANE_SNAPSHOT_REF: &str = "active";
 const DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT_MS: u64 = 2_000;
+const DEFAULT_HUGEROUTER_PUBLIC_BASE_URL: &str = "http://127.0.0.1:3000";
+const DEFAULT_ROUTE_TOKEN_ENV_KEY: &str = "HUGEROUTER_ROUTE_TOKEN";
+const DEFAULT_ROUTE_TOKEN_TTL_SECONDS: u64 = 2_592_000;
+const MAX_ROUTE_TOKEN_TTL_SECONDS: u64 = 2_592_000;
+const ROUTE_TOKEN_PREFIX: &str = "hgrt_";
+const ROUTE_TOKEN_ID_PREFIX: &str = "hgrtkn_";
+const ROUTE_TOKEN_CREDENTIAL_SCOPE_PREFIX: &str = "cred_route_token_";
+const REQUIRED_CODEX_ROUTE_SCOPE: &str = "route:codex";
+const PROVIDER_ANY_RELAY_SCOPE: &str = "provider:any-relay";
+const PROVIDER_HUGEROUTER_COMMERCIAL_SCOPE: &str = "provider:hugerouter-commercial";
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1_000);
 
 pub type GatewayState = Arc<AppState>;
@@ -73,6 +86,7 @@ pub type GatewayState = Arc<AppState>;
 pub struct AppState {
     config_store: Arc<dyn ActiveConfigStore>,
     auth_store: Arc<dyn ApiKeyScopeStore>,
+    route_token_store: Arc<dyn RouteTokenStore>,
     budget_store: Arc<dyn BudgetProjectionStore>,
     adapter_registry: ProviderAdapterRegistry,
     debug_headers_enabled: bool,
@@ -210,6 +224,111 @@ pub struct HealthResponse {
     pub status: &'static str,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadinessResponse {
+    pub service: &'static str,
+    pub status: &'static str,
+    pub base_url: String,
+    pub route_base_url: String,
+    pub capabilities: Vec<&'static str>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterCommercialServiceSnapshot {
+    pub connection: HugeRouterCommercialConnectionSummary,
+    pub capacity: Option<HugeRouterCommercialCapacitySummary>,
+    pub available_plans: Vec<HugeRouterCommercialPlanSummary>,
+    pub order: Option<HugeRouterCommercialOrderSummary>,
+    pub route_token: Option<HugeRouterRouteTokenSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterCommercialConnectionSummary {
+    pub status: &'static str,
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub account_label: Option<String>,
+    pub dashboard_url: Option<String>,
+    pub route_base_url: Option<String>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterCommercialCapacitySummary {
+    pub capacity_kind: Option<&'static str>,
+    pub plan_id: Option<String>,
+    pub plan_name: Option<String>,
+    pub included_monthly_credits: Option<u64>,
+    pub remaining_credits: Option<u64>,
+    pub concurrency_limit: Option<u64>,
+    pub shared_capacity_eligible: Option<bool>,
+    pub burst_capacity_eligible: Option<bool>,
+    pub resets_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterCommercialPlanSummary {
+    pub plan_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub capacity_kind: &'static str,
+    pub included_monthly_credits: Option<u64>,
+    pub currency: Option<String>,
+    pub unit_price_label: Option<String>,
+    pub order_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterCommercialOrderSummary {
+    pub order_id: Option<String>,
+    pub status: &'static str,
+    pub plan_id: Option<String>,
+    pub checkout_url: Option<String>,
+    pub manage_url: Option<String>,
+    pub next_billing_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterRouteTokenIssueRequest {
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub env_key: Option<String>,
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterRouteTokenIssueResponse {
+    pub token: String,
+    pub summary: HugeRouterRouteTokenSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HugeRouterRouteTokenSummary {
+    pub token_id: Option<String>,
+    pub status: String,
+    pub env_key: String,
+    pub expires_at: Option<u64>,
+    pub scopes: Vec<String>,
+    pub last_issued_at: Option<u64>,
+    pub last_four: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewaySuccess {
     pub request_id: String,
@@ -290,6 +409,8 @@ struct GatewayApiKeyScope {
     tenant_id: String,
     project_id: Option<String>,
     status: String,
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 
 pub fn app() -> Router {
@@ -299,6 +420,8 @@ pub fn app() -> Router {
 pub fn app_with_state(state: GatewayState) -> Router {
     Router::new()
         .route("/healthz", get(health))
+        .route("/health", get(health))
+        .route("/ready", get(ready))
         .route(
             "/internal/provider-adapters",
             get(adapter_manifests::provider_adapters),
@@ -310,6 +433,14 @@ pub fn app_with_state(state: GatewayState) -> Router {
         .route(
             "/internal/relay/capabilities",
             get(relay_capabilities::relay_capabilities),
+        )
+        .route(
+            "/v1/hugerouter/commercial-service",
+            get(hugerouter_commercial_service),
+        )
+        .route(
+            "/v1/hugerouter/route-tokens",
+            post(issue_hugerouter_route_token),
         )
         .route("/v1/images/generations", post(image_generations))
         .route("/v1/responses", post(responses))
@@ -332,6 +463,7 @@ fn default_state() -> GatewayState {
     Arc::new(AppState {
         config_store,
         auth_store,
+        route_token_store: Arc::new(InMemoryRouteTokenStore::default()),
         budget_store,
         adapter_registry,
         debug_headers_enabled: debug_headers_enabled_from_env(),
@@ -344,6 +476,44 @@ async fn health() -> Json<HealthResponse> {
         service: GATEWAY_SERVICE_NAME,
         status: "ok",
     })
+}
+
+async fn ready(State(state): State<GatewayState>) -> Json<ReadinessResponse> {
+    let mut diagnostics = Vec::new();
+    let status = match state.config_store.load().await {
+        Ok(_) => "ready",
+        Err(error) => {
+            diagnostics.push(format!("active configuration unavailable: {error}"));
+            "degraded"
+        }
+    };
+    Json(ReadinessResponse {
+        service: GATEWAY_SERVICE_NAME,
+        status,
+        base_url: hugerouter_public_base_url(),
+        route_base_url: hugerouter_route_base_url(),
+        capabilities: gateway_capabilities(),
+        diagnostics,
+    })
+}
+
+async fn hugerouter_commercial_service(
+    State(state): State<GatewayState>,
+) -> Json<HugeRouterCommercialServiceSnapshot> {
+    Json(commercial_service_snapshot(
+        state.route_token_store.latest_summary().await,
+    ))
+}
+
+async fn issue_hugerouter_route_token(
+    State(state): State<GatewayState>,
+    Json(request): Json<HugeRouterRouteTokenIssueRequest>,
+) -> Response {
+    let context = next_request_context();
+    match issue_route_token(&state, request, &context).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 async fn chat_completions(
@@ -509,24 +679,7 @@ async fn process_normalized_request(
     let bearer_token = extract_bearer_token(headers.get(AUTHORIZATION), &context)?;
     let request_headers = normalize_forward_headers(headers);
     let gateway_origin = infer_gateway_origin(headers);
-    let api_key_scope = state
-        .auth_store
-        .resolve(&bearer_token)
-        .await
-        .map_err(|message| {
-            publish_audit_best_effort(
-                &state,
-                "gateway.request.rejected",
-                "auth_invalid",
-                &context,
-                BTreeMap::from([("reason".to_string(), message.clone())]),
-            );
-            GatewayError::new(
-                StatusCode::UNAUTHORIZED,
-                normalized_error("auth_invalid", message, &context, false),
-                &context,
-            )
-        })?;
+    let api_key_scope = resolve_gateway_scope(&state, &bearer_token, &context).await?;
 
     let active_config = state.config_store.load().await.map_err(|error| {
         GatewayError::new(
@@ -541,6 +694,7 @@ async fn process_normalized_request(
         )
     })?;
     ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
+    ensure_route_token_scope(&api_key_scope, &normalized_request, &context)?;
     ensure_budget_allows_request(
         &state,
         &api_key_scope,
@@ -660,24 +814,7 @@ async fn process_normalized_image_request(
     let bearer_token = extract_bearer_token(headers.get(AUTHORIZATION), &context)?;
     let request_headers = normalize_forward_headers(headers);
     let gateway_origin = infer_gateway_origin(headers);
-    let api_key_scope = state
-        .auth_store
-        .resolve(&bearer_token)
-        .await
-        .map_err(|message| {
-            publish_audit_best_effort(
-                &state,
-                "gateway.request.rejected",
-                "auth_invalid",
-                &context,
-                BTreeMap::from([("reason".to_string(), message.clone())]),
-            );
-            GatewayError::new(
-                StatusCode::UNAUTHORIZED,
-                normalized_error("auth_invalid", message, &context, false),
-                &context,
-            )
-        })?;
+    let api_key_scope = resolve_gateway_scope(&state, &bearer_token, &context).await?;
 
     let active_config = state.config_store.load().await.map_err(|error| {
         GatewayError::new(
@@ -692,6 +829,7 @@ async fn process_normalized_image_request(
         )
     })?;
     ensure_scope_matches_config(&api_key_scope, &active_config, &context)?;
+    ensure_route_token_scope(&api_key_scope, &normalized_request, &context)?;
     ensure_budget_allows_request(
         &state,
         &api_key_scope,
@@ -1503,6 +1641,33 @@ fn extract_bearer_token(
     Ok(bearer_token.to_string())
 }
 
+async fn resolve_gateway_scope(
+    state: &GatewayState,
+    bearer_token: &str,
+    context: &RequestContext,
+) -> Result<GatewayApiKeyScope, GatewayError> {
+    let resolved = if bearer_token.starts_with(ROUTE_TOKEN_PREFIX) {
+        state.route_token_store.resolve(bearer_token).await
+    } else {
+        state.auth_store.resolve(bearer_token).await
+    };
+
+    resolved.map_err(|message| {
+        publish_audit_best_effort(
+            state,
+            "gateway.request.rejected",
+            "auth_invalid",
+            context,
+            BTreeMap::from([("reason".to_string(), message.clone())]),
+        );
+        GatewayError::new(
+            StatusCode::UNAUTHORIZED,
+            normalized_error("auth_invalid", message, context, false),
+            context,
+        )
+    })
+}
+
 #[allow(clippy::result_large_err)]
 fn ensure_scope_matches_config(
     api_key_scope: &GatewayApiKeyScope,
@@ -1551,6 +1716,47 @@ fn ensure_scope_matches_config(
     }
 
     Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+fn ensure_route_token_scope(
+    api_key_scope: &GatewayApiKeyScope,
+    normalized_request: &NormalizedChatRequest,
+    context: &RequestContext,
+) -> Result<(), GatewayError> {
+    if api_key_scope.scopes.is_empty()
+        || !api_key_scope
+            .credential_id
+            .starts_with(ROUTE_TOKEN_CREDENTIAL_SCOPE_PREFIX)
+    {
+        return Ok(());
+    }
+
+    let has_route_scope = api_key_scope
+        .scopes
+        .iter()
+        .any(|scope| scope == REQUIRED_CODEX_ROUTE_SCOPE);
+    let has_provider_scope = api_key_scope.scopes.iter().any(|scope| {
+        scope == PROVIDER_HUGEROUTER_COMMERCIAL_SCOPE || scope == PROVIDER_ANY_RELAY_SCOPE
+    });
+
+    if has_route_scope && has_provider_scope {
+        return Ok(());
+    }
+
+    Err(GatewayError::new(
+        StatusCode::FORBIDDEN,
+        normalized_error(
+            "auth_insufficient_scope",
+            format!(
+                "route token is not scoped for {} model routing",
+                normalized_request.protocol_family
+            ),
+            context,
+            false,
+        ),
+        context,
+    ))
 }
 
 #[allow(clippy::result_large_err)]
@@ -2194,7 +2400,7 @@ fn now_rfc3339() -> String {
 fn status_for_error_code(code: &str) -> StatusCode {
     match code {
         "auth_invalid" => StatusCode::UNAUTHORIZED,
-        "auth_forbidden" => StatusCode::FORBIDDEN,
+        "auth_forbidden" | "auth_insufficient_scope" => StatusCode::FORBIDDEN,
         "request_validation_failed" | "transit_loop_detected" => StatusCode::BAD_REQUEST,
         "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
         "upstream_timeout" => StatusCode::GATEWAY_TIMEOUT,
@@ -2433,6 +2639,18 @@ trait ApiKeyScopeStore: Send + Sync {
 }
 
 #[async_trait]
+trait RouteTokenStore: Send + Sync {
+    async fn issue(
+        &self,
+        request: ValidatedRouteTokenIssueRequest,
+    ) -> Result<HugeRouterRouteTokenIssueResponse, String>;
+
+    async fn resolve(&self, token: &str) -> Result<GatewayApiKeyScope, String>;
+
+    async fn latest_summary(&self) -> Option<HugeRouterRouteTokenSummary>;
+}
+
+#[async_trait]
 trait RuntimeEventSink: Send + Sync {
     async fn publish_route_receipt(
         &self,
@@ -2538,6 +2756,8 @@ struct GatewayApiKeyResolveResponse {
     project_id: Option<String>,
     status: String,
     tenant_id: String,
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -2553,6 +2773,22 @@ struct InternalGatewayConfigResponse {
     provider_resources: Vec<ProviderResource>,
 }
 
+#[derive(Debug, Clone)]
+struct ValidatedRouteTokenIssueRequest {
+    env_key: String,
+    scopes: Vec<String>,
+    ttl_seconds: u64,
+    tenant_id: String,
+    project_id: Option<String>,
+}
+
+struct ValidatedRouteTokenIssueInput {
+    env_key: String,
+    scopes: Vec<String>,
+    ttl_seconds: u64,
+    project_id: Option<String>,
+}
+
 #[derive(Debug)]
 struct NatsEventSink {
     client: OnceCell<async_nats::Client>,
@@ -2560,6 +2796,347 @@ struct NatsEventSink {
     route_receipt_subject: String,
     usage_event_subject: String,
     url: String,
+}
+
+#[derive(Debug, Default)]
+struct InMemoryRouteTokenStore {
+    records: Mutex<BTreeMap<String, RouteTokenRecord>>,
+    latest_token_hash: Mutex<Option<String>>,
+}
+
+#[derive(Debug, Clone)]
+struct RouteTokenRecord {
+    tenant_id: String,
+    project_id: Option<String>,
+    summary: HugeRouterRouteTokenSummary,
+}
+
+fn gateway_capabilities() -> Vec<&'static str> {
+    vec![
+        "openai_responses",
+        "openai_chat",
+        "openai_images",
+        "hugerouter_commercial_service_v1",
+        "route_token_issue_v1",
+        "route_receipt_v1",
+        "usage_event_v1",
+    ]
+}
+
+fn hugerouter_public_base_url() -> String {
+    std::env::var("HUGEROUTER_PUBLIC_BASE_URL")
+        .or_else(|_| std::env::var("GATEWAY_PUBLIC_BASE_URL"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_HUGEROUTER_PUBLIC_BASE_URL.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn hugerouter_route_base_url() -> String {
+    format!("{}/v1", hugerouter_public_base_url())
+}
+
+fn commercial_service_snapshot(
+    route_token: Option<HugeRouterRouteTokenSummary>,
+) -> HugeRouterCommercialServiceSnapshot {
+    let base_url = hugerouter_public_base_url();
+    HugeRouterCommercialServiceSnapshot {
+        connection: HugeRouterCommercialConnectionSummary {
+            status: "connected",
+            tenant_id: Some("tenant_local".to_string()),
+            project_id: Some("proj_local".to_string()),
+            account_label: Some("Local HugeRouter".to_string()),
+            dashboard_url: Some(format!("{base_url}/dashboard")),
+            route_base_url: Some(format!("{base_url}/v1")),
+            diagnostics: Vec::new(),
+        },
+        capacity: Some(HugeRouterCommercialCapacitySummary {
+            capacity_kind: Some("included"),
+            plan_id: Some("hugerouter-local".to_string()),
+            plan_name: Some("HugeRouter Local".to_string()),
+            included_monthly_credits: None,
+            remaining_credits: None,
+            concurrency_limit: None,
+            shared_capacity_eligible: Some(true),
+            burst_capacity_eligible: Some(false),
+            resets_at: None,
+        }),
+        available_plans: vec![HugeRouterCommercialPlanSummary {
+            plan_id: "hugerouter-local".to_string(),
+            name: "HugeRouter Local".to_string(),
+            description: Some("Local HugeRouter development route".to_string()),
+            capacity_kind: "included",
+            included_monthly_credits: None,
+            currency: Some("USD".to_string()),
+            unit_price_label: None,
+            order_url: None,
+        }],
+        order: Some(HugeRouterCommercialOrderSummary {
+            order_id: None,
+            status: "active",
+            plan_id: Some("hugerouter-local".to_string()),
+            checkout_url: None,
+            manage_url: None,
+            next_billing_at: None,
+        }),
+        route_token,
+    }
+}
+
+async fn issue_route_token(
+    state: &GatewayState,
+    request: HugeRouterRouteTokenIssueRequest,
+    context: &RequestContext,
+) -> Result<HugeRouterRouteTokenIssueResponse, GatewayError> {
+    let validated_input = validate_route_token_issue_request(request, context)?;
+    let active_config = state.config_store.load().await.map_err(|error| {
+        GatewayError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            normalized_error(
+                "route_not_available",
+                format!("active configuration is unavailable: {error}"),
+                context,
+                true,
+            ),
+            context,
+        )
+    })?;
+    let validated = ValidatedRouteTokenIssueRequest {
+        env_key: validated_input.env_key,
+        scopes: validated_input.scopes,
+        ttl_seconds: validated_input.ttl_seconds,
+        tenant_id: active_config.config_snapshot.tenant_id.as_str().to_string(),
+        project_id: validated_input.project_id.or_else(|| {
+            Some(
+                active_config
+                    .config_snapshot
+                    .project_id
+                    .as_str()
+                    .to_string(),
+            )
+        }),
+    };
+    state
+        .route_token_store
+        .issue(validated)
+        .await
+        .map_err(|message| {
+            GatewayError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                normalized_error("route_token_issue_failed", message, context, false),
+                context,
+            )
+        })
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_route_token_issue_request(
+    request: HugeRouterRouteTokenIssueRequest,
+    context: &RequestContext,
+) -> Result<ValidatedRouteTokenIssueInput, GatewayError> {
+    let env_key = request
+        .env_key
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_ROUTE_TOKEN_ENV_KEY.to_string());
+    if !is_valid_env_key(&env_key) {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            normalized_error(
+                "request_validation_failed",
+                "envKey must be an uppercase environment variable name".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    let ttl_seconds = request
+        .ttl_seconds
+        .unwrap_or(DEFAULT_ROUTE_TOKEN_TTL_SECONDS);
+    if ttl_seconds == 0 || ttl_seconds > MAX_ROUTE_TOKEN_TTL_SECONDS {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            normalized_error(
+                "request_validation_failed",
+                format!("ttlSeconds must be between 1 and {MAX_ROUTE_TOKEN_TTL_SECONDS}"),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    let mut scopes = request.scopes.unwrap_or_else(default_route_token_scopes);
+    scopes.sort();
+    scopes.dedup();
+    if scopes.is_empty() || scopes.iter().any(|scope| scope.trim().is_empty()) {
+        return Err(GatewayError::new(
+            StatusCode::BAD_REQUEST,
+            normalized_error(
+                "request_validation_failed",
+                "scopes must contain at least one non-empty scope".to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    Ok(ValidatedRouteTokenIssueInput {
+        env_key,
+        scopes,
+        ttl_seconds,
+        project_id: request.project_id,
+    })
+}
+
+fn default_route_token_scopes() -> Vec<String> {
+    vec![
+        REQUIRED_CODEX_ROUTE_SCOPE.to_string(),
+        PROVIDER_HUGEROUTER_COMMERCIAL_SCOPE.to_string(),
+    ]
+}
+
+fn is_valid_env_key(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_uppercase() || first == '_')
+        && chars.all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+}
+
+fn unix_timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
+fn random_route_token() -> Result<String, String> {
+    let mut token_bytes = [0_u8; 32];
+    File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut token_bytes))
+        .map_err(|error| format!("failed to read route token entropy: {error}"))?;
+    Ok(format!("{ROUTE_TOKEN_PREFIX}{}", hex_encode(&token_bytes)))
+}
+
+fn route_token_hash(token: &str) -> String {
+    format!("sha256:{}", hex_sha256(token.as_bytes()))
+}
+
+fn token_last_four(token: &str) -> String {
+    let mut chars = token.chars().rev().take(4).collect::<Vec<_>>();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
+fn route_token_id(token_hash: &str) -> String {
+    let suffix = token_hash
+        .strip_prefix("sha256:")
+        .unwrap_or(token_hash)
+        .chars()
+        .take(16)
+        .collect::<String>();
+    format!("{ROUTE_TOKEN_ID_PREFIX}{suffix}")
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    hex_encode(&digest)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
+}
+
+#[async_trait]
+impl RouteTokenStore for InMemoryRouteTokenStore {
+    async fn issue(
+        &self,
+        request: ValidatedRouteTokenIssueRequest,
+    ) -> Result<HugeRouterRouteTokenIssueResponse, String> {
+        let token = random_route_token()?;
+        let token_hash = route_token_hash(&token);
+        let now = unix_timestamp_millis();
+        let expires_at = now.saturating_add(request.ttl_seconds.saturating_mul(1_000));
+        let summary = HugeRouterRouteTokenSummary {
+            token_id: Some(route_token_id(&token_hash)),
+            status: "active".to_string(),
+            env_key: request.env_key,
+            expires_at: Some(expires_at),
+            scopes: request.scopes.clone(),
+            last_issued_at: Some(now),
+            last_four: Some(token_last_four(&token)),
+        };
+        let record = RouteTokenRecord {
+            tenant_id: request.tenant_id,
+            project_id: request.project_id,
+            summary: summary.clone(),
+        };
+        self.records.lock().await.insert(token_hash.clone(), record);
+        *self.latest_token_hash.lock().await = Some(token_hash);
+
+        Ok(HugeRouterRouteTokenIssueResponse { token, summary })
+    }
+
+    async fn resolve(&self, token: &str) -> Result<GatewayApiKeyScope, String> {
+        let token_hash = route_token_hash(token);
+        let record = self
+            .records
+            .lock()
+            .await
+            .get(&token_hash)
+            .cloned()
+            .ok_or_else(|| "route token is invalid".to_string())?;
+        if record.summary.status != "active" {
+            return Err("route token is not active".to_string());
+        }
+        if let Some(expires_at) = record.summary.expires_at
+            && expires_at <= unix_timestamp_millis()
+        {
+            return Err("route token is expired".to_string());
+        }
+
+        Ok(GatewayApiKeyScope {
+            credential_id: format!(
+                "{ROUTE_TOKEN_CREDENTIAL_SCOPE_PREFIX}{}",
+                record
+                    .summary
+                    .token_id
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .trim_start_matches(ROUTE_TOKEN_ID_PREFIX)
+            ),
+            tenant_id: record.tenant_id,
+            project_id: record.project_id,
+            status: "active".to_string(),
+            scopes: record.summary.scopes,
+        })
+    }
+
+    async fn latest_summary(&self) -> Option<HugeRouterRouteTokenSummary> {
+        let token_hash = self.latest_token_hash.lock().await.clone()?;
+        self.records.lock().await.get(&token_hash).map(|record| {
+            let mut summary = record.summary.clone();
+            if summary.status == "active"
+                && summary
+                    .expires_at
+                    .is_some_and(|expires_at| expires_at <= unix_timestamp_millis())
+            {
+                summary.status = "revoked".to_string();
+            }
+            summary
+        })
+    }
 }
 
 impl ControlPlaneConfigStore {
@@ -2785,6 +3362,7 @@ impl ControlPlaneApiKeyStore {
                 tenant_id: payload.tenant_id,
                 project_id: payload.project_id,
                 status: payload.status,
+                scopes: payload.scopes,
             })
             .map_err(|error| format!("failed to decode API key resolution payload: {error}"))
     }

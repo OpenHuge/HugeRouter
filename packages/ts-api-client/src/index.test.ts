@@ -269,6 +269,7 @@ void test('control-plane auth session endpoint is requested and parsed', async (
     'https://control-plane.example.test/api/control-plane/auth/session'
   )
   assert.equal(requests[0]?.init?.method, 'GET')
+  assert.equal(requests[0]?.init?.credentials, 'include')
   assert.equal(response?.session?.sessionId, 'sess_123')
   assert.equal(response?.session?.memberships[0]?.tenant.id, 'tenant_123')
 })
@@ -338,6 +339,29 @@ void test('startOAuthLogin uses provider-specific start endpoints', async () => 
   assert.equal(requests[0]?.url, '/api/control-plane/auth/oauth/github/start')
   assert.equal(requests[0]?.init?.method, 'POST')
   assert.equal(response.provider, 'github')
+})
+
+void test('logout posts with credentials and parses signed-out outcome', async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const client = createControlPlaneClient({
+    baseUrl: '',
+    fetch: (url, init) => {
+      requests.push({ url: resolveRequestUrl(url), init })
+
+      return Promise.resolve(
+        Response.json({
+          outcome: 'signed_out'
+        })
+      )
+    }
+  })
+
+  const response = await client.logout()
+
+  assert.equal(requests[0]?.url, '/api/control-plane/auth/logout')
+  assert.equal(requests[0]?.init?.method, 'POST')
+  assert.equal(requests[0]?.init?.credentials, 'include')
+  assert.equal(response.outcome, 'signed_out')
 })
 
 void test('completeOAuthLogin validates the response payload as a shared auth result', async () => {

@@ -2,10 +2,10 @@ use super::{
     ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
     ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
     GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ImageGenerationRequest,
-    InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext, ResponsesApiInputContent,
-    ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink, StaticBudgetProjectionStore,
-    StaticConfigStore, app_with_state, composition, evaluate_route, normalize_request,
-    normalize_responses_request,
+    InMemoryRouteTokenStore, InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext,
+    ResponsesApiInputContent, ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink,
+    StaticBudgetProjectionStore, StaticConfigStore, app_with_state, composition, evaluate_route,
+    normalize_request, normalize_responses_request,
 };
 use axum::{
     Json, Router,
@@ -285,6 +285,7 @@ impl StaticApiKeyScopeStore {
                 tenant_id: "tenant_acme".to_string(),
                 project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
+                scopes: Vec::new(),
             },
         }
     }
@@ -381,11 +382,33 @@ fn test_state_with_debug(
     Arc::new(AppState {
         config_store: Arc::new(StaticConfigStore::new(build_config(targets))),
         auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
         budget_store: Arc::new(StaticBudgetProjectionStore {
             response: ok_budget_projection(),
         }),
         adapter_registry: registry,
         debug_headers_enabled,
+        event_sink: Arc::new(RecordingRuntimeEventSink::default()),
+    })
+}
+
+fn test_state_with_route_token_store(
+    adapter: Arc<dyn ProviderAdapter>,
+    targets: Vec<ProviderTargetRuntime>,
+    route_token_store: Arc<dyn super::RouteTokenStore>,
+) -> GatewayState {
+    let mut registry = ProviderAdapterRegistry::new();
+    registry.register(adapter).unwrap();
+
+    Arc::new(AppState {
+        config_store: Arc::new(StaticConfigStore::new(build_config(targets))),
+        auth_store: Arc::new(StaticApiKeyScopeStore::matching_config()),
+        route_token_store,
+        budget_store: Arc::new(StaticBudgetProjectionStore {
+            response: ok_budget_projection(),
+        }),
+        adapter_registry: registry,
+        debug_headers_enabled: false,
         event_sink: Arc::new(RecordingRuntimeEventSink::default()),
     })
 }
@@ -430,6 +453,7 @@ async fn control_plane_api_key_resolution(
         tenant_id: "tenant_acme".to_string(),
         project_id: Some("proj_core".to_string()),
         status: "active".to_string(),
+        scopes: Vec::new(),
     }))
 }
 

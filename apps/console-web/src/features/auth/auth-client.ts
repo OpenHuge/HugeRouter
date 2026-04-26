@@ -140,6 +140,7 @@ function mapAuthResult(
     message: "HugeRouter session created successfully.",
     outcome: "authenticated",
     provider,
+    redirectTo: response.redirectTo,
     state: authenticatedState,
   };
 }

@@ -7,6 +7,8 @@ import {
   UiStack,
   UiDataTable,
   UiText,
+  UiSelect,
+  UiTextField,
 } from "@huge-router/ui-kit";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -20,7 +22,11 @@ import {
   getConsoleDataService,
   getControlPlaneActionErrorMessage,
 } from "../features/control-plane/service";
-import type { BillingExportJobView } from "../features/control-plane/types";
+import type {
+  BillingExportJobView,
+  WechatPaymentOrderView,
+  WechatPayPrepayResult,
+} from "../features/control-plane/types";
 import { ActionStatusNotice } from "../features/control-plane/workflow-ui";
 
 type BillingSearch = {
@@ -85,6 +91,18 @@ function BillingPage() {
   const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
   const [queueingExport, setQueueingExport] = useState(false);
   const [refreshingExports, setRefreshingExports] = useState(false);
+  const [paymentAmountYuan, setPaymentAmountYuan] = useState("100");
+  const [paymentChannel, setPaymentChannel] = useState<"native" | "jsapi">(
+    "native",
+  );
+  const [payerOpenid, setPayerOpenid] = useState("");
+  const [wechatPayment, setWechatPayment] =
+    useState<WechatPayPrepayResult | null>(null);
+  const [wechatOrder, setWechatOrder] = useState<WechatPaymentOrderView | null>(
+    null,
+  );
+  const [creatingWechatPayment, setCreatingWechatPayment] = useState(false);
+  const [checkingWechatPayment, setCheckingWechatPayment] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
 
@@ -115,6 +133,18 @@ function BillingPage() {
   }, [data.exportJobs]);
 
   const effectiveExportJobs = exportJobs;
+
+  useEffect(() => {
+    if (!wechatPayment || wechatOrder?.status === "paid") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshWechatPaymentStatus(wechatPayment.outTradeNo, true);
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [wechatPayment, wechatOrder?.status]);
 
   async function refreshBillingExports() {
     setRefreshingExports(true);
@@ -167,6 +197,75 @@ function BillingPage() {
     } finally {
       setDownloadingJobId(null);
     }
+  }
+
+  async function onCreateWechatPayment() {
+    const amountTotal = Math.round(Number(paymentAmountYuan) * 100);
+
+    if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+      setStatusError("Enter a valid recharge amount.");
+      setStatusSuccess(null);
+      return;
+    }
+
+    setCreatingWechatPayment(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+
+    try {
+      const payment = await getConsoleDataService().createWechatPayPrepay({
+        amountTotal,
+        channel: paymentChannel,
+        description: "HugeRouter balance recharge",
+        payerOpenid:
+          paymentChannel === "jsapi" && payerOpenid.trim().length > 0
+            ? payerOpenid.trim()
+            : undefined,
+        projectId: search.projectId,
+      });
+      setWechatPayment(payment);
+      setWechatOrder(null);
+      setStatusSuccess(`Created WeChat Pay order ${payment.outTradeNo}.`);
+      await refreshWechatPaymentStatus(payment.outTradeNo, false);
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "wechat-pay-prepay"),
+      );
+    } finally {
+      setCreatingWechatPayment(false);
+    }
+  }
+
+  async function refreshWechatPaymentStatus(
+    outTradeNo: string,
+    refresh: boolean,
+  ) {
+    setCheckingWechatPayment(true);
+    try {
+      const order = await getConsoleDataService().getWechatPaymentOrder(
+        outTradeNo,
+        refresh,
+      );
+      setWechatOrder(order);
+      if (order.status === "paid") {
+        setStatusSuccess(`Payment received for ${order.outTradeNo}.`);
+      }
+    } catch (error) {
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "wechat-pay-prepay"),
+      );
+    } finally {
+      setCheckingWechatPayment(false);
+    }
+  }
+
+  async function copyWechatCodeUrl() {
+    if (!wechatPayment?.codeUrl) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(wechatPayment.codeUrl);
+    setStatusSuccess("Copied WeChat Pay code URL.");
   }
 
   return (
@@ -284,6 +383,109 @@ function BillingPage() {
               Refresh jobs
             </UiButton>
           </UiInline>
+        </UiStack>
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>WeChat Pay recharge</UiText>
+          <UiChip color="green" variant="light">
+            API v3
+          </UiChip>
+        </UiInline>
+        <UiStack gap="sm">
+          <UiInline align="flex-end" grow>
+            <UiTextField
+              label="Amount (CNY)"
+              onChange={(event) =>
+                setPaymentAmountYuan(event.currentTarget.value)
+              }
+              placeholder="100"
+              value={paymentAmountYuan}
+            />
+            <UiSelect
+              data={[
+                { label: "Native QR", value: "native" },
+                { label: "JSAPI", value: "jsapi" },
+              ]}
+              label="Channel"
+              onChange={(value) =>
+                setPaymentChannel(value === "jsapi" ? "jsapi" : "native")
+              }
+              value={paymentChannel}
+            />
+            <UiButton
+              loading={creatingWechatPayment}
+              onClick={() => void onCreateWechatPayment()}
+            >
+              Create order
+            </UiButton>
+          </UiInline>
+          {paymentChannel === "jsapi" ? (
+            <UiTextField
+              label="Payer openid"
+              onChange={(event) => setPayerOpenid(event.currentTarget.value)}
+              placeholder="openid for the current WeChat user"
+              value={payerOpenid}
+            />
+          ) : null}
+          {wechatPayment ? (
+            <UiStack gap="xs">
+              <UiInline justify="space-between">
+                <UiText fw={700}>{wechatPayment.outTradeNo}</UiText>
+                <UiChip
+                  color={wechatOrder?.status === "paid" ? "teal" : "yellow"}
+                  variant="light"
+                >
+                  {wechatOrder?.status ?? "pending"}
+                </UiChip>
+              </UiInline>
+              {wechatPayment.codeQrSvg ? (
+                <div
+                  aria-label="WeChat Pay QR code"
+                  dangerouslySetInnerHTML={{ __html: wechatPayment.codeQrSvg }}
+                />
+              ) : null}
+              {wechatPayment.codeUrl ? (
+                <UiText>{wechatPayment.codeUrl}</UiText>
+              ) : null}
+              {wechatPayment.jsapiParams ? (
+                <UiText>{wechatPayment.jsapiParams.package}</UiText>
+              ) : null}
+              <UiInline>
+                {wechatPayment.codeUrl ? (
+                  <UiButton
+                    onClick={() => void copyWechatCodeUrl()}
+                    size="xs"
+                    variant="light"
+                  >
+                    Copy URL
+                  </UiButton>
+                ) : null}
+                <UiButton
+                  loading={checkingWechatPayment}
+                  onClick={() =>
+                    void refreshWechatPaymentStatus(
+                      wechatPayment.outTradeNo,
+                      true,
+                    )
+                  }
+                  size="xs"
+                  variant="subtle"
+                >
+                  Check status
+                </UiButton>
+              </UiInline>
+              {wechatOrder?.paidAt ? (
+                <UiText c="dimmed" size="sm">
+                  Paid at {wechatOrder.paidAt}
+                </UiText>
+              ) : (
+                <UiText c="dimmed" size="sm">
+                  Expires at {wechatOrder?.expiresAt ?? "pending confirmation"}
+                </UiText>
+              )}
+            </UiStack>
+          ) : null}
         </UiStack>
       </UiSurface>
       <UiSurface padding="lg" radius="md" shadow="sm">
