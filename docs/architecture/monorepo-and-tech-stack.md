@@ -111,8 +111,8 @@ ai-traffic-os/
 |   |-- ts-api-client/               # Generated TypeScript client for control plane API
 |   |-- ts-shared-schema/            # Shared Zod/TypeScript schemas for frontend
 |   |-- typescript-config/           # Shared tsconfig presets
-|   |-- ui-kit/                      # Mantine-wrapped shared React component library
-|   |-- design-tokens/               # Mantine theme, semantic tokens, typography, spacing
+|   |-- ui-kit/                      # HeroUI-wrapped shared React component library
+|   |-- design-tokens/               # HeroUI theme, semantic tokens, typography, spacing
 |   |-- docs-content/                # Markdown/MDX docs content
 |   `-- test-utils/                  # Frontend testing helpers
 |-- infra/
@@ -173,18 +173,18 @@ ai-traffic-os/
 - **Tables:** TanStack Table
 - **Forms:** TanStack Form + Zod validation for the primary path
 - **Schema validation:** Zod
-- **Component foundation:** Mantine
-- **App styling:** Mantine theme + Styles API, with CSS Modules for app-specific layout and feature styling
+- **Component foundation:** HeroUI
+- **App styling:** HeroUI theme + Styles API, with CSS Modules for app-specific layout and feature styling
 - **State management:** local-first plus TanStack Query; avoid unnecessary global stores
 - **Charts:** Recharts or similar lightweight charting
-- **Notifications / modals:** Mantine notifications and modals
+- **Notifications / overlays:** HeroUI toast/feedback surfaces and project-owned overlay wrappers
 - **Testing:** Vitest + Playwright
 
 ### 7.3 Frontend Package Responsibilities
 
 - `apps/console-web` owns route composition, loaders, mutations, feature modules, and auth-aware layouts
-- `packages/design-tokens` owns Mantine theme creation, semantic colors, spacing, radius, shadows, and typography decisions
-- `packages/ui-kit` owns reusable Mantine-based primitives and higher-level console components
+- `packages/design-tokens` owns HeroUI theme creation, semantic colors, spacing, radius, shadows, and typography decisions
+- `packages/ui-kit` owns reusable HeroUI-based primitives and higher-level console components
 - `apps/storybook` is the review surface for `packages/ui-kit` and shell primitives before feature integration
 
 ### 7.4 Developer Tooling
@@ -212,13 +212,13 @@ As of **April 20, 2026**, the repository frontend baseline is:
 
 - Node.js `24.x` LTS for local development and CI
 - React `19.2+`
-- Mantine `9.0.x`
+- HeroUI `9.0.x`
 - TanStack Start `1.x`
 
 Implementation policy:
 
 - keep TanStack Start, TanStack Router, and closely coupled packages pinned to exact versions in the repository until upgrade cadence, compatibility expectations, and lockfile review discipline are proven in CI
-- pin Mantine to the `9.0.x` minor line during initial implementation and upgrade intentionally with changelog review
+- pin HeroUI to the `9.0.x` minor line during initial implementation and upgrade intentionally with changelog review
 - commit `packageManager` in the root `package.json` and use Corepack in CI
 - treat framework major upgrades as explicit architecture changes, not routine dependency bumps
 

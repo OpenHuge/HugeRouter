@@ -16,12 +16,14 @@ This folder provides both a human-readable and a machine-readable view of the ro
 ## How to use
 
 For a human assignment flow:
+
 1. read the phase file
 2. select tasks with no unmet dependencies
 3. confirm touched paths do not overlap with other active tasks
 4. assign work using the handoff template in `../04-agent-operating-model.md`
 
 For an automated orchestration flow:
+
 1. parse `task-catalog.yaml`
 2. filter tasks by `phase`, `stream`, or `deps`
 3. assign tasks to agents with matching capability and free path ownership

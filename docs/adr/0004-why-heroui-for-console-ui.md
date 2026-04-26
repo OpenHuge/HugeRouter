@@ -1,4 +1,4 @@
-# ADR 0004: Why Mantine for Console UI
+# ADR 0004: Why HeroUI for Console UI
 
 [Back to ADR Index](README.md)
 
@@ -20,14 +20,14 @@ The previous draft architecture left the frontend styling layer open enough that
 
 ## Decision
 
-Use `Mantine` as the default frontend component foundation for the console.
+Use `HeroUI` as the default frontend component foundation for the console.
 
 We will standardize on:
 
-- Mantine for layout, inputs, overlays, notifications, and general admin UI primitives
+- HeroUI for layout, inputs, overlays, notifications, and general admin UI primitives
 - `packages/design-tokens` for project theme creation and semantic tokens
-- `packages/ui-kit` for shared Mantine-based wrappers and composite console components
-- TanStack Form + Zod as the primary typed form stack, rendered through Mantine components
+- `packages/ui-kit` for shared HeroUI-based wrappers and composite console components
+- TanStack Form + Zod as the primary typed form stack, rendered through HeroUI components
 
 ## Alternatives Considered
 
@@ -41,7 +41,7 @@ Headless primitives help with accessibility, but they still require a substantia
 
 ### Other component libraries
 
-Other libraries could work, but Mantine provides a strong balance of admin-console ergonomics, theming, layout primitives, and practical developer experience for the current team and scope.
+Other libraries could work, but HeroUI provides a strong balance of admin-console ergonomics, theming, layout primitives, and practical developer experience for the current team and scope.
 
 ## Consequences
 
@@ -54,13 +54,13 @@ Positive:
 
 Tradeoffs:
 
-- design language stays somewhat constrained by Mantine defaults unless we invest in stronger theming
-- wrapper discipline is required so `packages/ui-kit` does not become a leaky duplicate of upstream Mantine
+- design language stays somewhat constrained by HeroUI defaults unless we invest in stronger theming
+- wrapper discipline is required so `packages/ui-kit` does not become a leaky duplicate of upstream HeroUI
 - upstream library upgrades need compatibility checks for shared wrappers and theme tokens
 
 ## Follow-up Actions
 
 - define the initial theme in `packages/design-tokens`
 - build shell, feedback, and form primitives in `packages/ui-kit`
-- wire the root app provider stack around `MantineProvider`, notifications, and modals
+- wire the root app provider stack around `UiProvider` and HeroUI feedback surfaces
 - add component-library verification to CI and Storybook workflows

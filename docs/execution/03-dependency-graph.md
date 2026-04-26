@@ -14,13 +14,17 @@ The true critical path is shorter than the full task list. The program should op
 ## Dependency guidance
 
 ### Hard dependencies
+
 Use a hard dependency when:
+
 - a task cannot compile without another task's artifacts
 - a task needs a stable interface, schema, or migration before implementation
 - a task depends on seeded data or a running integration environment
 
 ### Soft dependencies
+
 Use a soft dependency when:
+
 - another task improves completeness but is not required for the first implementation
 - API/UI work can proceed against mocks or generated schemas
 - the feature can ship in a degraded or hidden state

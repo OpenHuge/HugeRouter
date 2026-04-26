@@ -1,18 +1,18 @@
 import {
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  FileInput,
-  Group,
-  NumberInput,
-  Select,
-  Switch,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiCheckbox,
+  UiFileField,
+  UiInline,
+  UiNumberField,
+  UiSelect,
+  UiStack,
+  UiSwitch,
+  UiDataTable,
+  UiText,
+  UiTextField,
+} from "@huge-router/ui-kit";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
@@ -287,7 +287,10 @@ function validateProviderForm(form: ProviderFormState) {
     errors.endpointBaseUrl = "Use an HTTPS endpoint URL.";
   }
 
-  if (form.budgetPolicyId.trim() && !/^budgetpol_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.budgetPolicyId)) {
+  if (
+    form.budgetPolicyId.trim() &&
+    !/^budgetpol_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.budgetPolicyId)
+  ) {
     errors.budgetPolicyId = "Budget policy ids must start with budgetpol_.";
   }
 
@@ -333,24 +336,26 @@ export const Route = createFileRoute("/app/providers")({
 function ProvidersPage() {
   const result = Route.useLoaderData();
   const router = useRouter();
-  const [editingProvider, setEditingProvider] = useState<ProviderResource | null>(
-    null,
-  );
+  const [editingProvider, setEditingProvider] =
+    useState<ProviderResource | null>(null);
   const [formErrors, setFormErrors] = useState<ProviderFormErrors>({});
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [formState, setFormState] = useState<ProviderFormState>(
     createEmptyProviderForm(),
   );
-  const [codexAuthUpload, setCodexAuthUpload] =
-    useState<CodexAuthUploadState>(createEmptyCodexAuthUpload());
+  const [codexAuthUpload, setCodexAuthUpload] = useState<CodexAuthUploadState>(
+    createEmptyCodexAuthUpload(),
+  );
   const [codexAuthUploadErrors, setCodexAuthUploadErrors] =
     useState<CodexAuthUploadErrors>({});
   const [sharingLeaseForm, setSharingLeaseForm] =
     useState<SharingLeaseFormState>(createEmptySharingLeaseForm());
-  const [carpoolForm, setCarpoolForm] =
-    useState<CarpoolFormState>(createEmptyCarpoolForm());
-  const [sharingFormErrors, setSharingFormErrors] =
-    useState<SharingFormErrors>({});
+  const [carpoolForm, setCarpoolForm] = useState<CarpoolFormState>(
+    createEmptyCarpoolForm(),
+  );
+  const [sharingFormErrors, setSharingFormErrors] = useState<SharingFormErrors>(
+    {},
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCodexAuthUploading, setIsCodexAuthUploading] = useState(false);
   const [isSharingSubmitting, setIsSharingSubmitting] = useState(false);
@@ -366,7 +371,7 @@ function ProvidersPage() {
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Inspect provider resources, health, routing scope, and quarantine state."
           title="Providers"
@@ -377,7 +382,7 @@ function ProvidersPage() {
           description="Provider inventory could not be loaded from the control-plane service."
           title="Providers unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -576,7 +581,8 @@ function ProvidersPage() {
         codexAuthUpload.providerResourceId.trim(),
       )
     ) {
-      errors.providerResourceId = "Provider resource ids must start with prvrsrc_.";
+      errors.providerResourceId =
+        "Provider resource ids must start with prvrsrc_.";
     }
     if (!/^https:\/\/.+/.test(codexAuthUpload.endpointBaseUrl.trim())) {
       errors.endpointBaseUrl = "Use an HTTPS reverse proxy endpoint.";
@@ -599,7 +605,8 @@ function ProvidersPage() {
         displayName: codexAuthUpload.displayName.trim(),
         endpointBaseUrl: codexAuthUpload.endpointBaseUrl.trim(),
         projectId: codexAuthUpload.projectId || undefined,
-        providerResourceId: codexAuthUpload.providerResourceId.trim() || undefined,
+        providerResourceId:
+          codexAuthUpload.providerResourceId.trim() || undefined,
         region: codexAuthUpload.region.trim(),
       });
       setCodexAuthUpload(createEmptyCodexAuthUpload());
@@ -739,7 +746,7 @@ function ProvidersPage() {
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Inspect provider resources, health, routing scope, and quarantine state."
         title="Providers"
@@ -752,33 +759,29 @@ function ProvidersPage() {
         }}
         success={statusSuccess}
       />
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>
             {formMode === "edit"
               ? "Edit provider resource"
               : "Create provider resource"}
-          </Text>
-          <Group>
+          </UiText>
+          <UiInline>
             {formMode ? (
-              <Button
-                onClick={resetForm}
-                size="sm"
-                variant="subtle"
-              >
+              <UiButton onClick={resetForm} size="sm" variant="subtle">
                 Cancel
-              </Button>
+              </UiButton>
             ) : null}
             {!formMode ? (
-              <Button onClick={openCreateForm} size="sm">
+              <UiButton onClick={openCreateForm} size="sm">
                 Create provider
-              </Button>
+              </UiButton>
             ) : null}
-          </Group>
-        </Group>
+          </UiInline>
+        </UiInline>
         {formMode ? (
-          <Stack>
-            <TextInput
+          <UiStack>
+            <UiTextField
               label="Provider resource id"
               onChange={(event) =>
                 updateField("providerResourceId", event.currentTarget.value)
@@ -787,14 +790,16 @@ function ProvidersPage() {
               value={formState.providerResourceId}
             />
             <FieldErrorText error={formErrors.providerResourceId} />
-            <Group grow>
-              <TextInput
+            <UiInline grow>
+              <UiTextField
                 label="Display name"
-                onChange={(event) => updateField("name", event.currentTarget.value)}
+                onChange={(event) =>
+                  updateField("name", event.currentTarget.value)
+                }
                 placeholder="OpenAI Primary"
                 value={formState.name}
               />
-              <TextInput
+              <UiTextField
                 label="Provider id"
                 onChange={(event) =>
                   updateField("providerId", event.currentTarget.value)
@@ -802,27 +807,29 @@ function ProvidersPage() {
                 placeholder="openai"
                 value={formState.providerId}
               />
-            </Group>
-            <Group grow>
+            </UiInline>
+            <UiInline grow>
               <FieldErrorText error={formErrors.name} />
               <FieldErrorText error={formErrors.providerId} />
-            </Group>
-            <Group grow>
-              <Select
+            </UiInline>
+            <UiInline grow>
+              <UiSelect
                 data={projectOptions}
                 label="Project scope"
                 onChange={(value) => updateField("projectId", value ?? "")}
                 value={formState.projectId}
               />
-              <TextInput
+              <UiTextField
                 label="Region"
-                onChange={(event) => updateField("region", event.currentTarget.value)}
+                onChange={(event) =>
+                  updateField("region", event.currentTarget.value)
+                }
                 placeholder="us-east-1"
                 value={formState.region}
               />
-            </Group>
+            </UiInline>
             <FieldErrorText error={formErrors.region} />
-            <TextInput
+            <UiTextField
               label="Endpoint URL"
               onChange={(event) =>
                 updateField("endpointBaseUrl", event.currentTarget.value)
@@ -831,79 +838,59 @@ function ProvidersPage() {
               value={formState.endpointBaseUrl}
             />
             <FieldErrorText error={formErrors.endpointBaseUrl} />
-            <Group grow>
-              <Select
+            <UiInline grow>
+              <UiSelect
                 data={provenanceOptions}
                 label="Provenance"
                 onChange={(value) =>
-                  updateField(
-                    "provenanceClass",
-                    value ?? "official_api",
-                  )
+                  updateField("provenanceClass", value ?? "official_api")
                 }
                 value={formState.provenanceClass}
               />
-              <Select
+              <UiSelect
                 data={credentialOwnerOptions}
                 label="Credential owner"
                 onChange={(value) =>
-                  updateField(
-                    "credentialOwnerType",
-                    value ?? "platform",
-                  )
+                  updateField("credentialOwnerType", value ?? "platform")
                 }
                 value={formState.credentialOwnerType}
               />
-            </Group>
-            <Group grow>
-              <Select
+            </UiInline>
+            <UiInline grow>
+              <UiSelect
                 data={deploymentScopeOptions}
                 label="Deployment scope"
                 onChange={(value) =>
-                  updateField(
-                    "deploymentScope",
-                    value ?? "shared",
-                  )
+                  updateField("deploymentScope", value ?? "shared")
                 }
                 value={formState.deploymentScope}
               />
-              <Select
+              <UiSelect
                 data={authKindOptions}
                 label="Auth kind"
                 onChange={(value) =>
-                  updateField(
-                    "authKind",
-                    value ?? "api_key",
-                  )
+                  updateField("authKind", value ?? "api_key")
                 }
                 value={formState.authKind}
               />
-            </Group>
-            <Group grow>
-              <Select
+            </UiInline>
+            <UiInline grow>
+              <UiSelect
                 data={providerHealthOptions}
                 label="Health state"
                 onChange={(value) =>
-                  updateField(
-                    "healthState",
-                    value ?? "healthy",
-                  )
+                  updateField("healthState", value ?? "healthy")
                 }
                 value={formState.healthState}
               />
-              <Select
+              <UiSelect
                 data={providerStatusOptions}
                 label="Resource status"
-                onChange={(value) =>
-                  updateField(
-                    "status",
-                    value ?? "active",
-                  )
-                }
+                onChange={(value) => updateField("status", value ?? "active")}
                 value={formState.status}
               />
-            </Group>
-            <TextInput
+            </UiInline>
+            <UiTextField
               label="Budget policy id"
               onChange={(event) =>
                 updateField("budgetPolicyId", event.currentTarget.value)
@@ -912,19 +899,22 @@ function ProvidersPage() {
               value={formState.budgetPolicyId}
             />
             <FieldErrorText error={formErrors.budgetPolicyId} />
-            <Stack gap="xs">
-              <Text fw={600} size="sm">
+            <UiStack gap="xs">
+              <UiText fw={600} size="sm">
                 Capabilities
-              </Text>
-              <Group>
-                <Checkbox
+              </UiText>
+              <UiInline>
+                <UiCheckbox
                   checked={formState.supportsStreaming}
                   label="streaming"
                   onChange={(event) =>
-                    updateField("supportsStreaming", event.currentTarget.checked)
+                    updateField(
+                      "supportsStreaming",
+                      event.currentTarget.checked,
+                    )
                   }
                 />
-                <Checkbox
+                <UiCheckbox
                   checked={formState.supportsToolCalling}
                   label="tool_calling"
                   onChange={(event) =>
@@ -934,40 +924,37 @@ function ProvidersPage() {
                     )
                   }
                 />
-                <Checkbox
+                <UiCheckbox
                   checked={formState.supportsJsonMode}
                   label="json_mode"
                   onChange={(event) =>
                     updateField("supportsJsonMode", event.currentTarget.checked)
                   }
                 />
-              </Group>
-            </Stack>
-            <Group justify="flex-end">
-              <Button
-                loading={isSubmitting}
-                onClick={() => void onSubmit()}
-              >
+              </UiInline>
+            </UiStack>
+            <UiInline justify="flex-end">
+              <UiButton loading={isSubmitting} onClick={() => void onSubmit()}>
                 {formMode === "edit" ? "Save provider" : "Create provider"}
-              </Button>
-            </Group>
-          </Stack>
+              </UiButton>
+            </UiInline>
+          </UiStack>
         ) : (
-          <Text c="dimmed" size="sm">
+          <UiText c="dimmed" size="sm">
             Create a new provider resource, or edit and disable an existing one.
-          </Text>
+          </UiText>
         )}
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Codex auth account pool</Text>
-          <Badge color="grape" variant="light">
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Codex auth account pool</UiText>
+          <UiChip color="grape" variant="light">
             encrypted upload
-          </Badge>
-        </Group>
-        <Stack>
-          <Group grow>
-            <TextInput
+          </UiChip>
+        </UiInline>
+        <UiStack>
+          <UiInline grow>
+            <UiTextField
               label="Account display name"
               onChange={(event) =>
                 updateCodexAuthField("displayName", event.currentTarget.value)
@@ -975,7 +962,7 @@ function ProvidersPage() {
               placeholder="Team Codex account"
               value={codexAuthUpload.displayName}
             />
-            <Select
+            <UiSelect
               data={projectOptions}
               label="Project scope"
               onChange={(value) =>
@@ -983,13 +970,13 @@ function ProvidersPage() {
               }
               value={codexAuthUpload.projectId}
             />
-          </Group>
-          <Group grow>
+          </UiInline>
+          <UiInline grow>
             <FieldErrorText error={codexAuthUploadErrors.displayName} />
             <FieldErrorText error={codexAuthUploadErrors.projectId} />
-          </Group>
-          <Group grow>
-            <TextInput
+          </UiInline>
+          <UiInline grow>
+            <UiTextField
               label="Pool provider resource id"
               onChange={(event) =>
                 updateCodexAuthField(
@@ -1000,7 +987,7 @@ function ProvidersPage() {
               placeholder="Leave blank to create one"
               value={codexAuthUpload.providerResourceId}
             />
-            <TextInput
+            <UiTextField
               label="Pool region"
               onChange={(event) =>
                 updateCodexAuthField("region", event.currentTarget.value)
@@ -1008,12 +995,12 @@ function ProvidersPage() {
               placeholder="global"
               value={codexAuthUpload.region}
             />
-          </Group>
-          <Group grow>
+          </UiInline>
+          <UiInline grow>
             <FieldErrorText error={codexAuthUploadErrors.providerResourceId} />
             <FieldErrorText error={codexAuthUploadErrors.region} />
-          </Group>
-          <TextInput
+          </UiInline>
+          <UiTextField
             label="Reverse proxy endpoint"
             onChange={(event) =>
               updateCodexAuthField("endpointBaseUrl", event.currentTarget.value)
@@ -1022,7 +1009,7 @@ function ProvidersPage() {
             value={codexAuthUpload.endpointBaseUrl}
           />
           <FieldErrorText error={codexAuthUploadErrors.endpointBaseUrl} />
-          <FileInput
+          <UiFileField
             accept="application/json,.json"
             clearable
             label="Codex auth.json"
@@ -1031,26 +1018,26 @@ function ProvidersPage() {
             value={codexAuthUpload.file}
           />
           <FieldErrorText error={codexAuthUploadErrors.file} />
-          <Group justify="flex-end">
-            <Button
+          <UiInline justify="flex-end">
+            <UiButton
               loading={isCodexAuthUploading}
               onClick={() => void onUploadCodexAuth()}
             >
               Add to pool
-            </Button>
-          </Group>
-        </Stack>
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Pools sharing</Text>
-          <Badge color="teal" variant="light">
+            </UiButton>
+          </UiInline>
+        </UiStack>
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Pools sharing</UiText>
+          <UiChip color="teal" variant="light">
             runtime-owned
-          </Badge>
-        </Group>
-        <Stack>
-          <Group align="flex-end" grow>
-            <TextInput
+          </UiChip>
+        </UiInline>
+        <UiStack>
+          <UiInline align="flex-end" grow>
+            <UiTextField
               label="Lease id"
               onChange={(event) =>
                 updateSharingLeaseField("leaseId", event.currentTarget.value)
@@ -1058,7 +1045,7 @@ function ProvidersPage() {
               placeholder="lease_codex_acme_support"
               value={sharingLeaseForm.leaseId}
             />
-            <TextInput
+            <UiTextField
               label="Borrower workspace"
               onChange={(event) =>
                 updateSharingLeaseField(
@@ -1068,7 +1055,7 @@ function ProvidersPage() {
               }
               value={sharingLeaseForm.borrowerWorkspaceId}
             />
-            <TextInput
+            <UiTextField
               label="Pool id"
               onChange={(event) =>
                 updateSharingLeaseField("poolId", event.currentTarget.value)
@@ -1076,19 +1063,15 @@ function ProvidersPage() {
               placeholder="prvrsrc_codex_team"
               value={sharingLeaseForm.poolId}
             />
-          </Group>
-          <Group grow>
+          </UiInline>
+          <UiInline grow>
             <FieldErrorText error={sharingFormErrors.leaseId} />
             <FieldErrorText error={sharingFormErrors.borrowerWorkspaceId} />
             <FieldErrorText error={sharingFormErrors.poolId} />
-          </Group>
-          <Group align="flex-end" grow>
-            <Select
-              data={[
-                { label: "codex", value: "codex" },
-                { label: "gemini", value: "gemini" },
-                { label: "claude_code", value: "claude_code" },
-              ]}
+          </UiInline>
+          <UiInline align="flex-end" grow>
+            <UiSelect
+              data={["codex", "gemini", "claude_code"]}
               label="Provider"
               onChange={(value) =>
                 updateSharingLeaseField(
@@ -1098,12 +1081,8 @@ function ProvidersPage() {
               }
               value={sharingLeaseForm.provider}
             />
-            <Select
-              data={[
-                { label: "active", value: "active" },
-                { label: "paused", value: "paused" },
-                { label: "pending", value: "pending" },
-              ]}
+            <UiSelect
+              data={["active", "paused", "pending"]}
               label="Lease status"
               onChange={(value) =>
                 updateSharingLeaseField(
@@ -1113,12 +1092,8 @@ function ProvidersPage() {
               }
               value={sharingLeaseForm.status}
             />
-            <Select
-              data={[
-                { label: "fair_share", value: "fair_share" },
-                { label: "owner_priority", value: "owner_priority" },
-                { label: "borrower_priority", value: "borrower_priority" },
-              ]}
+            <UiSelect
+              data={["fair_share", "owner_priority", "borrower_priority"]}
               label="Policy"
               onChange={(value) =>
                 updateSharingLeaseField(
@@ -1128,20 +1103,17 @@ function ProvidersPage() {
               }
               value={sharingLeaseForm.policy}
             />
-          </Group>
-          <Group align="flex-end" grow>
-            <NumberInput
+          </UiInline>
+          <UiInline align="flex-end" grow>
+            <UiNumberField
               label="Max concurrent runs"
               min={1}
               onChange={(value) =>
-                updateSharingLeaseField(
-                  "maxConcurrentRuns",
-                  Number(value) || 1,
-                )
+                updateSharingLeaseField("maxConcurrentRuns", Number(value) || 1)
               }
               value={sharingLeaseForm.maxConcurrentRuns}
             />
-            <NumberInput
+            <UiNumberField
               label="Turn budget"
               min={1}
               onChange={(value) =>
@@ -1149,55 +1121,55 @@ function ProvidersPage() {
               }
               value={sharingLeaseForm.turnBudget}
             />
-            <TextInput
+            <UiTextField
               label="Expires at"
               onChange={(event) =>
                 updateSharingLeaseField("expiresAt", event.currentTarget.value)
               }
               value={sharingLeaseForm.expiresAt}
             />
-          </Group>
+          </UiInline>
           <FieldErrorText error={sharingFormErrors.expiresAt} />
-          <Group justify="flex-end">
-            <Button
+          <UiInline justify="flex-end">
+            <UiButton
               loading={isSharingSubmitting}
               onClick={() => void onCreateSharingLease()}
             >
               Create lease
-            </Button>
-          </Group>
+            </UiButton>
+          </UiInline>
           {leases.length === 0 ? (
             <EmptyCollectionState
               description="Create a sharing lease to authorize a borrower workspace for a pool."
               title="No sharing leases"
             />
           ) : (
-            <Table striped withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Lease</Table.Th>
-                  <Table.Th>Borrower</Table.Th>
-                  <Table.Th>Pool</Table.Th>
-                  <Table.Th>Budget</Table.Th>
-                  <Table.Th>Status</Table.Th>
-                  <Table.Th>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
+            <UiDataTable striped withTableBorder>
+              <UiDataTable.Thead>
+                <UiDataTable.Tr>
+                  <UiDataTable.Th>Lease</UiDataTable.Th>
+                  <UiDataTable.Th>Borrower</UiDataTable.Th>
+                  <UiDataTable.Th>Pool</UiDataTable.Th>
+                  <UiDataTable.Th>Budget</UiDataTable.Th>
+                  <UiDataTable.Th>Status</UiDataTable.Th>
+                  <UiDataTable.Th>Actions</UiDataTable.Th>
+                </UiDataTable.Tr>
+              </UiDataTable.Thead>
+              <UiDataTable.Tbody>
                 {leases.map((lease) => (
-                  <Table.Tr key={lease.leaseId}>
-                    <Table.Td>{lease.leaseId}</Table.Td>
-                    <Table.Td>{lease.borrowerWorkspaceId}</Table.Td>
-                    <Table.Td>{lease.poolId}</Table.Td>
-                    <Table.Td>
+                  <UiDataTable.Tr key={lease.leaseId}>
+                    <UiDataTable.Td>{lease.leaseId}</UiDataTable.Td>
+                    <UiDataTable.Td>{lease.borrowerWorkspaceId}</UiDataTable.Td>
+                    <UiDataTable.Td>{lease.poolId}</UiDataTable.Td>
+                    <UiDataTable.Td>
                       {lease.turnBudget ?? "unlimited"} turns /{" "}
                       {lease.maxConcurrentRuns} concurrent
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="light">{lease.status}</Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Button
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiChip variant="light">{lease.status}</UiChip>
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiButton
                         disabled={lease.status === "revoked"}
                         loading={revokingLeaseId === lease.leaseId}
                         onClick={() => void onRevokeSharingLease(lease)}
@@ -1205,15 +1177,15 @@ function ProvidersPage() {
                         variant="subtle"
                       >
                         Revoke
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
+                      </UiButton>
+                    </UiDataTable.Td>
+                  </UiDataTable.Tr>
                 ))}
-              </Table.Tbody>
-            </Table>
+              </UiDataTable.Tbody>
+            </UiDataTable>
           )}
-          <Group align="flex-end" grow>
-            <TextInput
+          <UiInline align="flex-end" grow>
+            <UiTextField
               label="Carpool id"
               onChange={(event) =>
                 updateCarpoolField("carpoolId", event.currentTarget.value)
@@ -1221,14 +1193,14 @@ function ProvidersPage() {
               placeholder="carpool_codex_acme"
               value={carpoolForm.carpoolId}
             />
-            <TextInput
+            <UiTextField
               label="Name"
               onChange={(event) =>
                 updateCarpoolField("name", event.currentTarget.value)
               }
               value={carpoolForm.name}
             />
-            <TextInput
+            <UiTextField
               label="Pool ids"
               onChange={(event) =>
                 updateCarpoolField("poolIds", event.currentTarget.value)
@@ -1236,14 +1208,14 @@ function ProvidersPage() {
               placeholder="prvrsrc_codex_team"
               value={carpoolForm.poolIds}
             />
-          </Group>
-          <Group grow>
+          </UiInline>
+          <UiInline grow>
             <FieldErrorText error={sharingFormErrors.carpoolId} />
             <FieldErrorText error={sharingFormErrors.name} />
             <FieldErrorText error={sharingFormErrors.poolIds} />
-          </Group>
-          <Group align="flex-end" grow>
-            <TextInput
+          </UiInline>
+          <UiInline align="flex-end" grow>
+            <UiTextField
               label="Member workspaces"
               onChange={(event) =>
                 updateCarpoolField(
@@ -1253,12 +1225,12 @@ function ProvidersPage() {
               }
               value={carpoolForm.memberWorkspaceIds}
             />
-            <Select
+            <UiSelect
               data={[
-                { label: "fair_share", value: "fair_share" },
-                { label: "weighted", value: "weighted" },
-                { label: "cheapest_ready", value: "cheapest_ready" },
-                { label: "fastest_ready", value: "fastest_ready" },
+                "fair_share",
+                "weighted",
+                "cheapest_ready",
+                "fastest_ready",
               ]}
               label="Strategy"
               onChange={(value) =>
@@ -1269,17 +1241,17 @@ function ProvidersPage() {
               }
               value={carpoolForm.strategy}
             />
-            <Switch
+            <UiSwitch
               checked={carpoolForm.enabled}
               label="Enabled"
               onChange={(event) =>
                 updateCarpoolField("enabled", event.currentTarget.checked)
               }
             />
-          </Group>
+          </UiInline>
           <FieldErrorText error={sharingFormErrors.memberWorkspaceIds} />
-          <Group align="flex-end" grow>
-            <NumberInput
+          <UiInline align="flex-end" grow>
+            <UiNumberField
               label="Per-member concurrency"
               min={1}
               onChange={(value) =>
@@ -1290,7 +1262,7 @@ function ProvidersPage() {
               }
               value={carpoolForm.perMemberConcurrencyLimit}
             />
-            <NumberInput
+            <UiNumberField
               label="Per-member turns"
               min={1}
               onChange={(value) =>
@@ -1298,137 +1270,151 @@ function ProvidersPage() {
               }
               value={carpoolForm.perMemberTurnBudget}
             />
-            <Button
+            <UiButton
               loading={isSharingSubmitting}
               onClick={() => void onCreateCarpool()}
             >
               Create carpool
-            </Button>
-          </Group>
+            </UiButton>
+          </UiInline>
           {carpools.length === 0 ? (
             <EmptyCollectionState
               description="Create a carpool to share one or more pools across member workspaces."
               title="No carpools"
             />
           ) : (
-            <Table striped withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Carpool</Table.Th>
-                  <Table.Th>Members</Table.Th>
-                  <Table.Th>Pools</Table.Th>
-                  <Table.Th>Limits</Table.Th>
-                  <Table.Th>Status</Table.Th>
-                  <Table.Th>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
+            <UiDataTable striped withTableBorder>
+              <UiDataTable.Thead>
+                <UiDataTable.Tr>
+                  <UiDataTable.Th>Carpool</UiDataTable.Th>
+                  <UiDataTable.Th>Members</UiDataTable.Th>
+                  <UiDataTable.Th>Pools</UiDataTable.Th>
+                  <UiDataTable.Th>Limits</UiDataTable.Th>
+                  <UiDataTable.Th>Status</UiDataTable.Th>
+                  <UiDataTable.Th>Actions</UiDataTable.Th>
+                </UiDataTable.Tr>
+              </UiDataTable.Thead>
+              <UiDataTable.Tbody>
                 {carpools.map((carpool) => (
-                  <Table.Tr key={carpool.carpoolId}>
-                    <Table.Td>{carpool.name}</Table.Td>
-                    <Table.Td>{carpool.memberWorkspaceIds.join(", ")}</Table.Td>
-                    <Table.Td>{carpool.poolIds.join(", ")}</Table.Td>
-                    <Table.Td>
+                  <UiDataTable.Tr key={carpool.carpoolId}>
+                    <UiDataTable.Td>{carpool.name}</UiDataTable.Td>
+                    <UiDataTable.Td>
+                      {carpool.memberWorkspaceIds.join(", ")}
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      {carpool.poolIds.join(", ")}
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
                       {carpool.perMemberTurnBudget ?? "unlimited"} turns /{" "}
-                      {carpool.perMemberConcurrencyLimit ?? "unlimited"} concurrent
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={carpool.enabled ? "teal" : "gray"} variant="light">
+                      {carpool.perMemberConcurrencyLimit ?? "unlimited"}{" "}
+                      concurrent
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiChip
+                        color={carpool.enabled ? "teal" : "gray"}
+                        variant="light"
+                      >
                         {carpool.enabled ? "enabled" : "disabled"}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Button
+                      </UiChip>
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiButton
                         loading={removingCarpoolId === carpool.carpoolId}
                         onClick={() => void onRemoveCarpool(carpool)}
                         size="xs"
                         variant="subtle"
                       >
                         Disable
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
+                      </UiButton>
+                    </UiDataTable.Td>
+                  </UiDataTable.Tr>
                 ))}
-              </Table.Tbody>
-            </Table>
+              </UiDataTable.Tbody>
+            </UiDataTable>
           )}
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Usage scope</Table.Th>
-                <Table.Th>Provider</Table.Th>
-                <Table.Th>Account</Table.Th>
-                <Table.Th>Turns</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withTableBorder>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Usage scope</UiDataTable.Th>
+                <UiDataTable.Th>Provider</UiDataTable.Th>
+                <UiDataTable.Th>Account</UiDataTable.Th>
+                <UiDataTable.Th>Turns</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {sharingUsage.rows.slice(0, 6).map((row, index) => (
-                <Table.Tr key={`${row.leaseId ?? row.carpoolId ?? "usage"}-${index}`}>
-                  <Table.Td>
+                <UiDataTable.Tr
+                  key={(row.leaseId ?? row.carpoolId ?? "usage") + "-" + index}
+                >
+                  <UiDataTable.Td>
                     {row.leaseId ?? row.carpoolId ?? row.workspaceId ?? "pool"}
-                  </Table.Td>
-                  <Table.Td>{row.provider}</Table.Td>
-                  <Table.Td>{row.accountId ?? "all accounts"}</Table.Td>
-                  <Table.Td>{row.turns}</Table.Td>
-                </Table.Tr>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{row.provider}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    {row.accountId ?? "all accounts"}
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{row.turns}</UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
-        </Stack>
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Provider inventory</Text>
-          <Badge color="blue" variant="light">
+            </UiDataTable.Tbody>
+          </UiDataTable>
+        </UiStack>
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Provider inventory</UiText>
+          <UiChip color="blue" variant="light">
             {providers.length} resources
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {providers.length === 0 ? (
           <EmptyCollectionState
             description="Register a provider resource to begin routing tenant traffic."
             title="No providers"
           />
         ) : (
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Provider</Table.Th>
-                <Table.Th>Project</Table.Th>
-                <Table.Th>Region</Table.Th>
-                <Table.Th>Scope</Table.Th>
-                <Table.Th>Protocols</Table.Th>
-                <Table.Th>Capabilities</Table.Th>
-                <Table.Th>Health</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Latest route signal</Table.Th>
-                <Table.Th>Version</Table.Th>
-                <Table.Th>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withTableBorder>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Name</UiDataTable.Th>
+                <UiDataTable.Th>Provider</UiDataTable.Th>
+                <UiDataTable.Th>Project</UiDataTable.Th>
+                <UiDataTable.Th>Region</UiDataTable.Th>
+                <UiDataTable.Th>Scope</UiDataTable.Th>
+                <UiDataTable.Th>Protocols</UiDataTable.Th>
+                <UiDataTable.Th>Capabilities</UiDataTable.Th>
+                <UiDataTable.Th>Health</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Latest route signal</UiDataTable.Th>
+                <UiDataTable.Th>Version</UiDataTable.Th>
+                <UiDataTable.Th>Actions</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {providers.map((provider) => (
-                <Table.Tr key={provider.provider_resource_id}>
-                  <Table.Td>{provider.name}</Table.Td>
-                  <Table.Td>{provider.provider_id}</Table.Td>
-                  <Table.Td>
-                    {projects.find((project) => project.id === provider.project_id)
-                      ?.name ?? "Unscoped"}
-                  </Table.Td>
-                  <Table.Td>{provider.region}</Table.Td>
-                  <Table.Td>{provider.deployment_scope}</Table.Td>
-                  <Table.Td>
-                    <Text size="sm">
-                      {provider.supported_protocol_families.join(", ") || "None"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm">
+                <UiDataTable.Tr key={provider.provider_resource_id}>
+                  <UiDataTable.Td>{provider.name}</UiDataTable.Td>
+                  <UiDataTable.Td>{provider.provider_id}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    {projects.find(
+                      (project) => project.id === provider.project_id,
+                    )?.name ?? "Unscoped"}
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{provider.region}</UiDataTable.Td>
+                  <UiDataTable.Td>{provider.deployment_scope}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiText size="sm">
+                      {provider.supported_protocol_families.join(", ") ||
+                        "None"}
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiText size="sm">
                       {providerCapabilityLabels(provider).join(", ") || "None"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
                       color={
                         provider.health_state === "healthy"
                           ? "teal"
@@ -1439,36 +1425,36 @@ function ProvidersPage() {
                       variant="light"
                     >
                       {provider.health_state}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
                       color={provider.status === "active" ? "blue" : "gray"}
                       variant="light"
                     >
                       {provider.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text c="dimmed" size="sm">
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiText c="dimmed" size="sm">
                       {latestSignalForProvider(
                         provider,
                         routeReceipts,
                         routePolicyNames,
                       ) ?? "No recent receipt"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>{provider.version}</Table.Td>
-                  <Table.Td>
-                    <Group gap="xs">
-                      <Button
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{provider.version}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiInline gap="xs">
+                      <UiButton
                         onClick={() => openEditForm(provider)}
                         size="xs"
                         variant="light"
                       >
                         Edit
-                      </Button>
-                      <Button
+                      </UiButton>
+                      <UiButton
                         color="red"
                         disabled={
                           provider.status === "disabled" ||
@@ -1482,16 +1468,16 @@ function ProvidersPage() {
                         variant="light"
                       >
                         Disable
-                      </Button>
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
+                      </UiButton>
+                    </UiInline>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Card>
-    </Stack>
+      </UiSurface>
+    </UiStack>
   );
 }
 
@@ -1516,7 +1502,8 @@ function latestSignalForProvider(
     (candidate) =>
       candidate.selectedTargetId === provider.provider_resource_id ||
       candidate.excludedTargets.some(
-        (target) => target.provider_resource_id === provider.provider_resource_id,
+        (target) =>
+          target.provider_resource_id === provider.provider_resource_id,
       ),
   );
 

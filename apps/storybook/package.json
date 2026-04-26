@@ -15,19 +15,19 @@
   "dependencies": {
     "@huge-router/design-tokens": "workspace:*",
     "@huge-router/ui-kit": "workspace:*",
-    "@mantine/core": "9.0.2",
-    "@mantine/modals": "9.0.2",
-    "@mantine/notifications": "9.0.2",
+    "@heroui/react": "3.0.3",
     "react": "19.2.5",
     "react-dom": "19.2.5"
   },
   "devDependencies": {
     "@storybook/react-vite": "10.3.5",
+    "@tailwindcss/vite": "4.2.4",
     "@types/node": "25.6.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.1",
     "storybook": "10.3.5",
+    "tailwindcss": "4.2.4",
     "typescript": "6.0.3",
     "vite": "8.0.9"
   }

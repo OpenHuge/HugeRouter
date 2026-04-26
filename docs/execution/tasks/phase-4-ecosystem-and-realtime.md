@@ -18,16 +18,19 @@ Advanced ecosystem and realtime tasks.
 **Depends on:** FND-001, OBS-001, RTE-004
 
 **Paths:**
+
 - `services/realtime-gateway`
 - `crates/protocol-realtime`
 - `crates/authn-authz`
 
 **Outputs:**
+
 - WebSocket service skeleton
 - session auth
 - realtime connection model
 
 **Acceptance criteria:**
+
 - service can accept authenticated sessions
 - session lifecycle is traced
 - no billing is coupled to the connection handshake
@@ -39,13 +42,16 @@ Advanced ecosystem and realtime tasks.
 **Depends on:** PAD-001, RTE-004
 
 **Paths:**
+
 - `crates/provider-gateway`
 
 **Outputs:**
+
 - adapter for upstream gateway providers
 - health and capability metadata model
 
 **Acceptance criteria:**
+
 - adapter can call an upstream OpenAI-compatible gateway
 - upstream gateway errors preserve diagnostic detail
 - routing engine can score it alongside native providers

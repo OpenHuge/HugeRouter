@@ -10,7 +10,7 @@ A new engineer should be able to:
 - start local dependencies
 - run gateway and control plane
 - run the TanStack Start frontend
-- work on shared Mantine components in isolation
+- work on shared HeroUI components in isolation
 - call example APIs
 - inspect traces and logs
 - run tests and linters
@@ -40,7 +40,7 @@ Recommended JavaScript runtime baseline:
 
 - Node.js `24.15.0` in local development, devcontainer, and CI
 - Corepack-enabled `pnpm 10.33.0`
-- React `19.2+` because Mantine 9 requires it
+- React `19.2+` because HeroUI 3 requires it
 - TanStack Start pinned to an exact RC version until 1.0 stable is available
 
 Recommended Rust runtime baseline:
@@ -71,7 +71,7 @@ just dev-backend
 The frontend bootstrap should verify:
 
 - `apps/console-web` starts locally
-- the root Mantine provider renders with project theme tokens
+- the root HeroUI provider renders with project theme tokens
 - `src/start.ts` successfully registers global Start middleware
 - Storybook can render `packages/ui-kit` primitives and shell components
 - generated TypeScript clients and schemas can be consumed without manual patching
@@ -201,7 +201,7 @@ Shipped baseline:
 ### 30.5 Release Channel Policy
 
 - use exact version pinning for TanStack Start while it remains in RC
-- allow only intentional, reviewed minor upgrades for Mantine during the bootstrap phase
+- allow only intentional, reviewed minor upgrades for HeroUI during the bootstrap phase
 - record framework upgrades in ADRs
 - require changelog review for MCP transport, auth, or framework-level dependency changes
 
@@ -233,7 +233,7 @@ Shipped baseline:
 ### 31.3 Frontend Test Focus
 
 - route-level auth behavior
-- Mantine shell and navigation rendering
+- HeroUI shell and navigation rendering
 - table/filter interactions
 - policy editor validation
 - optimistic update edge cases
@@ -242,7 +242,7 @@ Shipped baseline:
 ### 31.4 Component-Library Test Focus
 
 - theme token application
-- wrapper compatibility with upstream Mantine changes
+- wrapper compatibility with upstream HeroUI changes
 - keyboard and focus behavior for shared shell primitives
 - loading, empty, and destructive confirmation states
 

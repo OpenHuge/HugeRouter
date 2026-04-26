@@ -6,18 +6,18 @@ The roadmap is intentionally arranged as **parallel workstreams**. Agents should
 
 ## Workstream summary
 
-| Workstream | Earliest Start | Primary Unlocks / Dependencies | Task Count |
-|---|---|---|---|
-| Foundation and Monorepo | PI-0 | none | 6 |
-| Data Storage and Events | PI-0 | FND-001, FND-003 | 2 |
-| Gateway and Protocol Ingress | PI-1 | FND-001, FND-003, GWT-003, PAD-001, RTE-002 | 8 |
-| Provider Adapters | PI-1 | GWT-003 | 5 |
-| Routing and Reliability | PI-1 | GWT-003, DB-001, PAD-001 | 5 |
-| Control Plane and Console | PI-0 | FND-002, CTL-001, DB-001, SEC-001 | 7 |
-| Metering, Ledger, and Billing | PI-1 | GWT-003, DB-002 | 5 |
-| Security, Identity, and Compliance | PI-0 | FND-004, CTL-001 | 4 |
-| Observability, SRE, and Runtime | PI-0 | FND-003 | 4 |
-| QA, Release, and Documentation | PI-0 | FND-005, FND-006 | 4 |
+| Workstream                         | Earliest Start | Primary Unlocks / Dependencies              | Task Count |
+| ---------------------------------- | -------------- | ------------------------------------------- | ---------- |
+| Foundation and Monorepo            | PI-0           | none                                        | 6          |
+| Data Storage and Events            | PI-0           | FND-001, FND-003                            | 2          |
+| Gateway and Protocol Ingress       | PI-1           | FND-001, FND-003, GWT-003, PAD-001, RTE-002 | 8          |
+| Provider Adapters                  | PI-1           | GWT-003                                     | 5          |
+| Routing and Reliability            | PI-1           | GWT-003, DB-001, PAD-001                    | 5          |
+| Control Plane and Console          | PI-0           | FND-002, CTL-001, DB-001, SEC-001           | 7          |
+| Metering, Ledger, and Billing      | PI-1           | GWT-003, DB-002                             | 5          |
+| Security, Identity, and Compliance | PI-0           | FND-004, CTL-001                            | 4          |
+| Observability, SRE, and Runtime    | PI-0           | FND-003                                     | 4          |
+| QA, Release, and Documentation     | PI-0           | FND-005, FND-006                            | 4          |
 
 ## Parallelization rules
 
@@ -39,29 +39,34 @@ The roadmap is intentionally arranged as **parallel workstreams**. Agents should
 ## Recommended concurrent lanes
 
 ### Lane A — Platform foundation
+
 - FND-001
 - FND-003
 - FND-005
 - OBS-001
 
 ### Lane B — Frontend foundation
+
 - FND-002
 - FND-006
 - CTL-004
 
 ### Lane C — Data and control plane foundation
+
 - CTL-001
 - DB-001
 - DB-002
 - SEC-001
 
 ### Lane D — Gateway kernel
+
 - GWT-001
 - GWT-003
 - PAD-001
 - RTE-001
 
 After those lanes land, the roadmap fans out into:
+
 - gateway MVP
 - provider adapters
 - routing diagnostics

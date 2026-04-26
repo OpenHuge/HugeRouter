@@ -1,265 +1,276 @@
 import {
-  Alert,
-  Button,
-  Card,
-  Center,
-  Divider,
-  Group,
-  Stack,
-  Text,
-  TextInput,
-  Title
-} from '@mantine/core'
-import type { AuthSessionState } from './auth-contract'
-import { useState } from 'react'
-import type { AuthSessionEnvelope, AuthProvider, LoginSearch } from './auth-contract'
-import { getAuthProviderLabel } from './auth-contract'
+  UiAlert,
+  UiButton,
+  UiSurface,
+  UiCenter,
+  UiDivider,
+  UiInline,
+  UiStack,
+  UiText,
+  UiTextField,
+  UiHeading,
+} from "@huge-router/ui-kit";
+import type { AuthSessionState } from "./auth-contract";
+import { useState } from "react";
+import type {
+  AuthSessionEnvelope,
+  AuthProvider,
+  LoginSearch,
+} from "./auth-contract";
+import { getAuthProviderLabel } from "./auth-contract";
 import {
   getAuthErrorMessage,
   getAuthErrorReason,
   useEmailLoginCompleteMutation,
   useEmailLoginMutation,
-  useProviderLoginMutation
-} from './auth-queries'
+  useProviderLoginMutation,
+} from "./auth-queries";
 
-function getSignInCopy(
-  configuredProviderCount: number
-) {
+function getSignInCopy(configuredProviderCount: number) {
   if (configuredProviderCount === 0) {
-    return 'No sign-in methods are currently configured for this workspace.'
+    return "No sign-in methods are currently configured for this workspace.";
   }
 
-  return 'Use a configured sign-in method below. Only providers enabled for this workspace are shown.'
+  return "Use a configured sign-in method below. Only providers enabled for this workspace are shown.";
 }
 
 type LoginPageProps = {
   onAuthenticated?: (
-    state: Extract<AuthSessionState, { kind: 'authenticated' }>
-  ) => Promise<void> | void
-  search: LoginSearch
-  sessionEnvelope: AuthSessionEnvelope
-}
+    state: Extract<AuthSessionState, { kind: "authenticated" }>,
+  ) => Promise<void> | void;
+  search: LoginSearch;
+  sessionEnvelope: AuthSessionEnvelope;
+};
 
 function getLoginStatusCopy(
   search: LoginSearch,
-  sessionEnvelope: AuthSessionEnvelope
+  sessionEnvelope: AuthSessionEnvelope,
 ) {
-  if (sessionEnvelope.state.kind === 'tenant_access_denied') {
+  if (sessionEnvelope.state.kind === "tenant_access_denied") {
     return {
       description: sessionEnvelope.state.message,
-      tone: 'orange' as const,
-      title: 'Tenant access is not available for this account'
-    }
+      tone: "orange" as const,
+      title: "Tenant access is not available for this account",
+    };
   }
 
-  if (sessionEnvelope.state.kind === 'tenant_selection_required') {
+  if (sessionEnvelope.state.kind === "tenant_selection_required") {
     return {
       description: sessionEnvelope.state.message,
-      tone: 'blue' as const,
-      title: 'Choose a workspace to continue'
-    }
+      tone: "blue" as const,
+      title: "Choose a workspace to continue",
+    };
   }
 
-  if (search.reason === 'provider-disabled') {
+  if (search.reason === "provider-disabled") {
     return {
       description:
         search.message ??
-        `${search.provider ? getAuthProviderLabel(search.provider) : 'That provider'} is currently disabled for this workspace.`,
-      tone: 'orange' as const,
-      title: 'Provider unavailable'
-    }
+        `${search.provider ? getAuthProviderLabel(search.provider) : "That provider"} is currently disabled for this workspace.`,
+      tone: "orange" as const,
+      title: "Provider unavailable",
+    };
   }
 
-  if (search.reason === 'tenant-denied') {
+  if (search.reason === "tenant-denied") {
     return {
       description:
         search.message ??
-        'Your identity is valid, but HugeRouter could not map it to an allowed tenant membership.',
-      tone: 'orange' as const,
-      title: 'Tenant access denied'
-    }
+        "Your identity is valid, but HugeRouter could not map it to an allowed tenant membership.",
+      tone: "orange" as const,
+      title: "Tenant access denied",
+    };
   }
 
-  if (search.reason === 'session-expired') {
+  if (search.reason === "session-expired") {
     return {
       description:
         search.message ??
-        'Your previous HugeRouter session expired. Sign in again to continue.',
-      tone: 'blue' as const,
-      title: 'Session expired'
-    }
+        "Your previous HugeRouter session expired. Sign in again to continue.",
+      tone: "blue" as const,
+      title: "Session expired",
+    };
   }
 
-  if (search.reason === 'signed-out') {
+  if (search.reason === "signed-out") {
     return {
       description:
-        search.message ?? 'Your HugeRouter session has been closed on this device.',
-      tone: 'green' as const,
-      title: 'Signed out'
-    }
+        search.message ??
+        "Your HugeRouter session has been closed on this device.",
+      tone: "green" as const,
+      title: "Signed out",
+    };
   }
 
-  return null
+  return null;
 }
 
 export function LoginPage({
   onAuthenticated,
   search,
-  sessionEnvelope
+  sessionEnvelope,
 }: LoginPageProps) {
-  const [workspaceSlug, setWorkspaceSlug] = useState('platform-admin')
-  const [email, setEmail] = useState('ops@huge-router.dev')
-  const [emailFlowId, setEmailFlowId] = useState<string | null>(null)
-  const [emailCode, setEmailCode] = useState('')
-  const [localError, setLocalError] = useState<string | null>(null)
-  const emailLoginMutation = useEmailLoginMutation()
-  const emailCompleteMutation = useEmailLoginCompleteMutation()
-  const providerLoginMutation = useProviderLoginMutation()
+  const [workspaceSlug, setWorkspaceSlug] = useState("platform-admin");
+  const [email, setEmail] = useState("ops@huge-router.dev");
+  const [emailFlowId, setEmailFlowId] = useState<string | null>(null);
+  const [emailCode, setEmailCode] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const emailLoginMutation = useEmailLoginMutation();
+  const emailCompleteMutation = useEmailLoginCompleteMutation();
+  const providerLoginMutation = useProviderLoginMutation();
 
-  const loginStatus = getLoginStatusCopy(search, sessionEnvelope)
+  const loginStatus = getLoginStatusCopy(search, sessionEnvelope);
   const configuredProviders = sessionEnvelope.state.availableProviders.filter(
-    (provider) => !provider.hidden
-  )
-  const emailProvider = configuredProviders.find((provider) => provider.provider === 'email')
+    (provider) => !provider.hidden,
+  );
+  const emailProvider = configuredProviders.find(
+    (provider) => provider.provider === "email",
+  );
   const visibleProviders = configuredProviders.filter(
-    (provider) => provider.provider !== 'email'
-  )
+    (provider) => provider.provider !== "email",
+  );
 
   async function handleEmailLogin() {
-    setLocalError(null)
+    setLocalError(null);
 
     if (!emailProvider) {
-      setLocalError('Email sign-in is not configured for this workspace.')
-      return
+      setLocalError("Email sign-in is not configured for this workspace.");
+      return;
     }
 
     if (!emailProvider.enabled) {
-      setLocalError(emailProvider.reason ?? 'Email sign-in is currently unavailable.')
-      return
+      setLocalError(
+        emailProvider.reason ?? "Email sign-in is currently unavailable.",
+      );
+      return;
     }
 
     if (!email.trim()) {
-      setLocalError('Email is required.')
-      return
+      setLocalError("Email is required.");
+      return;
     }
 
     try {
       const result = await emailLoginMutation.mutateAsync({
         email,
         redirectTo: search.redirect,
-        workspaceSlug
-      })
-      setEmailFlowId(result.flowId)
+        workspaceSlug,
+      });
+      setEmailFlowId(result.flowId);
     } catch (error) {
-      setLocalError(getAuthErrorMessage(error))
+      setLocalError(getAuthErrorMessage(error));
     }
   }
 
   async function handleEmailVerification() {
-    setLocalError(null)
+    setLocalError(null);
 
     if (!emailFlowId) {
-      setLocalError('Start the email login flow before entering a verification code.')
-      return
+      setLocalError(
+        "Start the email login flow before entering a verification code.",
+      );
+      return;
     }
 
     if (!emailCode.trim()) {
-      setLocalError('Verification code is required.')
-      return
+      setLocalError("Verification code is required.");
+      return;
     }
 
     try {
       const result = await emailCompleteMutation.mutateAsync({
         code: emailCode.trim(),
-        flowId: emailFlowId
-      })
+        flowId: emailFlowId,
+      });
 
-      if (result.outcome === 'authenticated') {
-        await onAuthenticated?.(result.state)
+      if (result.outcome === "authenticated") {
+        await onAuthenticated?.(result.state);
       } else {
-        setLocalError(result.message)
+        setLocalError(result.message);
       }
     } catch (error) {
-      setLocalError(getAuthErrorMessage(error))
+      setLocalError(getAuthErrorMessage(error));
     }
   }
 
   async function handleProviderLogin(provider: AuthProvider) {
-    setLocalError(null)
+    setLocalError(null);
 
     try {
       await providerLoginMutation.mutateAsync({
         input: {
           redirectTo: search.redirect,
-          workspaceSlug
+          workspaceSlug,
         },
-        provider
-      })
+        provider,
+      });
     } catch (error) {
-      const reason = getAuthErrorReason(error)
-      const message = getAuthErrorMessage(error)
+      const reason = getAuthErrorReason(error);
+      const message = getAuthErrorMessage(error);
 
       setLocalError(
-        reason === 'provider-disabled'
+        reason === "provider-disabled"
           ? `${getAuthProviderLabel(provider)} sign-in is disabled. ${message}`
-          : message
-      )
+          : message,
+      );
     }
   }
 
   return (
-    <Center mih="100vh" px="md">
-      <Card maw={460} padding="xl" radius="lg" shadow="md" w="100%">
-        <Stack>
-          <Title order={1}>Sign in</Title>
-          <Text c="dimmed" size="sm">
+    <UiCenter mih="100vh" px="md">
+      <UiSurface maw={460} padding="xl" radius="lg" shadow="md" w="100%">
+        <UiStack>
+          <UiHeading order={1}>Sign in</UiHeading>
+          <UiText c="dimmed" size="sm">
             {getSignInCopy(configuredProviders.length)}
-          </Text>
+          </UiText>
           {loginStatus ? (
-            <Alert color={loginStatus.tone} variant="light">
-              <Text fw={700}>{loginStatus.title}</Text>
-              <Text mt="xs" size="sm">
+            <UiAlert color={loginStatus.tone} variant="light">
+              <UiText fw={700}>{loginStatus.title}</UiText>
+              <UiText mt="xs" size="sm">
                 {loginStatus.description}
-              </Text>
-            </Alert>
+              </UiText>
+            </UiAlert>
           ) : null}
           {localError ? (
-            <Alert color="red" variant="light">
+            <UiAlert color="red" variant="light">
               {localError}
-            </Alert>
+            </UiAlert>
           ) : null}
           {emailLoginMutation.data ? (
-            <Alert color="green" variant="light">
-              <Text fw={700}>Check your email</Text>
-              <Text mt="xs" size="sm">
+            <UiAlert color="green" variant="light">
+              <UiText fw={700}>Check your email</UiText>
+              <UiText mt="xs" size="sm">
                 {emailLoginMutation.data.message}
-              </Text>
+              </UiText>
               {emailLoginMutation.data.codeHint ? (
-                <Text mt="xs" size="sm">
+                <UiText mt="xs" size="sm">
                   {emailLoginMutation.data.codeHint}
-                </Text>
+                </UiText>
               ) : null}
-            </Alert>
+            </UiAlert>
           ) : null}
           {configuredProviders.length > 0 ? (
             <>
-              <TextInput
+              <UiTextField
                 description="Optional workspace hint used for email and provider start requests."
                 label="Workspace"
-                onChange={(event) => setWorkspaceSlug(event.currentTarget.value)}
+                onChange={(event) =>
+                  setWorkspaceSlug(event.currentTarget.value)
+                }
                 placeholder="platform-admin"
                 value={workspaceSlug}
               />
               {emailProvider ? (
                 <>
-                  <TextInput
+                  <UiTextField
                     label="Email"
                     onChange={(event) => setEmail(event.currentTarget.value)}
                     placeholder="ops@huge-router.dev"
                     type="email"
                     value={email}
                   />
-                  <Button
+                  <UiButton
                     disabled={!emailProvider.enabled}
                     fullWidth
                     loading={emailLoginMutation.isPending}
@@ -267,79 +278,85 @@ export function LoginPage({
                     variant="filled"
                   >
                     Continue with Email
-                  </Button>
+                  </UiButton>
                   {!emailProvider.enabled && emailProvider.reason ? (
-                    <Text c="dimmed" size="xs">
+                    <UiText c="dimmed" size="xs">
                       {emailProvider.reason}
-                    </Text>
+                    </UiText>
                   ) : null}
                   {emailFlowId ? (
-                    <Stack gap="xs">
-                      <Text fw={700} size="sm">
+                    <UiStack gap="xs">
+                      <UiText fw={700} size="sm">
                         Enter verification code
-                      </Text>
-                      <TextInput
+                      </UiText>
+                      <UiTextField
                         label="Verification code"
-                        onChange={(event) => setEmailCode(event.currentTarget.value)}
+                        onChange={(event) =>
+                          setEmailCode(event.currentTarget.value)
+                        }
                         placeholder="111111"
                         value={emailCode}
                       />
-                      <Button
+                      <UiButton
                         fullWidth
                         loading={emailCompleteMutation.isPending}
                         onClick={() => void handleEmailVerification()}
                         variant="light"
                       >
                         Complete Email Sign-In
-                      </Button>
-                    </Stack>
+                      </UiButton>
+                    </UiStack>
                   ) : null}
                 </>
               ) : null}
               {emailProvider && visibleProviders.length > 0 ? (
-                <Divider label="or" labelPosition="center" />
+                <UiDivider label="or" labelPosition="center" />
               ) : null}
               {visibleProviders.length > 0 ? (
-                <Stack gap="xs">
+                <UiStack gap="xs">
                   {visibleProviders.map((provider) => (
                     <div key={provider.provider}>
-                      <Button
+                      <UiButton
                         disabled={!provider.enabled}
                         fullWidth
                         loading={
                           providerLoginMutation.isPending &&
-                          providerLoginMutation.variables?.provider === provider.provider
+                          providerLoginMutation.variables?.provider ===
+                            provider.provider
                         }
-                        onClick={() => void handleProviderLogin(provider.provider)}
+                        onClick={() =>
+                          void handleProviderLogin(provider.provider)
+                        }
                         variant="default"
                       >
                         Continue with {getAuthProviderLabel(provider.provider)}
-                      </Button>
+                      </UiButton>
                       {!provider.enabled && provider.reason ? (
-                        <Text c="dimmed" mt={4} size="xs">
+                        <UiText c="dimmed" mt={4} size="xs">
                           {provider.reason}
-                        </Text>
+                        </UiText>
                       ) : null}
                     </div>
                   ))}
-                </Stack>
+                </UiStack>
               ) : null}
             </>
           ) : (
-            <Alert color="orange" variant="light">
-              Contact your workspace administrator to configure at least one sign-in method.
-            </Alert>
+            <UiAlert color="orange" variant="light">
+              Contact your workspace administrator to configure at least one
+              sign-in method.
+            </UiAlert>
           )}
-          <Group gap="xs" justify="space-between">
-            <Text c="dimmed" size="xs">
+          <UiInline gap="xs" justify="space-between">
+            <UiText c="dimmed" size="xs">
               Provider selection is separate from tenant resolution.
-            </Text>
-            <Text c="dimmed" size="xs">
-              Request target: {search.redirect ?? '/app/overview'}
-            </Text>
-          </Group>
-        </Stack>
-      </Card>
-    </Center>
-  )
+            </UiText>
+            <UiText c="dimmed" size="xs">
+              Request target: {search.redirect ?? "/app/overview"}
+            </UiText>
+          </UiInline>
+        </UiStack>
+      </UiSurface>
+    </UiCenter>
+  );
 }

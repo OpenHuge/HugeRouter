@@ -2,19 +2,19 @@
 
 [Back to Execution Workstreams](README.md)
 
-Deliver the management API and the TanStack Start + Mantine console for tenants, providers, routes, and billing surfaces.
+Deliver the management API and the TanStack Start + HeroUI console for tenants, providers, routes, and billing surfaces.
 
 ## Task sequence
 
-| Task ID | Phase | Title | Depends On |
-|---|---|---|---|
-| CTL-001 | PI-0 | Create control plane API service skeleton with typed CRUD conventions | FND-001, FND-004 |
-| CTL-004 | PI-0 | Build TanStack Start + Mantine application shell and authenticated app layout | FND-002, FND-006 |
-| CTL-002 | PI-1 | Implement tenant, project, environment, and API key CRUD | CTL-001, DB-001, SEC-001 |
-| CTL-003 | PI-1 | Implement provider, credential, route policy, and route set management APIs | CTL-001, PAD-001, RTE-001, SEC-003 |
-| CTL-005 | PI-1 | Implement tenant/project management UI flows | CTL-002, CTL-004 |
-| CTL-006 | PI-2 | Implement provider and route management UI with diagnostics surfaces | CTL-003, CTL-004, RTE-005 |
-| CTL-007 | PI-3 | Build usage, budget, and billing dashboards | MET-004, MET-005, CTL-004 |
+| Task ID | Phase | Title                                                                        | Depends On                         |
+| ------- | ----- | ---------------------------------------------------------------------------- | ---------------------------------- |
+| CTL-001 | PI-0  | Create control plane API service skeleton with typed CRUD conventions        | FND-001, FND-004                   |
+| CTL-004 | PI-0  | Build TanStack Start + HeroUI application shell and authenticated app layout | FND-002, FND-006                   |
+| CTL-002 | PI-1  | Implement tenant, project, environment, and API key CRUD                     | CTL-001, DB-001, SEC-001           |
+| CTL-003 | PI-1  | Implement provider, credential, route policy, and route set management APIs  | CTL-001, PAD-001, RTE-001, SEC-003 |
+| CTL-005 | PI-1  | Implement tenant/project management UI flows                                 | CTL-002, CTL-004                   |
+| CTL-006 | PI-2  | Implement provider and route management UI with diagnostics surfaces         | CTL-003, CTL-004, RTE-005          |
+| CTL-007 | PI-3  | Build usage, budget, and billing dashboards                                  | MET-004, MET-005, CTL-004          |
 
 ## Detailed tasks
 
@@ -50,7 +50,7 @@ Deliver the management API and the TanStack Start + Mantine console for tenants,
 - Do not hardcode enum values that are owned by the backend schema.
 - Guard destructive operations with explicit confirmation UX.
 
-### CTL-004 - Build TanStack Start + Mantine application shell and authenticated app layout
+### CTL-004 - Build TanStack Start + HeroUI application shell and authenticated app layout
 
 **Phase:** PI-0  
 **Estimated size:** M  
@@ -68,13 +68,13 @@ Deliver the management API and the TanStack Start + Mantine console for tenants,
 
 - route tree
 - shell layout
-- Mantine-backed theme and navigation system
+- HeroUI-backed theme and navigation system
 - shared provider stack and shell primitives
 
 **Acceptance criteria:**
 
 - authenticated and unauthenticated layouts render
-- Mantine `AppShell` or equivalent internal shell wrapper is in place
+- HeroUI-compatible internal shell wrapper is in place
 - route-level data loaders compile
 - component story coverage exists for shell primitives
 
@@ -84,7 +84,7 @@ Deliver the management API and the TanStack Start + Mantine console for tenants,
 - Do not hardcode enum values that are owned by the backend schema.
 - Guard destructive operations with explicit confirmation UX.
 - Build shared layout and feedback primitives in `packages/ui-kit` first, then compose feature pages from those pieces.
-- Keep theme decisions centralized in `packages/design-tokens` so route modules do not reconfigure Mantine locally.
+- Keep theme decisions centralized in `packages/design-tokens` so route modules do not reconfigure HeroUI locally.
 
 ### CTL-002 - Implement tenant, project, environment, and API key CRUD
 

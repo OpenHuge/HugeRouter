@@ -1,60 +1,57 @@
-import { AppShell, Box, Group, NavLink, Stack, Text } from '@mantine/core'
-import type { ReactNode } from 'react'
+import { UiBox, UiInline, UiStack, UiText } from "../primitives";
+import type { ReactNode } from "react";
 
 export type ShellNavItem = {
-  href: string
-  label: string
-  description: string
-  active?: boolean
-}
+  href: string;
+  label: string;
+  description: string;
+  active?: boolean;
+};
 
 type AppShellFrameProps = {
-  title: string
-  subtitle: string
-  navItems: ShellNavItem[]
-  children: ReactNode
-}
+  title: string;
+  subtitle: string;
+  navItems: ShellNavItem[];
+  children: ReactNode;
+};
 
 export function AppShellFrame({
   children,
   navItems,
   subtitle,
-  title
+  title,
 }: AppShellFrameProps) {
   return (
-    <AppShell
-      header={{ height: 72 }}
-      navbar={{ width: 280, breakpoint: 'sm' }}
-      padding="lg"
-    >
-      <AppShell.Header px="lg">
-        <Group h="100%" justify="space-between">
-          <Box>
-            <Text fw={700}>{title}</Text>
-            <Text c="dimmed" size="sm">
+    <div className="hr-app-shell">
+      <header className="hr-app-shell-header">
+        <UiInline h="100%" justify="space-between" wrap="nowrap">
+          <UiBox>
+            <UiText fw={700}>{title}</UiText>
+            <UiText c="dimmed" size="sm">
               {subtitle}
-            </Text>
-          </Box>
-          <Text c="dimmed" size="sm">
+            </UiText>
+          </UiBox>
+          <UiText c="dimmed" size="sm">
             HugeRouter Console
-          </Text>
-        </Group>
-      </AppShell.Header>
-      <AppShell.Navbar p="md">
-        <Stack gap="xs">
+          </UiText>
+        </UiInline>
+      </header>
+      <aside className="hr-app-shell-nav">
+        <UiStack gap="xs">
           {navItems.map((item) => (
-            <NavLink
-              key={item.href}
-              active={item.active}
-              description={item.description}
+            <a
+              aria-current={item.active ? "page" : undefined}
+              className={item.active ? "hr-nav-link active" : "hr-nav-link"}
               href={item.href}
-              label={item.label}
-            />
+              key={item.href}
+            >
+              <strong>{item.label}</strong>
+              <span>{item.description}</span>
+            </a>
           ))}
-        </Stack>
-      </AppShell.Navbar>
-      <AppShell.Main>{children}</AppShell.Main>
-    </AppShell>
-  )
+        </UiStack>
+      </aside>
+      <main className="hr-app-shell-main">{children}</main>
+    </div>
+  );
 }
-

@@ -32,16 +32,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** CTL-001, DB-001, SEC-001
 
 **Paths:**
+
 - `services/control-plane-api`
 - `crates/storage`
 - `crates/core-domain`
 
 **Outputs:**
+
 - resource CRUD endpoints
 - API key issuance/rotation
 - resource validation
 
 **Acceptance criteria:**
+
 - CRUD endpoints are idempotent where expected
 - API key rotation invalidates old secrets
 - OpenAPI and TS client are updated
@@ -53,17 +56,20 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** CTL-001, PAD-001, RTE-001, SEC-003
 
 **Paths:**
+
 - `services/control-plane-api`
 - `crates/storage`
 - `crates/provider-traits`
 - `crates/routing-engine`
 
 **Outputs:**
+
 - provider CRUD
 - credential binding
 - route policy CRUD
 
 **Acceptance criteria:**
+
 - route policies can be created and validated from API
 - secret references are stored without plaintext leakage
 - policy schema validation errors are actionable
@@ -75,15 +81,18 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** CTL-002, CTL-004
 
 **Paths:**
+
 - `apps/console-web/src/routes`
 - `packages/ts-api-client`
 
 **Outputs:**
+
 - list/detail/create flows
 - API key issuance views
 - error/loading states
 
 **Acceptance criteria:**
+
 - CRUD flows are fully typed from generated client
 - forms validate client-side and server-side
 - role-based page guards work
@@ -95,16 +104,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** FND-001, FND-003, FND-004
 
 **Paths:**
+
 - `services/gateway-api`
 - `crates/sdk-server`
 - `crates/telemetry`
 
 **Outputs:**
+
 - HTTP server bootstrap
 - middleware pipeline
 - health/readiness endpoints
 
 **Acceptance criteria:**
+
 - service starts with trace and metrics middleware
 - health endpoints are covered by tests
 - configuration is hot-reload safe or explicitly immutable
@@ -116,16 +128,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** CTL-001, SEC-001
 
 **Paths:**
+
 - `services/gateway-api`
 - `crates/authn-authz`
 - `crates/storage`
 
 **Outputs:**
+
 - API key auth middleware
 - tenant/project context injection
 - error model
 
 **Acceptance criteria:**
+
 - valid keys resolve tenant and project scopes
 - invalid/disabled keys fail with normalized errors
 - auth path emits audit and trace metadata
@@ -137,16 +152,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** FND-001
 
 **Paths:**
+
 - `crates/protocol-ir`
 - `crates/core-domain`
 - `docs/architecture/protocol-ir-and-protocols.md`
 
 **Outputs:**
+
 - IR data structures
 - semantic validation
 - provider extension fields
 
 **Acceptance criteria:**
+
 - IR covers text generation MVP
 - unknown provider-specific metadata can be preserved
 - IR versioning strategy is documented
@@ -158,16 +176,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** GWT-001, GWT-003, PAD-001, PAD-002, RTE-002, MET-001
 
 **Paths:**
+
 - `services/gateway-api`
 - `crates/protocol-openai`
 - `schemas/examples`
 
 **Outputs:**
+
 - OpenAI-compatible endpoint
 - request parsing to IR
 - response mapping from IR/provider result
 
 **Acceptance criteria:**
+
 - non-streaming chat requests work end-to-end
 - OpenAI-compatible errors are returned
 - golden fixture tests pass
@@ -179,16 +200,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** GWT-004
 
 **Paths:**
+
 - `services/gateway-api`
 - `crates/sdk-server`
 - `crates/protocol-openai`
 
 **Outputs:**
+
 - stream relay
 - disconnect handling
 - partial usage capture hooks
 
 **Acceptance criteria:**
+
 - streaming responses are flushed incrementally
 - client disconnects cancel upstream requests
 - stream tests cover partial and terminal events
@@ -200,16 +224,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** GWT-003, DB-002
 
 **Paths:**
+
 - `crates/metering`
 - `crates/ledger-models`
 - `services/gateway-api`
 
 **Outputs:**
+
 - usage event schema
 - gateway emission hooks
 - idempotency key format
 
 **Acceptance criteria:**
+
 - usage events can be emitted for success and failure paths
 - schema version is explicit
 - events include tenant/project/route correlation IDs
@@ -221,15 +248,18 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** OBS-001, GWT-001, CTL-001
 
 **Paths:**
+
 - `infra/monitoring`
 - `docs/runbooks`
 
 **Outputs:**
+
 - Grafana dashboards
 - latency/error/availability SLOs
 - runbooks
 
 **Acceptance criteria:**
+
 - dashboards exist for gateway, control plane, and workers
 - SLO calculations are reproducible
 - runbooks link alerts to operational actions
@@ -241,16 +271,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** GWT-003, FND-001
 
 **Paths:**
+
 - `crates/provider-traits`
 - `crates/testing-kit`
 - `docs/architecture/provider-adapter-system.md`
 
 **Outputs:**
+
 - adapter trait set
 - error normalization model
 - conformance fixtures
 
 **Acceptance criteria:**
+
 - all adapters implement shared trait surfaces
 - adapter tests can run against mocks
 - error categories map to routing decisions
@@ -262,14 +295,17 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** PAD-001, GWT-003
 
 **Paths:**
+
 - `crates/provider-openai`
 
 **Outputs:**
+
 - OpenAI provider client
 - streaming and non-streaming calls
 - usage extraction hooks
 
 **Acceptance criteria:**
+
 - adapter passes conformance fixtures
 - timeouts and retries are configurable
 - provider errors map to normalized categories
@@ -281,16 +317,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** GWT-004, PAD-002, FND-006
 
 **Paths:**
+
 - `crates/testing-kit`
 - `schemas/examples`
 - `crates/protocol-openai`
 
 **Outputs:**
+
 - golden fixtures
 - contract runner
 - fixture update workflow
 
 **Acceptance criteria:**
+
 - protocol contract tests run in CI
 - fixtures cover success and failure cases
 - breaking fixture deltas require review
@@ -302,16 +341,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** GWT-003, DB-001
 
 **Paths:**
+
 - `crates/routing-engine`
 - `crates/core-domain`
 - `services/control-plane-api`
 
 **Outputs:**
+
 - route entities
 - policy model
 - score input structures
 
 **Acceptance criteria:**
+
 - route entities support weighted and ordered strategies
 - validation prevents impossible configurations
 - models are reusable by API and workers
@@ -323,15 +365,18 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** RTE-001, PAD-001
 
 **Paths:**
+
 - `crates/routing-engine`
 - `services/gateway-api`
 
 **Outputs:**
+
 - route evaluator
 - fallback chain execution
 - selection reasoning output
 
 **Acceptance criteria:**
+
 - engine selects eligible route deterministically
 - fallback occurs on retryable error classes
 - selection reason is emitted in traces
@@ -343,16 +388,19 @@ Core platform MVP tasks that produce the first working control plane and gateway
 **Depends on:** FND-004, DB-001
 
 **Paths:**
+
 - `crates/storage`
 - `services/control-plane-api`
 - `crates/config`
 
 **Outputs:**
+
 - secret reference abstraction
 - credential vault boundary
 - rotation hooks
 
 **Acceptance criteria:**
+
 - plaintext provider secrets are never returned by API
 - secret references can be resolved by authorized services only
 - rotation is auditable

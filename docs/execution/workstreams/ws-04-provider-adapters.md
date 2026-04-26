@@ -6,13 +6,13 @@ Implement upstream provider integration through shared traits, registries, error
 
 ## Task sequence
 
-| Task ID | Phase | Title | Depends On |
-|---|---|---|---|
-| PAD-001 | PI-1 | Define provider adapter trait model and adapter conformance test kit | GWT-003, FND-001 |
-| PAD-002 | PI-1 | Implement OpenAI upstream adapter | PAD-001, GWT-003 |
-| PAD-003 | PI-2 | Implement Anthropic upstream adapter | PAD-001, GWT-003 |
-| PAD-004 | PI-2 | Implement Gemini upstream adapter | PAD-001, GWT-003 |
-| PAD-005 | PI-4 | Implement gateway-of-gateways adapter for upstream transit systems | PAD-001, RTE-004 |
+| Task ID | Phase | Title                                                                | Depends On       |
+| ------- | ----- | -------------------------------------------------------------------- | ---------------- |
+| PAD-001 | PI-1  | Define provider adapter trait model and adapter conformance test kit | GWT-003, FND-001 |
+| PAD-002 | PI-1  | Implement OpenAI upstream adapter                                    | PAD-001, GWT-003 |
+| PAD-003 | PI-2  | Implement Anthropic upstream adapter                                 | PAD-001, GWT-003 |
+| PAD-004 | PI-2  | Implement Gemini upstream adapter                                    | PAD-001, GWT-003 |
+| PAD-005 | PI-4  | Implement gateway-of-gateways adapter for upstream transit systems   | PAD-001, RTE-004 |
 
 ## Detailed tasks
 
@@ -25,23 +25,27 @@ Implement upstream provider integration through shared traits, registries, error
 **Depends on:** GWT-003, FND-001
 
 **Primary paths to touch:**
+
 - `crates/provider-traits`
 - `crates/testing-kit`
 - `docs/architecture/provider-adapter-system.md`
 
 **Expected outputs:**
+
 - adapter trait set
 - adapter manifest and registry model
 - error normalization model
 - conformance fixtures
 
 **Acceptance criteria:**
+
 - all adapters implement shared trait surfaces
 - registry can resolve adapters by provider kind and capability profile
 - adapter tests can run against mocks
 - error categories map to routing decisions
 
 **Implementation notes:**
+
 - Normalize upstream errors into routing-relevant categories.
 - Keep adapter configuration typed and region-aware.
 - Adapters should pass shared conformance fixtures before integration.
@@ -56,19 +60,23 @@ Implement upstream provider integration through shared traits, registries, error
 **Depends on:** PAD-001, GWT-003
 
 **Primary paths to touch:**
+
 - `crates/provider-openai`
 
 **Expected outputs:**
+
 - OpenAI provider client
 - streaming and non-streaming calls
 - usage extraction hooks
 
 **Acceptance criteria:**
+
 - adapter passes conformance fixtures
 - timeouts and retries are configurable
 - provider errors map to normalized categories
 
 **Implementation notes:**
+
 - Normalize upstream errors into routing-relevant categories.
 - Keep adapter configuration typed and region-aware.
 - Adapters should pass shared conformance fixtures before integration.
@@ -82,19 +90,23 @@ Implement upstream provider integration through shared traits, registries, error
 **Depends on:** PAD-001, GWT-003
 
 **Primary paths to touch:**
+
 - `crates/provider-anthropic`
 
 **Expected outputs:**
+
 - Anthropic provider client
 - message API integration
 - usage extraction hooks
 
 **Acceptance criteria:**
+
 - adapter passes conformance fixtures
 - unsupported native features are surfaced clearly
 - timeout and region configs are supported
 
 **Implementation notes:**
+
 - Normalize upstream errors into routing-relevant categories.
 - Keep adapter configuration typed and region-aware.
 - Adapters should pass shared conformance fixtures before integration.
@@ -108,19 +120,23 @@ Implement upstream provider integration through shared traits, registries, error
 **Depends on:** PAD-001, GWT-003
 
 **Primary paths to touch:**
+
 - `crates/provider-gemini`
 
 **Expected outputs:**
+
 - Gemini provider client
 - compatibility layer
 - usage extraction hooks
 
 **Acceptance criteria:**
+
 - adapter passes conformance fixtures
 - model capability metadata is discoverable
 - error normalization is documented
 
 **Implementation notes:**
+
 - Normalize upstream errors into routing-relevant categories.
 - Keep adapter configuration typed and region-aware.
 - Adapters should pass shared conformance fixtures before integration.
@@ -134,18 +150,22 @@ Implement upstream provider integration through shared traits, registries, error
 **Depends on:** PAD-001, RTE-004
 
 **Primary paths to touch:**
+
 - `crates/provider-gateway`
 
 **Expected outputs:**
+
 - adapter for upstream gateway providers
 - health and capability metadata model
 
 **Acceptance criteria:**
+
 - adapter can call an upstream OpenAI-compatible gateway
 - upstream gateway errors preserve diagnostic detail
 - routing engine can score it alongside native providers
 
 **Implementation notes:**
+
 - Normalize upstream errors into routing-relevant categories.
 - Keep adapter configuration typed and region-aware.
 - Adapters should pass shared conformance fixtures before integration.

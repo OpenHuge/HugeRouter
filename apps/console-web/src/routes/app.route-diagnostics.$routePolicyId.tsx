@@ -1,4 +1,11 @@
-import { Badge, Card, Group, Stack, Table, Text } from "@mantine/core";
+import {
+  UiChip,
+  UiSurface,
+  UiInline,
+  UiStack,
+  UiDataTable,
+  UiText,
+} from "@huge-router/ui-kit";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
 import { loadRouteData } from "../features/control-plane/loaders";
@@ -29,7 +36,7 @@ function RouteDiagnosticsPage() {
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Explain how the active snapshot and recorded receipts affected target selection for this route."
           title="Route diagnostics"
@@ -38,7 +45,7 @@ function RouteDiagnosticsPage() {
           description="The route diagnostics drill-down could not be loaded from the control-plane service."
           title="Diagnostics unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -46,30 +53,32 @@ function RouteDiagnosticsPage() {
     result.data;
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Explain how the active snapshot and recorded receipts affected target selection for this route."
         title={diagnostics.route_policy.display_name}
       />
-      <Group justify="space-between">
-        <Stack gap={2}>
-          <Group gap="xs">
-            <Text c="dimmed" size="sm">
+      <UiInline justify="space-between">
+        <UiStack gap={2}>
+          <UiInline gap="xs">
+            <UiText c="dimmed" size="sm">
               {getProtocolLabel(diagnostics.route_policy.protocol_family)} ·{" "}
               {diagnostics.route_policy.model_alias}
-            </Text>
-            {isPreviewProtocolFamily(diagnostics.route_policy.protocol_family) ? (
-              <Badge color="yellow" size="sm" variant="light">
+            </UiText>
+            {isPreviewProtocolFamily(
+              diagnostics.route_policy.protocol_family,
+            ) ? (
+              <UiChip color="yellow" size="sm" variant="light">
                 Preview
-              </Badge>
+              </UiChip>
             ) : null}
-          </Group>
-          <Text c="dimmed" size="sm">
+          </UiInline>
+          <UiText c="dimmed" size="sm">
             Required capabilities:{" "}
             {diagnostics.route_policy.required_capabilities.join(", ")}
-          </Text>
-        </Stack>
-        <Badge
+          </UiText>
+        </UiStack>
+        <UiChip
           color={activeSnapshotMatchesRoutePolicy ? "teal" : "gray"}
           variant="light"
         >
@@ -78,128 +87,133 @@ function RouteDiagnosticsPage() {
             : activeSnapshotId
               ? `active snapshot ${activeSnapshotId} is routing a different policy`
               : "no active snapshot"}
-        </Badge>
-      </Group>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Target decision matrix</Text>
-          <Badge color="blue" variant="light">
+        </UiChip>
+      </UiInline>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Target decision matrix</UiText>
+          <UiChip color="blue" variant="light">
             {diagnostics.targets.length} targets
-          </Badge>
-        </Group>
-        <Table striped withTableBorder>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Target</Table.Th>
-              <Table.Th>Decision</Table.Th>
-              <Table.Th>Protocol</Table.Th>
-              <Table.Th>Capability gaps</Table.Th>
-              <Table.Th>Health</Table.Th>
-              <Table.Th>Reason</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+          </UiChip>
+        </UiInline>
+        <UiDataTable striped withTableBorder>
+          <UiDataTable.Thead>
+            <UiDataTable.Tr>
+              <UiDataTable.Th>Target</UiDataTable.Th>
+              <UiDataTable.Th>Decision</UiDataTable.Th>
+              <UiDataTable.Th>Protocol</UiDataTable.Th>
+              <UiDataTable.Th>Capability gaps</UiDataTable.Th>
+              <UiDataTable.Th>Health</UiDataTable.Th>
+              <UiDataTable.Th>Reason</UiDataTable.Th>
+            </UiDataTable.Tr>
+          </UiDataTable.Thead>
+          <UiDataTable.Tbody>
             {diagnostics.targets.map((target) => (
-              <Table.Tr key={target.provider_resource.provider_resource_id}>
-                <Table.Td>
-                  <Stack gap={2}>
-                    <Group gap="xs">
-                      <Text fw={600}>{target.provider_resource.name}</Text>
+              <UiDataTable.Tr
+                key={target.provider_resource.provider_resource_id}
+              >
+                <UiDataTable.Td>
+                  <UiStack gap={2}>
+                    <UiInline gap="xs">
+                      <UiText fw={600}>{target.provider_resource.name}</UiText>
                       {target.provider_resource.is_transit_gateway ? (
-                        <Badge color="indigo" variant="light">
+                        <UiChip color="indigo" variant="light">
                           transit
-                        </Badge>
+                        </UiChip>
                       ) : null}
-                    </Group>
-                    <Text c="dimmed" size="sm">
+                    </UiInline>
+                    <UiText c="dimmed" size="sm">
                       {target.provider_resource.provider_id} ·{" "}
                       {target.provider_resource.region}
-                    </Text>
-                  </Stack>
-                </Table.Td>
-                <Table.Td>
-                  <Badge color={decisionColor(target.decision)} variant="light">
+                    </UiText>
+                  </UiStack>
+                </UiDataTable.Td>
+                <UiDataTable.Td>
+                  <UiChip
+                    color={decisionColor(target.decision)}
+                    variant="light"
+                  >
                     {target.decision}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Badge
+                  </UiChip>
+                </UiDataTable.Td>
+                <UiDataTable.Td>
+                  <UiChip
                     color={target.supports_protocol_family ? "teal" : "red"}
                     variant="light"
                   >
                     {target.supports_protocol_family
                       ? "supported"
                       : "unsupported"}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
+                  </UiChip>
+                </UiDataTable.Td>
+                <UiDataTable.Td>
                   {target.capability_gaps.length > 0
                     ? target.capability_gaps.join(", ")
                     : "None"}
-                </Table.Td>
-                <Table.Td>
-                  <Stack gap={2}>
-                    <Badge
+                </UiDataTable.Td>
+                <UiDataTable.Td>
+                  <UiStack gap={2}>
+                    <UiChip
                       color={healthColor(target.provider_resource.health_state)}
                       variant="light"
                     >
                       {target.provider_resource.health_state}
-                    </Badge>
-                    <Text c="dimmed" size="sm">
+                    </UiChip>
+                    <UiText c="dimmed" size="sm">
                       {target.provider_resource.quarantine_reason ??
                         target.provider_resource.health_message ??
                         "No health message recorded."}
-                    </Text>
-                  </Stack>
-                </Table.Td>
-                <Table.Td>
-                  <Stack gap={2}>
-                    <Text size="sm">{target.reason}</Text>
-                    <Text c="dimmed" size="sm">
+                    </UiText>
+                  </UiStack>
+                </UiDataTable.Td>
+                <UiDataTable.Td>
+                  <UiStack gap={2}>
+                    <UiText size="sm">{target.reason}</UiText>
+                    <UiText c="dimmed" size="sm">
                       {target.in_active_snapshot
                         ? "Included in active snapshot"
                         : "Not in active snapshot set"}
-                    </Text>
+                    </UiText>
                     {target.recent_receipt_id ? (
-                      <Text c="dimmed" size="sm">
+                      <UiText c="dimmed" size="sm">
                         Receipt: {target.recent_receipt_id}
-                      </Text>
+                      </UiText>
                     ) : null}
-                  </Stack>
-                </Table.Td>
-              </Table.Tr>
+                  </UiStack>
+                </UiDataTable.Td>
+              </UiDataTable.Tr>
             ))}
-          </Table.Tbody>
-        </Table>
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Recent receipts</Text>
-          <Badge color="gray" variant="light">
+          </UiDataTable.Tbody>
+        </UiDataTable>
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Recent receipts</UiText>
+          <UiChip color="gray" variant="light">
             {diagnostics.recent_receipts.length}
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {diagnostics.recent_receipts.length === 0 ? (
-          <Text c="dimmed" size="sm">
+          <UiText c="dimmed" size="sm">
             No recent receipts for this route policy.
-          </Text>
+          </UiText>
         ) : (
-          <Stack gap="xs">
+          <UiStack gap="xs">
             {diagnostics.recent_receipts.map((receipt) => (
-              <Card
+              <UiSurface
                 key={receipt.route_receipt_id}
                 padding="md"
                 radius="md"
                 withBorder
               >
-                <Group justify="space-between">
-                  <Stack gap={2}>
-                    <Text fw={600}>{receipt.route_receipt_id}</Text>
-                    <Text c="dimmed" size="sm">
+                <UiInline justify="space-between">
+                  <UiStack gap={2}>
+                    <UiText fw={600}>{receipt.route_receipt_id}</UiText>
+                    <UiText c="dimmed" size="sm">
                       {receipt.created_at}
-                    </Text>
-                  </Stack>
-                  <Badge
+                    </UiText>
+                  </UiStack>
+                  <UiChip
                     color={
                       receipt.admission_result === "admitted"
                         ? "teal"
@@ -208,21 +222,21 @@ function RouteDiagnosticsPage() {
                     variant="light"
                   >
                     {receipt.admission_result}
-                  </Badge>
-                </Group>
-                <Text c="dimmed" mt="xs" size="sm">
+                  </UiChip>
+                </UiInline>
+                <UiText c="dimmed" mt="xs" size="sm">
                   {receipt.failure_reason ?? "No failure reason recorded."}
-                </Text>
-              </Card>
+                </UiText>
+              </UiSurface>
             ))}
-          </Stack>
+          </UiStack>
         )}
-      </Card>
-      <Text c="dimmed" size="sm">
+      </UiSurface>
+      <UiText c="dimmed" size="sm">
         Return to <Link to="/app/routes">Routes</Link> or{" "}
         <Link to="/app/receipts">Receipts</Link>.
-      </Text>
-    </Stack>
+      </UiText>
+    </UiStack>
   );
 }
 

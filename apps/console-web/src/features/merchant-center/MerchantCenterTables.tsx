@@ -1,13 +1,13 @@
 import {
-  Badge,
-  Button,
-  Card,
-  Group,
-  SegmentedControl,
-  Stack,
-  Table,
-  Text,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiInline,
+  UiSegmented,
+  UiStack,
+  UiDataTable,
+  UiText,
+} from "@huge-router/ui-kit";
 import type {
   CardProductView,
   MerchantShopView,
@@ -49,59 +49,59 @@ function EvaluationCheckBadges({
   ] as const;
 
   return (
-    <Group gap={4}>
+    <UiInline gap={4}>
       {checks.map(([label, status]) => (
-        <Badge color={statusColor(status)} key={label} size="xs" variant="dot">
+        <UiChip color={statusColor(status)} key={label} size="xs" variant="dot">
           {label} {status}
-        </Badge>
+        </UiChip>
       ))}
-    </Group>
+    </UiInline>
   );
 }
 
 export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Text fw={700}>Shops</Text>
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiText fw={700}>Shops</UiText>
         {shops.length === 0 ? (
           <EmptyCollectionState
             description="Open your first small shop to start listing card-secret products."
             title="No shops"
           />
         ) : (
-          <Table striped withRowBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Shop</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Slug</Table.Th>
-                <Table.Th>Fulfillment</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withRowBorders>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Shop</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Slug</UiDataTable.Th>
+                <UiDataTable.Th>Fulfillment</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {shops.map((shop) => (
-                <Table.Tr key={shop.merchantShopId}>
-                  <Table.Td>
-                    <Text fw={600}>{shop.displayName}</Text>
-                    <Text c="dimmed" size="sm">
+                <UiDataTable.Tr key={shop.merchantShopId}>
+                  <UiDataTable.Td>
+                    <UiText fw={600}>{shop.displayName}</UiText>
+                    <UiText c="dimmed" size="sm">
                       {shop.merchantShopId}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge color={statusColor(shop.status)} variant="light">
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip color={statusColor(shop.status)} variant="light">
                       {shop.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{shop.slug}</Table.Td>
-                  <Table.Td>{shop.fulfillmentMode}</Table.Td>
-                </Table.Tr>
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{shop.slug}</UiDataTable.Td>
+                  <UiDataTable.Td>{shop.fulfillmentMode}</UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }
 
@@ -111,49 +111,49 @@ export function CardProductTable({
   products: CardProductView[];
 }) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Text fw={700}>Card Products</Text>
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiText fw={700}>Card Products</UiText>
         {products.length === 0 ? (
           <EmptyCollectionState
             description="Create a card-secret product after your merchant shop is ready."
             title="No card products"
           />
         ) : (
-          <Table striped withRowBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Product</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Inventory</Table.Th>
-                <Table.Th>Face Value</Table.Th>
-                <Table.Th>Retail Price</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withRowBorders>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Product</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Inventory</UiDataTable.Th>
+                <UiDataTable.Th>Face Value</UiDataTable.Th>
+                <UiDataTable.Th>Retail Price</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {products.map((product) => (
-                <Table.Tr key={product.cardProductId}>
-                  <Table.Td>
-                    <Text fw={600}>{product.title}</Text>
-                    <Text c="dimmed" size="sm">
+                <UiDataTable.Tr key={product.cardProductId}>
+                  <UiDataTable.Td>
+                    <UiText fw={600}>{product.title}</UiText>
+                    <UiText c="dimmed" size="sm">
                       {product.cardProductId}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge color={statusColor(product.status)} variant="light">
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip color={statusColor(product.status)} variant="light">
                       {product.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{product.inventoryCount}</Table.Td>
-                  <Table.Td>${product.faceValueUsd}</Table.Td>
-                  <Table.Td>${product.retailPriceUsd}</Table.Td>
-                </Table.Tr>
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{product.inventoryCount}</UiDataTable.Td>
+                  <UiDataTable.Td>${product.faceValueUsd}</UiDataTable.Td>
+                  <UiDataTable.Td>${product.retailPriceUsd}</UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }
 
@@ -163,52 +163,52 @@ export function TrialConnectionTable({
   connections: TrialConnectionView[];
 }) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Text fw={700}>Trial Connections</Text>
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiText fw={700}>Trial Connections</UiText>
         {connections.length === 0 ? (
           <EmptyCollectionState
             description="Attach a dedicated test relay before running evaluation."
             title="No trial connections"
           />
         ) : (
-          <Table striped withRowBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Provider</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Endpoint</Table.Th>
-                <Table.Th>Masked Key</Table.Th>
-                <Table.Th>Model</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withRowBorders>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Provider</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Endpoint</UiDataTable.Th>
+                <UiDataTable.Th>Masked Key</UiDataTable.Th>
+                <UiDataTable.Th>Model</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {connections.map((connection) => (
-                <Table.Tr key={connection.trialConnectionId}>
-                  <Table.Td>
-                    <Text fw={600}>{connection.providerLabel}</Text>
-                    <Text c="dimmed" size="sm">
+                <UiDataTable.Tr key={connection.trialConnectionId}>
+                  <UiDataTable.Td>
+                    <UiText fw={600}>{connection.providerLabel}</UiText>
+                    <UiText c="dimmed" size="sm">
                       {connection.trialConnectionId}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
                       color={statusColor(connection.status)}
                       variant="light"
                     >
                       {connection.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{connection.endpointBaseUrl}</Table.Td>
-                  <Table.Td>{connection.apiKeyMasked}</Table.Td>
-                  <Table.Td>{connection.targetModel}</Table.Td>
-                </Table.Tr>
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{connection.endpointBaseUrl}</UiDataTable.Td>
+                  <UiDataTable.Td>{connection.apiKeyMasked}</UiDataTable.Td>
+                  <UiDataTable.Td>{connection.targetModel}</UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }
 
@@ -235,17 +235,17 @@ export function RelayEvaluationTable({
         );
 
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Group justify="space-between">
-          <Stack gap={0}>
-            <Text fw={700}>Recent Evaluations</Text>
-            <Text c="dimmed" size="sm">
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiInline justify="space-between">
+          <UiStack gap={0}>
+            <UiText fw={700}>Recent Evaluations</UiText>
+            <UiText c="dimmed" size="sm">
               {visibleEvaluations.length} of{" "}
               {workspace.recentEvaluations.length} evaluations shown.
-            </Text>
-          </Stack>
-          <SegmentedControl
+            </UiText>
+          </UiStack>
+          <UiSegmented
             data={[
               { label: "All", value: "all" },
               { label: "Healthy", value: "healthy" },
@@ -258,7 +258,7 @@ export function RelayEvaluationTable({
             size="xs"
             value={evaluationVerdictFilter}
           />
-        </Group>
+        </UiInline>
         {workspace.recentEvaluations.length === 0 ? (
           <EmptyCollectionState
             description="Run your first evaluation to produce replay-backed merchant evidence."
@@ -270,59 +270,61 @@ export function RelayEvaluationTable({
             title="No matching evaluations"
           />
         ) : (
-          <Table striped withRowBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Provider</Table.Th>
-                <Table.Th>Verdict</Table.Th>
-                <Table.Th>Score</Table.Th>
-                <Table.Th>Replay Capsule</Table.Th>
-                <Table.Th>Saved Tokens</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withRowBorders>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Provider</UiDataTable.Th>
+                <UiDataTable.Th>Verdict</UiDataTable.Th>
+                <UiDataTable.Th>Score</UiDataTable.Th>
+                <UiDataTable.Th>Replay Capsule</UiDataTable.Th>
+                <UiDataTable.Th>Saved Tokens</UiDataTable.Th>
+                <UiDataTable.Th />
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {visibleEvaluations.map((evaluation) => {
                 const isSelected =
                   selectedReplayCapsuleId === evaluation.replayCapsuleId;
 
                 return (
-                  <Table.Tr
-                    bg={isSelected ? "var(--mantine-color-blue-0)" : undefined}
+                  <UiDataTable.Tr
+                    bg={isSelected ? "var(--accent)" : undefined}
                     key={evaluation.relayEvaluationId}
                   >
-                    <Table.Td>
-                      <Text fw={600}>{evaluation.providerLabel}</Text>
-                      <Text c="dimmed" size="sm">
+                    <UiDataTable.Td>
+                      <UiText fw={600}>{evaluation.providerLabel}</UiText>
+                      <UiText c="dimmed" size="sm">
                         {evaluation.summary}
-                      </Text>
+                      </UiText>
                       <EvaluationCheckBadges evaluation={evaluation} />
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiChip
                         color={statusColor(evaluation.verdict)}
                         variant="light"
                       >
                         {evaluation.verdict}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>{evaluation.overallScore}</Table.Td>
-                    <Table.Td>
-                      <Group gap="xs">
-                        <Text>{evaluation.replayCapsuleId}</Text>
+                      </UiChip>
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>{evaluation.overallScore}</UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiInline gap="xs">
+                        <UiText>{evaluation.replayCapsuleId}</UiText>
                         {isSelected ? (
-                          <Badge color="blue" size="xs" variant="light">
+                          <UiChip color="blue" size="xs" variant="light">
                             Selected
-                          </Badge>
+                          </UiChip>
                         ) : null}
-                      </Group>
-                      <Text c="dimmed" size="sm">
+                      </UiInline>
+                      <UiText c="dimmed" size="sm">
                         {evaluation.runnerMode}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>{evaluation.estimatedTokensSaved}</Table.Td>
-                    <Table.Td>
-                      <Button
+                      </UiText>
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      {evaluation.estimatedTokensSaved}
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
+                      <UiButton
                         loading={
                           isLoadingReplayCapsule &&
                           selectedReplayCapsuleId === evaluation.replayCapsuleId
@@ -334,16 +336,16 @@ export function RelayEvaluationTable({
                         variant="light"
                       >
                         View replay
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
+                      </UiButton>
+                    </UiDataTable.Td>
+                  </UiDataTable.Tr>
                 );
               })}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }
 
@@ -353,16 +355,16 @@ export function ReplayCapsuleDetailCard({
   replayCapsule: ReplayCapsuleView | null;
 }) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Group justify="space-between">
-          <Text fw={700}>Replay Capsule</Text>
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiInline justify="space-between">
+          <UiText fw={700}>Replay Capsule</UiText>
           {replayCapsule ? (
-            <Badge color="teal" variant="light">
+            <UiChip color="teal" variant="light">
               {replayCapsule.redactionTier}
-            </Badge>
+            </UiChip>
           ) : null}
-        </Group>
+        </UiInline>
         {!replayCapsule ? (
           <EmptyCollectionState
             description="Open a replay capsule from the evaluation table to inspect the redacted request shape and upstream error hint."
@@ -370,69 +372,69 @@ export function ReplayCapsuleDetailCard({
           />
         ) : (
           <>
-            <Group grow>
-              <Stack gap={0}>
-                <Text c="dimmed" size="sm">
+            <UiInline grow>
+              <UiStack gap={0}>
+                <UiText c="dimmed" size="sm">
                   Replay Capsule ID
-                </Text>
-                <Text fw={600}>{replayCapsule.replayCapsuleId}</Text>
-              </Stack>
-              <Stack gap={0}>
-                <Text c="dimmed" size="sm">
+                </UiText>
+                <UiText fw={600}>{replayCapsule.replayCapsuleId}</UiText>
+              </UiStack>
+              <UiStack gap={0}>
+                <UiText c="dimmed" size="sm">
                   Request / Trace
-                </Text>
-                <Text fw={600}>{replayCapsule.requestId}</Text>
-                <Text c="dimmed" size="sm">
+                </UiText>
+                <UiText fw={600}>{replayCapsule.requestId}</UiText>
+                <UiText c="dimmed" size="sm">
                   {replayCapsule.traceId}
-                </Text>
-              </Stack>
-              <Stack gap={0}>
-                <Text c="dimmed" size="sm">
+                </UiText>
+              </UiStack>
+              <UiStack gap={0}>
+                <UiText c="dimmed" size="sm">
                   Config Snapshot
-                </Text>
-                <Text fw={600}>{replayCapsule.configSnapshotId}</Text>
-              </Stack>
-              <Stack gap={0}>
-                <Text c="dimmed" size="sm">
+                </UiText>
+                <UiText fw={600}>{replayCapsule.configSnapshotId}</UiText>
+              </UiStack>
+              <UiStack gap={0}>
+                <UiText c="dimmed" size="sm">
                   Route Receipt
-                </Text>
-                <Text fw={600}>{replayCapsule.routeReceiptId}</Text>
-              </Stack>
-            </Group>
-            <Table striped withRowBorders>
-              <Table.Tbody>
-                <Table.Tr>
-                  <Table.Th>Protocol family</Table.Th>
-                  <Table.Td>
+                </UiText>
+                <UiText fw={600}>{replayCapsule.routeReceiptId}</UiText>
+              </UiStack>
+            </UiInline>
+            <UiDataTable striped withRowBorders>
+              <UiDataTable.Tbody>
+                <UiDataTable.Tr>
+                  <UiDataTable.Th>Protocol family</UiDataTable.Th>
+                  <UiDataTable.Td>
                     {replayCapsule.normalizedRequestSummary.protocolFamily}
-                  </Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Th>Model alias</Table.Th>
-                  <Table.Td>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
+                <UiDataTable.Tr>
+                  <UiDataTable.Th>Model alias</UiDataTable.Th>
+                  <UiDataTable.Td>
                     {replayCapsule.normalizedRequestSummary.modelAlias}
-                  </Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Th>Estimated prompt tokens</Table.Th>
-                  <Table.Td>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
+                <UiDataTable.Tr>
+                  <UiDataTable.Th>Estimated prompt tokens</UiDataTable.Th>
+                  <UiDataTable.Td>
                     {
                       replayCapsule.normalizedRequestSummary
                         .estimatedPromptTokens
                     }
-                  </Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Th>Upstream error hint</Table.Th>
-                  <Table.Td>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
+                <UiDataTable.Tr>
+                  <UiDataTable.Th>Upstream error hint</UiDataTable.Th>
+                  <UiDataTable.Td>
                     {replayCapsule.upstreamErrorCode ?? "none"}
-                  </Table.Td>
-                </Table.Tr>
-              </Table.Tbody>
-            </Table>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
+              </UiDataTable.Tbody>
+            </UiDataTable>
           </>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }

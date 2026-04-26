@@ -1,14 +1,14 @@
 import {
-  Badge,
-  Button,
-  Card,
-  Group,
-  Select,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiInline,
+  UiSelect,
+  UiStack,
+  UiDataTable,
+  UiText,
+  UiTextField,
+} from "@huge-router/ui-kit";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
@@ -60,7 +60,9 @@ type RoutePolicyFormState = {
   routePolicyId: string;
 };
 
-type RoutePolicyFormErrors = Partial<Record<keyof RoutePolicyFormState, string>>;
+type RoutePolicyFormErrors = Partial<
+  Record<keyof RoutePolicyFormState, string>
+>;
 
 function protocolDisplay(protocolFamily: string) {
   return getProtocolLabel(protocolFamily);
@@ -119,7 +121,8 @@ function routePolicyToFormState(policy: RoutePolicyView): RoutePolicyFormState {
     displayName: policy.name,
     modelAlias: policy.modelAlias,
     preferredRegions: policy.preferredRegions.join(", "),
-    protocolFamily: policy.protocolFamily as RoutePolicyFormState["protocolFamily"],
+    protocolFamily:
+      policy.protocolFamily as RoutePolicyFormState["protocolFamily"],
     requiredCapabilities: policy.requiredCapabilities.join(", "),
     routePolicyId: policy.id,
   };
@@ -195,7 +198,7 @@ function RoutePoliciesPage() {
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Review protocol-aware route policies and recent route diagnostics."
           title="Routes"
@@ -206,7 +209,7 @@ function RoutePoliciesPage() {
           description="Route policy and diagnostics data could not be loaded from the control-plane service."
           title="Routes unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -328,7 +331,10 @@ function RoutePoliciesPage() {
     setStatusSuccess(null);
 
     try {
-      await getConsoleDataService().disableRoutePolicy(policy.id, policy.version);
+      await getConsoleDataService().disableRoutePolicy(
+        policy.id,
+        policy.version,
+      );
       setDisabledPolicyIds((current) => [...current, policy.id]);
       setStatusSuccess(`Disabled route policy ${policy.name}.`);
       await router.invalidate();
@@ -342,7 +348,7 @@ function RoutePoliciesPage() {
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Review protocol-aware route policies and recent route diagnostics."
         title="Routes"
@@ -355,27 +361,27 @@ function RoutePoliciesPage() {
         }}
         success={statusSuccess}
       />
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>
             {formMode === "edit" ? "Edit route policy" : "Create route policy"}
-          </Text>
-          <Group>
+          </UiText>
+          <UiInline>
             {formMode ? (
-              <Button onClick={resetForm} size="sm" variant="subtle">
+              <UiButton onClick={resetForm} size="sm" variant="subtle">
                 Cancel
-              </Button>
+              </UiButton>
             ) : null}
             {!formMode ? (
-              <Button onClick={openCreateForm} size="sm">
+              <UiButton onClick={openCreateForm} size="sm">
                 Create route policy
-              </Button>
+              </UiButton>
             ) : null}
-          </Group>
-        </Group>
+          </UiInline>
+        </UiInline>
         {formMode ? (
-          <Stack>
-            <TextInput
+          <UiStack>
+            <UiTextField
               label="Route policy id"
               onChange={(event) =>
                 updateField("routePolicyId", event.currentTarget.value)
@@ -384,8 +390,8 @@ function RoutePoliciesPage() {
               value={formState.routePolicyId}
             />
             <FieldErrorText error={formErrors.routePolicyId} />
-            <Group grow>
-              <TextInput
+            <UiInline grow>
+              <UiTextField
                 label="Display name"
                 onChange={(event) =>
                   updateField("displayName", event.currentTarget.value)
@@ -393,7 +399,7 @@ function RoutePoliciesPage() {
                 placeholder="Acme Reasoning Fast"
                 value={formState.displayName}
               />
-              <TextInput
+              <UiTextField
                 label="Model alias"
                 onChange={(event) =>
                   updateField("modelAlias", event.currentTarget.value)
@@ -401,26 +407,23 @@ function RoutePoliciesPage() {
                 placeholder="reasoning-fast"
                 value={formState.modelAlias}
               />
-            </Group>
-            <Group grow>
+            </UiInline>
+            <UiInline grow>
               <FieldErrorText error={formErrors.displayName} />
               <FieldErrorText error={formErrors.modelAlias} />
-            </Group>
-            <Select
+            </UiInline>
+            <UiSelect
               data={PROTOCOL_FAMILY_OPTIONS.map((value) => ({
                 label: getProtocolOptionLabel(value),
                 value,
               }))}
               label="Protocol family"
               onChange={(value) =>
-                updateField(
-                  "protocolFamily",
-                  value ?? "openai_chat",
-                )
+                updateField("protocolFamily", value ?? "openai_chat")
               }
               value={formState.protocolFamily}
             />
-            <TextInput
+            <UiTextField
               description={`Supported capability values: ${SUPPORTED_ROUTE_CAPABILITIES.join(
                 ", ",
               )}.`}
@@ -432,7 +435,7 @@ function RoutePoliciesPage() {
               value={formState.requiredCapabilities}
             />
             <FieldErrorText error={formErrors.requiredCapabilities} />
-            <TextInput
+            <UiTextField
               description="Comma-separated regions are optional."
               label="Preferred regions"
               onChange={(event) =>
@@ -441,25 +444,28 @@ function RoutePoliciesPage() {
               placeholder="us-east-1, us-west-2"
               value={formState.preferredRegions}
             />
-            <Group justify="flex-end">
-              <Button loading={isSubmitting} onClick={() => void onSubmit()}>
-                {formMode === "edit" ? "Save route policy" : "Create route policy"}
-              </Button>
-            </Group>
-          </Stack>
+            <UiInline justify="flex-end">
+              <UiButton loading={isSubmitting} onClick={() => void onSubmit()}>
+                {formMode === "edit"
+                  ? "Save route policy"
+                  : "Create route policy"}
+              </UiButton>
+            </UiInline>
+          </UiStack>
         ) : (
-          <Text c="dimmed" size="sm">
-            Create protocol-aware route policies, edit existing definitions, and disable outdated ones.
-          </Text>
+          <UiText c="dimmed" size="sm">
+            Create protocol-aware route policies, edit existing definitions, and
+            disable outdated ones.
+          </UiText>
         )}
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Route policy config</Text>
-          <Badge color="blue" variant="light">
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Route policy config</UiText>
+          <UiChip color="blue" variant="light">
             {effectiveRoutePolicies.length} policies
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {effectiveRoutePolicies.length === 0 ? (
           <EmptyCollectionState
             description="Create a route policy to define protocol-aware provider resolution."
@@ -467,57 +473,59 @@ function RoutePoliciesPage() {
           />
         ) : (
           protocolGroups.map(([protocolLabel, policies]) => (
-            <Stack key={protocolLabel} gap="sm">
-              <Group>
-                <Badge color={protocolColor(protocolLabel)} size="md">
+            <UiStack key={protocolLabel} gap="sm">
+              <UiInline>
+                <UiChip color={protocolColor(protocolLabel)} size="md">
                   {protocolDisplay(protocolLabel)}
-                </Badge>
+                </UiChip>
                 {isPreviewProtocolFamily(protocolLabel) ? (
-                  <Badge color="yellow" size="md" variant="light">
+                  <UiChip color="yellow" size="md" variant="light">
                     Preview
-                  </Badge>
+                  </UiChip>
                 ) : null}
-                <Text c="dimmed" size="sm">
+                <UiText c="dimmed" size="sm">
                   {policies.length} polic{policies.length === 1 ? "y" : "ies"}
-                </Text>
-              </Group>
-              <Table mb="md" striped withTableBorder>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Policy</Table.Th>
-                    <Table.Th>Protocol</Table.Th>
-                    <Table.Th>Model alias</Table.Th>
-                    <Table.Th>Selected providers</Table.Th>
-                    <Table.Th>Latest receipt</Table.Th>
-                    <Table.Th>Preferred regions</Table.Th>
-                    <Table.Th>Required capabilities</Table.Th>
-                    <Table.Th>Version</Table.Th>
-                    <Table.Th>Actions</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
+                </UiText>
+              </UiInline>
+              <UiDataTable mb="md" striped withTableBorder>
+                <UiDataTable.Thead>
+                  <UiDataTable.Tr>
+                    <UiDataTable.Th>Policy</UiDataTable.Th>
+                    <UiDataTable.Th>Protocol</UiDataTable.Th>
+                    <UiDataTable.Th>Model alias</UiDataTable.Th>
+                    <UiDataTable.Th>Selected providers</UiDataTable.Th>
+                    <UiDataTable.Th>Latest receipt</UiDataTable.Th>
+                    <UiDataTable.Th>Preferred regions</UiDataTable.Th>
+                    <UiDataTable.Th>Required capabilities</UiDataTable.Th>
+                    <UiDataTable.Th>Version</UiDataTable.Th>
+                    <UiDataTable.Th>Actions</UiDataTable.Th>
+                  </UiDataTable.Tr>
+                </UiDataTable.Thead>
+                <UiDataTable.Tbody>
                   {policies.map((policy) => (
-                    <Table.Tr key={policy.id}>
-                      <Table.Td>{policy.name}</Table.Td>
-                      <Table.Td>
-                        <Group gap="xs">
-                          <Text>{protocolDisplay(policy.protocolFamily)}</Text>
+                    <UiDataTable.Tr key={policy.id}>
+                      <UiDataTable.Td>{policy.name}</UiDataTable.Td>
+                      <UiDataTable.Td>
+                        <UiInline gap="xs">
+                          <UiText>
+                            {protocolDisplay(policy.protocolFamily)}
+                          </UiText>
                           {isPreviewProtocolFamily(policy.protocolFamily) ? (
-                            <Badge color="yellow" size="sm" variant="light">
+                            <UiChip color="yellow" size="sm" variant="light">
                               Preview
-                            </Badge>
+                            </UiChip>
                           ) : null}
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>{policy.modelAlias}</Table.Td>
-                      <Table.Td>
+                        </UiInline>
+                      </UiDataTable.Td>
+                      <UiDataTable.Td>{policy.modelAlias}</UiDataTable.Td>
+                      <UiDataTable.Td>
                         {policy.selectedProviders.length > 0
                           ? policy.selectedProviders.join(", ")
                           : "Inactive snapshot"}
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <Badge
+                      </UiDataTable.Td>
+                      <UiDataTable.Td>
+                        <UiStack gap={2}>
+                          <UiChip
                             color={
                               policy.lastReceiptOutcome === "admitted"
                                 ? "teal"
@@ -528,38 +536,38 @@ function RoutePoliciesPage() {
                             variant="light"
                           >
                             {policy.lastReceiptOutcome ?? "No receipt"}
-                          </Badge>
-                          <Text c="dimmed" size="sm">
+                          </UiChip>
+                          <UiText c="dimmed" size="sm">
                             {policy.lastFailureReason ??
                               "No recent routing failure recorded."}
-                          </Text>
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>
+                          </UiText>
+                        </UiStack>
+                      </UiDataTable.Td>
+                      <UiDataTable.Td>
                         {policy.preferredRegions.join(", ") || "Any region"}
-                      </Table.Td>
-                      <Table.Td>
+                      </UiDataTable.Td>
+                      <UiDataTable.Td>
                         {policy.requiredCapabilities.join(", ")}
-                      </Table.Td>
-                      <Table.Td>{policy.version}</Table.Td>
-                      <Table.Td>
-                        <Group gap="xs">
-                          <Button
+                      </UiDataTable.Td>
+                      <UiDataTable.Td>{policy.version}</UiDataTable.Td>
+                      <UiDataTable.Td>
+                        <UiInline gap="xs">
+                          <UiButton
                             component="a"
                             href={`/app/route-diagnostics/${policy.id}`}
                             size="xs"
                             variant="subtle"
                           >
                             Inspect
-                          </Button>
-                          <Button
+                          </UiButton>
+                          <UiButton
                             onClick={() => openEditForm(policy)}
                             size="xs"
                             variant="light"
                           >
                             Edit
-                          </Button>
-                          <Button
+                          </UiButton>
+                          <UiButton
                             color="red"
                             loading={disablingPolicyId === policy.id}
                             onClick={() => void onDisable(policy)}
@@ -567,32 +575,37 @@ function RoutePoliciesPage() {
                             variant="light"
                           >
                             Disable
-                          </Button>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
+                          </UiButton>
+                        </UiInline>
+                      </UiDataTable.Td>
+                    </UiDataTable.Tr>
                   ))}
-                </Table.Tbody>
-              </Table>
-            </Stack>
+                </UiDataTable.Tbody>
+              </UiDataTable>
+            </UiStack>
           ))
         )}
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Text fw={700} mb="xs">
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiText fw={700} mb="xs">
           Operator diagnostics
-        </Text>
-        <Text c="dimmed" size="sm">
+        </UiText>
+        <UiText c="dimmed" size="sm">
           Use the inspect action to review protocol support, capability gaps,
           health blockers, and the recent receipt history for a specific route
           policy.
-        </Text>
-        <Group mt="md">
-          <Button component="a" href="/app/receipts" size="sm" variant="light">
+        </UiText>
+        <UiInline mt="md">
+          <UiButton
+            component="a"
+            href="/app/receipts"
+            size="sm"
+            variant="light"
+          >
             Open route receipts
-          </Button>
-        </Group>
-      </Card>
-    </Stack>
+          </UiButton>
+        </UiInline>
+      </UiSurface>
+    </UiStack>
   );
 }

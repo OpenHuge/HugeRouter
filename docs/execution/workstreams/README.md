@@ -7,7 +7,7 @@
 - [Gateway and Protocol Ingress](ws-03-gateway-and-protocol-ingress.md) - Implement the northbound API gateway, protocol IR, protocol-specific ingress layers, and streaming/realtime request handling.
 - [Provider Adapters](ws-04-provider-adapters.md) - Implement upstream provider integration through shared traits, error normalization, conformance tests, and individual adapters.
 - [Routing and Reliability](ws-05-routing-and-reliability.md) - Own route domain models, route selection, health signals, retries, circuit breaking, fallback, and operator diagnostics.
-- [Control Plane and Console](ws-06-control-plane-and-console.md) - Deliver the management API and the TanStack Start + Mantine console for tenants, providers, routes, and billing surfaces.
+- [Control Plane and Console](ws-06-control-plane-and-console.md) - Deliver the management API and the TanStack Start + HeroUI console for tenants, providers, routes, and billing surfaces.
 - [Metering, Ledger, and Billing](ws-07-metering-ledger-and-billing.md) - Capture usage on the hot path, write immutable ledger records, compute projections, and expose billing analytics.
 - [Security, Identity, and Compliance](ws-08-security-identity-and-compliance.md) - Define authorization, secret boundaries, SSO, audit trails, and compliance controls.
 - [Observability, SRE, and Runtime](ws-09-observability-sre-and-runtime.md) - Create shared telemetry, SLOs, alerting, and performance/failure-injection practices.

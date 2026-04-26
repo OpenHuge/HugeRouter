@@ -1,4 +1,4 @@
-import { Stack } from "@mantine/core";
+import { UiStack } from "@huge-router/ui-kit";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@huge-router/ui-kit";
 import type { RouteDataResult } from "../control-plane/loaders";
@@ -50,7 +50,7 @@ export function MerchantCenterPage({
 }) {
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Manage small-shop setup, card-secret listings, trial relay connections, and replay-backed evaluations."
           title="Merchant Center"
@@ -61,7 +61,7 @@ export function MerchantCenterPage({
           description="Merchant data could not be loaded from the control-plane service."
           title="Merchant center unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -269,7 +269,7 @@ function MerchantCenterContent({ data }: { data: MerchantWorkspaceData }) {
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Operate a small shop, attach dedicated trial relays, and keep replay-backed evidence so repeated review does not burn live tokens."
         title="Merchant Center"
@@ -332,6 +332,6 @@ function MerchantCenterContent({ data }: { data: MerchantWorkspaceData }) {
         workspace={workspace}
       />
       <ReplayCapsuleDetailCard replayCapsule={selectedReplayCapsule} />
-    </Stack>
+    </UiStack>
   );
 }

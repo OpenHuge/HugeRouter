@@ -1,106 +1,115 @@
-import { Alert, Button, Group, Loader, Stack, Text } from '@mantine/core'
-import { EmptyState } from '@huge-router/ui-kit'
-import { Link } from '@tanstack/react-router'
-import type { RouteDataErrorKind } from './loaders'
+import {
+  UiAlert,
+  UiButton,
+  UiInline,
+  UiSpinner,
+  UiStack,
+  UiText,
+} from "@huge-router/ui-kit";
+import { EmptyState } from "@huge-router/ui-kit";
+import { Link } from "@tanstack/react-router";
+import type { RouteDataErrorKind } from "./loaders";
 
 type RouteLoadingStateProps = {
-  label: string
-}
+  label: string;
+};
 
 type RouteErrorStateProps = {
-  kind?: RouteDataErrorKind
-  title: string
-  description: string
-  message?: string
-}
+  kind?: RouteDataErrorKind;
+  title: string;
+  description: string;
+  message?: string;
+};
 
 export function RouteLoadingState({ label }: RouteLoadingStateProps) {
   return (
-    <Group justify="center" py="xl">
-      <Loader aria-label={label} size="md" />
-    </Group>
-  )
+    <UiInline justify="center" py="xl">
+      <UiSpinner aria-label={label} size="md" />
+    </UiInline>
+  );
 }
 
 function getActionByKind(kind?: RouteDataErrorKind) {
-  if (kind === 'session-expired') {
+  if (kind === "session-expired") {
     return {
-      label: 'Sign in again',
-      to: '/login?reason=session-expired'
-    }
+      label: "Sign in again",
+      to: "/login?reason=session-expired",
+    };
   }
 
-  if (kind === 'access-denied') {
+  if (kind === "access-denied") {
     return {
-      label: 'Try another account',
-      to: '/login?reason=tenant-denied'
-    }
+      label: "Try another account",
+      to: "/login?reason=tenant-denied",
+    };
   }
 
-  if (kind === 'not-found') {
+  if (kind === "not-found") {
     return {
-      label: 'Go to overview',
-      to: '/app/overview'
-    }
+      label: "Go to overview",
+      to: "/app/overview",
+    };
   }
 
-  return null
+  return null;
 }
 
-function resolveRouteErrorText(kind: RouteDataErrorKind | undefined, fallback: string) {
-  if (kind === 'session-expired') {
-    return 'The console session is no longer valid. Sign in to continue.'
+function resolveRouteErrorText(
+  kind: RouteDataErrorKind | undefined,
+  fallback: string,
+) {
+  if (kind === "session-expired") {
+    return "The console session is no longer valid. Sign in to continue.";
   }
 
-  if (kind === 'access-denied') {
-    return 'The active account does not have access to this control-plane resource.'
+  if (kind === "access-denied") {
+    return "The active account does not have access to this control-plane resource.";
   }
 
-  if (kind === 'not-found') {
-    return 'That control-plane resource could not be found.'
+  if (kind === "not-found") {
+    return "That control-plane resource could not be found.";
   }
 
-  return fallback
+  return fallback;
 }
 
 export function RouteErrorState({
   description,
   kind,
   message,
-  title
+  title,
 }: RouteErrorStateProps) {
-  const action = getActionByKind(kind)
+  const action = getActionByKind(kind);
 
   return (
-    <Alert color="red" radius="md" title={title} variant="light">
-      <Stack gap={4}>
-        <Text>{resolveRouteErrorText(kind, description)}</Text>
-        {message ? <Text c="dimmed" size="sm">{message}</Text> : null}
-        {action ? (
-          <Group mt={4}>
-            <Button
-              component={Link}
-              size="xs"
-              to={action.to}
-              variant="light"
-            >
-              {action.label}
-            </Button>
-          </Group>
+    <UiAlert color="red" radius="md" title={title} variant="light">
+      <UiStack gap={4}>
+        <UiText>{resolveRouteErrorText(kind, description)}</UiText>
+        {message ? (
+          <UiText c="dimmed" size="sm">
+            {message}
+          </UiText>
         ) : null}
-      </Stack>
-    </Alert>
-  )
+        {action ? (
+          <UiInline mt={4}>
+            <UiButton component={Link} size="xs" to={action.to} variant="light">
+              {action.label}
+            </UiButton>
+          </UiInline>
+        ) : null}
+      </UiStack>
+    </UiAlert>
+  );
 }
 
 type EmptyCollectionStateProps = {
-  title: string
-  description: string
-}
+  title: string;
+  description: string;
+};
 
 export function EmptyCollectionState({
   description,
-  title
+  title,
 }: EmptyCollectionStateProps) {
-  return <EmptyState action={null} description={description} title={title} />
+  return <EmptyState action={null} description={description} title={title} />;
 }

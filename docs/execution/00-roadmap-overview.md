@@ -9,7 +9,7 @@ Deliver the first production-capable version of **AI Traffic OS** as a Rust back
 - a protocol-native gateway optimized for 2026 paradigms (MCP, WebRTC)
 - a typed control plane
 - Turbo-managed frontend and shared-package workflows
-- a Mantine-based console design system
+- a HeroUI-based console design system
 - immutable usage and ledger handling
 - intelligent routing, semantic caching, and reliability controls
 - first-class security, observability, and release automation

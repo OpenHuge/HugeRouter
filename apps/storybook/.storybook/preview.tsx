@@ -1,24 +1,17 @@
-import type { Preview } from '@storybook/react-vite'
-import { MantineProvider } from '@mantine/core'
-import { ModalsProvider } from '@mantine/modals'
-import { Notifications } from '@mantine/notifications'
-import { createAppTheme } from '@huge-router/design-tokens'
-import '@mantine/core/styles.css'
-import '@mantine/notifications/styles.css'
+import type { Preview } from "@storybook/react-vite";
+import { UiProvider } from "@huge-router/ui-kit";
+import "../../console-web/src/styles/app.css";
 
 const preview: Preview = {
   decorators: [
     (Story) => (
-      <MantineProvider theme={createAppTheme()}>
-        <ModalsProvider>
-          <Notifications />
-          <div style={{ padding: 24 }}>
-            <Story />
-          </div>
-        </ModalsProvider>
-      </MantineProvider>
-    )
-  ]
-}
+      <UiProvider>
+        <div style={{ padding: 24 }}>
+          <Story />
+        </div>
+      </UiProvider>
+    ),
+  ],
+};
 
-export default preview
+export default preview;

@@ -77,7 +77,7 @@ Day-0 dependency policy should be:
 
 Practical interpretation:
 
-- `packages/ui-kit` can use Mantine and shared schemas, but it cannot import app routes, auth bootstrapping, or page-specific feature modules
+- `packages/ui-kit` can use HeroUI and shared schemas, but it cannot import app routes, auth bootstrapping, or page-specific feature modules
 - `packages/design-tokens` must remain framework-light and free of app state or transport concerns
 - generated clients and schemas should flow outward into apps, never the reverse
 
@@ -167,7 +167,7 @@ Blocking too early creates churn while packages are still moving. Waiting too lo
 Frontend feature work may begin when all of the following are true:
 
 - root workspace files exist and are pinned
-- `apps/console-web` boots with Mantine and TanStack Start middleware
+- `apps/console-web` boots with HeroUI and TanStack Start middleware
 - core shared packages have declared ownership and dependency intent
 - package tags are present for the initial JavaScript workspaces
 - CI can detect boundary drift, even if the first phase is advisory

@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Text } from "@mantine/core";
+import { UiAlert, UiButton, UiInline, UiText } from "@huge-router/ui-kit";
 
 export const SUPPORTED_ROUTE_CAPABILITIES = [
   "streaming",
@@ -51,9 +51,9 @@ export function FieldErrorText({ error }: { error?: string }) {
   }
 
   return (
-    <Text c="red" size="sm">
+    <UiText c="red" size="sm">
       {error}
-    </Text>
+    </UiText>
   );
 }
 
@@ -75,17 +75,17 @@ export function ActionStatusNotice({
   const message = error ?? success ?? "";
 
   return (
-    <Alert color={color} radius="md" title={title} variant="light">
-      <Group justify="space-between" wrap="nowrap">
-        <Text c="dimmed" size="sm">
+    <UiAlert color={color} radius="md" title={title} variant="light">
+      <UiInline justify="space-between" wrap="nowrap">
+        <UiText c="dimmed" size="sm">
           {message}
-        </Text>
+        </UiText>
         {onDismiss ? (
-          <Button onClick={onDismiss} size="xs" variant="subtle">
+          <UiButton onClick={onDismiss} size="xs" variant="subtle">
             Dismiss
-          </Button>
+          </UiButton>
         ) : null}
-      </Group>
-    </Alert>
+      </UiInline>
+    </UiAlert>
   );
 }

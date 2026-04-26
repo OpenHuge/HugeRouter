@@ -1,14 +1,14 @@
 import {
-  Badge,
-  Button,
-  Card,
-  Group,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-  Textarea,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiInline,
+  UiSelect,
+  UiStack,
+  UiText,
+  UiTextField,
+  UiTextarea,
+} from "@huge-router/ui-kit";
 import type {
   MerchantShopView,
   TrialConnectionView,
@@ -47,9 +47,9 @@ export function CardProductCard({
   shops,
 }: CardProductCardProps) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Text fw={700}>Add a card product</Text>
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiText fw={700}>Add a card product</UiText>
         {shops.length === 0 ? (
           <EmptyCollectionState
             description="Create a shop first, then attach card-secret products for that storefront."
@@ -57,9 +57,9 @@ export function CardProductCard({
           />
         ) : (
           <>
-            <Group align="flex-start" grow>
-              <Stack gap="xs">
-                <TextInput
+            <UiInline align="flex-start" grow>
+              <UiStack gap="xs">
+                <UiTextField
                   label="Card product id"
                   onChange={(event) =>
                     setCardForm((current) => ({
@@ -71,9 +71,9 @@ export function CardProductCard({
                   value={cardForm.cardProductId}
                 />
                 <FieldErrorText error={cardErrors.cardProductId} />
-              </Stack>
-              <Stack gap="xs">
-                <Select
+              </UiStack>
+              <UiStack gap="xs">
+                <UiSelect
                   data={shops.map((shop) => ({
                     label: `${shop.displayName} (${shop.merchantShopId})`,
                     value: shop.merchantShopId,
@@ -88,11 +88,11 @@ export function CardProductCard({
                   value={cardForm.merchantShopId}
                 />
                 <FieldErrorText error={cardErrors.merchantShopId} />
-              </Stack>
-            </Group>
-            <Group align="flex-start" grow>
-              <Stack gap="xs">
-                <TextInput
+              </UiStack>
+            </UiInline>
+            <UiInline align="flex-start" grow>
+              <UiStack gap="xs">
+                <UiTextField
                   label="Title"
                   onChange={(event) =>
                     setCardForm((current) => ({
@@ -104,9 +104,9 @@ export function CardProductCard({
                   value={cardForm.title}
                 />
                 <FieldErrorText error={cardErrors.title} />
-              </Stack>
-              <Stack gap="xs">
-                <Select
+              </UiStack>
+              <UiStack gap="xs">
+                <UiSelect
                   data={[
                     { label: "Trial enabled", value: "true" },
                     { label: "Regular product", value: "false" },
@@ -120,9 +120,9 @@ export function CardProductCard({
                   }
                   value={cardForm.supportsTrial}
                 />
-              </Stack>
-            </Group>
-            <Textarea
+              </UiStack>
+            </UiInline>
+            <UiTextarea
               label="Description"
               minRows={2}
               onChange={(event) =>
@@ -135,9 +135,9 @@ export function CardProductCard({
               value={cardForm.description}
             />
             <FieldErrorText error={cardErrors.description} />
-            <Group align="flex-start" grow>
-              <Stack gap="xs">
-                <TextInput
+            <UiInline align="flex-start" grow>
+              <UiStack gap="xs">
+                <UiTextField
                   label="Inventory count"
                   onChange={(event) =>
                     setCardForm((current) => ({
@@ -148,9 +148,9 @@ export function CardProductCard({
                   value={cardForm.inventoryCount}
                 />
                 <FieldErrorText error={cardErrors.inventoryCount} />
-              </Stack>
-              <Stack gap="xs">
-                <TextInput
+              </UiStack>
+              <UiStack gap="xs">
+                <UiTextField
                   label="Face value USD"
                   onChange={(event) =>
                     setCardForm((current) => ({
@@ -162,9 +162,9 @@ export function CardProductCard({
                   value={cardForm.faceValueUsd}
                 />
                 <FieldErrorText error={cardErrors.faceValueUsd} />
-              </Stack>
-              <Stack gap="xs">
-                <TextInput
+              </UiStack>
+              <UiStack gap="xs">
+                <UiTextField
                   label="Retail price USD"
                   onChange={(event) =>
                     setCardForm((current) => ({
@@ -176,20 +176,20 @@ export function CardProductCard({
                   value={cardForm.retailPriceUsd}
                 />
                 <FieldErrorText error={cardErrors.retailPriceUsd} />
-              </Stack>
-            </Group>
-            <Group justify="flex-end">
-              <Button
+              </UiStack>
+            </UiInline>
+            <UiInline justify="flex-end">
+              <UiButton
                 loading={isSubmittingCard}
                 onClick={() => void onCreateCardProduct()}
               >
                 Create card product
-              </Button>
-            </Group>
+              </UiButton>
+            </UiInline>
           </>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }
 
@@ -201,26 +201,26 @@ export function RelayEvaluationCard({
   trialConnections,
 }: RelayEvaluationCardProps) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Group justify="space-between">
-          <Text fw={700}>Run relay evaluation</Text>
-          <Badge color="blue" variant="light">
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiInline justify="space-between">
+          <UiText fw={700}>Run relay evaluation</UiText>
+          <UiChip color="blue" variant="light">
             Runner: simulated
-          </Badge>
-        </Group>
-        <Text c="dimmed" size="sm">
+          </UiChip>
+        </UiInline>
+        <UiText c="dimmed" size="sm">
           Each run records a replay capsule so follow-up review can reuse
           captured evidence instead of repeatedly spending live tokens.
-        </Text>
+        </UiText>
         {trialConnections.length === 0 ? (
           <EmptyCollectionState
             description="Attach at least one trial relay before running replay-backed evaluation."
             title="No trial relay yet"
           />
         ) : (
-          <Group align="flex-end">
-            <Select
+          <UiInline align="flex-end">
+            <UiSelect
               data={trialConnections.map((connection) => ({
                 label: `${connection.providerLabel} (${connection.trialConnectionId})`,
                 value: connection.trialConnectionId,
@@ -233,15 +233,15 @@ export function RelayEvaluationCard({
               }
               value={evaluationForm.trialConnectionId}
             />
-            <Button
+            <UiButton
               loading={isSubmittingEvaluation}
               onClick={() => void onRunEvaluation()}
             >
               Run evaluation
-            </Button>
-          </Group>
+            </UiButton>
+          </UiInline>
         )}
-      </Stack>
-    </Card>
+      </UiStack>
+    </UiSurface>
   );
 }

@@ -6,7 +6,7 @@ Turn `apps/console-web` from a data-backed gateway console into an operator-read
 
 ## Current Baseline
 
-- The app has a TanStack Start router, Mantine providers, authenticated shell, login and callback flow, tenant routes, admin tenant routes, provider resources, route policies, config snapshots, API keys, route diagnostics, route receipts, usage, billing, and merchant relay evaluation pages.
+- The app has a TanStack Start router, HeroUI providers, authenticated shell, login and callback flow, tenant routes, admin tenant routes, provider resources, route policies, config snapshots, API keys, route diagnostics, route receipts, usage, billing, and merchant relay evaluation pages.
 - Data access goes through `@huge-router/ts-api-client` and shared schemas, with route loaders and control-plane fetch test fixtures.
 - Auth screens exercise email and OAuth-oriented flows against backend-owned session contracts, with provider-disabled and callback states covered in tests.
 - Usage and billing screens are data-backed, but they still present basic summaries rather than the richer financial/operator views needed for cost governance.

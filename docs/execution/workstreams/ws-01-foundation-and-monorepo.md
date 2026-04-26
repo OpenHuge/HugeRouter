@@ -6,14 +6,14 @@ Establish repository, tooling, local runtime, schema generation, and CI. This st
 
 ## Task sequence
 
-| Task ID | Phase | Title | Depends On |
-|---|---|---|---|
-| FND-001 | PI-0 | Initialize Rust workspace and service skeletons | None |
-| FND-002 | PI-0 | Initialize pnpm + Turbo workspace and TanStack Start application shell | None |
-| FND-003 | PI-0 | Provision local development stack and containerized runtime | None |
-| FND-004 | PI-0 | Establish shared configuration, secrets, and environment loading | FND-001 |
-| FND-005 | PI-0 | Set up CI pipelines, quality gates, and caching strategy | FND-001, FND-002 |
-| FND-006 | PI-0 | Create schema pipeline for OpenAPI, JSON Schema, and generated TS client | FND-002 |
+| Task ID | Phase | Title                                                                    | Depends On       |
+| ------- | ----- | ------------------------------------------------------------------------ | ---------------- |
+| FND-001 | PI-0  | Initialize Rust workspace and service skeletons                          | None             |
+| FND-002 | PI-0  | Initialize pnpm + Turbo workspace and TanStack Start application shell   | None             |
+| FND-003 | PI-0  | Provision local development stack and containerized runtime              | None             |
+| FND-004 | PI-0  | Establish shared configuration, secrets, and environment loading         | FND-001          |
+| FND-005 | PI-0  | Set up CI pipelines, quality gates, and caching strategy                 | FND-001, FND-002 |
+| FND-006 | PI-0  | Create schema pipeline for OpenAPI, JSON Schema, and generated TS client | FND-002          |
 
 ## Detailed tasks
 
@@ -77,7 +77,7 @@ Establish repository, tooling, local runtime, schema generation, and CI. This st
 - pnpm workspace root
 - Turbo pipeline baseline
 - TanStack Start app shell
-- Mantine provider and theme bootstrap
+- HeroUI provider and theme bootstrap
 - TanStack Start global middleware bootstrap
 - typed route skeleton
 - shared TS config
@@ -86,9 +86,9 @@ Establish repository, tooling, local runtime, schema generation, and CI. This st
 **Acceptance criteria:**
 
 - `pnpm install`, `pnpm turbo run dev --filter=console-web`, and `pnpm turbo run typecheck --filter=console-web` work
-- React 19.2+ and Mantine 9 baseline are pinned and compatible
+- React 19.2+ and HeroUI 3 baseline are pinned and compatible
 - TanStack Start RC version is pinned exactly
-- root layout, auth placeholder, Mantine theme provider, TanStack Start global middleware, and basic navigation render
+- root layout, auth placeholder, HeroUI theme provider, TanStack Start global middleware, and basic navigation render
 - core JavaScript workspaces declare package tags or equivalent ownership metadata
 - shared UI primitives can render in Storybook or equivalent isolated component sandbox
 - build passes in CI
@@ -98,7 +98,7 @@ Establish repository, tooling, local runtime, schema generation, and CI. This st
 - Keep root tasks minimal and repeatable.
 - Prefer generated artifacts and workspace conventions over hand-maintained duplication.
 - Optimize for incremental builds and selective CI from day one.
-- Treat `packages/design-tokens` as the source of truth for Mantine theme setup and `packages/ui-kit` as the home for reusable shell primitives.
+- Treat `packages/design-tokens` as the source of truth for HeroUI theme setup and `packages/ui-kit` as the home for reusable shell primitives.
 - Keep `Turbo` focused on task orchestration; let package-level scripts stay simple and composable.
 
 ### FND-003 - Provision local development stack and containerized runtime

@@ -1,15 +1,15 @@
 import {
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Group,
-  Select,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiCheckbox,
+  UiInline,
+  UiSelect,
+  UiStack,
+  UiDataTable,
+  UiText,
+  UiTextField,
+} from "@huge-router/ui-kit";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
@@ -101,12 +101,14 @@ function validateSnapshotForm(form: SnapshotFormState) {
 export const Route = createFileRoute("/app/snapshots")({
   loader: () =>
     loadRouteData(async () => {
-      const [snapshots, routePolicies, providers, projects] = await Promise.all([
-        getConsoleDataService().listConfigSnapshots(),
-        getConsoleDataService().listRoutePolicies(),
-        getConsoleDataService().listProviderResources(),
-        getConsoleDataService().listProjects(),
-      ]);
+      const [snapshots, routePolicies, providers, projects] = await Promise.all(
+        [
+          getConsoleDataService().listConfigSnapshots(),
+          getConsoleDataService().listRoutePolicies(),
+          getConsoleDataService().listProviderResources(),
+          getConsoleDataService().listProjects(),
+        ],
+      );
 
       return {
         projects,
@@ -123,24 +125,24 @@ export const Route = createFileRoute("/app/snapshots")({
 function ConfigSnapshotsPage() {
   const result = Route.useLoaderData();
   const router = useRouter();
-  const [activatingSnapshotId, setActivatingSnapshotId] = useState<string | null>(
-    null,
-  );
+  const [activatingSnapshotId, setActivatingSnapshotId] = useState<
+    string | null
+  >(null);
   const [formErrors, setFormErrors] = useState<SnapshotFormErrors>({});
   const [formOpen, setFormOpen] = useState(false);
   const [formState, setFormState] = useState<SnapshotFormState>(
     createEmptySnapshotForm(),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [lastActivatedSnapshotId, setLastActivatedSnapshotId] = useState<string | null>(
-    null,
-  );
+  const [lastActivatedSnapshotId, setLastActivatedSnapshotId] = useState<
+    string | null
+  >(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Review config snapshots by tenant, and activate one snapshot as the live control-plane source."
           title="Snapshots"
@@ -151,7 +153,7 @@ function ConfigSnapshotsPage() {
           description="Snapshot catalog could not be loaded from the control-plane service."
           title="Snapshots unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -211,11 +213,15 @@ function ConfigSnapshotsPage() {
 
     try {
       await getConsoleDataService().createConfigSnapshot(input);
-      setStatusSuccess(`Created config snapshot ${formState.configSnapshotId}.`);
+      setStatusSuccess(
+        `Created config snapshot ${formState.configSnapshotId}.`,
+      );
       resetForm();
       await router.invalidate();
     } catch (error) {
-      setStatusError(getControlPlaneActionErrorMessage(error, "snapshot-create"));
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "snapshot-create"),
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -242,7 +248,7 @@ function ConfigSnapshotsPage() {
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Review config snapshots by tenant, and activate one snapshot as the live control-plane source."
         title="Snapshots"
@@ -255,16 +261,16 @@ function ConfigSnapshotsPage() {
         }}
         success={statusSuccess}
       />
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Create config snapshot</Text>
-          <Group>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Create config snapshot</UiText>
+          <UiInline>
             {formOpen ? (
-              <Button onClick={resetForm} size="sm" variant="subtle">
+              <UiButton onClick={resetForm} size="sm" variant="subtle">
                 Cancel
-              </Button>
+              </UiButton>
             ) : null}
-            <Button
+            <UiButton
               onClick={() => {
                 if (formOpen) {
                   resetForm();
@@ -276,12 +282,12 @@ function ConfigSnapshotsPage() {
               variant={formOpen ? "light" : "filled"}
             >
               {formOpen ? "Hide form" : "Create snapshot"}
-            </Button>
-          </Group>
-        </Group>
+            </UiButton>
+          </UiInline>
+        </UiInline>
         {formOpen ? (
-          <Stack>
-            <TextInput
+          <UiStack>
+            <UiTextField
               label="Snapshot id"
               onChange={(event) =>
                 updateField("configSnapshotId", event.currentTarget.value)
@@ -290,8 +296,8 @@ function ConfigSnapshotsPage() {
               value={formState.configSnapshotId}
             />
             <FieldErrorText error={formErrors.configSnapshotId} />
-            <Group grow>
-              <Select
+            <UiInline grow>
+              <UiSelect
                 data={projects.map((project) => ({
                   label: project.name,
                   value: project.id,
@@ -300,17 +306,19 @@ function ConfigSnapshotsPage() {
                 onChange={(value) => updateField("projectId", value ?? "")}
                 value={formState.projectId}
               />
-              <TextInput
+              <UiTextField
                 label="Revision"
-                onChange={(event) => updateField("revision", event.currentTarget.value)}
+                onChange={(event) =>
+                  updateField("revision", event.currentTarget.value)
+                }
                 value={formState.revision}
               />
-            </Group>
-            <Group grow>
+            </UiInline>
+            <UiInline grow>
               <FieldErrorText error={formErrors.projectId} />
               <FieldErrorText error={formErrors.revision} />
-            </Group>
-            <Select
+            </UiInline>
+            <UiSelect
               data={routePolicies.map((policy) => ({
                 label: `${policy.name} (${policy.modelAlias})`,
                 value: policy.id,
@@ -320,7 +328,7 @@ function ConfigSnapshotsPage() {
               value={formState.routePolicyId}
             />
             <FieldErrorText error={formErrors.routePolicyId} />
-            <TextInput
+            <UiTextField
               label="Budget policy id"
               onChange={(event) =>
                 updateField("budgetPolicyId", event.currentTarget.value)
@@ -328,23 +336,26 @@ function ConfigSnapshotsPage() {
               value={formState.budgetPolicyId}
             />
             <FieldErrorText error={formErrors.budgetPolicyId} />
-            <Stack gap="xs">
-              <Text fw={600} size="sm">
+            <UiStack gap="xs">
+              <UiText fw={600} size="sm">
                 Provider assignments
-              </Text>
+              </UiText>
               {providers.map((provider) => {
                 const checked = formState.providerResourceIds.includes(
                   provider.provider_resource_id,
                 );
 
                 return (
-                  <Checkbox
+                  <UiCheckbox
                     checked={checked}
                     key={provider.provider_resource_id}
                     label={`${provider.name} (${provider.provider_resource_id})`}
                     onChange={(event) => {
                       const nextIds = event.currentTarget.checked
-                        ? [...formState.providerResourceIds, provider.provider_resource_id]
+                        ? [
+                            ...formState.providerResourceIds,
+                            provider.provider_resource_id,
+                          ]
                         : formState.providerResourceIds.filter(
                             (providerId) =>
                               providerId !== provider.provider_resource_id,
@@ -354,101 +365,115 @@ function ConfigSnapshotsPage() {
                   />
                 );
               })}
-            </Stack>
+            </UiStack>
             <FieldErrorText error={formErrors.providerResourceIds} />
-            <Group justify="flex-end">
-              <Button loading={isSubmitting} onClick={() => void onCreateSnapshot()}>
+            <UiInline justify="flex-end">
+              <UiButton
+                loading={isSubmitting}
+                onClick={() => void onCreateSnapshot()}
+              >
                 Save snapshot
-              </Button>
-            </Group>
-          </Stack>
+              </UiButton>
+            </UiInline>
+          </UiStack>
         ) : (
-          <Text c="dimmed" size="sm">
-            Draft a new config snapshot from the current provider and route policy inventory.
-          </Text>
+          <UiText c="dimmed" size="sm">
+            Draft a new config snapshot from the current provider and route
+            policy inventory.
+          </UiText>
         )}
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Config snapshots</Text>
-          <Badge color="blue" variant="light">
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Config snapshots</UiText>
+          <UiChip color="blue" variant="light">
             {snapshots.length} items
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {snapshots.length === 0 ? (
           <EmptyCollectionState
             description="No snapshots have been created yet."
             title="No snapshots"
           />
         ) : (
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Snapshot ID</Table.Th>
-                <Table.Th>Project</Table.Th>
-                <Table.Th>Revision</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Route policy</Table.Th>
-                <Table.Th>Providers</Table.Th>
-                <Table.Th>Activated at</Table.Th>
-                <Table.Th>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withTableBorder>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Snapshot ID</UiDataTable.Th>
+                <UiDataTable.Th>Project</UiDataTable.Th>
+                <UiDataTable.Th>Revision</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Route policy</UiDataTable.Th>
+                <UiDataTable.Th>Providers</UiDataTable.Th>
+                <UiDataTable.Th>Activated at</UiDataTable.Th>
+                <UiDataTable.Th>Actions</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {snapshots.map((snapshot) => (
-                <Table.Tr key={snapshot.configSnapshotId}>
+                <UiDataTable.Tr key={snapshot.configSnapshotId}>
                   {(() => {
                     const isActive =
                       snapshot.status === "active" ||
                       lastActivatedSnapshotId === snapshot.configSnapshotId;
                     return (
                       <>
-                  <Table.Td>{snapshot.configSnapshotId}</Table.Td>
-                  <Table.Td>
-                    {projects.find((project) => project.id === snapshot.projectId)
-                      ?.name ?? snapshot.projectId}
-                  </Table.Td>
-                  <Table.Td>{snapshot.revision}</Table.Td>
-                  <Table.Td>
-                    <Badge
-                      color={isActive ? "teal" : "gray"}
-                      variant="light"
-                    >
-                      {isActive ? "active" : snapshot.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{snapshot.routePolicyId}</Table.Td>
-                  <Table.Td>
-                    {snapshot.providerResourceIds.join(", ") || "No provider assignments"}
-                  </Table.Td>
-                  <Table.Td>
-                    {isActive
-                      ? snapshot.activatedAt ?? "activating now"
-                      : snapshot.activatedAt ?? "not yet activated"}
-                  </Table.Td>
-                  <Table.Td>
-                    <Button
-                      disabled={
-                        isActive ||
-                        activatingSnapshotId === snapshot.configSnapshotId
-                      }
-                      loading={activatingSnapshotId === snapshot.configSnapshotId}
-                      onClick={() => void onActivate(snapshot.configSnapshotId)}
-                      size="sm"
-                      variant="light"
-                    >
-                      Activate
-                    </Button>
-                  </Table.Td>
+                        <UiDataTable.Td>
+                          {snapshot.configSnapshotId}
+                        </UiDataTable.Td>
+                        <UiDataTable.Td>
+                          {projects.find(
+                            (project) => project.id === snapshot.projectId,
+                          )?.name ?? snapshot.projectId}
+                        </UiDataTable.Td>
+                        <UiDataTable.Td>{snapshot.revision}</UiDataTable.Td>
+                        <UiDataTable.Td>
+                          <UiChip
+                            color={isActive ? "teal" : "gray"}
+                            variant="light"
+                          >
+                            {isActive ? "active" : snapshot.status}
+                          </UiChip>
+                        </UiDataTable.Td>
+                        <UiDataTable.Td>
+                          {snapshot.routePolicyId}
+                        </UiDataTable.Td>
+                        <UiDataTable.Td>
+                          {snapshot.providerResourceIds.join(", ") ||
+                            "No provider assignments"}
+                        </UiDataTable.Td>
+                        <UiDataTable.Td>
+                          {isActive
+                            ? (snapshot.activatedAt ?? "activating now")
+                            : (snapshot.activatedAt ?? "not yet activated")}
+                        </UiDataTable.Td>
+                        <UiDataTable.Td>
+                          <UiButton
+                            disabled={
+                              isActive ||
+                              activatingSnapshotId === snapshot.configSnapshotId
+                            }
+                            loading={
+                              activatingSnapshotId === snapshot.configSnapshotId
+                            }
+                            onClick={() =>
+                              void onActivate(snapshot.configSnapshotId)
+                            }
+                            size="sm"
+                            variant="light"
+                          >
+                            Activate
+                          </UiButton>
+                        </UiDataTable.Td>
                       </>
                     );
                   })()}
-                </Table.Tr>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Card>
-    </Stack>
+      </UiSurface>
+    </UiStack>
   );
 }

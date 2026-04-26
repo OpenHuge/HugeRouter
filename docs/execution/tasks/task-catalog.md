@@ -2,58 +2,58 @@
 
 [Back to Task Catalog Index](README.md)
 
-| Task ID | Phase | Stream | Size | Depends On | Title |
-|---|---|---|---|---|---|
-| FND-001 | PI-0 | Foundation and Monorepo | L | None | Initialize Rust workspace and service skeletons |
-| FND-002 | PI-0 | Foundation and Monorepo | M | None | Initialize pnpm + Turbo workspace and TanStack Start application shell |
-| FND-003 | PI-0 | Foundation and Monorepo | M | None | Provision local development stack and containerized runtime |
-| FND-004 | PI-0 | Foundation and Monorepo | M | FND-001 | Establish shared configuration, secrets, and environment loading |
-| FND-005 | PI-0 | Foundation and Monorepo | M | FND-001, FND-002 | Set up CI pipelines, quality gates, and caching strategy |
-| FND-006 | PI-0 | Foundation and Monorepo | M | FND-002 | Create schema pipeline for OpenAPI, JSON Schema, and generated TS client |
-| GWT-001 | PI-1 | Gateway and Protocol Ingress | M | FND-001, FND-003, FND-004 | Implement gateway HTTP server skeleton and middleware chain |
-| GWT-002 | PI-1 | Gateway and Protocol Ingress | M | CTL-001, SEC-001 | Implement API key authentication and tenant/project resolution |
-| GWT-003 | PI-1 | Gateway and Protocol Ingress | L | FND-001 | Define protocol IR v1 with request, response, and capability models |
-| GWT-004 | PI-1 | Gateway and Protocol Ingress | L | GWT-001, GWT-003, PAD-001, PAD-002, RTE-002, MET-001 | Ship OpenAI-compatible northbound chat/completions ingress |
-| GWT-005 | PI-1 | Gateway and Protocol Ingress | M | GWT-004 | Implement SSE streaming relay and backpressure-safe response path |
-| GWT-006 | PI-2 | Gateway and Protocol Ingress | M | GWT-003, PAD-003, RTE-002 | Add Anthropic-native northbound protocol support |
-| GWT-007 | PI-2 | Gateway and Protocol Ingress | M | GWT-003, PAD-004, RTE-002 | Add Gemini-native northbound protocol support |
-| GWT-008 | PI-4 | Gateway and Protocol Ingress | L | FND-001, OBS-001, RTE-004 | Build realtime session gateway skeleton |
-| CTL-001 | PI-0 | Control Plane and Console | M | FND-001, FND-004 | Create control plane API service skeleton with typed CRUD conventions |
-| CTL-002 | PI-1 | Control Plane and Console | L | CTL-001, DB-001, SEC-001 | Implement tenant, project, environment, and API key CRUD |
-| CTL-003 | PI-1 | Control Plane and Console | L | CTL-001, PAD-001, RTE-001, SEC-003 | Implement provider, credential, route policy, and route set management APIs |
-| CTL-004 | PI-0 | Control Plane and Console | M | FND-002, FND-006 | Build TanStack Start + Mantine application shell and authenticated app layout |
-| CTL-005 | PI-1 | Control Plane and Console | M | CTL-002, CTL-004 | Implement tenant/project management UI flows |
-| CTL-006 | PI-2 | Control Plane and Console | L | CTL-003, CTL-004, RTE-005 | Implement provider and route management UI with diagnostics surfaces |
-| CTL-007 | PI-3 | Control Plane and Console | L | MET-004, MET-005, CTL-004 | Build usage, budget, and billing dashboards |
-| DB-001 | PI-0 | Data Storage and Events | L | FND-001, FND-003 | Design relational schema, migrations, and repository primitives |
-| DB-002 | PI-0 | Data Storage and Events | M | FND-001, FND-003 | Implement event bus abstractions and NATS-backed publishers/consumers |
-| PAD-001 | PI-1 | Provider Adapters | M | GWT-003, FND-001 | Define provider adapter trait model and adapter conformance test kit |
-| PAD-002 | PI-1 | Provider Adapters | M | PAD-001, GWT-003 | Implement OpenAI upstream adapter |
-| PAD-003 | PI-2 | Provider Adapters | M | PAD-001, GWT-003 | Implement Anthropic upstream adapter |
-| PAD-004 | PI-2 | Provider Adapters | M | PAD-001, GWT-003 | Implement Gemini upstream adapter |
-| PAD-005 | PI-4 | Provider Adapters | M | PAD-001, RTE-004 | Implement gateway-of-gateways adapter for upstream transit systems |
-| RTE-001 | PI-1 | Routing and Reliability | M | GWT-003, DB-001 | Implement route, provider target, and policy domain models |
-| RTE-002 | PI-1 | Routing and Reliability | L | RTE-001, PAD-001 | Implement routing engine MVP for static selection and fallback |
-| RTE-003 | PI-2 | Routing and Reliability | M | RTE-001, DB-002, OBS-001 | Implement active health probes and passive health aggregation |
-| RTE-004 | PI-2 | Routing and Reliability | L | RTE-002, RTE-003, OBS-001 | Implement retry budgets, circuit breaking, and quarantine logic |
-| RTE-005 | PI-2 | Routing and Reliability | M | RTE-002, RTE-003, CTL-001 | Expose route diagnostics APIs and explanation model |
-| MET-001 | PI-1 | Metering, Ledger, and Billing | M | GWT-003, DB-002 | Define usage event schema and hot-path usage extraction hooks |
-| MET-002 | PI-2 | Metering, Ledger, and Billing | L | MET-001, DB-001, DB-002 | Build ledger worker for immutable event ingestion and deduplication |
-| MET-003 | PI-3 | Metering, Ledger, and Billing | L | MET-002, CTL-003 | Implement pricing engine with token, cached-token, and multimodal units |
-| MET-004 | PI-3 | Metering, Ledger, and Billing | M | MET-002, MET-003 | Build balance, budget, and projection read models |
-| MET-005 | PI-3 | Metering, Ledger, and Billing | M | MET-004, CTL-001 | Implement billing and usage analytics endpoints |
-| SEC-001 | PI-0 | Security, Identity, and Compliance | M | FND-001, CTL-001 | Define RBAC model, scopes, and authorization middleware |
-| SEC-002 | PI-3 | Security, Identity, and Compliance | M | CTL-004, SEC-001 | Implement OIDC/SSO login flow for console users |
-| SEC-003 | PI-1 | Security, Identity, and Compliance | M | FND-004, DB-001 | Implement secret reference model and provider credential storage boundary |
-| SEC-004 | PI-2 | Security, Identity, and Compliance | M | DB-002, SEC-001, OBS-001 | Build audit event pipeline and retention controls |
-| OBS-001 | PI-0 | Observability, SRE, and Runtime | M | FND-001, FND-003 | Implement telemetry crate and platform-wide OpenTelemetry conventions |
-| OBS-002 | PI-1 | Observability, SRE, and Runtime | M | OBS-001, GWT-001, CTL-001 | Build service-level dashboards and SLO definitions |
-| OBS-003 | PI-2 | Observability, SRE, and Runtime | S | OBS-002, SEC-004 | Implement alert routing and incident notification pipeline |
-| OBS-004 | PI-3 | Observability, SRE, and Runtime | L | GWT-005, RTE-004, MET-002 | Create load, soak, and failure-injection test suite |
-| QAR-001 | PI-1 | QA, Release, and Documentation | M | GWT-004, PAD-002, FND-006 | Build protocol contract tests and golden fixtures |
-| QAR-002 | PI-2 | QA, Release, and Documentation | M | CTL-005, GWT-005, MET-002 | Create end-to-end integration environment and seeded demo tenant |
-| QAR-003 | PI-2 | QA, Release, and Documentation | M | FND-005 | Implement release automation, versioning policy, and changelog generation |
-| QAR-004 | PI-0 | QA, Release, and Documentation | S | None | Create agent-facing implementation guides and definition-of-done checklists |
+| Task ID | Phase | Stream                             | Size | Depends On                                           | Title                                                                        |
+| ------- | ----- | ---------------------------------- | ---- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| FND-001 | PI-0  | Foundation and Monorepo            | L    | None                                                 | Initialize Rust workspace and service skeletons                              |
+| FND-002 | PI-0  | Foundation and Monorepo            | M    | None                                                 | Initialize pnpm + Turbo workspace and TanStack Start application shell       |
+| FND-003 | PI-0  | Foundation and Monorepo            | M    | None                                                 | Provision local development stack and containerized runtime                  |
+| FND-004 | PI-0  | Foundation and Monorepo            | M    | FND-001                                              | Establish shared configuration, secrets, and environment loading             |
+| FND-005 | PI-0  | Foundation and Monorepo            | M    | FND-001, FND-002                                     | Set up CI pipelines, quality gates, and caching strategy                     |
+| FND-006 | PI-0  | Foundation and Monorepo            | M    | FND-002                                              | Create schema pipeline for OpenAPI, JSON Schema, and generated TS client     |
+| GWT-001 | PI-1  | Gateway and Protocol Ingress       | M    | FND-001, FND-003, FND-004                            | Implement gateway HTTP server skeleton and middleware chain                  |
+| GWT-002 | PI-1  | Gateway and Protocol Ingress       | M    | CTL-001, SEC-001                                     | Implement API key authentication and tenant/project resolution               |
+| GWT-003 | PI-1  | Gateway and Protocol Ingress       | L    | FND-001                                              | Define protocol IR v1 with request, response, and capability models          |
+| GWT-004 | PI-1  | Gateway and Protocol Ingress       | L    | GWT-001, GWT-003, PAD-001, PAD-002, RTE-002, MET-001 | Ship OpenAI-compatible northbound chat/completions ingress                   |
+| GWT-005 | PI-1  | Gateway and Protocol Ingress       | M    | GWT-004                                              | Implement SSE streaming relay and backpressure-safe response path            |
+| GWT-006 | PI-2  | Gateway and Protocol Ingress       | M    | GWT-003, PAD-003, RTE-002                            | Add Anthropic-native northbound protocol support                             |
+| GWT-007 | PI-2  | Gateway and Protocol Ingress       | M    | GWT-003, PAD-004, RTE-002                            | Add Gemini-native northbound protocol support                                |
+| GWT-008 | PI-4  | Gateway and Protocol Ingress       | L    | FND-001, OBS-001, RTE-004                            | Build realtime session gateway skeleton                                      |
+| CTL-001 | PI-0  | Control Plane and Console          | M    | FND-001, FND-004                                     | Create control plane API service skeleton with typed CRUD conventions        |
+| CTL-002 | PI-1  | Control Plane and Console          | L    | CTL-001, DB-001, SEC-001                             | Implement tenant, project, environment, and API key CRUD                     |
+| CTL-003 | PI-1  | Control Plane and Console          | L    | CTL-001, PAD-001, RTE-001, SEC-003                   | Implement provider, credential, route policy, and route set management APIs  |
+| CTL-004 | PI-0  | Control Plane and Console          | M    | FND-002, FND-006                                     | Build TanStack Start + HeroUI application shell and authenticated app layout |
+| CTL-005 | PI-1  | Control Plane and Console          | M    | CTL-002, CTL-004                                     | Implement tenant/project management UI flows                                 |
+| CTL-006 | PI-2  | Control Plane and Console          | L    | CTL-003, CTL-004, RTE-005                            | Implement provider and route management UI with diagnostics surfaces         |
+| CTL-007 | PI-3  | Control Plane and Console          | L    | MET-004, MET-005, CTL-004                            | Build usage, budget, and billing dashboards                                  |
+| DB-001  | PI-0  | Data Storage and Events            | L    | FND-001, FND-003                                     | Design relational schema, migrations, and repository primitives              |
+| DB-002  | PI-0  | Data Storage and Events            | M    | FND-001, FND-003                                     | Implement event bus abstractions and NATS-backed publishers/consumers        |
+| PAD-001 | PI-1  | Provider Adapters                  | M    | GWT-003, FND-001                                     | Define provider adapter trait model and adapter conformance test kit         |
+| PAD-002 | PI-1  | Provider Adapters                  | M    | PAD-001, GWT-003                                     | Implement OpenAI upstream adapter                                            |
+| PAD-003 | PI-2  | Provider Adapters                  | M    | PAD-001, GWT-003                                     | Implement Anthropic upstream adapter                                         |
+| PAD-004 | PI-2  | Provider Adapters                  | M    | PAD-001, GWT-003                                     | Implement Gemini upstream adapter                                            |
+| PAD-005 | PI-4  | Provider Adapters                  | M    | PAD-001, RTE-004                                     | Implement gateway-of-gateways adapter for upstream transit systems           |
+| RTE-001 | PI-1  | Routing and Reliability            | M    | GWT-003, DB-001                                      | Implement route, provider target, and policy domain models                   |
+| RTE-002 | PI-1  | Routing and Reliability            | L    | RTE-001, PAD-001                                     | Implement routing engine MVP for static selection and fallback               |
+| RTE-003 | PI-2  | Routing and Reliability            | M    | RTE-001, DB-002, OBS-001                             | Implement active health probes and passive health aggregation                |
+| RTE-004 | PI-2  | Routing and Reliability            | L    | RTE-002, RTE-003, OBS-001                            | Implement retry budgets, circuit breaking, and quarantine logic              |
+| RTE-005 | PI-2  | Routing and Reliability            | M    | RTE-002, RTE-003, CTL-001                            | Expose route diagnostics APIs and explanation model                          |
+| MET-001 | PI-1  | Metering, Ledger, and Billing      | M    | GWT-003, DB-002                                      | Define usage event schema and hot-path usage extraction hooks                |
+| MET-002 | PI-2  | Metering, Ledger, and Billing      | L    | MET-001, DB-001, DB-002                              | Build ledger worker for immutable event ingestion and deduplication          |
+| MET-003 | PI-3  | Metering, Ledger, and Billing      | L    | MET-002, CTL-003                                     | Implement pricing engine with token, cached-token, and multimodal units      |
+| MET-004 | PI-3  | Metering, Ledger, and Billing      | M    | MET-002, MET-003                                     | Build balance, budget, and projection read models                            |
+| MET-005 | PI-3  | Metering, Ledger, and Billing      | M    | MET-004, CTL-001                                     | Implement billing and usage analytics endpoints                              |
+| SEC-001 | PI-0  | Security, Identity, and Compliance | M    | FND-001, CTL-001                                     | Define RBAC model, scopes, and authorization middleware                      |
+| SEC-002 | PI-3  | Security, Identity, and Compliance | M    | CTL-004, SEC-001                                     | Implement OIDC/SSO login flow for console users                              |
+| SEC-003 | PI-1  | Security, Identity, and Compliance | M    | FND-004, DB-001                                      | Implement secret reference model and provider credential storage boundary    |
+| SEC-004 | PI-2  | Security, Identity, and Compliance | M    | DB-002, SEC-001, OBS-001                             | Build audit event pipeline and retention controls                            |
+| OBS-001 | PI-0  | Observability, SRE, and Runtime    | M    | FND-001, FND-003                                     | Implement telemetry crate and platform-wide OpenTelemetry conventions        |
+| OBS-002 | PI-1  | Observability, SRE, and Runtime    | M    | OBS-001, GWT-001, CTL-001                            | Build service-level dashboards and SLO definitions                           |
+| OBS-003 | PI-2  | Observability, SRE, and Runtime    | S    | OBS-002, SEC-004                                     | Implement alert routing and incident notification pipeline                   |
+| OBS-004 | PI-3  | Observability, SRE, and Runtime    | L    | GWT-005, RTE-004, MET-002                            | Create load, soak, and failure-injection test suite                          |
+| QAR-001 | PI-1  | QA, Release, and Documentation     | M    | GWT-004, PAD-002, FND-006                            | Build protocol contract tests and golden fixtures                            |
+| QAR-002 | PI-2  | QA, Release, and Documentation     | M    | CTL-005, GWT-005, MET-002                            | Create end-to-end integration environment and seeded demo tenant             |
+| QAR-003 | PI-2  | QA, Release, and Documentation     | M    | FND-005                                              | Implement release automation, versioning policy, and changelog generation    |
+| QAR-004 | PI-0  | QA, Release, and Documentation     | S    | None                                                 | Create agent-facing implementation guides and definition-of-done checklists  |
 
 ## Detailed records
 
@@ -84,16 +84,16 @@
   - pnpm workspace root
   - Turbo pipeline baseline
   - TanStack Start app shell
-  - Mantine provider and theme bootstrap
+  - HeroUI provider and theme bootstrap
   - TanStack Start global middleware bootstrap
   - typed route skeleton
   - shared TS config
   - initial workspace tags and boundary-ready package configurations
 - **Acceptance criteria:**
   - `pnpm install`, `pnpm turbo run dev --filter=console-web`, and `pnpm turbo run typecheck --filter=console-web` work
-  - React 19.2+ and Mantine 9 baseline are pinned and compatible
+  - React 19.2+ and HeroUI 3 baseline are pinned and compatible
   - TanStack Start RC version is pinned exactly
-  - root layout, auth placeholder, Mantine theme provider, TanStack Start global middleware, and basic navigation render
+  - root layout, auth placeholder, HeroUI theme provider, TanStack Start global middleware, and basic navigation render
   - core JavaScript workspaces declare package tags or equivalent ownership metadata
   - shared UI primitives can render in Storybook or equivalent isolated component sandbox
   - build passes in CI
@@ -343,7 +343,7 @@
   - secret references are stored without plaintext leakage
   - policy schema validation errors are actionable
 
-### CTL-004 - Build TanStack Start + Mantine application shell and authenticated app layout
+### CTL-004 - Build TanStack Start + HeroUI application shell and authenticated app layout
 
 - **Phase:** PI-0
 - **Stream:** Control Plane and Console
@@ -353,11 +353,11 @@
 - **Expected outputs:**
   - route tree
   - shell layout
-  - Mantine-backed theme and navigation system
+  - HeroUI-backed theme and navigation system
   - shared provider stack and shell primitives
 - **Acceptance criteria:**
   - authenticated and unauthenticated layouts render
-  - Mantine AppShell or equivalent shell wrapper is in place
+  - internal HeroUI-compatible shell or equivalent shell wrapper is in place
   - route-level data loaders compile
   - component story coverage exists for shell primitives
 

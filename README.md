@@ -1,6 +1,6 @@
 # HugeRouter
 
-Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `Mantine` as the frontend component foundation for the console.
+Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `HeroUI` as the frontend component foundation for the console.
 
 ## Document Structure
 
@@ -44,7 +44,7 @@ This split specification preserves the original engineering intent:
 
 - Rust for backend correctness, performance, and strong domain modeling
 - TanStack Start for a typed frontend console
-- Mantine for the shared frontend design system and console primitives
+- HeroUI for the shared frontend design system and console primitives
 - Turbo-managed monorepo workflows for incremental local development and CI
 - protocol-native ingress and adapter-based egress (optimized for 2026 multi-modal and agentic traffic)
 - native support for Model Context Protocol (MCP) via Streamable HTTP and Agent-to-Agent (A2A) protocol with Agent Card discovery
@@ -59,7 +59,7 @@ The repository now includes a working bootstrap baseline:
 - `Cargo` workspace for backend crates and services
 - `pnpm` workspaces orchestrated by `Turbo` for frontend apps and shared packages
 - `TanStack Start` for `apps/console-web`
-- `Mantine` for theme, layout, form, feedback, and reusable console components
+- `HeroUI` for theme, layout, form, feedback, and reusable console components
 - `just` as the human-friendly entry point that wraps Rust, `pnpm`, and `turbo` tasks
 
 ## Quick Start
