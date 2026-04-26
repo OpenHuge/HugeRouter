@@ -41,9 +41,9 @@ const exactBudgetOverrides = new Map([
   [
     "apps/console-web/src/features/control-plane/service.ts",
     {
-      maxLines: 2600,
+      maxLines: 2800,
       reason:
-        "Legacy control-plane service aggregator. OAuth pool sharing bindings temporarily raised the ceiling; split provider and sharing services next.",
+        "Legacy control-plane service aggregator. WeChat Pay bindings temporarily raised the ceiling; split billing payment services next.",
     },
   ],
   [
@@ -121,25 +121,33 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/lib.rs",
     {
-      maxLines: 7300,
+      maxLines: 8300,
       reason:
-        "Control-plane API wiring is still oversized. OAuth pool sharing handlers temporarily raised the ceiling; move sharing endpoints into a focused module next.",
+        "Control-plane API wiring is still oversized. WeChat Pay handlers temporarily raised the ceiling; move billing endpoints into focused modules next.",
     },
   ],
   [
     "services/control-plane-api/src/store.rs",
     {
-      maxLines: 7350,
+      maxLines: 7700,
       reason:
-        "Store implementation is a known monolith. OAuth pool sharing persistence and selector tests temporarily raised the ceiling; extract sharing store code next.",
+        "Store implementation is a known monolith. WeChat Pay order persistence temporarily raised the ceiling; extract billing store code next.",
     },
   ],
   [
     "services/gateway-api/src/lib.rs",
     {
-      maxLines: 3400,
+      maxLines: 4000,
       reason:
-        "Gateway API wiring is still centralized. Route receipt attempt diagnostics temporarily raised the ceiling; new protocols and handlers should be factored into modules.",
+        "Gateway API wiring is still centralized. HugeCode commercial-service and route-token handlers temporarily raised the ceiling; factor local commercial routing into modules next.",
+    },
+  ],
+  [
+    "services/gateway-api/src/tests/http_basic.rs",
+    {
+      maxLines: 1050,
+      reason:
+        "Large gateway HTTP integration suite. HugeCode commercial routing scenarios temporarily raised the ceiling; partition route-token tests next.",
     },
   ],
 ]);
