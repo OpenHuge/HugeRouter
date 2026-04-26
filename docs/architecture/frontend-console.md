@@ -36,6 +36,8 @@ The login surface should support four interactive methods from the first product
 - Google
 - WeChat
 
+The console experience should also ship with first-class localization for Simplified Chinese (`zh-CN`) and English (`en`) from the first production-ready operator release.
+
 ### 23.2 Route Structure
 
 Suggested route groupings:
@@ -93,6 +95,7 @@ Requirements:
 - keep provider selection separate from workspace and post-login tenant resolution
 - explain that third-party login still results in a HugeRouter-managed session
 - allow tenant policy to hide or disable specific providers without rebuilding the page
+- allow locale switching between Simplified Chinese and English on the login page and carry that preference into the authenticated shell unless a stored user or tenant preference overrides it
 
 ### 23.4 Frontend Data Access
 
@@ -141,6 +144,12 @@ The UI must support:
 - JSON policy editing with validation
 - route simulation UX
 - trace and request diagnostics viewer
+- provider-resource workflows for both official APIs and third-party relay or gateway endpoints
+- relay-aware provider forms that can capture endpoint URL, key material, gateway flavor, header strategy, and sticky-session requirements
+- compatibility-profile presets for common relay families such as generic OpenAI-compatible, One API, New API, Sub2API, LiteLLM, and LMRouter-style gateways
+- bilingual product copy for Simplified Chinese and English, with user-facing strings externalized from route modules
+- locale-aware formatting for time, numbers, and billing currency values
+- billing payment-entry flows that initially support **WeChat Pay only**, behind a provider-agnostic integration boundary
 - a clean theme foundation that supports dark mode later without forcing it into the first milestone
 
 ### 23.7 Forms and Validation
@@ -177,6 +186,7 @@ Before feature work expands, the frontend foundation should provide:
 - theme bootstrap from `packages/design-tokens`
 - reusable page header, empty state, and resource table primitives
 - `src/start.ts` with global request middleware for auth, tracing, and request context
+- locale catalogs and language-switch plumbing for `zh-CN` and `en`
 - a Storybook surface for shell and form components
 - a typed API integration pattern that the first CRUD flows can reuse
 

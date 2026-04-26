@@ -38,12 +38,15 @@ Expansion tasks for reliability, diagnostics, multi-protocol support, and integr
 - provider detail pages
 - route editors
 - route diagnostics panels
+- relay-aware provider resource forms and validation flows
+- compatibility-profile selection and preset validation for common relay families
 
 **Acceptance criteria:**
 
 - operators can inspect route health and policy resolution
 - form edits are optimistic only where safe
 - dangerous operations require confirmation
+- operators can create and manage third-party relay resources by endpoint and key across multiple compatibility families, including One API-like, New API-like, Sub2API-like, LiteLLM-like, LMRouter-like, and generic OpenAI-compatible gateways
 
 ### GWT-006 — Add Anthropic-native northbound protocol support
 

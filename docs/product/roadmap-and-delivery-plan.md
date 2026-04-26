@@ -9,6 +9,7 @@ Deliver:
 - monorepo scaffolding
 - Rust workspace
 - TanStack Start app shell
+- bilingual console shell baseline for Simplified Chinese and English
 - PostgreSQL/Redis/NATS local stack
 - auth skeleton
 - trace pipeline skeleton
@@ -34,6 +35,8 @@ Deliver:
 - richer IR with MCP (Model Context Protocol) via Streamable HTTP
 - Semantic caching layer with pgvector for repeated agent prompts
 - multiple upstream adapters
+- provider-resource management for OpenAI-compatible relay and gateway endpoints
+- compatibility profiles for common upstream relay families such as One API, New API, Sub2API, LiteLLM, and generic OpenAI-compatible brokers
 - retry/fallback logic
 - route diagnostics UI
 
@@ -45,6 +48,7 @@ Deliver:
 - pricing engine
 - balance projections
 - billing dashboard
+- WeChat Pay as the first supported payment collection method
 - audit improvements
 - replay capsule and supportability maturity
 
@@ -61,6 +65,7 @@ Deliver:
 - data residency policies
 - plugin/adapters expansion
 - gateway-of-gateways support
+- hardened compatibility profiles for multiple third-party relay families such as One API, New API, Sub2API, LiteLLM, and LMRouter-style deployments
 - advanced observability and analytics with agentic session tracing
 - optional orchestration-aware integrations with external agent runtimes and memory systems where product demand justifies them
 

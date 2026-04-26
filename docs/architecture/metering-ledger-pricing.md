@@ -183,4 +183,16 @@ Budget enforcement should evaluate against the correct monetary view:
 
 The enforced monetary view must be explicit in policy and route receipts.
 
+### 15.5 Payment Collection Boundary
+
+Payment collection sits downstream of pricing and ledger projections. External payment-provider state must never directly rewrite immutable usage or ledger history.
+
+Rules:
+
+- payment initiation creates a pending payment record, not a settled balance mutation
+- balance or invoice settlement occurs only after callback verification and an explicit funding ledger entry
+- refunds, charge reversals, and manual adjustments remain ledger-visible events
+- the first customer-facing payment collection flow should support **WeChat Pay only**
+- payment domain models and API shapes should stay provider-agnostic so additional rails can be added later without changing ledger semantics
+
 ---

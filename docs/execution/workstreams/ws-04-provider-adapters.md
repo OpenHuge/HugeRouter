@@ -43,6 +43,8 @@ Implement upstream provider integration through shared traits, registries, error
 - registry can resolve adapters by provider kind and capability profile
 - adapter tests can run against mocks
 - error categories map to routing decisions
+- manifests can declare relay-specific compatibility details such as gateway flavor, header strategy, and sticky-session passthrough requirements
+- relay compatibility profiles are extensible enough to cover One API-like, New API-like, Sub2API-like, LiteLLM-like, LMRouter-like, and generic OpenAI-compatible upstreams
 
 **Implementation notes:**
 
@@ -157,15 +159,19 @@ Implement upstream provider integration through shared traits, registries, error
 
 - adapter for upstream gateway providers
 - health and capability metadata model
+- compatibility profiles for common relay and broker families
 
 **Acceptance criteria:**
 
 - adapter can call an upstream OpenAI-compatible gateway
 - upstream gateway errors preserve diagnostic detail
 - routing engine can score it alongside native providers
+- adapter can authenticate against third-party relay keys and preserve declared relay-required headers without leaking them into unrelated providers
+- profile coverage includes at least generic OpenAI-compatible gateways plus documented family-specific handling for One API-like, New API-like, Sub2API-like, and broker-style gateways such as LiteLLM or LMRouter where needed
 
 **Implementation notes:**
 
 - Normalize upstream errors into routing-relevant categories.
 - Keep adapter configuration typed and region-aware.
 - Adapters should pass shared conformance fixtures before integration.
+- Treat relay-family compatibility as typed profiles rather than site-by-site code forks.

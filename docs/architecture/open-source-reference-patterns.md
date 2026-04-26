@@ -180,6 +180,53 @@ Architectural implication:
 
 - HugeRouter should welcome multiple northbound compatibility surfaces, but route receipts, policy, metering, and diagnostics should still anchor on canonical domain artifacts rather than whichever compatibility endpoint happened to be called
 
+### 7.1 Sub2API-Class Relay Panels
+
+Sub2API is now an important reference for a different reason: it represents the shape of many real-world third-party relay businesses that sit between end users and official model vendors.
+
+Patterns to adopt:
+
+- separate relay-site identity from canonical upstream provider identity
+- support account-pool and channel-style upstream resource management
+- keep relay-specific headers, sticky-session behavior, and quota semantics configurable
+- integrate at the API boundary instead of coupling to a specific relay dashboard implementation
+
+Application to this repository:
+
+- third-party relay sites that look like `xfx.plus` should be modeled as upstream gateway providers, not mislabeled as direct OpenAI ownership
+- the first concrete compatibility profile for upstream relay panels should target **Sub2API-class** systems because their OpenAI-compatible data path and account/channel management model are already common in the market
+- control-plane resources should capture relay flavor, auth/header strategy, and session-affinity requirements as typed fields
+
+### 7.2 One API / New API Family
+
+One API and New API matter because they represent a very common control-plane shape for self-hosted OpenAI-compatible aggregation.
+
+Patterns to adopt:
+
+- treat panel flavor as a compatibility hint, not as the canonical provider identity
+- support model-list discovery and provider multiplexing behind a single endpoint
+- expect admin concepts such as channels, balances, and token management to exist off the hot path
+
+Application to this repository:
+
+- HugeRouter should support `one_api_like` and `new_api_like` compatibility profiles for upstream gateway resources
+- the routing engine should still evaluate them as gateway providers, not as if they were direct OpenAI or Anthropic accounts
+
+### 7.3 LiteLLM and Router-Like Brokers
+
+LiteLLM and LMRouter matter because they represent broker-style gateways that already normalize many providers behind one key, one edge, and one routing layer.
+
+Patterns to adopt:
+
+- support upstream gateways that already have their own routing, budgeting, and virtual-key semantics
+- preserve enough metadata to explain whether HugeRouter routed to a native provider or to an upstream broker
+- avoid assuming every OpenAI-compatible gateway is just a thin pass-through proxy
+
+Application to this repository:
+
+- HugeRouter should support `litellm_like` and `lmrouter_like` compatibility profiles in addition to panel-style relay profiles
+- diagnostics and policy should record when routing delegates to another brokered gateway so support and billing explanations stay defensible
+
 ## 8. OpenAI Agents SDK: Sessions, Guardrails, and Traceable Runs
 
 The OpenAI Agents SDK is a useful reference because it treats sessions, tracing, human-in-the-loop, handoffs, and realtime agents as core runtime concepts rather than side features.

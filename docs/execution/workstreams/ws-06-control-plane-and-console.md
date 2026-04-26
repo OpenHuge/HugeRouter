@@ -85,6 +85,7 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - Guard destructive operations with explicit confirmation UX.
 - Build shared layout and feedback primitives in `packages/ui-kit` first, then compose feature pages from those pieces.
 - Keep theme decisions centralized in `packages/design-tokens` so route modules do not reconfigure HeroUI locally.
+- Build locale plumbing for Simplified Chinese (`zh-CN`) and English (`en`) into the shell and auth surfaces early so later routes do not hardcode copy.
 
 ### CTL-002 - Implement tenant, project, environment, and API key CRUD
 
@@ -138,12 +139,14 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - provider CRUD
 - credential binding
 - route policy CRUD
+- provider-resource support for official APIs and third-party relay or gateway endpoints
 
 **Acceptance criteria:**
 
 - route policies can be created and validated from API
 - secret references are stored without plaintext leakage
 - policy schema validation errors are actionable
+- provider resources can model relay flavor, auth strategy, and required header passthrough without free-form per-site hacks
 
 **Implementation notes:**
 
@@ -175,6 +178,7 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - CRUD flows are fully typed from generated client
 - forms validate client-side and server-side
 - role-based page guards work
+- user-facing copy is wired through the shared `zh-CN` / `en` localization boundary rather than route-local literals
 
 **Implementation notes:**
 
@@ -200,12 +204,15 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - provider detail pages
 - route editors
 - route diagnostics panels
+- relay-aware provider resource forms and validation flows
+- compatibility-profile selection and preset validation for common relay families
 
 **Acceptance criteria:**
 
 - operators can inspect route health and policy resolution
 - form edits are optimistic only where safe
 - dangerous operations require confirmation
+- operators can create and manage third-party relay resources by endpoint and key across multiple compatibility families, including One API-like, New API-like, Sub2API-like, LiteLLM-like, LMRouter-like, and generic OpenAI-compatible gateways
 
 **Implementation notes:**
 
@@ -231,12 +238,14 @@ Deliver the management API and the TanStack Start + HeroUI console for tenants, 
 - usage charts
 - budget threshold views
 - balance and invoice projections
+- payment initiation and status surfaces for the first billing collection flow
 
 **Acceptance criteria:**
 
 - dashboards match projection APIs
 - time-range filters and tenant scopes work
 - large tables are paginated and exportable
+- the first payment flow exposed in the console supports WeChat Pay only and makes that scope explicit in the UI
 
 **Implementation notes:**
 

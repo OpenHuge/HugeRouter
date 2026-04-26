@@ -33,6 +33,7 @@ This track exists so the app track can consume a stable shared layer instead of 
 3. Real package-level tests for `ui-kit` and `test-utils`.
 4. Frontend verification patterns that Track `05` can reuse instead of redefining locally.
 5. Removal of no-op package tests in this ownership area.
+6. Shared locale-aware primitives and examples that let `apps/console-web` support Simplified Chinese and English without app-local duplication.
 
 ## Ordered Plan
 
@@ -40,6 +41,7 @@ This track exists so the app track can consume a stable shared layer instead of 
    - Add only components that solve repeated console problems.
    - Keep app-specific business logic out of the package.
    - Prioritize dense operational surfaces over marketing-style cards.
+   - Add shared locale-aware primitives only where repeated formatting or translated affordances belong in the reusable layer.
 2. Strengthen test utilities.
    - Make provider wrappers, query helpers, and common assertions reusable.
    - Keep the API ergonomic enough that app tests naturally adopt it.
@@ -47,6 +49,7 @@ This track exists so the app track can consume a stable shared layer instead of 
    - Add stories for normal, loading, empty, and error states.
    - Include fixtures that match real schema shapes from Track `01`.
    - Cover compact table/form states used by pricing, budgets, route diagnostics, guardrails, and audit pages.
+   - Include at least one `zh-CN` and one `en` story variant for components that render user-facing text or billing values.
 4. Replace no-op tests.
    - Add meaningful package tests for rendering, accessibility basics, and interactions where applicable.
    - Ensure the test command fails on regressions instead of printing a placeholder message.
@@ -60,6 +63,7 @@ This track exists so the app track can consume a stable shared layer instead of 
 - Tests for provider wrappers and helper utilities in `packages/test-utils`.
 - Storybook smoke or interaction coverage for key shared states.
 - Verification that package exports remain type-safe and consumable by `apps/console-web`.
+- Verification that locale-sensitive shared components render correctly for both `zh-CN` and `en`.
 
 ## Definition Of Done
 
@@ -67,6 +71,7 @@ This track exists so the app track can consume a stable shared layer instead of 
 - Storybook demonstrates the important shared operator states instead of a single shell snapshot.
 - Package test scripts in this track run real assertions.
 - Shared test utilities reduce boilerplate in downstream app tests.
+- Shared primitives and stories demonstrate the supported `zh-CN` and `en` locale behaviors.
 - Public exports are intentional, documented by stories or tests, and stable enough for follow-on work.
 
 ## Branch And PR Convention

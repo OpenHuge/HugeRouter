@@ -338,10 +338,12 @@
   - provider CRUD
   - credential binding
   - route policy CRUD
+  - provider-resource support for official APIs and third-party relay or gateway endpoints
 - **Acceptance criteria:**
   - route policies can be created and validated from API
   - secret references are stored without plaintext leakage
   - policy schema validation errors are actionable
+  - provider resources can model relay flavor, auth strategy, and required header passthrough without free-form per-site hacks
 
 ### CTL-004 - Build TanStack Start + HeroUI application shell and authenticated app layout
 
@@ -388,10 +390,13 @@
   - provider detail pages
   - route editors
   - route diagnostics panels
+  - relay-aware provider resource forms and validation flows
+  - compatibility-profile selection and preset validation for common relay families
 - **Acceptance criteria:**
   - operators can inspect route health and policy resolution
   - form edits are optimistic only where safe
   - dangerous operations require confirmation
+  - operators can create and manage third-party relay resources by endpoint and key across multiple compatibility families, including One API-like, New API-like, Sub2API-like, LiteLLM-like, LMRouter-like, and generic OpenAI-compatible gateways
 
 ### CTL-007 - Build usage, budget, and billing dashboards
 
@@ -404,10 +409,12 @@
   - usage charts
   - budget threshold views
   - balance and invoice projections
+  - payment initiation and status surfaces for the first billing collection flow
 - **Acceptance criteria:**
   - dashboards match projection APIs
   - time-range filters and tenant scopes work
   - large tables are paginated and exportable
+  - the first payment flow exposed in the console supports WeChat Pay only and states that scope clearly
 
 ### DB-001 - Design relational schema, migrations, and repository primitives
 
@@ -458,6 +465,8 @@
   - registry can resolve adapters by provider kind and capability profile
   - adapter tests can run against mocks
   - error categories map to routing decisions
+  - manifests can declare relay-specific compatibility details such as gateway flavor, header strategy, and sticky-session passthrough requirements
+  - relay compatibility profiles are extensible enough to cover One API-like, New API-like, Sub2API-like, LiteLLM-like, LMRouter-like, and generic OpenAI-compatible upstreams
 
 ### PAD-002 - Implement OpenAI upstream adapter
 
@@ -517,10 +526,13 @@
 - **Expected outputs:**
   - adapter for upstream gateway providers
   - health and capability metadata model
+  - compatibility profiles for common relay and broker families
 - **Acceptance criteria:**
   - adapter can call an upstream OpenAI-compatible gateway
   - upstream gateway errors preserve diagnostic detail
   - routing engine can score it alongside native providers
+  - adapter can authenticate against third-party relay keys and preserve declared relay-required headers without leaking them into unrelated providers
+  - profile coverage includes at least generic OpenAI-compatible gateways plus documented family-specific handling for One API-like, New API-like, Sub2API-like, LiteLLM-like, and LMRouter-like upstreams where needed
 
 ### RTE-001 - Implement route, provider target, and policy domain models
 
@@ -677,10 +689,12 @@
   - aggregated usage endpoints
   - balance endpoints
   - billing export endpoints
+  - payment record and status endpoints for the initial collection flow
 - **Acceptance criteria:**
   - APIs support tenant/project/time filtering
   - responses are paginated for large datasets
   - exports are asynchronous where needed
+  - the first payment collection path is modeled for WeChat Pay without leaking provider-specific semantics into ledger records
 
 ### SEC-001 - Define RBAC model, scopes, and authorization middleware
 

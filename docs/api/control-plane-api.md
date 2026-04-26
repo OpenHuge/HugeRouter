@@ -71,6 +71,7 @@ The first control-plane implementation should usually prioritize these resources
 Guardrail:
 
 - if a control-plane resource cannot yet affect routing, admission, billing, or supportability, it should usually remain out of the first implementation slice
+- `provider_resources` must be able to represent both official upstream APIs and third-party relay or gateway systems that front those APIs
 
 Recommended endpoint shapes:
 
@@ -159,6 +160,52 @@ Bedrock provider resources use the same payload shape with `provider_id="bedrock
 ```
 
 The native Bedrock adapter ignores the generic provider API key and uses the AWS SDK credential chain for credentials and SigV4 signing.
+
+Provider-resource guardrails:
+
+- `provider_id` identifies the canonical provider family or gateway family, not just a marketing site name
+- `provenance_class` must distinguish `official_api` from relay-oriented classes such as `third_party_gateway`
+- auth, passthrough headers, and sticky-session requirements must be modeled explicitly when the upstream is another gateway
+- relay compatibility should be captured with a typed flavor field such as `generic_openai_compatible`, `one_api_like`, `new_api_like`, `sub2api_like`, `litellm_like`, or `lmrouter_like`
+
+### 21.3.2.1 Relay and Gateway Provider Resource Example
+
+```json
+{
+  "provider_resource_id": "prvrsrc_456",
+  "provider_id": "gateway_openai_compatible",
+  "name": "relay-cn-primary",
+  "status": "active",
+  "provenance_class": "third_party_gateway",
+  "credential_owner_type": "tenant",
+  "deployment_scope": "dedicated",
+  "region": "cn-east",
+  "endpoint_base_url": "https://relay.example.com/v1",
+  "auth_kind": "api_key",
+  "health_state": "healthy",
+  "quota_policy_id": "budgetpol_456",
+  "metadata": {
+    "gateway_flavor": "sub2api_like",
+    "canonical_upstream_family": "openai",
+    "model_discovery_mode": "openai_models_list",
+    "header_strategy": "bearer_or_x_api_key",
+    "preserve_headers": ["session_id"],
+    "sticky_session_supported": true,
+    "supports_streaming": true
+  },
+  "created_at": "2026-04-20T00:00:00Z",
+  "updated_at": "2026-04-20T00:00:00Z"
+}
+```
+
+This shape is intended for relay panels and upstream gateway sites that generate and manage their own downstream keys. The control plane should store HugeRouter's secret reference to that upstream relay key, not expose the relay key itself as a customer credential.
+
+Flavor guidance:
+
+- use `generic_openai_compatible` when HugeRouter only relies on `/v1/*` behavior and no family-specific quirks
+- use `one_api_like` or `new_api_like` when the upstream panel family is known and HugeRouter needs family-specific discovery or diagnostics behavior
+- use `sub2api_like` for account-pool or subscription relay systems
+- use `litellm_like` or `lmrouter_like` for broker gateways that already perform their own provider routing behind one key
 
 ### 21.3.3 Codex Auth Account Pool
 
