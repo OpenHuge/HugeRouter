@@ -71,6 +71,14 @@ const exactBudgetOverrides = new Map([
     },
   ],
   [
+    "packages/ui-kit/src/primitives.tsx",
+    {
+      maxLines: 1050,
+      reason:
+        "HeroUI compatibility shim still centralizes primitives during migration. Extract field, layout, and feedback primitives before adding more controls.",
+    },
+  ],
+  [
     "packages/ts-api-client/src/index.ts",
     {
       maxLines: 900,

@@ -21,6 +21,7 @@ import {
   TextArea as HeroTextArea,
   Toast,
 } from "@heroui/react";
+import { useId } from "react";
 import type {
   CSSProperties,
   ChangeEvent,
@@ -562,19 +563,24 @@ function FieldInput({
   className,
   description,
   error,
+  id,
   label,
   size,
   style,
   ...props
 }: InputProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+
   return (
     <div
       className={classNames("hr-field", className)}
       style={layoutStyle({ ...props, style })}
     >
-      {label ? <HeroLabelRoot>{label}</HeroLabelRoot> : null}
+      {label ? <HeroLabelRoot htmlFor={inputId}>{label}</HeroLabelRoot> : null}
       <HeroInputRoot
         className={classNames("hr-input", sizeClass(size))}
+        id={inputId}
         {...props}
       />
       {description ? (
@@ -600,20 +606,25 @@ export function UiTextarea({
   className,
   description,
   error,
+  id,
   label,
   minRows,
   size,
   style,
   ...props
 }: TextareaProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+
   return (
     <div
       className={classNames("hr-field", className)}
       style={layoutStyle({ ...props, style })}
     >
-      {label ? <HeroLabelRoot>{label}</HeroLabelRoot> : null}
+      {label ? <HeroLabelRoot htmlFor={inputId}>{label}</HeroLabelRoot> : null}
       <HeroTextAreaRoot
         className={classNames("hr-input", "hr-textarea", sizeClass(size))}
+        id={inputId}
         rows={minRows}
         {...props}
       />
