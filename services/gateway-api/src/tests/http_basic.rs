@@ -143,6 +143,54 @@ async fn internal_provider_adapter_lookup_reports_unloaded_provider() {
 }
 
 #[tokio::test]
+async fn internal_relay_capabilities_reports_current_and_future_controls() {
+    let app = app_with_state(test_state(
+        Arc::new(MockAdapter {
+            outcomes: BTreeMap::new(),
+        }),
+        vec![build_gateway_target("prvrsrc_gateway_primary")],
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/internal/relay/capabilities")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(payload["service"], "gateway-api");
+    assert_eq!(payload["capability_schema_version"], 1);
+    assert!(
+        payload["current_protocols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|protocol| protocol["protocol_family"] == "openai_chat")
+    );
+    assert!(
+        payload["future_protocols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|protocol| protocol["protocol_family"] == "mcp_streamable_http")
+    );
+    assert!(
+        payload["safety_controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|control| control == "terms_policy_gate_required_for_external_relays")
+    );
+}
+
+#[tokio::test]
 async fn rejects_missing_auth_with_normalized_error() {
     let app = app_with_state(test_state(
         Arc::new(MockAdapter {

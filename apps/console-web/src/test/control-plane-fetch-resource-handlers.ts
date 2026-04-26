@@ -137,6 +137,21 @@ export function handleReadOnlyRequest(
     return jsonResponse(200, { data: state.apiKeys });
   }
 
+  if (path === "/v1/oauth-sharing-leases") {
+    return jsonResponse(200, { data: state.oauthSharingLeases });
+  }
+
+  if (path === "/v1/oauth-carpools") {
+    return jsonResponse(200, { data: state.oauthCarpools });
+  }
+
+  if (path === "/v1/oauth-sharing-usage") {
+    return jsonResponse(200, {
+      audit_events: state.oauthSharingAuditEvents,
+      data: [],
+    });
+  }
+
   if (path === "/v1/billing/exports") {
     if (state.billingExportJobs.some((job) => job.status === "queued")) {
       if (state.billingExportPollCount > 0) {
@@ -457,6 +472,86 @@ export function handleMutationRequest(
     }
 
     return emptyResponse(405);
+  }
+
+  if (path === "/v1/oauth-sharing-leases" && init?.method === "POST") {
+    const body = parseRequestBody(init) ?? {};
+    const nextLease = {
+      ...body,
+      created_at: "2026-04-23T00:00:00Z",
+      updated_at: "2026-04-23T00:00:00Z",
+    } as (typeof state.oauthSharingLeases)[number];
+    state.oauthSharingLeases = [
+      ...state.oauthSharingLeases.filter(
+        (lease) => lease.lease_id !== nextLease.lease_id,
+      ),
+      nextLease,
+    ];
+    return jsonResponse(200, nextLease);
+  }
+
+  if (
+    path.startsWith("/v1/oauth-sharing-leases/") &&
+    path.endsWith("/revoke") &&
+    init?.method === "POST"
+  ) {
+    const leaseId = decodeURIComponent(path.split("/")[3] ?? "");
+    const current = state.oauthSharingLeases.find(
+      (lease) => lease.lease_id === leaseId,
+    );
+    if (!current) {
+      return notFoundResponse(
+        "oauth_sharing_lease_not_found",
+        "OAuth sharing lease not found.",
+      );
+    }
+    const revoked = {
+      ...current,
+      status: "revoked",
+      updated_at: "2026-04-23T00:00:00Z",
+    };
+    state.oauthSharingLeases = state.oauthSharingLeases.map((lease) =>
+      lease.lease_id === leaseId ? revoked : lease,
+    );
+    return jsonResponse(200, revoked);
+  }
+
+  if (path === "/v1/oauth-carpools" && init?.method === "POST") {
+    const body = parseRequestBody(init) ?? {};
+    const nextCarpool = {
+      ...body,
+      created_at: "2026-04-23T00:00:00Z",
+      updated_at: "2026-04-23T00:00:00Z",
+    } as (typeof state.oauthCarpools)[number];
+    state.oauthCarpools = [
+      ...state.oauthCarpools.filter(
+        (carpool) => carpool.carpool_id !== nextCarpool.carpool_id,
+      ),
+      nextCarpool,
+    ];
+    return jsonResponse(200, nextCarpool);
+  }
+
+  if (path.startsWith("/v1/oauth-carpools/") && init?.method === "DELETE") {
+    const carpoolId = decodeURIComponent(path.split("/")[3] ?? "");
+    const current = state.oauthCarpools.find(
+      (carpool) => carpool.carpool_id === carpoolId,
+    );
+    if (!current) {
+      return notFoundResponse(
+        "oauth_carpool_not_found",
+        "OAuth carpool not found.",
+      );
+    }
+    const disabled = {
+      ...current,
+      enabled: false,
+      updated_at: "2026-04-23T00:00:00Z",
+    };
+    state.oauthCarpools = state.oauthCarpools.filter(
+      (carpool) => carpool.carpool_id !== carpoolId,
+    );
+    return jsonResponse(200, disabled);
   }
 
   if (path === "/v1/pricing/simulations" && init?.method === "POST") {

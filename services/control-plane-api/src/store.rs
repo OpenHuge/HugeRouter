@@ -138,6 +138,10 @@ pub struct MemoryStore {
     billing_export_jobs: Vec<BillingExportJobRecord>,
     route_policy_disabled_ids: HashSet<String>,
     api_keys: Vec<ApiKeyRecord>,
+    codex_auth_accounts: Vec<CodexAuthAccountRecord>,
+    oauth_sharing_leases: Vec<OAuthSharingLeaseRecord>,
+    oauth_carpools: Vec<OAuthCarpoolRecord>,
+    oauth_sharing_audit_events: Vec<OAuthSharingAuditEventRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +172,242 @@ pub struct ApiKey {
 #[derive(Debug, Clone, Serialize)]
 pub struct ApiKeysResponse {
     pub data: Vec<ApiKey>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedSecretBlob {
+    pub algorithm: String,
+    pub key_id: String,
+    pub nonce: String,
+    pub ciphertext: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexAuthAccountRecord {
+    pub codex_account_id: String,
+    #[serde(default = "default_oauth_account_provider")]
+    pub provider: String,
+    pub tenant_id: TenantId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub provider_resource_id: ProviderResourceId,
+    pub display_name: String,
+    pub status: String,
+    #[serde(default = "default_true")]
+    pub schedulable: bool,
+    #[serde(default = "default_true")]
+    pub credential_ready: bool,
+    #[serde(default)]
+    pub concurrency_limit: Option<u32>,
+    #[serde(default)]
+    pub active_runs: u32,
+    #[serde(default)]
+    pub rate_limited_until: Option<String>,
+    #[serde(default)]
+    pub overloaded_until: Option<String>,
+    #[serde(default)]
+    pub temp_unschedulable_until: Option<String>,
+    pub auth_json_sha256: String,
+    pub encrypted_auth_json: EncryptedSecretBlob,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leased_until: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CodexAuthAccount {
+    pub codex_account_id: String,
+    pub provider: String,
+    pub tenant_id: TenantId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub provider_resource_id: ProviderResourceId,
+    pub display_name: String,
+    pub status: String,
+    pub schedulable: bool,
+    pub credential_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency_limit: Option<u32>,
+    pub active_runs: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limited_until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overloaded_until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp_unschedulable_until: Option<String>,
+    pub auth_json_sha256: String,
+    pub encrypted_auth_json_key_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leased_until: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CodexAuthAccountsResponse {
+    pub data: Vec<CodexAuthAccount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OAuthSharingUsageBudget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_end: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthSharingLeaseRecord {
+    pub lease_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<String>,
+    pub borrower_workspace_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub borrower_user_id: Option<String>,
+    pub provider: String,
+    pub pool_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_account_ids: Option<Vec<String>>,
+    pub status: String,
+    pub starts_at: String,
+    pub expires_at: String,
+    pub max_concurrent_runs: u32,
+    #[serde(default)]
+    pub usage_budget: OAuthSharingUsageBudget,
+    pub policy: String,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OAuthSharingLeasesResponse {
+    pub data: Vec<OAuthSharingLeaseRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthCarpoolRecord {
+    pub carpool_id: String,
+    pub provider: String,
+    pub name: String,
+    #[serde(default)]
+    pub member_workspace_ids: Vec<String>,
+    #[serde(default)]
+    pub pool_ids: Vec<String>,
+    pub strategy: String,
+    #[serde(default)]
+    pub member_weights: BTreeMap<String, u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_member_concurrency_limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_member_turn_budget: Option<u64>,
+    pub enabled: bool,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OAuthCarpoolsResponse {
+    pub data: Vec<OAuthCarpoolRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthSharingAuditEventRecord {
+    pub audit_event_id: String,
+    pub event_type: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carpool_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_id: Option<String>,
+    pub reason: String,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct OAuthSharingUsageSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub carpool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    pub turns: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OAuthSharingUsageResponse {
+    pub data: Vec<OAuthSharingUsageSummary>,
+    pub audit_events: Vec<OAuthSharingAuditEventRecord>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OAuthSharingUsageFilters<'a> {
+    pub lease_id: Option<&'a str>,
+    pub carpool_id: Option<&'a str>,
+    pub workspace_id: Option<&'a str>,
+    pub provider: Option<&'a str>,
+    pub account_id: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OAuthPoolSelectionRequest {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub provider_resource_id: Option<String>,
+    #[serde(default)]
+    pub pool_id: Option<String>,
+    #[serde(default)]
+    pub lease_id: Option<String>,
+    #[serde(default)]
+    pub carpool_id: Option<String>,
+    #[serde(default)]
+    pub borrower_workspace_id: Option<String>,
+    #[serde(default)]
+    pub borrower_user_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OAuthPoolSelection {
+    pub account: Option<CodexAuthAccountRecord>,
+    pub reason: String,
+    pub blocked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub carpool_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -257,6 +497,42 @@ impl ApiKeyRecord {
             is_active: true,
         })
     }
+}
+
+impl CodexAuthAccountRecord {
+    #[must_use]
+    pub fn public_view(&self) -> CodexAuthAccount {
+        CodexAuthAccount {
+            codex_account_id: self.codex_account_id.clone(),
+            provider: self.provider.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            provider_resource_id: self.provider_resource_id.clone(),
+            display_name: self.display_name.clone(),
+            status: self.status.clone(),
+            schedulable: self.schedulable,
+            credential_ready: self.credential_ready,
+            concurrency_limit: self.concurrency_limit,
+            active_runs: self.active_runs,
+            rate_limited_until: self.rate_limited_until.clone(),
+            overloaded_until: self.overloaded_until.clone(),
+            temp_unschedulable_until: self.temp_unschedulable_until.clone(),
+            auth_json_sha256: self.auth_json_sha256.clone(),
+            encrypted_auth_json_key_id: self.encrypted_auth_json.key_id.clone(),
+            leased_until: self.leased_until.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+        }
+    }
+}
+
+fn default_oauth_account_provider() -> String {
+    "codex".to_string()
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -871,6 +1147,10 @@ impl MemoryStore {
             billing_export_jobs: Vec::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
+            codex_auth_accounts: Vec::new(),
+            oauth_sharing_leases: Vec::new(),
+            oauth_carpools: Vec::new(),
+            oauth_sharing_audit_events: Vec::new(),
         }
     }
 
@@ -1740,6 +2020,211 @@ impl StoreMode {
                 })
             }
             Self::Postgres(store) => store.list_api_keys().await,
+        }
+    }
+
+    pub async fn list_codex_auth_accounts(&self) -> Result<CodexAuthAccountsResponse> {
+        match self {
+            Self::Memory(store) => Ok(CodexAuthAccountsResponse {
+                data: store
+                    .read()
+                    .expect("memory store read lock")
+                    .codex_auth_accounts
+                    .iter()
+                    .map(CodexAuthAccountRecord::public_view)
+                    .collect(),
+            }),
+            Self::Postgres(store) => store.list_codex_auth_accounts().await,
+        }
+    }
+
+    pub async fn create_codex_auth_account(
+        &self,
+        mut record: CodexAuthAccountRecord,
+    ) -> Result<CodexAuthAccount> {
+        record.version = 1;
+        record.created_at = now_rfc3339();
+        record.updated_at = now_rfc3339();
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .codex_auth_accounts
+                    .push(record.clone());
+                Ok(record.public_view())
+            }
+            Self::Postgres(store) => store.create_codex_auth_account(&record).await,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn lease_codex_auth_account(
+        &self,
+        provider_resource_id: Option<&str>,
+    ) -> Result<Option<CodexAuthAccountRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let leased_until = lease_until_rfc3339();
+                let now = now_rfc3339();
+                let account = store
+                    .codex_auth_accounts
+                    .iter_mut()
+                    .find(|account| {
+                        account.status == "active"
+                            && provider_resource_id.is_none_or(|provider_resource_id| {
+                                account.provider_resource_id.as_str() == provider_resource_id
+                            })
+                    })
+                    .map(|account| {
+                        account.leased_until = Some(leased_until);
+                        account.updated_at = now;
+                        account.version = account.version.saturating_add(1);
+                        account.clone()
+                    });
+                Ok(account)
+            }
+            Self::Postgres(store) => store.lease_codex_auth_account(provider_resource_id).await,
+        }
+    }
+
+    pub async fn select_oauth_pool_account(
+        &self,
+        mut request: OAuthPoolSelectionRequest,
+    ) -> Result<OAuthPoolSelection> {
+        if request.pool_id.is_none() {
+            request.pool_id.clone_from(&request.provider_resource_id);
+        }
+        if request.provider.is_none() {
+            request.provider = Some("codex".to_string());
+        }
+
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(select_memory_oauth_pool_account(&mut store, &request))
+            }
+            Self::Postgres(store) => store.select_oauth_pool_account(&request).await,
+        }
+    }
+
+    pub async fn list_oauth_sharing_leases(&self) -> Result<OAuthSharingLeasesResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(OAuthSharingLeasesResponse {
+                    data: store.oauth_sharing_leases.clone(),
+                })
+            }
+            Self::Postgres(store) => store.list_oauth_sharing_leases().await,
+        }
+    }
+
+    pub async fn upsert_oauth_sharing_lease(
+        &self,
+        mut record: OAuthSharingLeaseRecord,
+    ) -> Result<OAuthSharingLeaseRecord> {
+        normalize_oauth_sharing_lease(&mut record);
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(upsert_memory_oauth_sharing_lease(&mut store, record))
+            }
+            Self::Postgres(store) => store.upsert_oauth_sharing_lease(&record).await,
+        }
+    }
+
+    pub async fn revoke_oauth_sharing_lease(
+        &self,
+        lease_id: &str,
+    ) -> Result<Option<OAuthSharingLeaseRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(revoke_memory_oauth_sharing_lease(&mut store, lease_id))
+            }
+            Self::Postgres(store) => store.revoke_oauth_sharing_lease(lease_id).await,
+        }
+    }
+
+    pub async fn list_oauth_carpools(&self) -> Result<OAuthCarpoolsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(OAuthCarpoolsResponse {
+                    data: store.oauth_carpools.clone(),
+                })
+            }
+            Self::Postgres(store) => store.list_oauth_carpools().await,
+        }
+    }
+
+    pub async fn upsert_oauth_carpool(
+        &self,
+        mut record: OAuthCarpoolRecord,
+    ) -> Result<OAuthCarpoolRecord> {
+        normalize_oauth_carpool(&mut record);
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(upsert_memory_oauth_carpool(&mut store, record))
+            }
+            Self::Postgres(store) => store.upsert_oauth_carpool(&record).await,
+        }
+    }
+
+    pub async fn remove_oauth_carpool(
+        &self,
+        carpool_id: &str,
+    ) -> Result<Option<OAuthCarpoolRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(remove_memory_oauth_carpool(&mut store, carpool_id))
+            }
+            Self::Postgres(store) => store.remove_oauth_carpool(carpool_id).await,
+        }
+    }
+
+    pub async fn read_oauth_sharing_usage(
+        &self,
+        filters: OAuthSharingUsageFilters<'_>,
+    ) -> Result<OAuthSharingUsageResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(read_memory_oauth_sharing_usage(&store, filters))
+            }
+            Self::Postgres(store) => store.read_oauth_sharing_usage(filters).await,
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn set_codex_auth_account_runtime_state(
+        &self,
+        codex_account_id: &str,
+        rate_limited_until: Option<String>,
+        concurrency_limit: Option<u32>,
+        active_runs: u32,
+    ) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                if let Some(account) = store
+                    .write()
+                    .expect("memory store write lock")
+                    .codex_auth_accounts
+                    .iter_mut()
+                    .find(|account| account.codex_account_id == codex_account_id)
+                {
+                    account.rate_limited_until = rate_limited_until;
+                    account.concurrency_limit = concurrency_limit;
+                    account.active_runs = active_runs;
+                    account.updated_at = now_rfc3339();
+                }
+                Ok(())
+            }
+            Self::Postgres(_) => Ok(()),
         }
     }
 
@@ -3043,6 +3528,357 @@ impl PostgresStore {
                 })
                 .collect(),
         })
+    }
+
+    async fn list_codex_auth_accounts(&self) -> Result<CodexAuthAccountsResponse> {
+        let rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY codex_account_id")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(CodexAuthAccountsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<CodexAuthAccountRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        })
+    }
+
+    async fn create_codex_auth_account(
+        &self,
+        record: &CodexAuthAccountRecord,
+    ) -> Result<CodexAuthAccount> {
+        sqlx::query(
+            "INSERT INTO codex_auth_accounts
+                (codex_account_id, tenant_id, project_id, provider_resource_id, display_name, status, auth_json_sha256, encrypted_auth_json, leased_until, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(&record.codex_account_id)
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_ref().map(ProjectId::as_str))
+        .bind(record.provider_resource_id.as_str())
+        .bind(&record.display_name)
+        .bind(&record.status)
+        .bind(&record.auth_json_sha256)
+        .bind(Json(&record.encrypted_auth_json))
+        .bind(record.leased_until.as_deref())
+        .bind(Json(record))
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(record.public_view())
+    }
+
+    #[allow(dead_code)]
+    async fn lease_codex_auth_account(
+        &self,
+        provider_resource_id: Option<&str>,
+    ) -> Result<Option<CodexAuthAccountRecord>> {
+        let row = if let Some(provider_resource_id) = provider_resource_id {
+            sqlx::query(
+                "SELECT payload FROM codex_auth_accounts
+                 WHERE status = 'active' AND provider_resource_id = $1
+                 ORDER BY updated_at ASC
+                 LIMIT 1",
+            )
+            .bind(provider_resource_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload FROM codex_auth_accounts
+                 WHERE status = 'active'
+                 ORDER BY updated_at ASC
+                 LIMIT 1",
+            )
+            .fetch_optional(&self.pool)
+            .await?
+        };
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let mut record = row.get::<Json<CodexAuthAccountRecord>, _>("payload").0;
+        record.leased_until = Some(lease_until_rfc3339());
+        record.updated_at = now_rfc3339();
+        record.version = record.version.saturating_add(1);
+        sqlx::query(
+            "UPDATE codex_auth_accounts
+                SET leased_until = $2, updated_at = $3, payload = $4
+              WHERE codex_account_id = $1",
+        )
+        .bind(&record.codex_account_id)
+        .bind(record.leased_until.as_deref())
+        .bind(&record.updated_at)
+        .bind(Json(&record))
+        .execute(&self.pool)
+        .await?;
+        Ok(Some(record))
+    }
+
+    async fn select_oauth_pool_account(
+        &self,
+        request: &OAuthPoolSelectionRequest,
+    ) -> Result<OAuthPoolSelection> {
+        let mut memory = MemoryStore {
+            codex_auth_accounts: self.load_codex_auth_account_records().await?,
+            oauth_sharing_leases: self.load_oauth_sharing_lease_records().await?,
+            oauth_carpools: self.load_oauth_carpool_records().await?,
+            oauth_sharing_audit_events: self.load_oauth_sharing_audit_records().await?,
+            ..MemoryStore::default()
+        };
+        let audit_len = memory.oauth_sharing_audit_events.len();
+        let selection = select_memory_oauth_pool_account(&mut memory, request);
+
+        if let Some(account) = selection.account.as_ref() {
+            sqlx::query(
+                "UPDATE codex_auth_accounts
+                    SET leased_until = $2, updated_at = $3, payload = $4
+                  WHERE codex_account_id = $1",
+            )
+            .bind(&account.codex_account_id)
+            .bind(account.leased_until.as_deref())
+            .bind(&account.updated_at)
+            .bind(Json(account))
+            .execute(&self.pool)
+            .await?;
+        }
+
+        for event in memory
+            .oauth_sharing_audit_events
+            .into_iter()
+            .skip(audit_len)
+        {
+            self.insert_oauth_sharing_audit_event(&event).await?;
+        }
+
+        Ok(selection)
+    }
+
+    async fn list_oauth_sharing_leases(&self) -> Result<OAuthSharingLeasesResponse> {
+        Ok(OAuthSharingLeasesResponse {
+            data: self.load_oauth_sharing_lease_records().await?,
+        })
+    }
+
+    async fn upsert_oauth_sharing_lease(
+        &self,
+        record: &OAuthSharingLeaseRecord,
+    ) -> Result<OAuthSharingLeaseRecord> {
+        sqlx::query(
+            "INSERT INTO oauth_sharing_leases
+                (lease_id, provider, pool_id, borrower_workspace_id, status, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (lease_id) DO UPDATE SET
+                provider = EXCLUDED.provider,
+                pool_id = EXCLUDED.pool_id,
+                borrower_workspace_id = EXCLUDED.borrower_workspace_id,
+                status = EXCLUDED.status,
+                payload = EXCLUDED.payload,
+                updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&record.lease_id)
+        .bind(&record.provider)
+        .bind(&record.pool_id)
+        .bind(&record.borrower_workspace_id)
+        .bind(&record.status)
+        .bind(Json(record))
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        self.insert_oauth_sharing_audit_event(&OAuthSharingAuditEventRecord {
+            audit_event_id: format!("oauthaud_{}", now_rfc3339().replace([':', '.', '-'], "")),
+            event_type: "lease_upsert".to_string(),
+            provider: record.provider.clone(),
+            lease_id: Some(record.lease_id.clone()),
+            carpool_id: None,
+            workspace_id: Some(record.borrower_workspace_id.clone()),
+            account_id: None,
+            pool_id: Some(record.pool_id.clone()),
+            reason: "lease upserted by control plane".to_string(),
+            metadata: serde_json::json!({ "status": record.status }),
+            created_at: now_rfc3339(),
+        })
+        .await?;
+        Ok(record.clone())
+    }
+
+    async fn revoke_oauth_sharing_lease(
+        &self,
+        lease_id: &str,
+    ) -> Result<Option<OAuthSharingLeaseRecord>> {
+        let Some(mut record) = self
+            .load_oauth_sharing_lease_records()
+            .await?
+            .into_iter()
+            .find(|candidate| candidate.lease_id == lease_id)
+        else {
+            return Ok(None);
+        };
+        record.status = "revoked".to_string();
+        record.updated_at = now_rfc3339();
+        record.version = record.version.saturating_add(1);
+        self.upsert_oauth_sharing_lease(&record).await?;
+        Ok(Some(record))
+    }
+
+    async fn list_oauth_carpools(&self) -> Result<OAuthCarpoolsResponse> {
+        Ok(OAuthCarpoolsResponse {
+            data: self.load_oauth_carpool_records().await?,
+        })
+    }
+
+    async fn upsert_oauth_carpool(
+        &self,
+        record: &OAuthCarpoolRecord,
+    ) -> Result<OAuthCarpoolRecord> {
+        sqlx::query(
+            "INSERT INTO oauth_carpools
+                (carpool_id, provider, enabled, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (carpool_id) DO UPDATE SET
+                provider = EXCLUDED.provider,
+                enabled = EXCLUDED.enabled,
+                payload = EXCLUDED.payload,
+                updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&record.carpool_id)
+        .bind(&record.provider)
+        .bind(record.enabled)
+        .bind(Json(record))
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        self.insert_oauth_sharing_audit_event(&OAuthSharingAuditEventRecord {
+            audit_event_id: format!("oauthaud_{}", now_rfc3339().replace([':', '.', '-'], "")),
+            event_type: "carpool_upsert".to_string(),
+            provider: record.provider.clone(),
+            lease_id: None,
+            carpool_id: Some(record.carpool_id.clone()),
+            workspace_id: None,
+            account_id: None,
+            pool_id: None,
+            reason: "carpool upserted by control plane".to_string(),
+            metadata: serde_json::json!({ "enabled": record.enabled }),
+            created_at: now_rfc3339(),
+        })
+        .await?;
+        Ok(record.clone())
+    }
+
+    async fn remove_oauth_carpool(&self, carpool_id: &str) -> Result<Option<OAuthCarpoolRecord>> {
+        let Some(record) = self
+            .load_oauth_carpool_records()
+            .await?
+            .into_iter()
+            .find(|candidate| candidate.carpool_id == carpool_id)
+        else {
+            return Ok(None);
+        };
+        sqlx::query("DELETE FROM oauth_carpools WHERE carpool_id = $1")
+            .bind(carpool_id)
+            .execute(&self.pool)
+            .await?;
+        self.insert_oauth_sharing_audit_event(&OAuthSharingAuditEventRecord {
+            audit_event_id: format!("oauthaud_{}", now_rfc3339().replace([':', '.', '-'], "")),
+            event_type: "carpool_remove".to_string(),
+            provider: record.provider.clone(),
+            lease_id: None,
+            carpool_id: Some(record.carpool_id.clone()),
+            workspace_id: None,
+            account_id: None,
+            pool_id: None,
+            reason: "carpool removed by control plane".to_string(),
+            metadata: serde_json::json!({}),
+            created_at: now_rfc3339(),
+        })
+        .await?;
+        Ok(Some(record))
+    }
+
+    async fn read_oauth_sharing_usage(
+        &self,
+        filters: OAuthSharingUsageFilters<'_>,
+    ) -> Result<OAuthSharingUsageResponse> {
+        let memory = MemoryStore {
+            oauth_sharing_audit_events: self.load_oauth_sharing_audit_records().await?,
+            ..MemoryStore::default()
+        };
+        Ok(read_memory_oauth_sharing_usage(&memory, filters))
+    }
+
+    async fn load_codex_auth_account_records(&self) -> Result<Vec<CodexAuthAccountRecord>> {
+        let rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY updated_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<Json<CodexAuthAccountRecord>, _>("payload").0)
+            .collect())
+    }
+
+    async fn load_oauth_sharing_lease_records(&self) -> Result<Vec<OAuthSharingLeaseRecord>> {
+        let rows = sqlx::query("SELECT payload FROM oauth_sharing_leases ORDER BY lease_id")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<Json<OAuthSharingLeaseRecord>, _>("payload").0)
+            .collect())
+    }
+
+    async fn load_oauth_carpool_records(&self) -> Result<Vec<OAuthCarpoolRecord>> {
+        let rows = sqlx::query("SELECT payload FROM oauth_carpools ORDER BY carpool_id")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<Json<OAuthCarpoolRecord>, _>("payload").0)
+            .collect())
+    }
+
+    async fn load_oauth_sharing_audit_records(&self) -> Result<Vec<OAuthSharingAuditEventRecord>> {
+        let rows =
+            sqlx::query("SELECT payload FROM oauth_sharing_audit_events ORDER BY created_at")
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                row.get::<Json<OAuthSharingAuditEventRecord>, _>("payload")
+                    .0
+            })
+            .collect())
+    }
+
+    async fn insert_oauth_sharing_audit_event(
+        &self,
+        event: &OAuthSharingAuditEventRecord,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO oauth_sharing_audit_events
+                (audit_event_id, event_type, provider, lease_id, carpool_id, workspace_id, account_id, pool_id, payload, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (audit_event_id) DO NOTHING",
+        )
+        .bind(&event.audit_event_id)
+        .bind(&event.event_type)
+        .bind(&event.provider)
+        .bind(event.lease_id.as_deref())
+        .bind(event.carpool_id.as_deref())
+        .bind(event.workspace_id.as_deref())
+        .bind(event.account_id.as_deref())
+        .bind(event.pool_id.as_deref())
+        .bind(Json(event))
+        .bind(&event.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn revoke_api_key(
@@ -4456,6 +5292,661 @@ fn revoke_memory_api_key(
     }
 }
 
+fn normalize_oauth_sharing_lease(record: &mut OAuthSharingLeaseRecord) {
+    let now = now_rfc3339();
+    if record.created_at.is_empty() {
+        record.created_at = now.clone();
+    }
+    record.updated_at = now;
+    if record.version == 0 {
+        record.version = 1;
+    }
+    if record.policy.is_empty() {
+        record.policy = "fair_share".to_string();
+    }
+    if record.status.is_empty() {
+        record.status = "active".to_string();
+    }
+    if record.max_concurrent_runs == 0 {
+        record.max_concurrent_runs = 1;
+    }
+    if record.metadata.is_null() {
+        record.metadata = serde_json::json!({});
+    }
+}
+
+fn normalize_oauth_carpool(record: &mut OAuthCarpoolRecord) {
+    let now = now_rfc3339();
+    if record.created_at.is_empty() {
+        record.created_at = now.clone();
+    }
+    record.updated_at = now;
+    if record.version == 0 {
+        record.version = 1;
+    }
+    if record.strategy.is_empty() {
+        record.strategy = "fair_share".to_string();
+    }
+    if record.metadata.is_null() {
+        record.metadata = serde_json::json!({});
+    }
+}
+
+fn upsert_memory_oauth_sharing_lease(
+    store: &mut MemoryStore,
+    mut record: OAuthSharingLeaseRecord,
+) -> OAuthSharingLeaseRecord {
+    if let Some(existing) = store
+        .oauth_sharing_leases
+        .iter_mut()
+        .find(|item| item.lease_id == record.lease_id)
+    {
+        record.created_at = existing.created_at.clone();
+        record.version = existing.version.saturating_add(1);
+        *existing = record.clone();
+    } else {
+        store.oauth_sharing_leases.push(record.clone());
+    }
+    push_oauth_audit_event(
+        store,
+        "lease_upsert",
+        &record.provider,
+        Some(&record.lease_id),
+        None,
+        Some(&record.borrower_workspace_id),
+        None,
+        Some(&record.pool_id),
+        "lease upserted by control plane",
+        serde_json::json!({ "status": record.status }),
+    );
+    record
+}
+
+fn revoke_memory_oauth_sharing_lease(
+    store: &mut MemoryStore,
+    lease_id: &str,
+) -> Option<OAuthSharingLeaseRecord> {
+    let index = store
+        .oauth_sharing_leases
+        .iter()
+        .position(|item| item.lease_id == lease_id)?;
+    let mut record = store.oauth_sharing_leases[index].clone();
+    record.status = "revoked".to_string();
+    record.updated_at = now_rfc3339();
+    record.version = record.version.saturating_add(1);
+    store.oauth_sharing_leases[index] = record.clone();
+    push_oauth_audit_event(
+        store,
+        "lease_revoke",
+        &record.provider,
+        Some(&record.lease_id),
+        None,
+        Some(&record.borrower_workspace_id),
+        None,
+        Some(&record.pool_id),
+        "lease revoked by control plane",
+        serde_json::json!({}),
+    );
+    Some(record)
+}
+
+fn upsert_memory_oauth_carpool(
+    store: &mut MemoryStore,
+    mut record: OAuthCarpoolRecord,
+) -> OAuthCarpoolRecord {
+    if let Some(existing) = store
+        .oauth_carpools
+        .iter_mut()
+        .find(|item| item.carpool_id == record.carpool_id)
+    {
+        record.created_at = existing.created_at.clone();
+        record.version = existing.version.saturating_add(1);
+        *existing = record.clone();
+    } else {
+        store.oauth_carpools.push(record.clone());
+    }
+    push_oauth_audit_event(
+        store,
+        "carpool_upsert",
+        &record.provider,
+        None,
+        Some(&record.carpool_id),
+        None,
+        None,
+        None,
+        "carpool upserted by control plane",
+        serde_json::json!({ "enabled": record.enabled }),
+    );
+    record
+}
+
+type OAuthSharingUsageKey = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+    Option<String>,
+);
+
+fn remove_memory_oauth_carpool(
+    store: &mut MemoryStore,
+    carpool_id: &str,
+) -> Option<OAuthCarpoolRecord> {
+    let index = store
+        .oauth_carpools
+        .iter()
+        .position(|item| item.carpool_id == carpool_id)?;
+    let mut record = store.oauth_carpools.remove(index);
+    record.enabled = false;
+    record.updated_at = now_rfc3339();
+    record.version = record.version.saturating_add(1);
+    push_oauth_audit_event(
+        store,
+        "carpool_remove",
+        &record.provider,
+        None,
+        Some(&record.carpool_id),
+        None,
+        None,
+        None,
+        "carpool removed by control plane",
+        serde_json::json!({}),
+    );
+    Some(record)
+}
+
+fn read_memory_oauth_sharing_usage(
+    store: &MemoryStore,
+    filters: OAuthSharingUsageFilters<'_>,
+) -> OAuthSharingUsageResponse {
+    let mut grouped: BTreeMap<OAuthSharingUsageKey, u64> = BTreeMap::new();
+    let mut audit_events = Vec::new();
+
+    for event in &store.oauth_sharing_audit_events {
+        if !oauth_audit_event_matches(event, filters) {
+            continue;
+        }
+        audit_events.push(event.clone());
+        if matches!(event.event_type.as_str(), "select" | "bind") {
+            let provider = event.provider.clone();
+            let key = (
+                event.lease_id.clone(),
+                event.carpool_id.clone(),
+                event.workspace_id.clone(),
+                provider,
+                event.account_id.clone(),
+            );
+            *grouped.entry(key).or_default() += 1;
+        }
+    }
+
+    OAuthSharingUsageResponse {
+        data: grouped
+            .into_iter()
+            .map(
+                |((lease_id, carpool_id, workspace_id, provider, account_id), turns)| {
+                    OAuthSharingUsageSummary {
+                        lease_id,
+                        carpool_id,
+                        workspace_id,
+                        provider,
+                        account_id,
+                        turns,
+                    }
+                },
+            )
+            .collect(),
+        audit_events,
+    }
+}
+
+fn oauth_audit_event_matches(
+    event: &OAuthSharingAuditEventRecord,
+    filters: OAuthSharingUsageFilters<'_>,
+) -> bool {
+    filters
+        .lease_id
+        .is_none_or(|value| event.lease_id.as_deref() == Some(value))
+        && filters
+            .carpool_id
+            .is_none_or(|value| event.carpool_id.as_deref() == Some(value))
+        && filters
+            .workspace_id
+            .is_none_or(|value| event.workspace_id.as_deref() == Some(value))
+        && filters.provider.is_none_or(|value| event.provider == value)
+        && filters
+            .account_id
+            .is_none_or(|value| event.account_id.as_deref() == Some(value))
+}
+
+fn select_memory_oauth_pool_account(
+    store: &mut MemoryStore,
+    request: &OAuthPoolSelectionRequest,
+) -> OAuthPoolSelection {
+    let provider = request.provider.as_deref().unwrap_or("codex");
+    let borrower_workspace_id = request.borrower_workspace_id.as_deref();
+    let pool_id = request.pool_id.as_deref();
+
+    let mut allowed_account_ids = None;
+    let mut context_pool_ids = pool_id.map(|value| vec![value.to_string()]);
+    let mut policy = "fair_share".to_string();
+    let mut lease_id = None;
+    let mut carpool_id = None;
+
+    if let Some(requested_lease_id) = request.lease_id.as_deref() {
+        let Some(lease) = store
+            .oauth_sharing_leases
+            .iter()
+            .find(|candidate| candidate.lease_id == requested_lease_id)
+            .cloned()
+        else {
+            return blocked_selection(
+                store,
+                provider,
+                Some(requested_lease_id),
+                None,
+                borrower_workspace_id,
+                pool_id,
+                "lease_not_found",
+            );
+        };
+        if let Some(reason) = lease_block_reason(&lease, borrower_workspace_id, pool_id, store) {
+            return blocked_selection(
+                store,
+                provider,
+                Some(&lease.lease_id),
+                None,
+                borrower_workspace_id,
+                Some(&lease.pool_id),
+                &reason,
+            );
+        }
+        allowed_account_ids = lease.allowed_account_ids.clone();
+        context_pool_ids = Some(vec![lease.pool_id.clone()]);
+        policy = lease.policy;
+        lease_id = Some(lease.lease_id);
+    }
+
+    if let Some(requested_carpool_id) = request.carpool_id.as_deref() {
+        let Some(carpool) = store
+            .oauth_carpools
+            .iter()
+            .find(|candidate| candidate.carpool_id == requested_carpool_id)
+            .cloned()
+        else {
+            return blocked_selection(
+                store,
+                provider,
+                lease_id.as_deref(),
+                Some(requested_carpool_id),
+                borrower_workspace_id,
+                pool_id,
+                "carpool_not_found",
+            );
+        };
+        if let Some(reason) = carpool_block_reason(&carpool, borrower_workspace_id, pool_id, store)
+        {
+            return blocked_selection(
+                store,
+                provider,
+                lease_id.as_deref(),
+                Some(&carpool.carpool_id),
+                borrower_workspace_id,
+                pool_id,
+                &reason,
+            );
+        }
+        context_pool_ids = Some(carpool.pool_ids.clone());
+        policy = carpool.strategy;
+        carpool_id = Some(carpool.carpool_id);
+    }
+
+    let selected_index = select_schedulable_account_index(
+        store,
+        provider,
+        context_pool_ids.as_deref(),
+        allowed_account_ids.as_deref(),
+        borrower_workspace_id,
+        lease_id.as_deref(),
+        carpool_id.as_deref(),
+        &policy,
+    );
+    let Some(selected_index) = selected_index else {
+        return blocked_selection(
+            store,
+            provider,
+            lease_id.as_deref(),
+            carpool_id.as_deref(),
+            borrower_workspace_id,
+            pool_id,
+            "no_schedulable_account",
+        );
+    };
+
+    let leased_until = lease_until_rfc3339();
+    let now = now_rfc3339();
+    let account_id;
+    let selected;
+    {
+        let account = store
+            .codex_auth_accounts
+            .get_mut(selected_index)
+            .expect("selected account index should exist");
+        account.leased_until = Some(leased_until);
+        account.active_runs = account.active_runs.saturating_add(1);
+        account.updated_at = now;
+        account.version = account.version.saturating_add(1);
+        account_id = account.codex_account_id.clone();
+        selected = account.clone();
+    }
+    let reason = selection_reason(lease_id.as_deref(), carpool_id.as_deref(), &policy);
+    push_oauth_audit_event(
+        store,
+        "select",
+        provider,
+        lease_id.as_deref(),
+        carpool_id.as_deref(),
+        borrower_workspace_id,
+        Some(&account_id),
+        Some(selected.provider_resource_id.as_str()),
+        &reason,
+        serde_json::json!({
+            "model_id": request.model_id,
+            "session_id": request.session_id,
+        }),
+    );
+    OAuthPoolSelection {
+        account: Some(selected),
+        reason,
+        blocked: false,
+        lease_id,
+        carpool_id,
+    }
+}
+
+fn select_schedulable_account_index(
+    store: &MemoryStore,
+    provider: &str,
+    pool_ids: Option<&[String]>,
+    allowed_account_ids: Option<&[String]>,
+    borrower_workspace_id: Option<&str>,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    policy: &str,
+) -> Option<usize> {
+    let mut candidates = store
+        .codex_auth_accounts
+        .iter()
+        .enumerate()
+        .filter(|(_, account)| {
+            oauth_account_is_schedulable(account, provider)
+                && pool_ids.is_none_or(|pool_ids| {
+                    pool_ids
+                        .iter()
+                        .any(|pool_id| pool_id == account.provider_resource_id.as_str())
+                })
+                && allowed_account_ids.is_none_or(|allowed| {
+                    allowed
+                        .iter()
+                        .any(|account_id| account_id == account.codex_account_id.as_str())
+                })
+        })
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    candidates.sort_by_key(|(_, account)| {
+        let usage = account_turn_usage(
+            store,
+            lease_id,
+            carpool_id,
+            borrower_workspace_id,
+            Some(account.codex_account_id.as_str()),
+            provider,
+        );
+        let active_runs = u64::from(account.active_runs);
+        match policy {
+            "owner_priority" => (active_runs, usage, account.updated_at.clone()),
+            _ => (usage, active_runs, account.updated_at.clone()),
+        }
+    });
+
+    candidates.first().map(|(index, _)| *index)
+}
+
+fn oauth_account_is_schedulable(account: &CodexAuthAccountRecord, provider: &str) -> bool {
+    account.provider == provider
+        && account.status == "active"
+        && account.schedulable
+        && account.credential_ready
+        && account
+            .concurrency_limit
+            .is_none_or(|limit| account.active_runs < limit)
+        && time_gate_allows(account.rate_limited_until.as_deref())
+        && time_gate_allows(account.overloaded_until.as_deref())
+        && time_gate_allows(account.temp_unschedulable_until.as_deref())
+}
+
+fn lease_block_reason(
+    lease: &OAuthSharingLeaseRecord,
+    borrower_workspace_id: Option<&str>,
+    pool_id: Option<&str>,
+    store: &MemoryStore,
+) -> Option<String> {
+    if lease.status != "active" {
+        return Some(format!("lease_{}", lease.status));
+    }
+    if borrower_workspace_id != Some(lease.borrower_workspace_id.as_str()) {
+        return Some("borrower_not_authorized".to_string());
+    }
+    if pool_id.is_some_and(|pool_id| pool_id != lease.pool_id) {
+        return Some("pool_not_authorized".to_string());
+    }
+    if !time_window_allows(&lease.starts_at, &lease.expires_at) {
+        return Some("lease_expired".to_string());
+    }
+    let active_runs = active_context_runs(
+        store,
+        Some(&lease.lease_id),
+        None,
+        Some(&lease.borrower_workspace_id),
+        &lease.provider,
+    );
+    if active_runs >= u64::from(lease.max_concurrent_runs) {
+        return Some("lease_concurrency_exhausted".to_string());
+    }
+    if let Some(limit) = lease.usage_budget.turns {
+        let used = account_turn_usage(
+            store,
+            Some(&lease.lease_id),
+            None,
+            Some(&lease.borrower_workspace_id),
+            None,
+            &lease.provider,
+        );
+        if used >= limit {
+            return Some("lease_budget_exhausted".to_string());
+        }
+    }
+    None
+}
+
+fn carpool_block_reason(
+    carpool: &OAuthCarpoolRecord,
+    borrower_workspace_id: Option<&str>,
+    pool_id: Option<&str>,
+    store: &MemoryStore,
+) -> Option<String> {
+    if !carpool.enabled {
+        return Some("carpool_disabled".to_string());
+    }
+    let Some(borrower_workspace_id) = borrower_workspace_id else {
+        return Some("borrower_workspace_required".to_string());
+    };
+    if !carpool
+        .member_workspace_ids
+        .iter()
+        .any(|member_id| member_id == borrower_workspace_id)
+    {
+        return Some("borrower_not_authorized".to_string());
+    }
+    if pool_id.is_some_and(|pool_id| !carpool.pool_ids.iter().any(|item| item == pool_id)) {
+        return Some("pool_not_authorized".to_string());
+    }
+    if let Some(limit) = carpool.per_member_concurrency_limit {
+        let active_runs = active_context_runs(
+            store,
+            None,
+            Some(&carpool.carpool_id),
+            Some(borrower_workspace_id),
+            &carpool.provider,
+        );
+        if active_runs >= u64::from(limit) {
+            return Some("carpool_concurrency_exhausted".to_string());
+        }
+    }
+    if let Some(limit) = carpool.per_member_turn_budget {
+        let used = account_turn_usage(
+            store,
+            None,
+            Some(&carpool.carpool_id),
+            Some(borrower_workspace_id),
+            None,
+            &carpool.provider,
+        );
+        if used >= limit {
+            return Some("carpool_budget_exhausted".to_string());
+        }
+    }
+    None
+}
+
+fn blocked_selection(
+    store: &mut MemoryStore,
+    provider: &str,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    workspace_id: Option<&str>,
+    pool_id: Option<&str>,
+    reason: &str,
+) -> OAuthPoolSelection {
+    let event_type = if reason.contains("budget_exhausted") {
+        "budget_exhausted"
+    } else {
+        "select_blocked"
+    };
+    push_oauth_audit_event(
+        store,
+        event_type,
+        provider,
+        lease_id,
+        carpool_id,
+        workspace_id,
+        None,
+        pool_id,
+        reason,
+        serde_json::json!({}),
+    );
+    OAuthPoolSelection {
+        account: None,
+        reason: reason.to_string(),
+        blocked: true,
+        lease_id: lease_id.map(str::to_string),
+        carpool_id: carpool_id.map(str::to_string),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_oauth_audit_event(
+    store: &mut MemoryStore,
+    event_type: &str,
+    provider: &str,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    workspace_id: Option<&str>,
+    account_id: Option<&str>,
+    pool_id: Option<&str>,
+    reason: &str,
+    metadata: serde_json::Value,
+) {
+    let audit_event_id = format!(
+        "oauthaud_{}",
+        store.oauth_sharing_audit_events.len().saturating_add(1)
+    );
+    store
+        .oauth_sharing_audit_events
+        .push(OAuthSharingAuditEventRecord {
+            audit_event_id,
+            event_type: event_type.to_string(),
+            provider: provider.to_string(),
+            lease_id: lease_id.map(str::to_string),
+            carpool_id: carpool_id.map(str::to_string),
+            workspace_id: workspace_id.map(str::to_string),
+            account_id: account_id.map(str::to_string),
+            pool_id: pool_id.map(str::to_string),
+            reason: reason.to_string(),
+            metadata,
+            created_at: now_rfc3339(),
+        });
+}
+
+fn selection_reason(lease_id: Option<&str>, carpool_id: Option<&str>, policy: &str) -> String {
+    match (lease_id, carpool_id) {
+        (Some(lease_id), Some(carpool_id)) => {
+            format!("authorized lease {lease_id} and carpool {carpool_id} selected by {policy}")
+        }
+        (Some(lease_id), None) => format!("authorized lease {lease_id} selected by {policy}"),
+        (None, Some(carpool_id)) => {
+            format!("authorized carpool {carpool_id} selected by {policy}")
+        }
+        (None, None) => "legacy pool selected by strict schedulable filter".to_string(),
+    }
+}
+
+fn active_context_runs(
+    store: &MemoryStore,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    workspace_id: Option<&str>,
+    provider: &str,
+) -> u64 {
+    account_turn_usage(store, lease_id, carpool_id, workspace_id, None, provider)
+}
+
+fn account_turn_usage(
+    store: &MemoryStore,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    workspace_id: Option<&str>,
+    account_id: Option<&str>,
+    provider: &str,
+) -> u64 {
+    store
+        .oauth_sharing_audit_events
+        .iter()
+        .filter(|event| {
+            matches!(event.event_type.as_str(), "select" | "bind")
+                && event.provider == provider
+                && lease_id.is_none_or(|value| event.lease_id.as_deref() == Some(value))
+                && carpool_id.is_none_or(|value| event.carpool_id.as_deref() == Some(value))
+                && workspace_id.is_none_or(|value| event.workspace_id.as_deref() == Some(value))
+                && account_id.is_none_or(|value| event.account_id.as_deref() == Some(value))
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn time_gate_allows(value: Option<&str>) -> bool {
+    value.is_none_or(timestamp_is_expired)
+}
+
+fn time_window_allows(starts_at: &str, expires_at: &str) -> bool {
+    !timestamp_is_future(starts_at) && !timestamp_is_expired(expires_at)
+}
+
 fn api_key_prefix(api_key: &str) -> String {
     if api_key.len() <= 6 {
         api_key.to_string()
@@ -5693,9 +7184,19 @@ pub fn expires_at(seconds: u64) -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
+fn lease_until_rfc3339() -> String {
+    expires_at(60 * 5)
+}
+
 fn timestamp_is_expired(value: &str) -> bool {
     OffsetDateTime::parse(value, &Rfc3339)
         .map(|timestamp| timestamp <= OffsetDateTime::now_utc())
+        .unwrap_or(true)
+}
+
+fn timestamp_is_future(value: &str) -> bool {
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map(|timestamp| timestamp > OffsetDateTime::now_utc())
         .unwrap_or(true)
 }
 

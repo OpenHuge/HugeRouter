@@ -71,6 +71,19 @@ web_modules/
 .env.*
 !.env.example
 
+# Local OAuth credentials and provider console exports
+.env.local
+.env.*.local
+client_secret*.json
+oauth_client*.json
+google-oauth*.json
+github-oauth*.json
+wechat-oauth*.json
+*.pem
+*.key
+*.p8
+*.p12
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

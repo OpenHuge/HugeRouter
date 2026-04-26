@@ -93,6 +93,23 @@ export type ConsoleDataService = {
     providerResourceId: string,
     expectedVersion: number,
   ) => Promise<ProviderResource>;
+  uploadCodexAuthAccount: (
+    input: CodexAuthAccountUploadInput,
+  ) => Promise<CodexAuthAccountView>;
+  listCodexAuthAccounts: () => Promise<CodexAuthAccountView[]>;
+  listOAuthSharingLeases: () => Promise<OAuthSharingLeaseView[]>;
+  upsertOAuthSharingLease: (
+    input: OAuthSharingLeaseMutationInput,
+  ) => Promise<OAuthSharingLeaseView>;
+  revokeOAuthSharingLease: (leaseId: string) => Promise<OAuthSharingLeaseView>;
+  listOAuthCarpools: () => Promise<OAuthCarpoolView[]>;
+  upsertOAuthCarpool: (
+    input: OAuthCarpoolMutationInput,
+  ) => Promise<OAuthCarpoolView>;
+  removeOAuthCarpool: (carpoolId: string) => Promise<OAuthCarpoolView>;
+  readOAuthSharingUsage: (
+    workspaceId?: string,
+  ) => Promise<OAuthSharingUsageView>;
   createRoutePolicy: (
     routePolicy: RoutePolicyMutationInput,
   ) => Promise<RoutePolicy>;
@@ -152,11 +169,13 @@ type ActionErrorKind =
   | "provider-create"
   | "provider-disable"
   | "provider-update"
+  | "codex-auth-upload"
   | "relay-evaluation-create"
   | "replay-capsule-load"
   | "route-policy-create"
   | "route-policy-disable"
   | "route-policy-update"
+  | "sharing"
   | "snapshot-activate"
   | "snapshot-create"
   | "trial-connection-create";
@@ -188,6 +207,84 @@ export type ProviderResourceMutationInput = {
   region: string;
   status: "active" | "disabled" | "draining" | "quarantined" | "deleted";
   version?: number;
+};
+
+export type CodexAuthAccountUploadInput = {
+  authJson: unknown;
+  displayName: string;
+  endpointBaseUrl?: string;
+  projectId?: string;
+  providerResourceId?: string;
+  region?: string;
+};
+
+export type CodexAuthAccountView = {
+  codexAccountId: string;
+  displayName: string;
+  encryptedAuthJsonKeyId: string;
+  providerResourceId: string;
+  status: string;
+  authJsonSha256: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OAuthSharingLeaseView = {
+  leaseId: string;
+  ownerWorkspaceId?: string;
+  borrowerWorkspaceId: string;
+  provider: "codex" | "gemini" | "claude_code";
+  poolId: string;
+  allowedAccountIds: string[];
+  status: "pending" | "active" | "paused" | "expired" | "revoked";
+  startsAt: string;
+  expiresAt: string;
+  maxConcurrentRuns: number;
+  turnBudget?: number;
+  policy: "fair_share" | "owner_priority" | "borrower_priority";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OAuthSharingLeaseMutationInput = Omit<
+  OAuthSharingLeaseView,
+  "createdAt" | "updatedAt"
+>;
+
+export type OAuthCarpoolView = {
+  carpoolId: string;
+  provider: "codex" | "gemini" | "claude_code";
+  name: string;
+  memberWorkspaceIds: string[];
+  poolIds: string[];
+  strategy: "fair_share" | "weighted" | "cheapest_ready" | "fastest_ready";
+  perMemberConcurrencyLimit?: number;
+  perMemberTurnBudget?: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OAuthCarpoolMutationInput = Omit<
+  OAuthCarpoolView,
+  "createdAt" | "updatedAt"
+>;
+
+export type OAuthSharingUsageView = {
+  rows: {
+    leaseId?: string;
+    carpoolId?: string;
+    workspaceId?: string;
+    provider: string;
+    accountId?: string;
+    turns: number;
+  }[];
+  auditEvents: {
+    eventType: string;
+    reason: string;
+    provider: string;
+    createdAt: string;
+  }[];
 };
 
 export type RoutePolicyMutationInput = {
@@ -253,6 +350,10 @@ function numberOrUndefined(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function arrayOrEmpty(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function booleanOrUndefined(value: unknown): boolean | undefined {
@@ -970,6 +1071,9 @@ export function getControlPlaneActionErrorMessage(
   }
 
   if (
+    code === "codex_auth_json_invalid" ||
+    code === "codex_auth_json_too_large" ||
+    code === "codex_auth_display_name_required" ||
     code === "provider_resource_invalid" ||
     code === "provider_resource_id_invalid" ||
     code === "route_policy_invalid" ||
@@ -994,6 +1098,10 @@ export function getControlPlaneActionErrorMessage(
 
   if (kind === "provider-disable") {
     return "The provider resource could not be disabled.";
+  }
+
+  if (kind === "codex-auth-upload") {
+    return "The Codex auth.json file could not be added to the account pool.";
   }
 
   if (kind === "route-policy-disable") {
@@ -1179,6 +1287,364 @@ async function disableProviderResourceInControlPlane(
     {
       body: JSON.stringify({
         expected_version: expectedVersion,
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+function toCodexAuthAccountView(payload: unknown): CodexAuthAccountView {
+  if (!isRecord(payload)) {
+    throw new ControlPlaneClientError(
+      "Invalid Codex auth account payload.",
+      500,
+    );
+  }
+
+  return {
+    authJsonSha256:
+      stringOrUndefined(pickRecordValue(payload, ["auth_json_sha256"])) ?? "",
+    codexAccountId:
+      stringOrUndefined(pickRecordValue(payload, ["codex_account_id"])) ?? "",
+    createdAt:
+      stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
+    displayName:
+      stringOrUndefined(pickRecordValue(payload, ["display_name"])) ?? "",
+    encryptedAuthJsonKeyId:
+      stringOrUndefined(
+        pickRecordValue(payload, ["encrypted_auth_json_key_id"]),
+      ) ?? "",
+    providerResourceId:
+      stringOrUndefined(pickRecordValue(payload, ["provider_resource_id"])) ??
+      "",
+    status: stringOrUndefined(pickRecordValue(payload, ["status"])) ?? "",
+    updatedAt:
+      stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
+  };
+}
+
+function parseCodexAuthAccountList(payload: unknown) {
+  if (!isRecord(payload) || !hasArray(payload.data)) {
+    return [];
+  }
+
+  return payload.data.map(toCodexAuthAccountView);
+}
+
+function toOAuthSharingLeaseView(payload: unknown): OAuthSharingLeaseView {
+  if (!isRecord(payload)) {
+    throw new ControlPlaneClientError(
+      "Invalid OAuth sharing lease payload.",
+      500,
+    );
+  }
+
+  const usageBudget = pickRecordValue(payload, ["usage_budget"]);
+  const budget = isRecord(usageBudget) ? usageBudget : {};
+
+  return {
+    allowedAccountIds: arrayOrEmpty(
+      pickRecordValue(payload, ["allowed_account_ids"]),
+    ).map(String),
+    borrowerWorkspaceId:
+      stringOrUndefined(pickRecordValue(payload, ["borrower_workspace_id"])) ??
+      "",
+    createdAt:
+      stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
+    expiresAt:
+      stringOrUndefined(pickRecordValue(payload, ["expires_at"])) ?? "",
+    leaseId: stringOrUndefined(pickRecordValue(payload, ["lease_id"])) ?? "",
+    maxConcurrentRuns:
+      numberOrUndefined(pickRecordValue(payload, ["max_concurrent_runs"])) ?? 1,
+    ownerWorkspaceId: stringOrUndefined(
+      pickRecordValue(payload, ["owner_workspace_id"]),
+    ),
+    policy:
+      (stringOrUndefined(
+        pickRecordValue(payload, ["policy"]),
+      ) as OAuthSharingLeaseView["policy"]) ?? "fair_share",
+    poolId: stringOrUndefined(pickRecordValue(payload, ["pool_id"])) ?? "",
+    provider:
+      (stringOrUndefined(
+        pickRecordValue(payload, ["provider"]),
+      ) as OAuthSharingLeaseView["provider"]) ?? "codex",
+    startsAt: stringOrUndefined(pickRecordValue(payload, ["starts_at"])) ?? "",
+    status:
+      (stringOrUndefined(
+        pickRecordValue(payload, ["status"]),
+      ) as OAuthSharingLeaseView["status"]) ?? "pending",
+    turnBudget: numberOrUndefined(pickRecordValue(budget, ["turns"])),
+    updatedAt:
+      stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
+  };
+}
+
+function parseOAuthSharingLeaseList(payload: unknown) {
+  if (!isRecord(payload) || !hasArray(payload.data)) {
+    return [];
+  }
+
+  return payload.data.map(toOAuthSharingLeaseView);
+}
+
+function toOAuthCarpoolView(payload: unknown): OAuthCarpoolView {
+  if (!isRecord(payload)) {
+    throw new ControlPlaneClientError("Invalid OAuth carpool payload.", 500);
+  }
+
+  return {
+    carpoolId:
+      stringOrUndefined(pickRecordValue(payload, ["carpool_id"])) ?? "",
+    createdAt:
+      stringOrUndefined(pickRecordValue(payload, ["created_at"])) ?? "",
+    enabled: Boolean(pickRecordValue(payload, ["enabled"])),
+    memberWorkspaceIds: arrayOrEmpty(
+      pickRecordValue(payload, ["member_workspace_ids"]),
+    ).map(String),
+    name: stringOrUndefined(pickRecordValue(payload, ["name"])) ?? "",
+    perMemberConcurrencyLimit: numberOrUndefined(
+      pickRecordValue(payload, ["per_member_concurrency_limit"]),
+    ),
+    perMemberTurnBudget: numberOrUndefined(
+      pickRecordValue(payload, ["per_member_turn_budget"]),
+    ),
+    poolIds: arrayOrEmpty(pickRecordValue(payload, ["pool_ids"])).map(String),
+    provider:
+      (stringOrUndefined(
+        pickRecordValue(payload, ["provider"]),
+      ) as OAuthCarpoolView["provider"]) ?? "codex",
+    strategy:
+      (stringOrUndefined(
+        pickRecordValue(payload, ["strategy"]),
+      ) as OAuthCarpoolView["strategy"]) ?? "fair_share",
+    updatedAt:
+      stringOrUndefined(pickRecordValue(payload, ["updated_at"])) ?? "",
+  };
+}
+
+function parseOAuthCarpoolList(payload: unknown) {
+  if (!isRecord(payload) || !hasArray(payload.data)) {
+    return [];
+  }
+
+  return payload.data.map(toOAuthCarpoolView);
+}
+
+function toOAuthSharingUsageView(payload: unknown): OAuthSharingUsageView {
+  const rows = isRecord(payload) && hasArray(payload.data) ? payload.data : [];
+  const auditEvents =
+    isRecord(payload) && hasArray(payload.audit_events)
+      ? payload.audit_events
+      : [];
+
+  return {
+    auditEvents: auditEvents.map((event) => ({
+      createdAt: isRecord(event)
+        ? (stringOrUndefined(pickRecordValue(event, ["created_at"])) ?? "")
+        : "",
+      eventType: isRecord(event)
+        ? (stringOrUndefined(pickRecordValue(event, ["event_type"])) ?? "")
+        : "",
+      provider: isRecord(event)
+        ? (stringOrUndefined(pickRecordValue(event, ["provider"])) ?? "")
+        : "",
+      reason: isRecord(event)
+        ? (stringOrUndefined(pickRecordValue(event, ["reason"])) ?? "")
+        : "",
+    })),
+    rows: rows.map((row) => ({
+      accountId: isRecord(row)
+        ? stringOrUndefined(pickRecordValue(row, ["account_id"]))
+        : undefined,
+      carpoolId: isRecord(row)
+        ? stringOrUndefined(pickRecordValue(row, ["carpool_id"]))
+        : undefined,
+      leaseId: isRecord(row)
+        ? stringOrUndefined(pickRecordValue(row, ["lease_id"]))
+        : undefined,
+      provider: isRecord(row)
+        ? (stringOrUndefined(pickRecordValue(row, ["provider"])) ?? "")
+        : "",
+      turns: isRecord(row)
+        ? (numberOrUndefined(pickRecordValue(row, ["turns"])) ?? 0)
+        : 0,
+      workspaceId: isRecord(row)
+        ? stringOrUndefined(pickRecordValue(row, ["workspace_id"]))
+        : undefined,
+    })),
+  };
+}
+
+async function listCodexAuthAccountsFromControlPlane() {
+  try {
+    return await requestControlPlaneJson(
+      "/v1/codex-auth-accounts",
+      parseCodexAuthAccountList,
+      {
+        headers: {
+          Accept: "application/json",
+        },
+        method: "GET",
+      },
+    );
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+async function listOAuthSharingLeasesFromControlPlane() {
+  try {
+    return await requestControlPlaneJson(
+      "/v1/oauth-sharing-leases",
+      parseOAuthSharingLeaseList,
+      {
+        headers: { Accept: "application/json" },
+        method: "GET",
+      },
+    );
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function upsertOAuthSharingLeaseInControlPlane(
+  input: OAuthSharingLeaseMutationInput,
+) {
+  return requestControlPlaneJson(
+    "/v1/oauth-sharing-leases",
+    toOAuthSharingLeaseView,
+    {
+      body: JSON.stringify({
+        allowed_account_ids:
+          input.allowedAccountIds.length > 0
+            ? input.allowedAccountIds
+            : undefined,
+        borrower_workspace_id: input.borrowerWorkspaceId,
+        expires_at: input.expiresAt,
+        lease_id: input.leaseId,
+        max_concurrent_runs: input.maxConcurrentRuns,
+        owner_workspace_id: input.ownerWorkspaceId,
+        policy: input.policy,
+        pool_id: input.poolId,
+        provider: input.provider,
+        starts_at: input.startsAt,
+        status: input.status,
+        usage_budget: {
+          turns: input.turnBudget,
+        },
+      }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+}
+
+async function revokeOAuthSharingLeaseInControlPlane(leaseId: string) {
+  return requestControlPlaneJson(
+    `/v1/oauth-sharing-leases/${encodeURIComponent(leaseId)}/revoke`,
+    toOAuthSharingLeaseView,
+    {
+      headers: { Accept: "application/json" },
+      method: "POST",
+    },
+  );
+}
+
+async function listOAuthCarpoolsFromControlPlane() {
+  try {
+    return await requestControlPlaneJson(
+      "/v1/oauth-carpools",
+      parseOAuthCarpoolList,
+      {
+        headers: { Accept: "application/json" },
+        method: "GET",
+      },
+    );
+  } catch (error) {
+    if (isRecoverableMissingEndpoint(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function upsertOAuthCarpoolInControlPlane(
+  input: OAuthCarpoolMutationInput,
+) {
+  return requestControlPlaneJson("/v1/oauth-carpools", toOAuthCarpoolView, {
+    body: JSON.stringify({
+      carpool_id: input.carpoolId,
+      enabled: input.enabled,
+      member_workspace_ids: input.memberWorkspaceIds,
+      name: input.name,
+      per_member_concurrency_limit: input.perMemberConcurrencyLimit,
+      per_member_turn_budget: input.perMemberTurnBudget,
+      pool_ids: input.poolIds,
+      provider: input.provider,
+      strategy: input.strategy,
+    }),
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+}
+
+async function removeOAuthCarpoolInControlPlane(carpoolId: string) {
+  return requestControlPlaneJson(
+    `/v1/oauth-carpools/${encodeURIComponent(carpoolId)}`,
+    toOAuthCarpoolView,
+    {
+      headers: { Accept: "application/json" },
+      method: "DELETE",
+    },
+  );
+}
+
+async function readOAuthSharingUsageFromControlPlane(workspaceId?: string) {
+  const query = workspaceId
+    ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+    : "";
+
+  return requestControlPlaneJson(
+    `/v1/oauth-sharing-usage${query}`,
+    toOAuthSharingUsageView,
+    {
+      headers: { Accept: "application/json" },
+      method: "GET",
+    },
+  );
+}
+
+async function uploadCodexAuthAccountInControlPlane(
+  input: CodexAuthAccountUploadInput,
+) {
+  return requestControlPlaneJson(
+    "/v1/codex-auth-accounts",
+    toCodexAuthAccountView,
+    {
+      body: JSON.stringify({
+        auth_json: input.authJson,
+        display_name: input.displayName,
+        endpoint_base_url: input.endpointBaseUrl,
+        project_id: input.projectId,
+        provider_resource_id: input.providerResourceId,
+        region: input.region,
       }),
       headers: {
         Accept: "application/json",
@@ -1991,6 +2457,42 @@ const defaultConsoleDataService: ConsoleDataService = {
       providerResourceId,
       expectedVersion,
     );
+  },
+
+  async listCodexAuthAccounts() {
+    return listCodexAuthAccountsFromControlPlane();
+  },
+
+  async uploadCodexAuthAccount(input) {
+    return uploadCodexAuthAccountInControlPlane(input);
+  },
+
+  async listOAuthSharingLeases() {
+    return listOAuthSharingLeasesFromControlPlane();
+  },
+
+  async upsertOAuthSharingLease(input) {
+    return upsertOAuthSharingLeaseInControlPlane(input);
+  },
+
+  async revokeOAuthSharingLease(leaseId) {
+    return revokeOAuthSharingLeaseInControlPlane(leaseId);
+  },
+
+  async listOAuthCarpools() {
+    return listOAuthCarpoolsFromControlPlane();
+  },
+
+  async upsertOAuthCarpool(input) {
+    return upsertOAuthCarpoolInControlPlane(input);
+  },
+
+  async removeOAuthCarpool(carpoolId) {
+    return removeOAuthCarpoolInControlPlane(carpoolId);
+  },
+
+  async readOAuthSharingUsage(workspaceId) {
+    return readOAuthSharingUsageFromControlPlane(workspaceId);
   },
 
   async createRoutePolicy(routePolicy) {
