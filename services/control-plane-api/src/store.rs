@@ -73,6 +73,10 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub const SESSION_TTL_SECONDS: u64 = 60 * 60 * 8;
 pub const ACTIVE_CONFIG_ALIAS: &str = "active";
+const DEFAULT_OAUTH_POOL_RUNTIME_LEASE_TTL_SECONDS: u64 = 120;
+const DEFAULT_OAUTH_POOL_SESSION_BINDING_TTL_SECONDS: u64 = 60 * 60 * 24;
+const OAUTH_POOL_COOLDOWN_SECONDS: u64 = 60 * 5;
+const OAUTH_POOL_MAX_COOLDOWN_SECONDS: u64 = 60 * 60;
 
 const PROVIDER_CATALOG: &[(AuthProvider, &str, &str)] = &[
     (
@@ -142,6 +146,8 @@ pub struct MemoryStore {
     codex_auth_accounts: Vec<CodexAuthAccountRecord>,
     oauth_sharing_leases: Vec<OAuthSharingLeaseRecord>,
     oauth_carpools: Vec<OAuthCarpoolRecord>,
+    oauth_pool_runtime_leases: Vec<OAuthPoolRuntimeLeaseRecord>,
+    oauth_pool_session_bindings: Vec<OAuthPoolSessionBindingRecord>,
     oauth_sharing_audit_events: Vec<OAuthSharingAuditEventRecord>,
 }
 
@@ -242,6 +248,16 @@ pub struct CodexAuthAccountRecord {
     pub overloaded_until: Option<String>,
     #[serde(default)]
     pub temp_unschedulable_until: Option<String>,
+    #[serde(default = "default_oauth_account_health_state")]
+    pub health_state: String,
+    #[serde(default = "default_oauth_account_health_score")]
+    pub health_score: f32,
+    #[serde(default)]
+    pub last_error_code: Option<String>,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    #[serde(default)]
+    pub last_success_at: Option<String>,
     pub auth_json_sha256: String,
     pub encrypted_auth_json: EncryptedSecretBlob,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -272,6 +288,13 @@ pub struct CodexAuthAccount {
     pub overloaded_until: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temp_unschedulable_until: Option<String>,
+    pub health_state: String,
+    pub health_score: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_code: Option<String>,
+    pub consecutive_failures: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<String>,
     pub auth_json_sha256: String,
     pub encrypted_auth_json_key_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -383,6 +406,69 @@ pub struct OAuthSharingAuditEventRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthPoolRuntimeLeaseRecord {
+    pub runtime_lease_id: String,
+    pub account_id: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carpool_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holder_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    pub status: String,
+    pub expires_at: String,
+    pub heartbeat_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released_at: Option<String>,
+    pub fencing_token: u64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthPoolSessionBindingRecord {
+    pub binding_id: String,
+    pub session_key: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_id: Option<String>,
+    pub account_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub binding_policy: String,
+    pub expires_at: String,
+    pub last_seen_at: String,
+    pub rebind_count: u64,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OAuthPoolAccountFeedback {
+    #[serde(default)]
+    pub runtime_lease_id: Option<String>,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub status_code: Option<u16>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub retry_after_seconds: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct OAuthSharingUsageSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -432,6 +518,14 @@ pub struct OAuthPoolSelectionRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
+    #[serde(default)]
+    pub holder_id: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub lease_ttl_seconds: Option<u64>,
+    #[serde(default)]
+    pub binding_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -443,6 +537,14 @@ pub struct OAuthPoolSelection {
     pub lease_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub carpool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lease_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_expires_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fencing_token: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -552,6 +654,11 @@ impl CodexAuthAccountRecord {
             rate_limited_until: self.rate_limited_until.clone(),
             overloaded_until: self.overloaded_until.clone(),
             temp_unschedulable_until: self.temp_unschedulable_until.clone(),
+            health_state: self.health_state.clone(),
+            health_score: self.health_score,
+            last_error_code: self.last_error_code.clone(),
+            consecutive_failures: self.consecutive_failures,
+            last_success_at: self.last_success_at.clone(),
             auth_json_sha256: self.auth_json_sha256.clone(),
             encrypted_auth_json_key_id: self.encrypted_auth_json.key_id.clone(),
             leased_until: self.leased_until.clone(),
@@ -564,6 +671,14 @@ impl CodexAuthAccountRecord {
 
 fn default_oauth_account_provider() -> String {
     "codex".to_string()
+}
+
+fn default_oauth_account_health_state() -> String {
+    "healthy".to_string()
+}
+
+const fn default_oauth_account_health_score() -> f32 {
+    1.0
 }
 
 const fn default_true() -> bool {
@@ -1215,6 +1330,8 @@ impl MemoryStore {
             codex_auth_accounts: Vec::new(),
             oauth_sharing_leases: Vec::new(),
             oauth_carpools: Vec::new(),
+            oauth_pool_runtime_leases: Vec::new(),
+            oauth_pool_session_bindings: Vec::new(),
             oauth_sharing_audit_events: Vec::new(),
         }
     }
@@ -2265,6 +2382,61 @@ impl StoreMode {
                 Ok(read_memory_oauth_sharing_usage(&store, filters))
             }
             Self::Postgres(store) => store.read_oauth_sharing_usage(filters).await,
+        }
+    }
+
+    pub async fn heartbeat_oauth_pool_runtime_lease(
+        &self,
+        runtime_lease_id: &str,
+    ) -> Result<Option<OAuthPoolRuntimeLeaseRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(heartbeat_memory_runtime_lease(&mut store, runtime_lease_id))
+            }
+            Self::Postgres(store) => {
+                store
+                    .heartbeat_oauth_pool_runtime_lease(runtime_lease_id)
+                    .await
+            }
+        }
+    }
+
+    pub async fn release_oauth_pool_runtime_lease(
+        &self,
+        runtime_lease_id: &str,
+    ) -> Result<Option<OAuthPoolRuntimeLeaseRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(release_memory_runtime_lease(&mut store, runtime_lease_id))
+            }
+            Self::Postgres(store) => {
+                store
+                    .release_oauth_pool_runtime_lease(runtime_lease_id)
+                    .await
+            }
+        }
+    }
+
+    pub async fn record_oauth_pool_account_feedback(
+        &self,
+        account_id: &str,
+        feedback: OAuthPoolAccountFeedback,
+    ) -> Result<Option<CodexAuthAccount>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(
+                    apply_memory_account_feedback(&mut store, account_id, feedback)
+                        .map(|record| record.public_view()),
+                )
+            }
+            Self::Postgres(store) => {
+                store
+                    .record_oauth_pool_account_feedback(account_id, feedback)
+                    .await
+            }
         }
     }
 
@@ -3747,38 +3919,44 @@ impl PostgresStore {
         &self,
         request: &OAuthPoolSelectionRequest,
     ) -> Result<OAuthPoolSelection> {
+        let mut tx = self.pool.begin().await?;
+        let account_rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY updated_at ASC FOR UPDATE SKIP LOCKED")
+            .fetch_all(&mut *tx)
+            .await?;
         let mut memory = MemoryStore {
-            codex_auth_accounts: self.load_codex_auth_account_records().await?,
-            oauth_sharing_leases: self.load_oauth_sharing_lease_records().await?,
-            oauth_carpools: self.load_oauth_carpool_records().await?,
-            oauth_sharing_audit_events: self.load_oauth_sharing_audit_records().await?,
+            codex_auth_accounts: account_rows
+                .into_iter()
+                .map(|row| row.get::<Json<CodexAuthAccountRecord>, _>("payload").0)
+                .collect(),
+            oauth_sharing_leases: load_oauth_sharing_lease_records_from_tx(&mut tx).await?,
+            oauth_carpools: load_oauth_carpool_records_from_tx(&mut tx).await?,
+            oauth_pool_runtime_leases: load_oauth_pool_runtime_lease_records_from_tx(&mut tx)
+                .await?,
+            oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
+                .await?,
+            oauth_sharing_audit_events: load_oauth_sharing_audit_records_from_tx(&mut tx).await?,
             ..MemoryStore::default()
         };
         let audit_len = memory.oauth_sharing_audit_events.len();
         let selection = select_memory_oauth_pool_account(&mut memory, request);
 
-        if let Some(account) = selection.account.as_ref() {
-            sqlx::query(
-                "UPDATE codex_auth_accounts
-                    SET leased_until = $2, updated_at = $3, payload = $4
-                  WHERE codex_account_id = $1",
-            )
-            .bind(&account.codex_account_id)
-            .bind(account.leased_until.as_deref())
-            .bind(&account.updated_at)
-            .bind(Json(account))
-            .execute(&self.pool)
-            .await?;
+        for account in &memory.codex_auth_accounts {
+            persist_codex_auth_account_tx(&mut tx, account).await?;
         }
 
-        for event in memory
-            .oauth_sharing_audit_events
-            .into_iter()
-            .skip(audit_len)
-        {
-            self.insert_oauth_sharing_audit_event(&event).await?;
+        for runtime_lease in &memory.oauth_pool_runtime_leases {
+            upsert_oauth_pool_runtime_lease_tx(&mut tx, runtime_lease).await?;
         }
 
+        for binding in &memory.oauth_pool_session_bindings {
+            upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+
+        for event in memory.oauth_sharing_audit_events.iter().skip(audit_len) {
+            insert_oauth_sharing_audit_event_tx(&mut tx, event).await?;
+        }
+
+        tx.commit().await?;
         Ok(selection)
     }
 
@@ -3936,14 +4114,81 @@ impl PostgresStore {
         Ok(read_memory_oauth_sharing_usage(&memory, filters))
     }
 
-    async fn load_codex_auth_account_records(&self) -> Result<Vec<CodexAuthAccountRecord>> {
-        let rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY updated_at ASC")
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| row.get::<Json<CodexAuthAccountRecord>, _>("payload").0)
-            .collect())
+    async fn heartbeat_oauth_pool_runtime_lease(
+        &self,
+        runtime_lease_id: &str,
+    ) -> Result<Option<OAuthPoolRuntimeLeaseRecord>> {
+        let mut tx = self.pool.begin().await?;
+        let mut memory = MemoryStore {
+            codex_auth_accounts: load_codex_auth_account_records_from_tx(&mut tx).await?,
+            oauth_pool_runtime_leases: load_oauth_pool_runtime_lease_records_from_tx(&mut tx)
+                .await?,
+            oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
+                .await?,
+            ..MemoryStore::default()
+        };
+        let result = heartbeat_memory_runtime_lease(&mut memory, runtime_lease_id);
+        for account in &memory.codex_auth_accounts {
+            persist_codex_auth_account_tx(&mut tx, account).await?;
+        }
+        for runtime_lease in &memory.oauth_pool_runtime_leases {
+            upsert_oauth_pool_runtime_lease_tx(&mut tx, runtime_lease).await?;
+        }
+        for binding in &memory.oauth_pool_session_bindings {
+            upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+        tx.commit().await?;
+        Ok(result)
+    }
+
+    async fn release_oauth_pool_runtime_lease(
+        &self,
+        runtime_lease_id: &str,
+    ) -> Result<Option<OAuthPoolRuntimeLeaseRecord>> {
+        let mut tx = self.pool.begin().await?;
+        let mut memory = MemoryStore {
+            codex_auth_accounts: load_codex_auth_account_records_from_tx(&mut tx).await?,
+            oauth_pool_runtime_leases: load_oauth_pool_runtime_lease_records_from_tx(&mut tx)
+                .await?,
+            oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
+                .await?,
+            ..MemoryStore::default()
+        };
+        let result = release_memory_runtime_lease(&mut memory, runtime_lease_id);
+        for account in &memory.codex_auth_accounts {
+            persist_codex_auth_account_tx(&mut tx, account).await?;
+        }
+        for runtime_lease in &memory.oauth_pool_runtime_leases {
+            upsert_oauth_pool_runtime_lease_tx(&mut tx, runtime_lease).await?;
+        }
+        for binding in &memory.oauth_pool_session_bindings {
+            upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+        tx.commit().await?;
+        Ok(result)
+    }
+
+    async fn record_oauth_pool_account_feedback(
+        &self,
+        account_id: &str,
+        feedback: OAuthPoolAccountFeedback,
+    ) -> Result<Option<CodexAuthAccount>> {
+        let mut tx = self.pool.begin().await?;
+        let mut memory = MemoryStore {
+            codex_auth_accounts: load_codex_auth_account_records_from_tx(&mut tx).await?,
+            oauth_sharing_audit_events: load_oauth_sharing_audit_records_from_tx(&mut tx).await?,
+            ..MemoryStore::default()
+        };
+        let audit_len = memory.oauth_sharing_audit_events.len();
+        let result = apply_memory_account_feedback(&mut memory, account_id, feedback);
+        if let Some(account) = result.as_ref() {
+            persist_codex_auth_account_tx(&mut tx, account).await?;
+        }
+        for event in memory.oauth_sharing_audit_events.iter().skip(audit_len) {
+            insert_oauth_sharing_audit_event_tx(&mut tx, event).await?;
+        }
+        tx.commit().await?;
+        Ok(result.map(|record| record.public_view()))
     }
 
     async fn load_oauth_sharing_lease_records(&self) -> Result<Vec<OAuthSharingLeaseRecord>> {
@@ -5754,10 +5999,278 @@ fn oauth_audit_event_matches(
             .is_none_or(|value| event.account_id.as_deref() == Some(value))
 }
 
+fn cleanup_memory_runtime_leases(store: &mut MemoryStore) {
+    let now = now_rfc3339();
+    let mut expired_account_ids = Vec::new();
+    for runtime_lease in &mut store.oauth_pool_runtime_leases {
+        if runtime_lease.status == "active" && timestamp_is_expired(&runtime_lease.expires_at) {
+            runtime_lease.status = "expired".to_string();
+            runtime_lease.released_at = Some(now.clone());
+            expired_account_ids.push(runtime_lease.account_id.clone());
+        }
+    }
+
+    for account_id in expired_account_ids {
+        if let Some(account) = store
+            .codex_auth_accounts
+            .iter_mut()
+            .find(|account| account.codex_account_id == account_id)
+        {
+            account.active_runs = account.active_runs.saturating_sub(1);
+            account.updated_at = now.clone();
+            account.version = account.version.saturating_add(1);
+        }
+    }
+
+    for binding in &mut store.oauth_pool_session_bindings {
+        if binding.status == "active" && timestamp_is_expired(&binding.expires_at) {
+            binding.status = "expired".to_string();
+            binding.updated_at = now.clone();
+        }
+    }
+}
+
+fn active_runtime_lease_count(
+    store: &MemoryStore,
+    account_id: Option<&str>,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    workspace_id: Option<&str>,
+    provider: &str,
+) -> u64 {
+    store
+        .oauth_pool_runtime_leases
+        .iter()
+        .filter(|runtime_lease| {
+            runtime_lease.status == "active"
+                && !timestamp_is_expired(&runtime_lease.expires_at)
+                && runtime_lease.provider == provider
+                && account_id.is_none_or(|value| runtime_lease.account_id == value)
+                && lease_id.is_none_or(|value| runtime_lease.lease_id.as_deref() == Some(value))
+                && carpool_id.is_none_or(|value| runtime_lease.carpool_id.as_deref() == Some(value))
+                && workspace_id
+                    .is_none_or(|value| runtime_lease.workspace_id.as_deref() == Some(value))
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn session_key_for_request(provider: &str, request: &OAuthPoolSelectionRequest) -> Option<String> {
+    let session_id = request.session_id.as_deref()?.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+
+    let mut hasher = Sha256::new();
+    for part in [
+        request.borrower_workspace_id.as_deref().unwrap_or(""),
+        request.borrower_user_id.as_deref().unwrap_or(""),
+        session_id,
+        provider,
+        request.model_id.as_deref().unwrap_or(""),
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    Some(format!("sessbind_{:x}", hasher.finalize()))
+}
+
+fn pool_binding_matches(
+    binding: &OAuthPoolSessionBindingRecord,
+    provider: &str,
+    pool_ids: Option<&[String]>,
+    workspace_id: Option<&str>,
+    model_id: Option<&str>,
+) -> bool {
+    binding.provider == provider
+        && binding.status == "active"
+        && !timestamp_is_expired(&binding.expires_at)
+        && pool_ids.is_none_or(|pool_ids| {
+            binding
+                .pool_id
+                .as_deref()
+                .is_some_and(|pool_id| pool_ids.iter().any(|candidate| candidate == pool_id))
+        })
+        && workspace_id.is_none_or(|value| binding.workspace_id.as_deref() == Some(value))
+        && model_id.is_none_or(|value| binding.model_id.as_deref() == Some(value))
+}
+
+fn account_runtime_capacity_allows(
+    store: &MemoryStore,
+    account: &CodexAuthAccountRecord,
+    provider: &str,
+) -> bool {
+    let limit = account.concurrency_limit.unwrap_or(1);
+    active_runtime_lease_count(
+        store,
+        Some(account.codex_account_id.as_str()),
+        None,
+        None,
+        None,
+        provider,
+    ) < u64::from(limit)
+}
+
+fn account_health_allows(account: &CodexAuthAccountRecord) -> bool {
+    matches!(account.health_state.as_str(), "healthy" | "degraded")
+}
+
+fn find_bound_account_index(
+    store: &MemoryStore,
+    provider: &str,
+    session_key: Option<&str>,
+    pool_ids: Option<&[String]>,
+    workspace_id: Option<&str>,
+    model_id: Option<&str>,
+) -> Option<(usize, OAuthPoolSessionBindingRecord)> {
+    let session_key = session_key?;
+    let binding = store
+        .oauth_pool_session_bindings
+        .iter()
+        .find(|binding| {
+            binding.session_key == session_key
+                && pool_binding_matches(binding, provider, pool_ids, workspace_id, model_id)
+        })?
+        .clone();
+    let index = store
+        .codex_auth_accounts
+        .iter()
+        .position(|account| account.codex_account_id == binding.account_id)?;
+    let account = &store.codex_auth_accounts[index];
+    if oauth_account_is_schedulable(account, provider)
+        && account_health_allows(account)
+        && account_runtime_capacity_allows(store, account, provider)
+    {
+        Some((index, binding))
+    } else {
+        None
+    }
+}
+
+fn next_runtime_lease_id(
+    store: &MemoryStore,
+    account_id: &str,
+    operation_id: Option<&str>,
+) -> String {
+    let sequence = store.oauth_pool_runtime_leases.len().saturating_add(1);
+    let mut hasher = Sha256::new();
+    hasher.update(account_id.as_bytes());
+    hasher.update(operation_id.unwrap_or("").as_bytes());
+    hasher.update(sequence.to_string().as_bytes());
+    format!("opoollease_{:x}", hasher.finalize())
+}
+
+fn next_binding_id(session_key: &str, provider: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(session_key.as_bytes());
+    hasher.update(provider.as_bytes());
+    format!("opoolbind_{:x}", hasher.finalize())
+}
+
+fn create_memory_runtime_lease(
+    store: &mut MemoryStore,
+    request: &OAuthPoolSelectionRequest,
+    provider: &str,
+    account: &CodexAuthAccountRecord,
+    lease_id: Option<&str>,
+    carpool_id: Option<&str>,
+    pool_id: Option<&str>,
+    session_key: Option<&str>,
+) -> OAuthPoolRuntimeLeaseRecord {
+    let now = now_rfc3339();
+    let ttl = request
+        .lease_ttl_seconds
+        .unwrap_or(DEFAULT_OAUTH_POOL_RUNTIME_LEASE_TTL_SECONDS)
+        .clamp(1, DEFAULT_OAUTH_POOL_SESSION_BINDING_TTL_SECONDS);
+    let fencing_token = store.oauth_pool_runtime_leases.len().saturating_add(1) as u64;
+    let record = OAuthPoolRuntimeLeaseRecord {
+        runtime_lease_id: next_runtime_lease_id(
+            store,
+            account.codex_account_id.as_str(),
+            request.operation_id.as_deref(),
+        ),
+        account_id: account.codex_account_id.clone(),
+        provider: provider.to_string(),
+        pool_id: pool_id.map(str::to_string),
+        lease_id: lease_id.map(str::to_string),
+        carpool_id: carpool_id.map(str::to_string),
+        workspace_id: request.borrower_workspace_id.clone(),
+        session_key: session_key.map(str::to_string),
+        holder_id: request.holder_id.clone(),
+        operation_id: request.operation_id.clone(),
+        status: "active".to_string(),
+        expires_at: expires_at(ttl),
+        heartbeat_at: now.clone(),
+        released_at: None,
+        fencing_token,
+        created_at: now,
+    };
+    store.oauth_pool_runtime_leases.push(record.clone());
+    record
+}
+
+fn upsert_memory_session_binding(
+    store: &mut MemoryStore,
+    request: &OAuthPoolSelectionRequest,
+    provider: &str,
+    account_id: &str,
+    pool_id: Option<&str>,
+    session_key: Option<&str>,
+) -> Option<OAuthPoolSessionBindingRecord> {
+    let session_key = session_key?;
+    let now = now_rfc3339();
+    let binding_policy = request
+        .binding_policy
+        .clone()
+        .unwrap_or_else(|| "sticky_session".to_string());
+    let binding = OAuthPoolSessionBindingRecord {
+        binding_id: next_binding_id(session_key, provider),
+        session_key: session_key.to_string(),
+        provider: provider.to_string(),
+        pool_id: pool_id.map(str::to_string),
+        account_id: account_id.to_string(),
+        workspace_id: request.borrower_workspace_id.clone(),
+        model_id: request.model_id.clone(),
+        binding_policy,
+        expires_at: expires_at(DEFAULT_OAUTH_POOL_SESSION_BINDING_TTL_SECONDS),
+        last_seen_at: now.clone(),
+        rebind_count: 0,
+        status: "active".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    if let Some(existing) = store
+        .oauth_pool_session_bindings
+        .iter_mut()
+        .find(|existing| existing.session_key == session_key && existing.provider == provider)
+    {
+        let same_account = existing.account_id == account_id;
+        existing.pool_id = binding.pool_id.clone();
+        existing.account_id = binding.account_id.clone();
+        existing.workspace_id = binding.workspace_id.clone();
+        existing.model_id = binding.model_id.clone();
+        existing.binding_policy = binding.binding_policy.clone();
+        existing.expires_at = binding.expires_at.clone();
+        existing.last_seen_at = binding.last_seen_at.clone();
+        existing.status = "active".to_string();
+        existing.updated_at = binding.updated_at.clone();
+        if !same_account {
+            existing.rebind_count = existing.rebind_count.saturating_add(1);
+        }
+        return Some(existing.clone());
+    }
+
+    store.oauth_pool_session_bindings.push(binding.clone());
+    Some(binding)
+}
+
 fn select_memory_oauth_pool_account(
     store: &mut MemoryStore,
     request: &OAuthPoolSelectionRequest,
 ) -> OAuthPoolSelection {
+    cleanup_memory_runtime_leases(store);
     let provider = request.provider.as_deref().unwrap_or("codex");
     let borrower_workspace_id = request.borrower_workspace_id.as_deref();
     let pool_id = request.pool_id.as_deref();
@@ -5836,16 +6349,27 @@ fn select_memory_oauth_pool_account(
         carpool_id = Some(carpool.carpool_id);
     }
 
-    let selected_index = select_schedulable_account_index(
+    let session_key = session_key_for_request(provider, request);
+    let bound = find_bound_account_index(
         store,
         provider,
+        session_key.as_deref(),
         context_pool_ids.as_deref(),
-        allowed_account_ids.as_deref(),
         borrower_workspace_id,
-        lease_id.as_deref(),
-        carpool_id.as_deref(),
-        &policy,
+        request.model_id.as_deref(),
     );
+    let selected_index = bound.as_ref().map(|(index, _)| *index).or_else(|| {
+        select_schedulable_account_index(
+            store,
+            provider,
+            context_pool_ids.as_deref(),
+            allowed_account_ids.as_deref(),
+            borrower_workspace_id,
+            lease_id.as_deref(),
+            carpool_id.as_deref(),
+            &policy,
+        )
+    });
     let Some(selected_index) = selected_index else {
         return blocked_selection(
             store,
@@ -5858,7 +6382,63 @@ fn select_memory_oauth_pool_account(
         );
     };
 
-    let leased_until = lease_until_rfc3339();
+    let selected_snapshot = store
+        .codex_auth_accounts
+        .get(selected_index)
+        .expect("selected account index should exist")
+        .clone();
+    let effective_pool_id = context_pool_ids
+        .as_deref()
+        .and_then(|pool_ids| {
+            pool_ids.iter().find(|candidate| {
+                candidate.as_str() == selected_snapshot.provider_resource_id.as_str()
+            })
+        })
+        .map(String::as_str)
+        .or(pool_id)
+        .or_else(|| Some(selected_snapshot.provider_resource_id.as_str()));
+    let runtime_lease = create_memory_runtime_lease(
+        store,
+        request,
+        provider,
+        &selected_snapshot,
+        lease_id.as_deref(),
+        carpool_id.as_deref(),
+        effective_pool_id,
+        session_key.as_deref(),
+    );
+    let binding = upsert_memory_session_binding(
+        store,
+        request,
+        provider,
+        selected_snapshot.codex_account_id.as_str(),
+        effective_pool_id,
+        session_key.as_deref(),
+    );
+    if let Some(binding) = binding.as_ref() {
+        push_oauth_audit_event(
+            store,
+            if bound.is_some() {
+                "bind_reuse"
+            } else {
+                "bind"
+            },
+            provider,
+            lease_id.as_deref(),
+            carpool_id.as_deref(),
+            borrower_workspace_id,
+            Some(selected_snapshot.codex_account_id.as_str()),
+            effective_pool_id,
+            "session binding updated",
+            serde_json::json!({
+                "binding_id": binding.binding_id,
+                "binding_policy": binding.binding_policy,
+                "session_key": binding.session_key,
+                "model_id": request.model_id,
+            }),
+        );
+    }
+
     let now = now_rfc3339();
     let account_id;
     let selected;
@@ -5867,14 +6447,18 @@ fn select_memory_oauth_pool_account(
             .codex_auth_accounts
             .get_mut(selected_index)
             .expect("selected account index should exist");
-        account.leased_until = Some(leased_until);
+        account.leased_until = Some(runtime_lease.expires_at.clone());
         account.active_runs = account.active_runs.saturating_add(1);
         account.updated_at = now;
         account.version = account.version.saturating_add(1);
         account_id = account.codex_account_id.clone();
         selected = account.clone();
     }
-    let reason = selection_reason(lease_id.as_deref(), carpool_id.as_deref(), &policy);
+    let reason = if bound.is_some() {
+        "sticky session binding selected".to_string()
+    } else {
+        selection_reason(lease_id.as_deref(), carpool_id.as_deref(), &policy)
+    };
     push_oauth_audit_event(
         store,
         "select",
@@ -5886,6 +6470,8 @@ fn select_memory_oauth_pool_account(
         Some(selected.provider_resource_id.as_str()),
         &reason,
         serde_json::json!({
+            "runtime_lease_id": runtime_lease.runtime_lease_id,
+            "binding_id": binding.as_ref().map(|binding| binding.binding_id.clone()),
             "model_id": request.model_id,
             "session_id": request.session_id,
         }),
@@ -5896,6 +6482,10 @@ fn select_memory_oauth_pool_account(
         blocked: false,
         lease_id,
         carpool_id,
+        runtime_lease_id: Some(runtime_lease.runtime_lease_id),
+        binding_id: binding.as_ref().map(|binding| binding.binding_id.clone()),
+        binding_expires_at: binding.as_ref().map(|binding| binding.expires_at.clone()),
+        fencing_token: Some(runtime_lease.fencing_token),
     }
 }
 
@@ -5915,6 +6505,8 @@ fn select_schedulable_account_index(
         .enumerate()
         .filter(|(_, account)| {
             oauth_account_is_schedulable(account, provider)
+                && account_health_allows(account)
+                && account_runtime_capacity_allows(store, account, provider)
                 && pool_ids.is_none_or(|pool_ids| {
                     pool_ids
                         .iter()
@@ -5954,6 +6546,7 @@ fn select_schedulable_account_index(
 fn oauth_account_is_schedulable(account: &CodexAuthAccountRecord, provider: &str) -> bool {
     account.provider == provider
         && account.status == "active"
+        && account_health_allows(account)
         && account.schedulable
         && account.credential_ready
         && account
@@ -6090,7 +6683,149 @@ fn blocked_selection(
         blocked: true,
         lease_id: lease_id.map(str::to_string),
         carpool_id: carpool_id.map(str::to_string),
+        runtime_lease_id: None,
+        binding_id: None,
+        binding_expires_at: None,
+        fencing_token: None,
     }
+}
+
+fn heartbeat_memory_runtime_lease(
+    store: &mut MemoryStore,
+    runtime_lease_id: &str,
+) -> Option<OAuthPoolRuntimeLeaseRecord> {
+    cleanup_memory_runtime_leases(store);
+    let index = store
+        .oauth_pool_runtime_leases
+        .iter()
+        .position(|runtime_lease| runtime_lease.runtime_lease_id == runtime_lease_id)?;
+    let now = now_rfc3339();
+    let runtime_lease = store.oauth_pool_runtime_leases.get_mut(index)?;
+    if runtime_lease.status != "active" || timestamp_is_expired(&runtime_lease.expires_at) {
+        return Some(runtime_lease.clone());
+    }
+    runtime_lease.heartbeat_at = now;
+    Some(runtime_lease.clone())
+}
+
+fn release_memory_runtime_lease(
+    store: &mut MemoryStore,
+    runtime_lease_id: &str,
+) -> Option<OAuthPoolRuntimeLeaseRecord> {
+    cleanup_memory_runtime_leases(store);
+    let index = store
+        .oauth_pool_runtime_leases
+        .iter()
+        .position(|runtime_lease| runtime_lease.runtime_lease_id == runtime_lease_id)?;
+    let now = now_rfc3339();
+    let runtime_lease = store.oauth_pool_runtime_leases.get_mut(index)?;
+    if runtime_lease.status == "active" {
+        runtime_lease.status = "released".to_string();
+        runtime_lease.released_at = Some(now.clone());
+        if let Some(account) = store
+            .codex_auth_accounts
+            .iter_mut()
+            .find(|account| account.codex_account_id == runtime_lease.account_id)
+        {
+            account.active_runs = account.active_runs.saturating_sub(1);
+            account.updated_at = now.clone();
+            account.version = account.version.saturating_add(1);
+        }
+    }
+    Some(runtime_lease.clone())
+}
+
+fn feedback_error_code(feedback: &OAuthPoolAccountFeedback) -> Option<String> {
+    feedback.error_code.clone().or_else(|| {
+        feedback
+            .status_code
+            .map(|status_code| format!("http_{status_code}"))
+    })
+}
+
+fn apply_memory_account_feedback(
+    store: &mut MemoryStore,
+    account_id: &str,
+    feedback: OAuthPoolAccountFeedback,
+) -> Option<CodexAuthAccountRecord> {
+    let index = store
+        .codex_auth_accounts
+        .iter()
+        .position(|account| account.codex_account_id == account_id)?;
+    let now = now_rfc3339();
+    let account = store.codex_auth_accounts.get_mut(index)?;
+    let status_code = feedback.status_code;
+    let outcome = feedback.outcome.as_deref().unwrap_or("error");
+    let error_code = feedback_error_code(&feedback);
+
+    if outcome == "success" || status_code.is_some_and(|status| (200..400).contains(&status)) {
+        account.health_state = "healthy".to_string();
+        account.health_score = (account.health_score + 0.05).min(1.0);
+        account.last_error_code = None;
+        account.consecutive_failures = 0;
+        account.last_success_at = Some(now.clone());
+    } else if status_code == Some(401) || error_code.as_deref() == Some("invalid_token") {
+        account.health_state = "quarantined".to_string();
+        account.health_score = 0.0;
+        account.last_error_code = error_code;
+        account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+    } else if status_code == Some(403) || matches!(error_code.as_deref(), Some("policy" | "risk")) {
+        account.health_state = "cooldown".to_string();
+        account.health_score = (account.health_score - 0.4).max(0.0);
+        account.temp_unschedulable_until = Some(expires_at(OAUTH_POOL_COOLDOWN_SECONDS));
+        account.last_error_code = error_code;
+        account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+    } else if status_code == Some(429) {
+        account.health_state = "degraded".to_string();
+        let retry_after = feedback
+            .retry_after_seconds
+            .unwrap_or(OAUTH_POOL_COOLDOWN_SECONDS)
+            .min(OAUTH_POOL_MAX_COOLDOWN_SECONDS);
+        account.rate_limited_until = Some(expires_at(retry_after));
+        account.health_score = (account.health_score - 0.2).max(0.1);
+        account.last_error_code = error_code;
+        account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+    } else {
+        account.health_state = "degraded".to_string();
+        account.health_score = (account.health_score - 0.2).max(0.1);
+        account.last_error_code = error_code;
+        account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+        if account.consecutive_failures >= 3 {
+            account.overloaded_until = Some(expires_at(OAUTH_POOL_COOLDOWN_SECONDS));
+        }
+    }
+    account.updated_at = now;
+    account.version = account.version.saturating_add(1);
+    let account_snapshot = account.clone();
+    let event_type = if account_snapshot.health_state == "quarantined" {
+        "quarantine"
+    } else if account_snapshot.health_state == "cooldown" {
+        "cooldown"
+    } else {
+        "feedback"
+    };
+
+    push_oauth_audit_event(
+        store,
+        event_type,
+        account_snapshot.provider.as_str(),
+        None,
+        None,
+        Some(account_snapshot.tenant_id.as_str()),
+        Some(account_snapshot.codex_account_id.as_str()),
+        Some(account_snapshot.provider_resource_id.as_str()),
+        account_snapshot.health_state.as_str(),
+        serde_json::json!({
+            "runtime_lease_id": feedback.runtime_lease_id,
+            "outcome": feedback.outcome,
+            "status_code": status_code,
+            "error_code": account_snapshot.last_error_code,
+            "health_score": account_snapshot.health_score,
+            "consecutive_failures": account_snapshot.consecutive_failures,
+        }),
+    );
+
+    Some(account_snapshot)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6147,7 +6882,7 @@ fn active_context_runs(
     workspace_id: Option<&str>,
     provider: &str,
 ) -> u64 {
-    account_turn_usage(store, lease_id, carpool_id, workspace_id, None, provider)
+    active_runtime_lease_count(store, None, lease_id, carpool_id, workspace_id, provider)
 }
 
 fn account_turn_usage(
@@ -6162,7 +6897,7 @@ fn account_turn_usage(
         .oauth_sharing_audit_events
         .iter()
         .filter(|event| {
-            matches!(event.event_type.as_str(), "select" | "bind")
+            event.event_type == "select"
                 && event.provider == provider
                 && lease_id.is_none_or(|value| event.lease_id.as_deref() == Some(value))
                 && carpool_id.is_none_or(|value| event.carpool_id.as_deref() == Some(value))
@@ -6978,6 +7713,258 @@ fn build_route_diagnostics_response(
         recent_receipts: recent_receipt_summaries,
         targets,
     })
+}
+
+async fn persist_codex_auth_account_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    account: &CodexAuthAccountRecord,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE codex_auth_accounts
+            SET leased_until = $2, updated_at = $3, payload = $4
+          WHERE codex_account_id = $1",
+    )
+    .bind(&account.codex_account_id)
+    .bind(account.leased_until.as_deref())
+    .bind(&account.updated_at)
+    .bind(Json(account))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn load_codex_auth_account_records_from_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<Vec<CodexAuthAccountRecord>> {
+    let rows =
+        sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY updated_at ASC FOR UPDATE")
+            .fetch_all(&mut **tx)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<Json<CodexAuthAccountRecord>, _>("payload").0)
+        .collect())
+}
+
+async fn load_oauth_sharing_lease_records_from_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<Vec<OAuthSharingLeaseRecord>> {
+    let rows = sqlx::query("SELECT payload FROM oauth_sharing_leases ORDER BY lease_id")
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<Json<OAuthSharingLeaseRecord>, _>("payload").0)
+        .collect())
+}
+
+async fn load_oauth_carpool_records_from_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<Vec<OAuthCarpoolRecord>> {
+    let rows = sqlx::query("SELECT payload FROM oauth_carpools ORDER BY carpool_id")
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<Json<OAuthCarpoolRecord>, _>("payload").0)
+        .collect())
+}
+
+async fn load_oauth_pool_runtime_lease_records_from_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<Vec<OAuthPoolRuntimeLeaseRecord>> {
+    let rows = sqlx::query(
+        "SELECT runtime_lease_id, account_id, provider, pool_id, lease_id, carpool_id,
+                workspace_id, session_key, holder_id, operation_id, status, expires_at,
+                heartbeat_at, released_at, fencing_token, created_at
+           FROM oauth_pool_runtime_leases
+          ORDER BY created_at",
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| OAuthPoolRuntimeLeaseRecord {
+            runtime_lease_id: row.get("runtime_lease_id"),
+            account_id: row.get("account_id"),
+            provider: row.get("provider"),
+            pool_id: row.get("pool_id"),
+            lease_id: row.get("lease_id"),
+            carpool_id: row.get("carpool_id"),
+            workspace_id: row.get("workspace_id"),
+            session_key: row.get("session_key"),
+            holder_id: row.get("holder_id"),
+            operation_id: row.get("operation_id"),
+            status: row.get("status"),
+            expires_at: row.get("expires_at"),
+            heartbeat_at: row.get("heartbeat_at"),
+            released_at: row.get("released_at"),
+            fencing_token: row.get::<i64, _>("fencing_token").try_into().unwrap_or(0),
+            created_at: row.get("created_at"),
+        })
+        .collect())
+}
+
+async fn load_oauth_pool_session_binding_records_from_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<Vec<OAuthPoolSessionBindingRecord>> {
+    let rows = sqlx::query(
+        "SELECT binding_id, session_key, provider, pool_id, account_id, workspace_id,
+                model_id, binding_policy, expires_at, last_seen_at, rebind_count,
+                status, created_at, updated_at
+           FROM oauth_pool_session_bindings
+          ORDER BY updated_at",
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| OAuthPoolSessionBindingRecord {
+            binding_id: row.get("binding_id"),
+            session_key: row.get("session_key"),
+            provider: row.get("provider"),
+            pool_id: row.get("pool_id"),
+            account_id: row.get("account_id"),
+            workspace_id: row.get("workspace_id"),
+            model_id: row.get("model_id"),
+            binding_policy: row.get("binding_policy"),
+            expires_at: row.get("expires_at"),
+            last_seen_at: row.get("last_seen_at"),
+            rebind_count: row.get::<i64, _>("rebind_count").try_into().unwrap_or(0),
+            status: row.get("status"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+        .collect())
+}
+
+async fn load_oauth_sharing_audit_records_from_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<Vec<OAuthSharingAuditEventRecord>> {
+    let rows = sqlx::query("SELECT payload FROM oauth_sharing_audit_events ORDER BY created_at")
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            row.get::<Json<OAuthSharingAuditEventRecord>, _>("payload")
+                .0
+        })
+        .collect())
+}
+
+async fn upsert_oauth_pool_runtime_lease_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    record: &OAuthPoolRuntimeLeaseRecord,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO oauth_pool_runtime_leases
+            (runtime_lease_id, account_id, provider, pool_id, lease_id, carpool_id,
+             workspace_id, session_key, holder_id, operation_id, status, expires_at,
+             heartbeat_at, released_at, fencing_token, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         ON CONFLICT (runtime_lease_id) DO UPDATE SET
+            account_id = EXCLUDED.account_id,
+            provider = EXCLUDED.provider,
+            pool_id = EXCLUDED.pool_id,
+            lease_id = EXCLUDED.lease_id,
+            carpool_id = EXCLUDED.carpool_id,
+            workspace_id = EXCLUDED.workspace_id,
+            session_key = EXCLUDED.session_key,
+            holder_id = EXCLUDED.holder_id,
+            operation_id = EXCLUDED.operation_id,
+            status = EXCLUDED.status,
+            expires_at = EXCLUDED.expires_at,
+            heartbeat_at = EXCLUDED.heartbeat_at,
+            released_at = EXCLUDED.released_at,
+            fencing_token = EXCLUDED.fencing_token",
+    )
+    .bind(&record.runtime_lease_id)
+    .bind(&record.account_id)
+    .bind(&record.provider)
+    .bind(record.pool_id.as_deref())
+    .bind(record.lease_id.as_deref())
+    .bind(record.carpool_id.as_deref())
+    .bind(record.workspace_id.as_deref())
+    .bind(record.session_key.as_deref())
+    .bind(record.holder_id.as_deref())
+    .bind(record.operation_id.as_deref())
+    .bind(&record.status)
+    .bind(&record.expires_at)
+    .bind(&record.heartbeat_at)
+    .bind(record.released_at.as_deref())
+    .bind(i64::try_from(record.fencing_token).unwrap_or(i64::MAX))
+    .bind(&record.created_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn upsert_oauth_pool_session_binding_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    record: &OAuthPoolSessionBindingRecord,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO oauth_pool_session_bindings
+            (binding_id, session_key, provider, pool_id, account_id, workspace_id,
+             model_id, binding_policy, expires_at, last_seen_at, rebind_count,
+             status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         ON CONFLICT (session_key, provider) DO UPDATE SET
+            binding_id = EXCLUDED.binding_id,
+            pool_id = EXCLUDED.pool_id,
+            account_id = EXCLUDED.account_id,
+            workspace_id = EXCLUDED.workspace_id,
+            model_id = EXCLUDED.model_id,
+            binding_policy = EXCLUDED.binding_policy,
+            expires_at = EXCLUDED.expires_at,
+            last_seen_at = EXCLUDED.last_seen_at,
+            rebind_count = EXCLUDED.rebind_count,
+            status = EXCLUDED.status,
+            updated_at = EXCLUDED.updated_at",
+    )
+    .bind(&record.binding_id)
+    .bind(&record.session_key)
+    .bind(&record.provider)
+    .bind(record.pool_id.as_deref())
+    .bind(&record.account_id)
+    .bind(record.workspace_id.as_deref())
+    .bind(record.model_id.as_deref())
+    .bind(&record.binding_policy)
+    .bind(&record.expires_at)
+    .bind(&record.last_seen_at)
+    .bind(i64::try_from(record.rebind_count).unwrap_or(i64::MAX))
+    .bind(&record.status)
+    .bind(&record.created_at)
+    .bind(&record.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn insert_oauth_sharing_audit_event_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    event: &OAuthSharingAuditEventRecord,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO oauth_sharing_audit_events
+            (audit_event_id, event_type, provider, lease_id, carpool_id, workspace_id, account_id, pool_id, payload, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (audit_event_id) DO NOTHING",
+    )
+    .bind(&event.audit_event_id)
+    .bind(&event.event_type)
+    .bind(&event.provider)
+    .bind(event.lease_id.as_deref())
+    .bind(event.carpool_id.as_deref())
+    .bind(event.workspace_id.as_deref())
+    .bind(event.account_id.as_deref())
+    .bind(event.pool_id.as_deref())
+    .bind(Json(event))
+    .bind(&event.created_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 fn membership(

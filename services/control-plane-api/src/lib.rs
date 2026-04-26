@@ -46,11 +46,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use store::{
     ApiKey, ApiKeysResponse, CodexAuthAccount, CodexAuthAccountRecord, CodexAuthAccountsResponse,
     ConcurrencyResult, ConfigSnapshotsResponse, EncryptedSecretBlob, IdentityLookup,
-    OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolSelectionRequest, OAuthSharingLeaseRecord,
-    OAuthSharingLeasesResponse, OAuthSharingUsageBudget, OAuthSharingUsageFilters,
-    OAuthSharingUsageResponse, ProviderResourceFilters, SESSION_TTL_SECONDS, StoreMode,
-    WechatPaymentOrderRecord, WechatPaymentOrderResponse, auth_provider_enabled, expires_at,
-    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
+    OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolAccountFeedback, OAuthPoolSelectionRequest,
+    OAuthSharingLeaseRecord, OAuthSharingLeasesResponse, OAuthSharingUsageBudget,
+    OAuthSharingUsageFilters, OAuthSharingUsageResponse, ProviderResourceFilters,
+    SESSION_TTL_SECONDS, StoreMode, WechatPaymentOrderRecord, WechatPaymentOrderResponse,
+    auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
@@ -181,6 +181,14 @@ struct CodexAuthAccountLeaseRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
+    #[serde(default)]
+    pub holder_id: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub lease_ttl_seconds: Option<u64>,
+    #[serde(default)]
+    pub binding_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -197,6 +205,14 @@ struct CodexAuthAccountLeaseResponse {
     pub lease_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub carpool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lease_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_expires_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fencing_token: Option<u64>,
     pub auth_json: Value,
 }
 
@@ -639,6 +655,18 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/oauth-pool/select",
             post(select_oauth_pool_account_for_gateway),
+        )
+        .route(
+            "/internal/gateway/oauth-pool/runtime-leases/{runtime_lease_id}/heartbeat",
+            post(heartbeat_oauth_pool_runtime_lease_for_gateway),
+        )
+        .route(
+            "/internal/gateway/oauth-pool/runtime-leases/{runtime_lease_id}/release",
+            post(release_oauth_pool_runtime_lease_for_gateway),
+        )
+        .route(
+            "/internal/gateway/oauth-pool/accounts/{account_id}/feedback",
+            post(record_oauth_pool_account_feedback_for_gateway),
         )
         .route(
             "/internal/gateway/codex-account-pool/lease",
@@ -1799,6 +1827,11 @@ async fn upload_codex_auth_account(
         rate_limited_until: None,
         overloaded_until: None,
         temp_unschedulable_until: None,
+        health_state: "healthy".to_string(),
+        health_score: 1.0,
+        last_error_code: None,
+        consecutive_failures: 0,
+        last_success_at: None,
         auth_json_sha256,
         encrypted_auth_json,
         leased_until: None,
@@ -2231,6 +2264,10 @@ async fn lease_codex_auth_account_for_gateway(
             borrower_user_id: request.borrower_user_id,
             session_id: request.session_id,
             model_id: request.model_id,
+            holder_id: request.holder_id,
+            operation_id: request.operation_id,
+            lease_ttl_seconds: request.lease_ttl_seconds,
+            binding_policy: request.binding_policy,
         })
         .await
         .map_err(|error| {
@@ -2264,6 +2301,10 @@ async fn lease_codex_auth_account_for_gateway(
         reason: selection.reason,
         lease_id: selection.lease_id,
         carpool_id: selection.carpool_id,
+        runtime_lease_id: selection.runtime_lease_id,
+        binding_id: selection.binding_id,
+        binding_expires_at: selection.binding_expires_at,
+        fencing_token: selection.fencing_token,
         auth_json,
     }))
 }
@@ -2293,7 +2334,96 @@ async fn select_oauth_pool_account_for_gateway(
         "reason": selection.reason,
         "lease_id": selection.lease_id,
         "carpool_id": selection.carpool_id,
+        "runtime_lease_id": selection.runtime_lease_id,
+        "binding_id": selection.binding_id,
+        "binding_expires_at": selection.binding_expires_at,
+        "fencing_token": selection.fencing_token,
     })))
+}
+
+async fn heartbeat_oauth_pool_runtime_lease_for_gateway(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(runtime_lease_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let runtime_lease = state
+        .store
+        .heartbeat_oauth_pool_runtime_lease(&runtime_lease_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to heartbeat OAuth pool runtime lease: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "oauth_pool_runtime_lease_not_found",
+                "OAuth pool runtime lease was not found".to_string(),
+                &context,
+            )
+        })?;
+    Ok(Json(serde_json::json!({ "runtime_lease": runtime_lease })))
+}
+
+async fn release_oauth_pool_runtime_lease_for_gateway(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(runtime_lease_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let runtime_lease = state
+        .store
+        .release_oauth_pool_runtime_lease(&runtime_lease_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to release OAuth pool runtime lease: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "oauth_pool_runtime_lease_not_found",
+                "OAuth pool runtime lease was not found".to_string(),
+                &context,
+            )
+        })?;
+    Ok(Json(serde_json::json!({ "runtime_lease": runtime_lease })))
+}
+
+async fn record_oauth_pool_account_feedback_for_gateway(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(account_id): Path<String>,
+    Json(feedback): Json<OAuthPoolAccountFeedback>,
+) -> Result<Json<Value>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let account = state
+        .store
+        .record_oauth_pool_account_feedback(&account_id, feedback)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to record OAuth pool account feedback: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "codex_auth_account_not_found",
+                "Codex auth account was not found".to_string(),
+                &context,
+            )
+        })?;
+    Ok(Json(serde_json::json!({ "account": account })))
 }
 
 async fn get_internal_gateway_config(

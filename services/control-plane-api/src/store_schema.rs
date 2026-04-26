@@ -24,6 +24,8 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "codex_auth_accounts",
     "oauth_sharing_leases",
     "oauth_carpools",
+    "oauth_pool_runtime_leases",
+    "oauth_pool_session_bindings",
     "oauth_sharing_audit_events",
 ];
 
@@ -251,6 +253,43 @@ pub const MIGRATIONS: &[&str] = &[
         payload JSONB NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS oauth_pool_runtime_leases (
+        runtime_lease_id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        pool_id TEXT NULL,
+        lease_id TEXT NULL,
+        carpool_id TEXT NULL,
+        workspace_id TEXT NULL,
+        session_key TEXT NULL,
+        holder_id TEXT NULL,
+        operation_id TEXT NULL,
+        status TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL,
+        released_at TEXT NULL,
+        fencing_token BIGINT NOT NULL,
+        created_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS oauth_pool_runtime_leases_active_account_idx
+       ON oauth_pool_runtime_leases (account_id, status, expires_at)",
+    r"CREATE TABLE IF NOT EXISTS oauth_pool_session_bindings (
+        binding_id TEXT PRIMARY KEY,
+        session_key TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        pool_id TEXT NULL,
+        account_id TEXT NOT NULL,
+        workspace_id TEXT NULL,
+        model_id TEXT NULL,
+        binding_policy TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        rebind_count BIGINT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (session_key, provider)
     )",
     r"CREATE TABLE IF NOT EXISTS oauth_sharing_audit_events (
         audit_event_id TEXT PRIMARY KEY,
