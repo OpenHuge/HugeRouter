@@ -2,7 +2,7 @@
 
 [Back to Root README](../../README.md)
 
-This folder turns the architecture specification into an **agent-ready development plan** for the Rust + TanStack Start monorepo, with Turbo for JavaScript workspace orchestration and Mantine as the console UI foundation.
+This folder turns the architecture specification into an **agent-ready development plan** for the Rust + TanStack Start monorepo, with Turbo for JavaScript workspace orchestration and HeroUI as the console UI foundation.
 
 ## What this pack contains
 

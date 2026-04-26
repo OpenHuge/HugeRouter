@@ -1,15 +1,15 @@
 import {
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Group,
-  Select,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiCheckbox,
+  UiInline,
+  UiSelect,
+  UiStack,
+  UiDataTable,
+  UiText,
+  UiTextField,
+} from "@huge-router/ui-kit";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
@@ -185,7 +185,10 @@ function validateProviderForm(form: ProviderFormState) {
     errors.endpointBaseUrl = "Use an HTTPS endpoint URL.";
   }
 
-  if (form.budgetPolicyId.trim() && !/^budgetpol_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.budgetPolicyId)) {
+  if (
+    form.budgetPolicyId.trim() &&
+    !/^budgetpol_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.budgetPolicyId)
+  ) {
     errors.budgetPolicyId = "Budget policy ids must start with budgetpol_.";
   }
 
@@ -195,12 +198,13 @@ function validateProviderForm(form: ProviderFormState) {
 export const Route = createFileRoute("/app/providers")({
   loader: () =>
     loadRouteData(async () => {
-      const [providers, projects, routePolicies, routeReceipts] = await Promise.all([
-        getConsoleDataService().listProviderResources(),
-        getConsoleDataService().listProjects(),
-        getConsoleDataService().listRoutePolicies(),
-        getConsoleDataService().listRouteReceipts(),
-      ]);
+      const [providers, projects, routePolicies, routeReceipts] =
+        await Promise.all([
+          getConsoleDataService().listProviderResources(),
+          getConsoleDataService().listProjects(),
+          getConsoleDataService().listRoutePolicies(),
+          getConsoleDataService().listRouteReceipts(),
+        ]);
 
       return {
         projects,
@@ -217,9 +221,8 @@ export const Route = createFileRoute("/app/providers")({
 function ProvidersPage() {
   const result = Route.useLoaderData();
   const router = useRouter();
-  const [editingProvider, setEditingProvider] = useState<ProviderResource | null>(
-    null,
-  );
+  const [editingProvider, setEditingProvider] =
+    useState<ProviderResource | null>(null);
   const [formErrors, setFormErrors] = useState<ProviderFormErrors>({});
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [formState, setFormState] = useState<ProviderFormState>(
@@ -234,7 +237,7 @@ function ProvidersPage() {
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Inspect provider resources, health, routing scope, and quarantine state."
           title="Providers"
@@ -245,7 +248,7 @@ function ProvidersPage() {
           description="Provider inventory could not be loaded from the control-plane service."
           title="Providers unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -388,7 +391,7 @@ function ProvidersPage() {
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Inspect provider resources, health, routing scope, and quarantine state."
         title="Providers"
@@ -401,33 +404,29 @@ function ProvidersPage() {
         }}
         success={statusSuccess}
       />
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>
             {formMode === "edit"
               ? "Edit provider resource"
               : "Create provider resource"}
-          </Text>
-          <Group>
+          </UiText>
+          <UiInline>
             {formMode ? (
-              <Button
-                onClick={resetForm}
-                size="sm"
-                variant="subtle"
-              >
+              <UiButton onClick={resetForm} size="sm" variant="subtle">
                 Cancel
-              </Button>
+              </UiButton>
             ) : null}
             {!formMode ? (
-              <Button onClick={openCreateForm} size="sm">
+              <UiButton onClick={openCreateForm} size="sm">
                 Create provider
-              </Button>
+              </UiButton>
             ) : null}
-          </Group>
-        </Group>
+          </UiInline>
+        </UiInline>
         {formMode ? (
-          <Stack>
-            <TextInput
+          <UiStack>
+            <UiTextField
               label="Provider resource id"
               onChange={(event) =>
                 updateField("providerResourceId", event.currentTarget.value)
@@ -436,14 +435,16 @@ function ProvidersPage() {
               value={formState.providerResourceId}
             />
             <FieldErrorText error={formErrors.providerResourceId} />
-            <Group grow>
-              <TextInput
+            <UiInline grow>
+              <UiTextField
                 label="Display name"
-                onChange={(event) => updateField("name", event.currentTarget.value)}
+                onChange={(event) =>
+                  updateField("name", event.currentTarget.value)
+                }
                 placeholder="OpenAI Primary"
                 value={formState.name}
               />
-              <TextInput
+              <UiTextField
                 label="Provider id"
                 onChange={(event) =>
                   updateField("providerId", event.currentTarget.value)
@@ -451,27 +452,29 @@ function ProvidersPage() {
                 placeholder="openai"
                 value={formState.providerId}
               />
-            </Group>
-            <Group grow>
+            </UiInline>
+            <UiInline grow>
               <FieldErrorText error={formErrors.name} />
               <FieldErrorText error={formErrors.providerId} />
-            </Group>
-            <Group grow>
-              <Select
+            </UiInline>
+            <UiInline grow>
+              <UiSelect
                 data={projectOptions}
                 label="Project scope"
                 onChange={(value) => updateField("projectId", value ?? "")}
                 value={formState.projectId}
               />
-              <TextInput
+              <UiTextField
                 label="Region"
-                onChange={(event) => updateField("region", event.currentTarget.value)}
+                onChange={(event) =>
+                  updateField("region", event.currentTarget.value)
+                }
                 placeholder="us-east-1"
                 value={formState.region}
               />
-            </Group>
+            </UiInline>
             <FieldErrorText error={formErrors.region} />
-            <TextInput
+            <UiTextField
               label="Endpoint URL"
               onChange={(event) =>
                 updateField("endpointBaseUrl", event.currentTarget.value)
@@ -480,79 +483,59 @@ function ProvidersPage() {
               value={formState.endpointBaseUrl}
             />
             <FieldErrorText error={formErrors.endpointBaseUrl} />
-            <Group grow>
-              <Select
+            <UiInline grow>
+              <UiSelect
                 data={provenanceOptions}
                 label="Provenance"
                 onChange={(value) =>
-                  updateField(
-                    "provenanceClass",
-                    value ?? "official_api",
-                  )
+                  updateField("provenanceClass", value ?? "official_api")
                 }
                 value={formState.provenanceClass}
               />
-              <Select
+              <UiSelect
                 data={credentialOwnerOptions}
                 label="Credential owner"
                 onChange={(value) =>
-                  updateField(
-                    "credentialOwnerType",
-                    value ?? "platform",
-                  )
+                  updateField("credentialOwnerType", value ?? "platform")
                 }
                 value={formState.credentialOwnerType}
               />
-            </Group>
-            <Group grow>
-              <Select
+            </UiInline>
+            <UiInline grow>
+              <UiSelect
                 data={deploymentScopeOptions}
                 label="Deployment scope"
                 onChange={(value) =>
-                  updateField(
-                    "deploymentScope",
-                    value ?? "shared",
-                  )
+                  updateField("deploymentScope", value ?? "shared")
                 }
                 value={formState.deploymentScope}
               />
-              <Select
+              <UiSelect
                 data={authKindOptions}
                 label="Auth kind"
                 onChange={(value) =>
-                  updateField(
-                    "authKind",
-                    value ?? "api_key",
-                  )
+                  updateField("authKind", value ?? "api_key")
                 }
                 value={formState.authKind}
               />
-            </Group>
-            <Group grow>
-              <Select
+            </UiInline>
+            <UiInline grow>
+              <UiSelect
                 data={providerHealthOptions}
                 label="Health state"
                 onChange={(value) =>
-                  updateField(
-                    "healthState",
-                    value ?? "healthy",
-                  )
+                  updateField("healthState", value ?? "healthy")
                 }
                 value={formState.healthState}
               />
-              <Select
+              <UiSelect
                 data={providerStatusOptions}
                 label="Resource status"
-                onChange={(value) =>
-                  updateField(
-                    "status",
-                    value ?? "active",
-                  )
-                }
+                onChange={(value) => updateField("status", value ?? "active")}
                 value={formState.status}
               />
-            </Group>
-            <TextInput
+            </UiInline>
+            <UiTextField
               label="Budget policy id"
               onChange={(event) =>
                 updateField("budgetPolicyId", event.currentTarget.value)
@@ -561,19 +544,22 @@ function ProvidersPage() {
               value={formState.budgetPolicyId}
             />
             <FieldErrorText error={formErrors.budgetPolicyId} />
-            <Stack gap="xs">
-              <Text fw={600} size="sm">
+            <UiStack gap="xs">
+              <UiText fw={600} size="sm">
                 Capabilities
-              </Text>
-              <Group>
-                <Checkbox
+              </UiText>
+              <UiInline>
+                <UiCheckbox
                   checked={formState.supportsStreaming}
                   label="streaming"
                   onChange={(event) =>
-                    updateField("supportsStreaming", event.currentTarget.checked)
+                    updateField(
+                      "supportsStreaming",
+                      event.currentTarget.checked,
+                    )
                   }
                 />
-                <Checkbox
+                <UiCheckbox
                   checked={formState.supportsToolCalling}
                   label="tool_calling"
                   onChange={(event) =>
@@ -583,83 +569,82 @@ function ProvidersPage() {
                     )
                   }
                 />
-                <Checkbox
+                <UiCheckbox
                   checked={formState.supportsJsonMode}
                   label="json_mode"
                   onChange={(event) =>
                     updateField("supportsJsonMode", event.currentTarget.checked)
                   }
                 />
-              </Group>
-            </Stack>
-            <Group justify="flex-end">
-              <Button
-                loading={isSubmitting}
-                onClick={() => void onSubmit()}
-              >
+              </UiInline>
+            </UiStack>
+            <UiInline justify="flex-end">
+              <UiButton loading={isSubmitting} onClick={() => void onSubmit()}>
                 {formMode === "edit" ? "Save provider" : "Create provider"}
-              </Button>
-            </Group>
-          </Stack>
+              </UiButton>
+            </UiInline>
+          </UiStack>
         ) : (
-          <Text c="dimmed" size="sm">
+          <UiText c="dimmed" size="sm">
             Create a new provider resource, or edit and disable an existing one.
-          </Text>
+          </UiText>
         )}
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Provider inventory</Text>
-          <Badge color="blue" variant="light">
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Provider inventory</UiText>
+          <UiChip color="blue" variant="light">
             {providers.length} resources
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {providers.length === 0 ? (
           <EmptyCollectionState
             description="Register a provider resource to begin routing tenant traffic."
             title="No providers"
           />
         ) : (
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Provider</Table.Th>
-                <Table.Th>Project</Table.Th>
-                <Table.Th>Region</Table.Th>
-                <Table.Th>Scope</Table.Th>
-                <Table.Th>Protocols</Table.Th>
-                <Table.Th>Capabilities</Table.Th>
-                <Table.Th>Health</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Latest route signal</Table.Th>
-                <Table.Th>Version</Table.Th>
-                <Table.Th>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withTableBorder>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Name</UiDataTable.Th>
+                <UiDataTable.Th>Provider</UiDataTable.Th>
+                <UiDataTable.Th>Project</UiDataTable.Th>
+                <UiDataTable.Th>Region</UiDataTable.Th>
+                <UiDataTable.Th>Scope</UiDataTable.Th>
+                <UiDataTable.Th>Protocols</UiDataTable.Th>
+                <UiDataTable.Th>Capabilities</UiDataTable.Th>
+                <UiDataTable.Th>Health</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Latest route signal</UiDataTable.Th>
+                <UiDataTable.Th>Version</UiDataTable.Th>
+                <UiDataTable.Th>Actions</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {providers.map((provider) => (
-                <Table.Tr key={provider.provider_resource_id}>
-                  <Table.Td>{provider.name}</Table.Td>
-                  <Table.Td>{provider.provider_id}</Table.Td>
-                  <Table.Td>
-                    {projects.find((project) => project.id === provider.project_id)
-                      ?.name ?? "Unscoped"}
-                  </Table.Td>
-                  <Table.Td>{provider.region}</Table.Td>
-                  <Table.Td>{provider.deployment_scope}</Table.Td>
-                  <Table.Td>
-                    <Text size="sm">
-                      {provider.supported_protocol_families.join(", ") || "None"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm">
+                <UiDataTable.Tr key={provider.provider_resource_id}>
+                  <UiDataTable.Td>{provider.name}</UiDataTable.Td>
+                  <UiDataTable.Td>{provider.provider_id}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    {projects.find(
+                      (project) => project.id === provider.project_id,
+                    )?.name ?? "Unscoped"}
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{provider.region}</UiDataTable.Td>
+                  <UiDataTable.Td>{provider.deployment_scope}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiText size="sm">
+                      {provider.supported_protocol_families.join(", ") ||
+                        "None"}
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiText size="sm">
                       {providerCapabilityLabels(provider).join(", ") || "None"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
                       color={
                         provider.health_state === "healthy"
                           ? "teal"
@@ -670,36 +655,36 @@ function ProvidersPage() {
                       variant="light"
                     >
                       {provider.health_state}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
                       color={provider.status === "active" ? "blue" : "gray"}
                       variant="light"
                     >
                       {provider.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text c="dimmed" size="sm">
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiText c="dimmed" size="sm">
                       {latestSignalForProvider(
                         provider,
                         routeReceipts,
                         routePolicyNames,
                       ) ?? "No recent receipt"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>{provider.version}</Table.Td>
-                  <Table.Td>
-                    <Group gap="xs">
-                      <Button
+                    </UiText>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{provider.version}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiInline gap="xs">
+                      <UiButton
                         onClick={() => openEditForm(provider)}
                         size="xs"
                         variant="light"
                       >
                         Edit
-                      </Button>
-                      <Button
+                      </UiButton>
+                      <UiButton
                         color="red"
                         disabled={
                           provider.status === "disabled" ||
@@ -713,16 +698,16 @@ function ProvidersPage() {
                         variant="light"
                       >
                         Disable
-                      </Button>
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
+                      </UiButton>
+                    </UiInline>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Card>
-    </Stack>
+      </UiSurface>
+    </UiStack>
   );
 }
 
@@ -747,7 +732,8 @@ function latestSignalForProvider(
     (candidate) =>
       candidate.selectedTargetId === provider.provider_resource_id ||
       candidate.excludedTargets.some(
-        (target) => target.provider_resource_id === provider.provider_resource_id,
+        (target) =>
+          target.provider_resource_id === provider.provider_resource_id,
       ),
   );
 

@@ -22,15 +22,18 @@ Ledger, billing, SSO, analytics, and operational hardening tasks.
 **Depends on:** MET-004, MET-005, CTL-004
 
 **Paths:**
+
 - `apps/console-web/src/routes/usage`
 - `apps/console-web/src/routes/billing`
 
 **Outputs:**
+
 - usage charts
 - budget threshold views
 - balance and invoice projections
 
 **Acceptance criteria:**
+
 - dashboards match projection APIs
 - time-range filters and tenant scopes work
 - large tables are paginated and exportable
@@ -42,16 +45,19 @@ Ledger, billing, SSO, analytics, and operational hardening tasks.
 **Depends on:** MET-002, CTL-003
 
 **Paths:**
+
 - `crates/metering`
 - `crates/ledger-models`
 - `services/control-plane-api`
 
 **Outputs:**
+
 - pricing rules engine
 - price table model
 - cost calculation library
 
 **Acceptance criteria:**
+
 - pricing can model input/output/cache/image/audio units
 - pricing rules are versioned and auditable
 - simulation endpoint exists for test scenarios
@@ -63,16 +69,19 @@ Ledger, billing, SSO, analytics, and operational hardening tasks.
 **Depends on:** MET-002, MET-003
 
 **Paths:**
+
 - `services/ledger-worker`
 - `crates/storage`
 - `services/control-plane-api`
 
 **Outputs:**
+
 - projection jobs
 - budget threshold evaluation
 - usage summary APIs
 
 **Acceptance criteria:**
+
 - projection lag is measurable
 - budget threshold events are emitted once per threshold crossing
 - read models can be repaired without ledger mutation
@@ -84,15 +93,18 @@ Ledger, billing, SSO, analytics, and operational hardening tasks.
 **Depends on:** MET-004, CTL-001
 
 **Paths:**
+
 - `services/control-plane-api`
 - `schemas/openapi`
 
 **Outputs:**
+
 - aggregated usage endpoints
 - balance endpoints
 - billing export endpoints
 
 **Acceptance criteria:**
+
 - APIs support tenant/project/time filtering
 - responses are paginated for large datasets
 - exports are asynchronous where needed
@@ -104,16 +116,19 @@ Ledger, billing, SSO, analytics, and operational hardening tasks.
 **Depends on:** GWT-005, RTE-004, MET-002
 
 **Paths:**
+
 - `crates/testing-kit`
 - `infra/scripts`
 - `docs/runbooks`
 
 **Outputs:**
+
 - performance test scenarios
 - failure injection harness
 - capacity baseline report
 
 **Acceptance criteria:**
+
 - test suite covers concurrency, retry storms, and degraded dependencies
 - results are versioned and comparable
 - capacity thresholds are documented
@@ -125,16 +140,19 @@ Ledger, billing, SSO, analytics, and operational hardening tasks.
 **Depends on:** CTL-004, SEC-001
 
 **Paths:**
+
 - `apps/console-web`
 - `services/control-plane-api`
 - `crates/authn-authz`
 
 **Outputs:**
+
 - OIDC login flow
 - session handling
 - group-to-role mapping
 
 **Acceptance criteria:**
+
 - interactive login works against a reference IdP
 - logout and session expiry are handled cleanly
 - role mapping is configurable

@@ -1,13 +1,13 @@
 import {
-  Badge,
-  Button,
-  ButtonGroup,
-  Card,
-  Group,
-  Stack,
-  Table,
-  Text,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiButtonGroup,
+  UiSurface,
+  UiInline,
+  UiStack,
+  UiDataTable,
+  UiText,
+} from "@huge-router/ui-kit";
 import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
 import { loadRouteData } from "../features/control-plane/loaders";
@@ -68,7 +68,7 @@ function UsagePage() {
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Review persisted token totals, provider and model breakdowns, and billable amounts for the selected window."
           title="Usage"
@@ -79,22 +79,22 @@ function UsagePage() {
           description="Persisted usage totals could not be loaded from the control-plane service."
           title="Usage unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
   const data = result.data;
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Review persisted token totals, provider and model breakdowns, and billable amounts for the selected window."
         title="Usage"
       />
-      <Group justify="space-between" wrap="wrap">
-        <ButtonGroup>
+      <UiInline justify="space-between" wrap="wrap">
+        <UiButtonGroup>
           {(["7d", "30d", "90d"] as const).map((range) => (
-            <Button
+            <UiButton
               color={search.range === range ? "blue" : "gray"}
               component="a"
               href={`/app/usage?range=${range}&groupBy=${search.groupBy}${search.projectId ? `&projectId=${search.projectId}` : ""}`}
@@ -102,12 +102,12 @@ function UsagePage() {
               variant={search.range === range ? "filled" : "light"}
             >
               {range}
-            </Button>
+            </UiButton>
           ))}
-        </ButtonGroup>
-        <ButtonGroup>
+        </UiButtonGroup>
+        <UiButtonGroup>
           {(["provider", "model", "day"] as const).map((groupBy) => (
-            <Button
+            <UiButton
               color={search.groupBy === groupBy ? "blue" : "gray"}
               component="a"
               href={`/app/usage?range=${search.range}&groupBy=${groupBy}${search.projectId ? `&projectId=${search.projectId}` : ""}`}
@@ -115,20 +115,20 @@ function UsagePage() {
               variant={search.groupBy === groupBy ? "filled" : "light"}
             >
               {groupBy}
-            </Button>
+            </UiButton>
           ))}
-        </ButtonGroup>
-        <ButtonGroup>
-          <Button
+        </UiButtonGroup>
+        <UiButtonGroup>
+          <UiButton
             color={!data.activeProjectId ? "blue" : "gray"}
             component="a"
             href={`/app/usage?range=${search.range}&groupBy=${search.groupBy}`}
             variant={!data.activeProjectId ? "filled" : "light"}
           >
             all projects
-          </Button>
+          </UiButton>
           {data.availableProjects.map((project) => (
-            <Button
+            <UiButton
               color={data.activeProjectId === project.id ? "blue" : "gray"}
               component="a"
               href={`/app/usage?range=${search.range}&groupBy=${search.groupBy}&projectId=${project.id}`}
@@ -136,11 +136,11 @@ function UsagePage() {
               variant={data.activeProjectId === project.id ? "filled" : "light"}
             >
               {project.name}
-            </Button>
+            </UiButton>
           ))}
-        </ButtonGroup>
-      </Group>
-      <Group grow>
+        </UiButtonGroup>
+      </UiInline>
+      <UiInline grow>
         <MetricCard label="Range" value={data.rangeLabel} />
         <MetricCard
           label="Project scope"
@@ -152,78 +152,81 @@ function UsagePage() {
         />
         <MetricCard label="Events" value={String(data.eventCount)} />
         <MetricCard label="Provider cost" value={`$${data.providerCostUsd}`} />
-        <MetricCard label="Billable total" value={`$${data.billablePriceUsd}`} />
-      </Group>
-      <Group grow>
+        <MetricCard
+          label="Billable total"
+          value={`$${data.billablePriceUsd}`}
+        />
+      </UiInline>
+      <UiInline grow>
         <MetricCard label="Input tokens" value={String(data.inputTokens)} />
         <MetricCard label="Output tokens" value={String(data.outputTokens)} />
         <MetricCard
           label="Cached input"
           value={String(data.cachedInputTokens)}
         />
-      </Group>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Usage breakdown</Text>
-          <Badge color="blue" variant="light">
+      </UiInline>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Usage breakdown</UiText>
+          <UiChip color="blue" variant="light">
             {data.breakdown.length} rows
-          </Badge>
-        </Group>
-        <Table striped withTableBorder>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Bucket</Table.Th>
-              <Table.Th>Provider</Table.Th>
-              <Table.Th>Model</Table.Th>
-              <Table.Th>Input</Table.Th>
-              <Table.Th>Output</Table.Th>
-              <Table.Th>Cached</Table.Th>
-              <Table.Th>Provider cost</Table.Th>
-              <Table.Th>Billable</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+          </UiChip>
+        </UiInline>
+        <UiDataTable striped withTableBorder>
+          <UiDataTable.Thead>
+            <UiDataTable.Tr>
+              <UiDataTable.Th>Bucket</UiDataTable.Th>
+              <UiDataTable.Th>Provider</UiDataTable.Th>
+              <UiDataTable.Th>Model</UiDataTable.Th>
+              <UiDataTable.Th>Input</UiDataTable.Th>
+              <UiDataTable.Th>Output</UiDataTable.Th>
+              <UiDataTable.Th>Cached</UiDataTable.Th>
+              <UiDataTable.Th>Provider cost</UiDataTable.Th>
+              <UiDataTable.Th>Billable</UiDataTable.Th>
+            </UiDataTable.Tr>
+          </UiDataTable.Thead>
+          <UiDataTable.Tbody>
             {data.breakdown.map((row) => (
-              <Table.Tr
+              <UiDataTable.Tr
                 key={`${row.bucket}-${row.providerId ?? "none"}-${row.modelAlias ?? "none"}`}
               >
-                <Table.Td>{row.bucket}</Table.Td>
-                <Table.Td>{row.providerId ?? "—"}</Table.Td>
-                <Table.Td>{row.modelAlias ?? "—"}</Table.Td>
-                <Table.Td>{row.inputTokens}</Table.Td>
-                <Table.Td>{row.outputTokens}</Table.Td>
-                <Table.Td>{row.cachedInputTokens}</Table.Td>
-                <Table.Td>${row.providerCostUsd}</Table.Td>
-                <Table.Td>${row.billablePriceUsd}</Table.Td>
-              </Table.Tr>
+                <UiDataTable.Td>{row.bucket}</UiDataTable.Td>
+                <UiDataTable.Td>{row.providerId ?? "—"}</UiDataTable.Td>
+                <UiDataTable.Td>{row.modelAlias ?? "—"}</UiDataTable.Td>
+                <UiDataTable.Td>{row.inputTokens}</UiDataTable.Td>
+                <UiDataTable.Td>{row.outputTokens}</UiDataTable.Td>
+                <UiDataTable.Td>{row.cachedInputTokens}</UiDataTable.Td>
+                <UiDataTable.Td>${row.providerCostUsd}</UiDataTable.Td>
+                <UiDataTable.Td>${row.billablePriceUsd}</UiDataTable.Td>
+              </UiDataTable.Tr>
             ))}
-          </Table.Tbody>
-        </Table>
+          </UiDataTable.Tbody>
+        </UiDataTable>
         {data.nextCursor ? (
-          <Group justify="flex-end" mt="md">
-            <Button
+          <UiInline justify="flex-end" mt="md">
+            <UiButton
               component="a"
               href={`/app/usage?range=${search.range}&groupBy=${search.groupBy}${search.projectId ? `&projectId=${search.projectId}` : ""}&cursor=${data.nextCursor}`}
               variant="light"
             >
               Load more
-            </Button>
-          </Group>
+            </UiButton>
+          </UiInline>
         ) : null}
-      </Card>
-    </Stack>
+      </UiSurface>
+    </UiStack>
   );
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Text c="dimmed" size="sm">
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiText c="dimmed" size="sm">
         {label}
-      </Text>
-      <Text fw={700} mt="xs" size="lg">
+      </UiText>
+      <UiText fw={700} mt="xs" size="lg">
         {value}
-      </Text>
-    </Card>
+      </UiText>
+    </UiSurface>
   );
 }

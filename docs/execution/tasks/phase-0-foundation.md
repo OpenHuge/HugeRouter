@@ -7,7 +7,7 @@ Foundation tasks that unlock all other streams.
 ## Recommended execution order
 
 - **CTL-001** - Create control plane API service skeleton with typed CRUD conventions _(depends on: FND-001, FND-004)_
-- **CTL-004** - Build TanStack Start + Mantine application shell and authenticated app layout _(depends on: FND-002, FND-006)_
+- **CTL-004** - Build TanStack Start + HeroUI application shell and authenticated app layout _(depends on: FND-002, FND-006)_
 - **DB-001** - Design relational schema, migrations, and repository primitives _(depends on: FND-001, FND-003)_
 - **DB-002** - Implement event bus abstractions and NATS-backed publishers/consumers _(depends on: FND-001, FND-003)_
 - **FND-001** - Initialize Rust workspace and service skeletons _(depends on: None)_
@@ -46,7 +46,7 @@ Foundation tasks that unlock all other streams.
 - OpenAPI spec is generated from implementation
 - integration test can start service against local stack
 
-### CTL-004 - Build TanStack Start + Mantine application shell and authenticated app layout
+### CTL-004 - Build TanStack Start + HeroUI application shell and authenticated app layout
 
 **Stream:** Control Plane and Console  
 **Owners:** frontend-console  
@@ -62,13 +62,13 @@ Foundation tasks that unlock all other streams.
 
 - route tree
 - shell layout
-- Mantine-backed theme and navigation system
+- HeroUI-backed theme and navigation system
 - shared provider stack and shell primitives
 
 **Acceptance criteria:**
 
 - authenticated and unauthenticated layouts render
-- Mantine AppShell or equivalent shell wrapper is in place
+- internal HeroUI-compatible shell or equivalent shell wrapper is in place
 - route-level data loaders compile
 - component story coverage exists for shell primitives
 
@@ -170,7 +170,7 @@ Foundation tasks that unlock all other streams.
 - pnpm workspace root
 - Turbo pipeline baseline
 - TanStack Start app shell
-- Mantine provider and theme bootstrap
+- HeroUI provider and theme bootstrap
 - TanStack Start global middleware bootstrap
 - typed route skeleton
 - shared TS config
@@ -179,9 +179,9 @@ Foundation tasks that unlock all other streams.
 **Acceptance criteria:**
 
 - `pnpm install`, `pnpm turbo run dev --filter=console-web`, and `pnpm turbo run typecheck --filter=console-web` work
-- React 19.2+ and Mantine 9 baseline are pinned and compatible
+- React 19.2+ and HeroUI 3 baseline are pinned and compatible
 - TanStack Start RC version is pinned exactly
-- root layout, auth placeholder, Mantine theme provider, TanStack Start global middleware, and basic navigation render
+- root layout, auth placeholder, HeroUI theme provider, TanStack Start global middleware, and basic navigation render
 - core JavaScript workspaces declare package tags or equivalent ownership metadata
 - shared UI primitives can render in Storybook or equivalent isolated component sandbox
 - build passes in CI

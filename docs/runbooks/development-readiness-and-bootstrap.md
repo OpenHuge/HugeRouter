@@ -12,7 +12,7 @@ As of **April 20, 2026**, the recommended implementation baseline is:
 - frontend runtime: Node.js `24.x` LTS
 - frontend framework: TanStack Start `1.x`, pinned to an exact repository version
 - React baseline: `19.2+`
-- component foundation: Mantine `9.x`
+- component foundation: HeroUI `3.x`
 - monorepo orchestrator: Turbo
 - MCP transport baseline: Streamable HTTP
 
@@ -40,7 +40,7 @@ These decisions should be treated as closed for the initial development window:
 ### 3.1 JavaScript Stack
 
 - pin TanStack Start and tightly coupled Start packages to exact versions
-- pin Mantine to a specific minor line during bootstrap
+- pin HeroUI to a specific minor line during bootstrap
 - commit `packageManager` in root `package.json`
 - use Corepack in local setup and CI
 - pin Node.js to `24.15.0`
@@ -83,7 +83,7 @@ Recommended implementation order:
 
 1. initialize workspace roots and lock tool versions
 2. scaffold `apps/console-web` and `apps/storybook`
-3. create `packages/design-tokens` and wire Mantine 9 theme bootstrap
+3. create `packages/design-tokens` and wire HeroUI 3 theme bootstrap
 4. create `packages/ui-kit` shell, feedback, and form primitives
 5. add `src/start.ts` with global TanStack Start middleware
 6. scaffold `crates/plugin-sdk`, `plugin-registry`, and `runtime-composition`
@@ -107,10 +107,10 @@ Canonical bootstrap and verification path:
 
 Development is considered ready to start when all of the following are true:
 
-- architecture decisions for Turbo, Mantine, pluggability, and exact-version policy are documented
+- architecture decisions for Turbo, HeroUI, pluggability, and exact-version policy are documented
 - leading open source reference patterns have been translated into repository rules rather than left as informal inspiration
 - root workspace files exist
-- local frontend can boot with Mantine theme and TanStack Start middleware
+- local frontend can boot with HeroUI theme and TanStack Start middleware
 - Rust workspace compiles with placeholder binaries
 - Turbo tasks have explicit outputs and package boundaries
 - initial JavaScript workspaces declare ownership intent and boundary tags

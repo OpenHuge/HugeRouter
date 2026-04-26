@@ -1,9 +1,9 @@
-import { MantineProvider } from '@mantine/core'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { AppShellFrame, EmptyState, PageHeader } from './index'
+import { UiProvider } from "@huge-router/ui-kit";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { AppShellFrame, EmptyState, PageHeader } from "./index";
 
-Object.defineProperty(window, 'matchMedia', {
+Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({
     matches: false,
@@ -13,59 +13,64 @@ Object.defineProperty(window, 'matchMedia', {
     addListener: () => undefined,
     dispatchEvent: () => false,
     removeEventListener: () => undefined,
-    removeListener: () => undefined
-  })
-})
+    removeListener: () => undefined,
+  }),
+});
 
-describe('ui-kit', () => {
-  it('renders EmptyState fallback action copy', () => {
+describe("ui-kit", () => {
+  it("renders EmptyState fallback action copy", () => {
     render(
-      <MantineProvider>
-        <EmptyState description="No providers are registered." title="No providers" />
-      </MantineProvider>
-    )
+      <UiProvider>
+        <EmptyState
+          description="No providers are registered."
+          title="No providers"
+        />
+      </UiProvider>,
+    );
 
-    expect(screen.getByRole('heading', { name: 'No providers' })).toBeTruthy()
-    expect(screen.getByText('Placeholder action')).toBeTruthy()
-  })
+    expect(screen.getByRole("heading", { name: "No providers" })).toBeTruthy();
+    expect(screen.getByText("Placeholder action")).toBeTruthy();
+  });
 
-  it('renders PageHeader actions', () => {
+  it("renders PageHeader actions", () => {
     render(
-      <MantineProvider>
+      <UiProvider>
         <PageHeader
           actions={<button type="button">Create route</button>}
           description="Inspect the active tenant state."
           title="Overview"
         />
-      </MantineProvider>
-    )
+      </UiProvider>,
+    );
 
-    expect(screen.getByRole('heading', { name: 'Overview' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Create route' })).toBeTruthy()
-  })
+    expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create route" })).toBeTruthy();
+  });
 
-  it('renders AppShellFrame navigation and chrome', () => {
+  it("renders AppShellFrame navigation and chrome", () => {
     render(
-      <MantineProvider>
+      <UiProvider>
         <AppShellFrame
           navItems={[
             {
-              href: '/app/overview',
-              label: 'Overview',
-              description: 'Workspace summary',
-              active: true
-            }
+              href: "/app/overview",
+              label: "Overview",
+              description: "Workspace summary",
+              active: true,
+            },
           ]}
           subtitle="Tenant-facing control plane views."
           title="Tenant Workspace"
         >
           <div>Shell body</div>
         </AppShellFrame>
-      </MantineProvider>
-    )
+      </UiProvider>,
+    );
 
-    expect(screen.getByText('HugeRouter Console')).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Overview/ }).getAttribute('href')).toBe('/app/overview')
-    expect(screen.getByText('Shell body')).toBeTruthy()
-  })
-})
+    expect(screen.getByText("HugeRouter Console")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /Overview/ }).getAttribute("href"),
+    ).toBe("/app/overview");
+    expect(screen.getByText("Shell body")).toBeTruthy();
+  });
+});

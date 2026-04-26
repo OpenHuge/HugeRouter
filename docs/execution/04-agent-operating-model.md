@@ -7,7 +7,9 @@ This program is designed for execution by multiple coding agents or sub-teams.
 ## Agent roles
 
 ### Interface owner
+
 Owns high-contention contracts such as:
+
 - protocol IR
 - adapter traits
 - storage repositories
@@ -15,12 +17,15 @@ Owns high-contention contracts such as:
 - RBAC policy models
 
 ### Feature implementer
+
 Builds against stable interfaces inside a service, crate, or route group.
 
 ### Integrator
+
 Merges generated artifacts, fixes cross-package type issues, and keeps CI green.
 
 ### Verifier
+
 Writes or extends contract tests, integration tests, smoke tests, and performance baselines.
 
 ## How to assign work

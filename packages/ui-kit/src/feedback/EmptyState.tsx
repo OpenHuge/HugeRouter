@@ -1,23 +1,29 @@
-import { Alert, Button, Group, Stack, Text, Title } from '@mantine/core'
-import type { ReactNode } from 'react'
+import {
+  UiAlert,
+  UiButton,
+  UiInline,
+  UiStack,
+  UiText,
+  UiHeading,
+} from "../primitives";
+import type { ReactNode } from "react";
 
 type EmptyStateProps = {
-  title: string
-  description: string
-  action?: ReactNode
-}
+  title: string;
+  description: string;
+  action?: ReactNode;
+};
 
 export function EmptyState({ action, description, title }: EmptyStateProps) {
   return (
-    <Alert color="teal" radius="md" variant="light">
-      <Stack gap="sm">
-        <Title order={4}>{title}</Title>
-        <Text>{description}</Text>
-        <Group>
-          {action ?? <Button variant="light">Placeholder action</Button>}
-        </Group>
-      </Stack>
-    </Alert>
-  )
+    <UiAlert color="teal" radius="md" variant="light">
+      <UiStack gap="sm">
+        <UiHeading order={4}>{title}</UiHeading>
+        <UiText>{description}</UiText>
+        <UiInline>
+          {action ?? <UiButton variant="light">Placeholder action</UiButton>}
+        </UiInline>
+      </UiStack>
+    </UiAlert>
+  );
 }
-

@@ -1,4 +1,11 @@
-import { Badge, Card, Group, SimpleGrid, Stack, Text } from "@mantine/core";
+import {
+  UiChip,
+  UiSurface,
+  UiInline,
+  UiGrid,
+  UiStack,
+  UiText,
+} from "@huge-router/ui-kit";
 import type { MerchantWorkspaceData } from "../control-plane/types";
 
 function statusColor(status: string) {
@@ -37,14 +44,14 @@ function MetricBlock({
   value: string | number;
 }) {
   return (
-    <Stack gap={2}>
-      <Text c="dimmed" size="sm">
+    <UiStack gap={2}>
+      <UiText c="dimmed" size="sm">
         {label}
-      </Text>
-      <Text fw={700} size="xl">
+      </UiText>
+      <UiText fw={700} size="xl">
         {value}
-      </Text>
-    </Stack>
+      </UiText>
+    </UiStack>
   );
 }
 
@@ -73,24 +80,24 @@ export function MerchantEvidenceSummary({
   const latestEvaluation = workspace.recentEvaluations[0];
 
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Stack>
-        <Group justify="space-between">
-          <Stack gap={0}>
-            <Text fw={700}>Replay Evidence</Text>
-            <Text c="dimmed" size="sm">
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiStack>
+        <UiInline justify="space-between">
+          <UiStack gap={0}>
+            <UiText fw={700}>Replay Evidence</UiText>
+            <UiText c="dimmed" size="sm">
               Tenant {workspace.tenantId} has {replayableEvaluations} replayable
               evaluations for support review.
-            </Text>
-          </Stack>
-          <Badge
+            </UiText>
+          </UiStack>
+          <UiChip
             color={workspace.merchantEnabled ? "teal" : "gray"}
             variant="light"
           >
             {workspace.merchantEnabled ? "Merchant enabled" : "Not enabled"}
-          </Badge>
-        </Group>
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="md">
+          </UiChip>
+        </UiInline>
+        <UiGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="md">
           <MetricBlock label="Active shops" value={activeShops} />
           <MetricBlock label="Listed inventory" value={listedInventory} />
           <MetricBlock
@@ -102,31 +109,31 @@ export function MerchantEvidenceSummary({
             label="Tokens saved"
             value={estimatedTokensSaved.toLocaleString("en")}
           />
-        </SimpleGrid>
-        <Group justify="space-between">
-          <Text c="dimmed" size="sm">
+        </UiGrid>
+        <UiInline justify="space-between">
+          <UiText c="dimmed" size="sm">
             Latest evaluation
-          </Text>
+          </UiText>
           {latestEvaluation ? (
-            <Group gap="xs">
-              <Badge
+            <UiInline gap="xs">
+              <UiChip
                 color={statusColor(latestEvaluation.verdict)}
                 variant="light"
               >
                 {latestEvaluation.verdict}
-              </Badge>
-              <Text size="sm">
+              </UiChip>
+              <UiText size="sm">
                 {latestEvaluation.providerLabel} at{" "}
                 {formatDateTime(latestEvaluation.createdAt)}
-              </Text>
-            </Group>
+              </UiText>
+            </UiInline>
           ) : (
-            <Text c="dimmed" size="sm">
+            <UiText c="dimmed" size="sm">
               none
-            </Text>
+            </UiText>
           )}
-        </Group>
-      </Stack>
-    </Card>
+        </UiInline>
+      </UiStack>
+    </UiSurface>
   );
 }

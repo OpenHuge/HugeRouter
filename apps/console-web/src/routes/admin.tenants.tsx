@@ -1,106 +1,116 @@
-import { Badge, Card, Group, Stack, Table, Text } from '@mantine/core'
-import { Link, Outlet, createFileRoute } from '@tanstack/react-router'
-import { PageHeader } from '@huge-router/ui-kit'
-import { loadRouteData } from '../features/control-plane/loaders'
+import {
+  UiChip,
+  UiSurface,
+  UiInline,
+  UiStack,
+  UiDataTable,
+  UiText,
+} from "@huge-router/ui-kit";
+import { Link, Outlet, createFileRoute } from "@tanstack/react-router";
+import { PageHeader } from "@huge-router/ui-kit";
+import { loadRouteData } from "../features/control-plane/loaders";
 import {
   EmptyCollectionState,
   RouteErrorState,
-  RouteLoadingState
-} from '../features/control-plane/route-state'
-import { getConsoleDataService } from '../features/control-plane/service'
+  RouteLoadingState,
+} from "../features/control-plane/route-state";
+import { getConsoleDataService } from "../features/control-plane/service";
 
-export const Route = createFileRoute('/admin/tenants')({
+export const Route = createFileRoute("/admin/tenants")({
   loader: () => loadRouteData(() => getConsoleDataService().listTenants()),
   pendingComponent: () => <RouteLoadingState label="Loading tenants" />,
   pendingMs: 0,
-  component: AdminTenantsPage
-})
+  component: AdminTenantsPage,
+});
 
 function AdminTenantsPage() {
-  const result = Route.useLoaderData()
+  const result = Route.useLoaderData();
 
-  if (!result || result.state === 'error') {
+  if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Review tenant inventory, configured projects, provider coverage, and active snapshot status."
           title="Tenants"
         />
         <RouteErrorState
           kind={result?.kind}
-          message={result?.state === 'error' ? result?.message : undefined}
+          message={result?.state === "error" ? result?.message : undefined}
           description="Tenant inventory could not be loaded. Retry once the control-plane surface is reachable."
           title="Tenants unavailable"
         />
-      </Stack>
-    )
+      </UiStack>
+    );
   }
 
-  const tenants = result.data
+  const tenants = result.data;
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Review tenant inventory, configured projects, provider coverage, and active snapshot status."
         title="Tenants"
       />
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Known tenants</Text>
-          <Badge color="blue" variant="light">
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Known tenants</UiText>
+          <UiChip color="blue" variant="light">
             {tenants.length} workspaces
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {tenants.length === 0 ? (
           <EmptyCollectionState
             description="Create the first tenant in the control plane to begin routing traffic."
             title="No tenants"
           />
         ) : (
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Tenant</Table.Th>
-                <Table.Th>Projects</Table.Th>
-                <Table.Th>Providers</Table.Th>
-                <Table.Th>Route policies</Table.Th>
-                <Table.Th>Active snapshot</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withTableBorder>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Tenant</UiDataTable.Th>
+                <UiDataTable.Th>Projects</UiDataTable.Th>
+                <UiDataTable.Th>Providers</UiDataTable.Th>
+                <UiDataTable.Th>Route policies</UiDataTable.Th>
+                <UiDataTable.Th>Active snapshot</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {tenants.map((tenant) => (
-                <Table.Tr key={tenant.id}>
-                  <Table.Td>
-                    <Stack gap={2}>
-                      <Link params={{ tenantId: tenant.id }} to="/admin/tenants/$tenantId">
+                <UiDataTable.Tr key={tenant.id}>
+                  <UiDataTable.Td>
+                    <UiStack gap={2}>
+                      <Link
+                        params={{ tenantId: tenant.id }}
+                        to="/admin/tenants/$tenantId"
+                      >
                         {tenant.displayName}
                       </Link>
-                      <Text c="dimmed" size="sm">
+                      <UiText c="dimmed" size="sm">
                         {tenant.slug}
-                      </Text>
-                    </Stack>
-                  </Table.Td>
-                  <Table.Td>{tenant.projectCount}</Table.Td>
-                  <Table.Td>{tenant.providerCount}</Table.Td>
-                  <Table.Td>{tenant.routePolicyCount}</Table.Td>
-                  <Table.Td>
+                      </UiText>
+                    </UiStack>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{tenant.projectCount}</UiDataTable.Td>
+                  <UiDataTable.Td>{tenant.providerCount}</UiDataTable.Td>
+                  <UiDataTable.Td>{tenant.routePolicyCount}</UiDataTable.Td>
+                  <UiDataTable.Td>
                     {tenant.activeConfigSnapshotId ? (
-                      <Badge color="teal" variant="light">
+                      <UiChip color="teal" variant="light">
                         {tenant.activeConfigSnapshotId}
-                      </Badge>
+                      </UiChip>
                     ) : (
-                      <Badge color="gray" variant="light">
+                      <UiChip color="gray" variant="light">
                         No active snapshot
-                      </Badge>
+                      </UiChip>
                     )}
-                  </Table.Td>
-                </Table.Tr>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Card>
+      </UiSurface>
       <Outlet />
-    </Stack>
-  )
+    </UiStack>
+  );
 }

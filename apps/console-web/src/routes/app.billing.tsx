@@ -1,13 +1,13 @@
 import {
-  Badge,
-  Button,
-  ButtonGroup,
-  Card,
-  Group,
-  Stack,
-  Table,
-  Text,
-} from "@mantine/core";
+  UiChip,
+  UiButton,
+  UiButtonGroup,
+  UiSurface,
+  UiInline,
+  UiStack,
+  UiDataTable,
+  UiText,
+} from "@huge-router/ui-kit";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@huge-router/ui-kit";
@@ -90,7 +90,7 @@ function BillingPage() {
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Review persisted spend totals, budget threshold state, and recorded billing export jobs."
           title="Billing"
@@ -101,7 +101,7 @@ function BillingPage() {
           description="Persisted billing totals could not be loaded from the control-plane service."
           title="Billing unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -135,7 +135,10 @@ function BillingPage() {
     setStatusSuccess(null);
 
     try {
-      await getConsoleDataService().queueBillingExport(search.range, search.projectId);
+      await getConsoleDataService().queueBillingExport(
+        search.range,
+        search.projectId,
+      );
       setStatusSuccess("Queued a billing export job.");
       await refreshBillingExports();
     } catch (error) {
@@ -167,7 +170,7 @@ function BillingPage() {
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Review persisted spend totals, budget threshold state, and recorded billing export jobs."
         title="Billing"
@@ -180,9 +183,9 @@ function BillingPage() {
         }}
         success={statusSuccess}
       />
-      <ButtonGroup>
+      <UiButtonGroup>
         {(["7d", "30d", "90d"] as const).map((range) => (
-          <Button
+          <UiButton
             color={search.range === range ? "blue" : "gray"}
             component="a"
             href={`/app/billing?range=${range}${search.projectId ? `&projectId=${search.projectId}` : ""}`}
@@ -190,20 +193,20 @@ function BillingPage() {
             variant={search.range === range ? "filled" : "light"}
           >
             {range}
-          </Button>
+          </UiButton>
         ))}
-      </ButtonGroup>
-      <ButtonGroup>
-        <Button
+      </UiButtonGroup>
+      <UiButtonGroup>
+        <UiButton
           color={!data.activeProjectId ? "blue" : "gray"}
           component="a"
           href={`/app/billing?range=${search.range}`}
           variant={!data.activeProjectId ? "filled" : "light"}
         >
           all projects
-        </Button>
+        </UiButton>
         {data.availableProjects.map((project) => (
-          <Button
+          <UiButton
             color={data.activeProjectId === project.id ? "blue" : "gray"}
             component="a"
             href={`/app/billing?range=${search.range}&projectId=${project.id}`}
@@ -211,10 +214,10 @@ function BillingPage() {
             variant={data.activeProjectId === project.id ? "filled" : "light"}
           >
             {project.name}
-          </Button>
+          </UiButton>
         ))}
-      </ButtonGroup>
-      <Group grow>
+      </UiButtonGroup>
+      <UiInline grow>
         <MetricCard label="Range" value={data.rangeLabel} />
         <MetricCard
           label="Project scope"
@@ -232,8 +235,8 @@ function BillingPage() {
           label="Billable total"
           value={`$${data.billableTotalUsd}`}
         />
-      </Group>
-      <Group grow>
+      </UiInline>
+      <UiInline grow>
         <MetricCard
           label="Configured budget"
           value={`$${data.configuredBudgetUsd}`}
@@ -246,11 +249,11 @@ function BillingPage() {
           label="Projection lag"
           value={`${data.projectionLagSeconds}s`}
         />
-      </Group>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Projection status</Text>
-          <Badge
+      </UiInline>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Projection status</UiText>
+          <UiChip
             color={
               data.thresholdStatus === "exceeded"
                 ? "red"
@@ -261,109 +264,108 @@ function BillingPage() {
             variant="light"
           >
             {thresholdStatusLabel(data.thresholdStatus)}
-          </Badge>
-        </Group>
-        <Stack gap="xs">
-          <Text>Projection updated at: {data.lastProjectedAt}</Text>
-          <Group>
-            <Button
+          </UiChip>
+        </UiInline>
+        <UiStack gap="xs">
+          <UiText>Projection updated at: {data.lastProjectedAt}</UiText>
+          <UiInline>
+            <UiButton
               loading={queueingExport}
               onClick={() => void onQueueExport()}
               variant="light"
             >
               Queue export
-            </Button>
-            <Button
+            </UiButton>
+            <UiButton
               loading={refreshingExports}
               onClick={() => void refreshBillingExports()}
               variant="subtle"
             >
               Refresh jobs
-            </Button>
-          </Group>
-        </Stack>
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Billing export jobs</Text>
-          <Badge color="blue" variant="light">
+            </UiButton>
+          </UiInline>
+        </UiStack>
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Billing export jobs</UiText>
+          <UiChip color="blue" variant="light">
             {effectiveExportJobs.length}
-          </Badge>
-        </Group>
-        <Table striped withTableBorder>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Export job</Table.Th>
-              <Table.Th>Status</Table.Th>
-              <Table.Th>Format</Table.Th>
-              <Table.Th>Requested</Table.Th>
-              <Table.Th>Completed</Table.Th>
-              <Table.Th>Error</Table.Th>
-              <Table.Th>Actions</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+          </UiChip>
+        </UiInline>
+        <UiDataTable striped withTableBorder>
+          <UiDataTable.Thead>
+            <UiDataTable.Tr>
+              <UiDataTable.Th>Export job</UiDataTable.Th>
+              <UiDataTable.Th>Status</UiDataTable.Th>
+              <UiDataTable.Th>Format</UiDataTable.Th>
+              <UiDataTable.Th>Requested</UiDataTable.Th>
+              <UiDataTable.Th>Completed</UiDataTable.Th>
+              <UiDataTable.Th>Error</UiDataTable.Th>
+              <UiDataTable.Th>Actions</UiDataTable.Th>
+            </UiDataTable.Tr>
+          </UiDataTable.Thead>
+          <UiDataTable.Tbody>
             {effectiveExportJobs.map((job) => {
               const isCompleted = job.status === "completed";
-              const isFailed = job.status === "failed" || job.status === "error";
+              const isFailed =
+                job.status === "failed" || job.status === "error";
               const isPending = !isCompleted && !isFailed;
 
               return (
-                <Table.Tr key={job.exportJobId}>
-                  <Table.Td>{job.exportJobId}</Table.Td>
-                  <Table.Td>
-                    <Badge
-                      color={
-                        isCompleted ? "teal" : isFailed ? "red" : "yellow"
-                      }
+                <UiDataTable.Tr key={job.exportJobId}>
+                  <UiDataTable.Td>{job.exportJobId}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
+                      color={isCompleted ? "teal" : isFailed ? "red" : "yellow"}
                       variant="light"
                     >
                       {job.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{job.format}</Table.Td>
-                  <Table.Td>{job.requestedAt}</Table.Td>
-                  <Table.Td>{job.completedAt ?? "—"}</Table.Td>
-                  <Table.Td>{job.errorMessage ?? "—"}</Table.Td>
-                  <Table.Td>
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{job.format}</UiDataTable.Td>
+                  <UiDataTable.Td>{job.requestedAt}</UiDataTable.Td>
+                  <UiDataTable.Td>{job.completedAt ?? "—"}</UiDataTable.Td>
+                  <UiDataTable.Td>{job.errorMessage ?? "—"}</UiDataTable.Td>
+                  <UiDataTable.Td>
                     {isCompleted ? (
-                      <Button
+                      <UiButton
                         loading={downloadingJobId === job.exportJobId}
                         onClick={() => void onDownloadExport(job.exportJobId)}
                         size="xs"
                         variant="light"
                       >
                         Download
-                      </Button>
+                      </UiButton>
                     ) : isPending ? (
-                      <Text c="dimmed" size="sm">
+                      <UiText c="dimmed" size="sm">
                         Pending
-                      </Text>
+                      </UiText>
                     ) : (
-                      <Text c="red" size="sm">
+                      <UiText c="red" size="sm">
                         Retry unavailable
-                      </Text>
+                      </UiText>
                     )}
-                  </Table.Td>
-                </Table.Tr>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
               );
             })}
-          </Table.Tbody>
-        </Table>
-      </Card>
-    </Stack>
+          </UiDataTable.Tbody>
+        </UiDataTable>
+      </UiSurface>
+    </UiStack>
   );
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <Card padding="lg" radius="md" shadow="sm">
-      <Text c="dimmed" size="sm">
+    <UiSurface padding="lg" radius="md" shadow="sm">
+      <UiText c="dimmed" size="sm">
         {label}
-      </Text>
-      <Text fw={700} mt="xs" size="lg">
+      </UiText>
+      <UiText fw={700} mt="xs" size="lg">
         {value}
-      </Text>
-    </Card>
+      </UiText>
+    </UiSurface>
   );
 }

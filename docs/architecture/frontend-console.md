@@ -2,12 +2,12 @@
 
 [Back to Docs Index](../README.md)
 
-The console is implemented with **TanStack Start** and uses **Mantine** as the shared UI foundation. The goal is to move quickly with a cohesive admin-grade component system without over-investing in custom design infrastructure before the product shape is proven.
+The console is implemented with **TanStack Start** and uses **HeroUI** as the shared UI foundation. The goal is to move quickly with a cohesive admin-grade component system without over-investing in custom design infrastructure before the product shape is proven.
 
 As of **April 20, 2026**, the recommended baseline is:
 
 - React `19.2+`
-- Mantine `9.0.x`
+- HeroUI `3.0.x`
 - TanStack Start `1.x`
 
 Repository policy:
@@ -68,19 +68,18 @@ Suggested route groupings:
 
 The root frontend provider stack should include:
 
-- `MantineProvider` configured from `packages/design-tokens`
+- `UiProvider` from `packages/ui-kit`
 - `QueryClientProvider` for TanStack Query
-- Mantine notifications
-- Mantine modals
+- HeroUI toast/feedback surfaces
 - TanStack Router error boundaries and pending UI
 - `src/start.ts` for TanStack Start global middleware and request-level configuration
 
-The authenticated shell should be built around Mantine's `AppShell` primitives plus internal wrappers from `packages/ui-kit` so that navigation, breadcrumbs, headers, and content frames are consistent across the product.
+The authenticated shell should be built around internal wrappers from `packages/ui-kit` backed by HeroUI-compatible primitives so that navigation, breadcrumbs, headers, and content frames are consistent across the product.
 
 Recommended shell policy:
 
-- use standard fixed `AppShell` layout for the authenticated admin and tenant console
-- use Mantine 9 `AppShell` static mode for auth pages, setup flows, embedded documentation, or low-chrome pages where fixed positioning would be awkward
+- use standard fixed shell layout for the authenticated admin and tenant console
+- use static shell composition for auth pages, setup flows, embedded documentation, or low-chrome pages where fixed positioning would be awkward
 - centralize shell mode decisions in `packages/ui-kit/shell` instead of scattering them across route files
 
 ### 23.3.1 Login Experience
@@ -115,9 +114,9 @@ OpenAI-facing console features should be designed around Responses-era artifacts
 - model request inspection around typed items and request metadata, not only `choices[0].message`
 - keep Chat Completions compatibility views as adapters at the UI edge, not as the canonical internal representation
 
-### 23.5 Mantine Usage Model
+### 23.5 HeroUI Usage Model
 
-Mantine is the default component layer for:
+HeroUI is the default component layer for:
 
 - layout primitives
 - buttons and input controls
@@ -128,7 +127,7 @@ Mantine is the default component layer for:
 
 We should prefer composition over broad wrapper abstraction:
 
-- expose Mantine directly inside app features when no shared opinion is needed
+- expose HeroUI directly inside app features when no shared opinion is needed
 - create shared wrappers in `packages/ui-kit` only when we need product-specific defaults, access patterns, or repeated combinations
 - keep custom CSS focused on layout, feature-specific visual affordances, and integration gaps rather than rebuilding a design system from scratch
 
@@ -150,7 +149,7 @@ The primary form stack should be:
 
 - TanStack Form for typed form state
 - Zod for schema validation
-- Mantine input components for rendering
+- HeroUI input components for rendering
 
 Prefer Standard Schema-compatible Zod schemas at the package boundary so forms, server validation, and generated docs can converge on one representation over time.
 
@@ -187,7 +186,7 @@ Before feature work expands, the frontend foundation should provide:
 
 ### 35.1 `packages/design-tokens`
 
-Owns Mantine theme creation, semantic tokens, and visual system defaults.
+Owns HeroUI theme creation, semantic tokens, and visual system defaults.
 
 Recommended exports:
 
@@ -199,7 +198,7 @@ Recommended exports:
 
 ### 35.2 `packages/ui-kit`
 
-Owns shared presentational and composite components built on Mantine.
+Owns shared presentational and composite components built on HeroUI.
 
 Recommended structure:
 
@@ -238,6 +237,6 @@ Recommended app-level foldering:
 - `src/routes` for route files
 - `src/features` for product-domain features
 - `src/lib` for app wiring and client configuration
-- `src/styles` for app-specific CSS modules and global resets that Mantine does not cover
+- `src/styles` for app-specific CSS modules and global resets that HeroUI does not cover
 
 ---

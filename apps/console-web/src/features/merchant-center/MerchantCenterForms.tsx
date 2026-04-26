@@ -1,13 +1,13 @@
 import {
-  Alert,
-  Button,
-  Card,
-  Group,
-  Stack,
-  Text,
-  TextInput,
-  Textarea,
-} from "@mantine/core";
+  UiAlert,
+  UiButton,
+  UiSurface,
+  UiInline,
+  UiStack,
+  UiText,
+  UiTextField,
+  UiTextarea,
+} from "@huge-router/ui-kit";
 import {
   ActionStatusNotice,
   FieldErrorText,
@@ -50,7 +50,7 @@ export function MerchantCenterIntro({
         onDismiss={statusNotice.onDismiss}
         success={statusNotice.success}
       />
-      <Alert
+      <UiAlert
         color="yellow"
         radius="md"
         title="Trial key guardrail"
@@ -59,7 +59,7 @@ export function MerchantCenterIntro({
         Use a dedicated trial key only. Merchant evaluations now record
         replayable data so support and comparison can reuse prior runs instead
         of repeatedly spending live tokens.
-      </Alert>
+      </UiAlert>
     </>
   );
 }
@@ -77,11 +77,11 @@ export function ShopAndTrialCards({
   setTrialForm,
 }: ShopAndTrialCardsProps) {
   return (
-    <Group align="stretch" grow>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Stack>
-          <Text fw={700}>Open a shop</Text>
-          <TextInput
+    <UiInline align="stretch" grow>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiStack>
+          <UiText fw={700}>Open a shop</UiText>
+          <UiTextField
             label="Merchant shop id"
             onChange={(event) =>
               setShopForm((current) => ({
@@ -93,7 +93,7 @@ export function ShopAndTrialCards({
             value={shopForm.merchantShopId}
           />
           <FieldErrorText error={shopErrors.merchantShopId} />
-          <TextInput
+          <UiTextField
             label="Slug"
             onChange={(event) =>
               setShopForm((current) => ({
@@ -105,7 +105,7 @@ export function ShopAndTrialCards({
             value={shopForm.slug}
           />
           <FieldErrorText error={shopErrors.slug} />
-          <TextInput
+          <UiTextField
             label="Display name"
             onChange={(event) =>
               setShopForm((current) => ({
@@ -117,7 +117,7 @@ export function ShopAndTrialCards({
             value={shopForm.displayName}
           />
           <FieldErrorText error={shopErrors.displayName} />
-          <Textarea
+          <UiTextarea
             label="Announcement"
             minRows={2}
             onChange={(event) =>
@@ -129,21 +129,21 @@ export function ShopAndTrialCards({
             placeholder="Fresh trial cards with replay-backed evaluation"
             value={shopForm.announcement}
           />
-          <Group justify="flex-end">
-            <Button
+          <UiInline justify="flex-end">
+            <UiButton
               loading={isSubmittingShop}
               onClick={() => void onCreateShop()}
             >
               Create shop
-            </Button>
-          </Group>
-        </Stack>
-      </Card>
+            </UiButton>
+          </UiInline>
+        </UiStack>
+      </UiSurface>
 
-      <Card padding="lg" radius="md" shadow="sm">
-        <Stack>
-          <Text fw={700}>Attach a trial relay</Text>
-          <TextInput
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiStack>
+          <UiText fw={700}>Attach a trial relay</UiText>
+          <UiTextField
             label="Trial connection id"
             onChange={(event) =>
               setTrialForm((current) => ({
@@ -155,7 +155,7 @@ export function ShopAndTrialCards({
             value={trialForm.trialConnectionId}
           />
           <FieldErrorText error={trialErrors.trialConnectionId} />
-          <TextInput
+          <UiTextField
             label="Provider label"
             onChange={(event) =>
               setTrialForm((current) => ({
@@ -167,7 +167,7 @@ export function ShopAndTrialCards({
             value={trialForm.providerLabel}
           />
           <FieldErrorText error={trialErrors.providerLabel} />
-          <TextInput
+          <UiTextField
             label="Endpoint"
             onChange={(event) =>
               setTrialForm((current) => ({
@@ -179,7 +179,7 @@ export function ShopAndTrialCards({
             value={trialForm.endpointBaseUrl}
           />
           <FieldErrorText error={trialErrors.endpointBaseUrl} />
-          <TextInput
+          <UiTextField
             label="Trial API key"
             onChange={(event) =>
               setTrialForm((current) => ({
@@ -191,7 +191,7 @@ export function ShopAndTrialCards({
             value={trialForm.apiKey}
           />
           <FieldErrorText error={trialErrors.apiKey} />
-          <TextInput
+          <UiTextField
             label="Target model"
             onChange={(event) =>
               setTrialForm((current) => ({
@@ -203,7 +203,7 @@ export function ShopAndTrialCards({
             value={trialForm.targetModel}
           />
           <FieldErrorText error={trialErrors.targetModel} />
-          <Textarea
+          <UiTextarea
             label="Notes"
             minRows={2}
             onChange={(event) =>
@@ -215,16 +215,16 @@ export function ShopAndTrialCards({
             placeholder="Dedicated trial key only"
             value={trialForm.notes}
           />
-          <Group justify="flex-end">
-            <Button
+          <UiInline justify="flex-end">
+            <UiButton
               loading={isSubmittingTrial}
               onClick={() => void onCreateTrialConnection()}
             >
               Save trial relay
-            </Button>
-          </Group>
-        </Stack>
-      </Card>
-    </Group>
+            </UiButton>
+          </UiInline>
+        </UiStack>
+      </UiSurface>
+    </UiInline>
   );
 }

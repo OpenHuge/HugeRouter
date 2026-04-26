@@ -1,15 +1,15 @@
 import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Group,
-  Select,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-} from "@mantine/core";
+  UiAlert,
+  UiChip,
+  UiButton,
+  UiSurface,
+  UiInline,
+  UiSelect,
+  UiStack,
+  UiDataTable,
+  UiText,
+  UiTextField,
+} from "@huge-router/ui-kit";
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@huge-router/ui-kit";
@@ -103,13 +103,15 @@ function ApiKeysPage() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [revokingApiKeyId, setRevokingApiKeyId] = useState<string | null>(null);
-  const [secretPreview, setSecretPreview] = useState<SecretPreview | null>(null);
+  const [secretPreview, setSecretPreview] = useState<SecretPreview | null>(
+    null,
+  );
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
 
   if (!result || result.state === "error") {
     return (
-      <Stack>
+      <UiStack>
         <PageHeader
           description="Manage API key lifecycle and observe key activity at tenant level."
           title="API Keys"
@@ -120,7 +122,7 @@ function ApiKeysPage() {
           description="API keys could not be loaded from the control-plane service."
           title="API keys unavailable"
         />
-      </Stack>
+      </UiStack>
     );
   }
 
@@ -189,7 +191,9 @@ function ApiKeysPage() {
       resetForm();
       setApiKeys(await getConsoleDataService().listApiKeys());
     } catch (error) {
-      setStatusError(getControlPlaneActionErrorMessage(error, "api-key-create"));
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "api-key-create"),
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -205,14 +209,16 @@ function ApiKeysPage() {
       setStatusSuccess(`Revoked API key ${apiKeyId}.`);
       setApiKeys(await getConsoleDataService().listApiKeys());
     } catch (error) {
-      setStatusError(getControlPlaneActionErrorMessage(error, "api-key-revoke"));
+      setStatusError(
+        getControlPlaneActionErrorMessage(error, "api-key-revoke"),
+      );
     } finally {
       setRevokingApiKeyId(null);
     }
   }
 
   return (
-    <Stack>
+    <UiStack>
       <PageHeader
         description="Manage API key lifecycle and observe key activity at tenant level."
         title="API Keys"
@@ -226,28 +232,38 @@ function ApiKeysPage() {
         success={statusSuccess}
       />
       {secretPreview ? (
-        <Alert color="yellow" radius="md" title="Save this secret now" variant="light">
-          <Stack gap="xs">
-            <Text size="sm">
-              The secret value is shown only once. Save it before you dismiss this notice.
-            </Text>
-            <Text fw={700} size="sm">
+        <UiAlert
+          color="yellow"
+          radius="md"
+          title="Save this secret now"
+          variant="light"
+        >
+          <UiStack gap="xs">
+            <UiText size="sm">
+              The secret value is shown only once. Save it before you dismiss
+              this notice.
+            </UiText>
+            <UiText fw={700} size="sm">
               {secretPreview.displayName}
-            </Text>
-            <Text size="sm">Prefix: {secretPreview.keyPrefix}</Text>
-            <Text size="sm">Secret: {secretPreview.secretValue}</Text>
-            <Group justify="flex-end">
-              <Button onClick={() => setSecretPreview(null)} size="xs" variant="light">
+            </UiText>
+            <UiText size="sm">Prefix: {secretPreview.keyPrefix}</UiText>
+            <UiText size="sm">Secret: {secretPreview.secretValue}</UiText>
+            <UiInline justify="flex-end">
+              <UiButton
+                onClick={() => setSecretPreview(null)}
+                size="xs"
+                variant="light"
+              >
                 Return to list
-              </Button>
-            </Group>
-          </Stack>
-        </Alert>
+              </UiButton>
+            </UiInline>
+          </UiStack>
+        </UiAlert>
       ) : null}
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>Create API key</Text>
-          <Button
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>Create API key</UiText>
+          <UiButton
             onClick={() => {
               if (formOpen) {
                 resetForm();
@@ -259,11 +275,11 @@ function ApiKeysPage() {
             variant={formOpen ? "light" : "filled"}
           >
             {formOpen ? "Hide form" : "Create API key"}
-          </Button>
-        </Group>
+          </UiButton>
+        </UiInline>
         {formOpen ? (
-          <Stack>
-            <TextInput
+          <UiStack>
+            <UiTextField
               label="Display name"
               onChange={(event) =>
                 updateField("displayName", event.currentTarget.value)
@@ -272,7 +288,7 @@ function ApiKeysPage() {
               value={formState.displayName}
             />
             <FieldErrorText error={formErrors.displayName} />
-            <Select
+            <UiSelect
               data={providers.map((provider) => ({
                 label: `${provider.name} (${provider.provider_resource_id})`,
                 value: provider.provider_resource_id,
@@ -284,70 +300,80 @@ function ApiKeysPage() {
               value={formState.providerResourceId}
             />
             <FieldErrorText error={formErrors.providerResourceId} />
-            <TextInput
+            <UiTextField
               label="Secret value"
-              onChange={(event) => updateField("apiKey", event.currentTarget.value)}
+              onChange={(event) =>
+                updateField("apiKey", event.currentTarget.value)
+              }
               placeholder="akp_test_very_secret"
               value={formState.apiKey}
             />
             <FieldErrorText error={formErrors.apiKey} />
-            <Group justify="flex-end">
-              <Button loading={isSubmitting} onClick={() => void onCreateApiKey()}>
+            <UiInline justify="flex-end">
+              <UiButton
+                loading={isSubmitting}
+                onClick={() => void onCreateApiKey()}
+              >
                 Save API key
-              </Button>
-            </Group>
-          </Stack>
+              </UiButton>
+            </UiInline>
+          </UiStack>
         ) : (
-          <Text c="dimmed" size="sm">
-            Create a key, verify the one-time secret preview, then return to the list view.
-          </Text>
+          <UiText c="dimmed" size="sm">
+            Create a key, verify the one-time secret preview, then return to the
+            list view.
+          </UiText>
         )}
-      </Card>
-      <Card padding="lg" radius="md" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Text fw={700}>API keys</Text>
-          <Badge color="blue" variant="light">
+      </UiSurface>
+      <UiSurface padding="lg" radius="md" shadow="sm">
+        <UiInline justify="space-between" mb="md">
+          <UiText fw={700}>API keys</UiText>
+          <UiChip color="blue" variant="light">
             {apiKeys.length} keys
-          </Badge>
-        </Group>
+          </UiChip>
+        </UiInline>
         {apiKeys.length === 0 ? (
           <EmptyCollectionState
             description="No API keys are available for this tenant."
             title="No API keys"
           />
         ) : (
-          <Table striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Display name</Table.Th>
-                <Table.Th>Key prefix</Table.Th>
-                <Table.Th>Provider</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Created</Table.Th>
-                <Table.Th>Updated</Table.Th>
-                <Table.Th>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <UiDataTable striped withTableBorder>
+            <UiDataTable.Thead>
+              <UiDataTable.Tr>
+                <UiDataTable.Th>Display name</UiDataTable.Th>
+                <UiDataTable.Th>Key prefix</UiDataTable.Th>
+                <UiDataTable.Th>Provider</UiDataTable.Th>
+                <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Created</UiDataTable.Th>
+                <UiDataTable.Th>Updated</UiDataTable.Th>
+                <UiDataTable.Th>Actions</UiDataTable.Th>
+              </UiDataTable.Tr>
+            </UiDataTable.Thead>
+            <UiDataTable.Tbody>
               {apiKeys.map((key) => (
-                <Table.Tr key={key.apiKeyId}>
-                  <Table.Td>{key.displayName}</Table.Td>
-                  <Table.Td>{key.keyPrefix}</Table.Td>
-                  <Table.Td>
+                <UiDataTable.Tr key={key.apiKeyId}>
+                  <UiDataTable.Td>{key.displayName}</UiDataTable.Td>
+                  <UiDataTable.Td>{key.keyPrefix}</UiDataTable.Td>
+                  <UiDataTable.Td>
                     {providers.find(
                       (provider) =>
-                        provider.provider_resource_id === key.providerResourceId,
+                        provider.provider_resource_id ===
+                        key.providerResourceId,
                     )?.name ?? key.providerResourceId}
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge color={key.isActive ? "teal" : "gray"} variant="light">
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
+                      color={key.isActive ? "teal" : "gray"}
+                      variant="light"
+                    >
                       {key.isActive ? "Active" : "Revoked"}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{key.createdAt}</Table.Td>
-                  <Table.Td>{key.updatedAt}</Table.Td>
-                  <Table.Td>
-                    <Button
+                    </UiChip>
+                  </UiDataTable.Td>
+                  <UiDataTable.Td>{key.createdAt}</UiDataTable.Td>
+                  <UiDataTable.Td>{key.updatedAt}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiButton
                       disabled={
                         !key.canRevoke ||
                         !key.isActive ||
@@ -359,14 +385,14 @@ function ApiKeysPage() {
                       variant="light"
                     >
                       Revoke
-                    </Button>
-                  </Table.Td>
-                </Table.Tr>
+                    </UiButton>
+                  </UiDataTable.Td>
+                </UiDataTable.Tr>
               ))}
-            </Table.Tbody>
-          </Table>
+            </UiDataTable.Tbody>
+          </UiDataTable>
         )}
-      </Card>
-    </Stack>
+      </UiSurface>
+    </UiStack>
   );
 }
