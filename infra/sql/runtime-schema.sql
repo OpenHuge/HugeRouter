@@ -170,6 +170,26 @@ CREATE TABLE IF NOT EXISTS billing_export_jobs (
     content_type TEXT NULL
 );
 
+CREATE TABLE IF NOT EXISTS wechat_payment_orders (
+    out_trade_no TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NULL,
+    amount_total BIGINT NOT NULL,
+    currency TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL,
+    trade_state TEXT NULL,
+    code_url TEXT NULL,
+    prepay_id TEXT NULL,
+    transaction_id TEXT NULL,
+    notification_id TEXT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    paid_at TEXT NULL,
+    payload JSONB NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
     catalog_id TEXT NOT NULL,
     catalog_version INTEGER NOT NULL,
@@ -194,6 +214,94 @@ CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
         model_alias_key,
         region_key
     )
+);
+
+CREATE TABLE IF NOT EXISTS codex_auth_accounts (
+    codex_account_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NULL,
+    provider_resource_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    auth_json_sha256 TEXT NOT NULL,
+    encrypted_auth_json JSONB NOT NULL,
+    leased_until TEXT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_sharing_leases (
+    lease_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    pool_id TEXT NOT NULL,
+    borrower_workspace_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_carpools (
+    carpool_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_pool_runtime_leases (
+    runtime_lease_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    pool_id TEXT NULL,
+    lease_id TEXT NULL,
+    carpool_id TEXT NULL,
+    workspace_id TEXT NULL,
+    session_key TEXT NULL,
+    holder_id TEXT NULL,
+    operation_id TEXT NULL,
+    status TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    released_at TEXT NULL,
+    fencing_token BIGINT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS oauth_pool_runtime_leases_active_account_idx
+    ON oauth_pool_runtime_leases (account_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS oauth_pool_session_bindings (
+    binding_id TEXT PRIMARY KEY,
+    session_key TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    pool_id TEXT NULL,
+    account_id TEXT NOT NULL,
+    workspace_id TEXT NULL,
+    model_id TEXT NULL,
+    binding_policy TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    rebind_count BIGINT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (session_key, provider)
+);
+
+CREATE TABLE IF NOT EXISTS oauth_sharing_audit_events (
+    audit_event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    lease_id TEXT NULL,
+    carpool_id TEXT NULL,
+    workspace_id TEXT NULL,
+    account_id TEXT NULL,
+    pool_id TEXT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ledger_entries (

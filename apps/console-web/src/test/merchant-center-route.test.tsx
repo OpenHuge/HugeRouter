@@ -23,10 +23,14 @@ describe("merchant center route", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Merchant Center",
+        name: "Supplier Evidence Center",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Replay Evidence")).toBeInTheDocument();
+    expect(screen.getByText("Supplier Evidence")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Evidence source: simulated").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Not live upstream evidence")).toBeInTheDocument();
     expect(screen.getByText("Tokens saved")).toBeInTheDocument();
     expect(screen.getByText("2,400")).toBeInTheDocument();
     expect(screen.getByText("Fingerprint pass")).toBeInTheDocument();
@@ -53,16 +57,18 @@ describe("merchant center route", () => {
     await renderRoute("/app/merchant");
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Run evaluation" }),
+      await screen.findByRole("button", { name: "Run evidence check" }),
     );
 
     expect(
       await screen.findByText(
-        "Recorded evaluation reval_2 with replay capsule replay_2.",
+        "Recorded supplier evidence reval_2 with replay capsule replay_2.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("4,800")).toBeInTheDocument();
-    expect(screen.getByText("2 of 2 evaluations shown.")).toBeInTheDocument();
+    expect(
+      screen.getByText("2 of 2 evidence records shown."),
+    ).toBeInTheDocument();
     expect(screen.getByText("replay_2")).toBeInTheDocument();
   });
 });

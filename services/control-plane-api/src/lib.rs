@@ -213,6 +213,9 @@ struct CodexAuthAccountLeaseResponse {
     pub binding_expires_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fencing_token: Option<u64>,
+    pub account_health_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limited_until: Option<String>,
     pub auth_json: Value,
 }
 
@@ -655,6 +658,14 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/oauth-pool/select",
             post(select_oauth_pool_account_for_gateway),
+        )
+        .route(
+            "/internal/gateway/oauth-pool/leases/{runtime_lease_id}/heartbeat",
+            post(heartbeat_oauth_pool_runtime_lease_for_gateway),
+        )
+        .route(
+            "/internal/gateway/oauth-pool/leases/{runtime_lease_id}/release",
+            post(release_oauth_pool_runtime_lease_for_gateway),
         )
         .route(
             "/internal/gateway/oauth-pool/runtime-leases/{runtime_lease_id}/heartbeat",
@@ -2287,6 +2298,8 @@ async fn lease_codex_auth_account_for_gateway(
             &context,
         )
     })?;
+    let account_health_state = account.health_state.clone();
+    let rate_limited_until = account.rate_limited_until.clone();
     let auth_json = decrypt_codex_auth_json(&account.encrypted_auth_json, &context)?;
 
     Ok(Json(CodexAuthAccountLeaseResponse {
@@ -2305,6 +2318,8 @@ async fn lease_codex_auth_account_for_gateway(
         binding_id: selection.binding_id,
         binding_expires_at: selection.binding_expires_at,
         fencing_token: selection.fencing_token,
+        account_health_state,
+        rate_limited_until,
         auth_json,
     }))
 }
@@ -6809,6 +6824,175 @@ mod tests {
                 .unwrap()
                 .contains("authorized lease")
         );
+    }
+
+    #[tokio::test]
+    async fn oauth_pool_sticky_binding_runtime_lease_and_feedback_lifecycle() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let uploaded =
+            upload_codex_account_for_test(app.clone(), &admin_cookie, "prvrsrc_codex_sticky").await;
+        state
+            .store
+            .set_codex_auth_account_runtime_state(
+                uploaded["codex_account_id"].as_str().unwrap(),
+                None,
+                Some(2),
+                0,
+            )
+            .await
+            .unwrap();
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "provider_resource_id": "prvrsrc_codex_sticky",
+                            "borrower_workspace_id": "tenant_acme",
+                            "borrower_user_id": "user_acme",
+                            "session_id": "chat-session-1",
+                            "model_id": "gpt-test",
+                            "holder_id": "gateway-a",
+                            "operation_id": "op-a",
+                            "lease_ttl_seconds": 120
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first = response_json(first).await;
+        assert_eq!(first["provider_resource_id"], "prvrsrc_codex_sticky");
+        assert_eq!(first["account_health_state"], "healthy");
+        let runtime_lease_id = first["runtime_lease_id"].as_str().unwrap().to_string();
+        let binding_id = first["binding_id"].as_str().unwrap().to_string();
+
+        let second = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "provider_resource_id": "prvrsrc_codex_sticky",
+                            "borrower_workspace_id": "tenant_acme",
+                            "borrower_user_id": "user_acme",
+                            "session_id": "chat-session-1",
+                            "model_id": "gpt-test",
+                            "operation_id": "op-b"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let second = response_json(second).await;
+        assert_eq!(second["codex_account_id"], first["codex_account_id"]);
+        assert_eq!(second["binding_id"], binding_id);
+        assert_eq!(second["reason"], "sticky session binding selected");
+
+        let heartbeat = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/internal/gateway/oauth-pool/leases/{runtime_lease_id}/heartbeat"
+                    ))
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(heartbeat.status(), StatusCode::OK);
+        let heartbeat = response_json(heartbeat).await;
+        assert_eq!(
+            heartbeat["runtime_lease"]["runtime_lease_id"],
+            runtime_lease_id
+        );
+        assert_eq!(heartbeat["runtime_lease"]["status"], "active");
+
+        let release = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/internal/gateway/oauth-pool/leases/{runtime_lease_id}/release"
+                    ))
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(release.status(), StatusCode::OK);
+        let release = response_json(release).await;
+        assert_eq!(release["runtime_lease"]["status"], "released");
+
+        let feedback = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/internal/gateway/oauth-pool/accounts/{}/feedback",
+                        first["codex_account_id"].as_str().unwrap()
+                    ))
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "runtime_lease_id": second["runtime_lease_id"],
+                            "outcome": "error",
+                            "status_code": 401,
+                            "error_code": "invalid_token"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(feedback.status(), StatusCode::OK);
+        let feedback = response_json(feedback).await;
+        assert_eq!(feedback["account"]["health_state"], "quarantined");
+
+        let blocked = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/codex-account-pool/lease")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "provider_resource_id": "prvrsrc_codex_sticky",
+                            "borrower_workspace_id": "tenant_acme",
+                            "borrower_user_id": "user_acme",
+                            "session_id": "chat-session-2",
+                            "model_id": "gpt-test"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

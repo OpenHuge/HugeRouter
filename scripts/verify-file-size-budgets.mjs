@@ -121,9 +121,9 @@ const exactBudgetOverrides = new Map([
   [
     "services/control-plane-api/src/lib.rs",
     {
-      maxLines: 8300,
+      maxLines: 8500,
       reason:
-        "Control-plane API wiring is still oversized. WeChat Pay handlers temporarily raised the ceiling; move billing endpoints into focused modules next.",
+        "Control-plane API wiring is still oversized. WeChat Pay and OAuth pool runtime compatibility handlers temporarily raised the ceiling; move billing and pool endpoints into focused modules next.",
     },
   ],
   [

@@ -4,9 +4,11 @@
 
 ## Objective
 
-Deliver the first production-capable version of **AI Traffic OS** as a Rust backend + TanStack Start frontend monorepo with:
+Deliver the first public beta of **ku0 Trust Layer** as a Rust backend + TanStack Start frontend monorepo with:
 
-- a protocol-native gateway optimized for 2026 paradigms (MCP, WebRTC)
+- a live AI-resource inspection workflow for supplier endpoints
+- supplier profiles, shareable reports, risk notes, and procurement evidence
+- a protocol-native trusted-gateway substrate optimized for 2026 paradigms (MCP, WebRTC)
 - a typed control plane
 - Turbo-managed frontend and shared-package workflows
 - a HeroUI-based console design system
@@ -19,17 +21,18 @@ Deliver the first production-capable version of **AI Traffic OS** as a Rust back
 - The repository starts from the split Markdown specification already present in this monorepo.
 - Multiple agents can work in parallel when tasks have distinct file ownership or only depend on stable interfaces.
 - Database, event bus, and generated schema workflows must be available early because they unlock most other streams.
-- The program should produce a usable gateway MVP quickly, then grow toward enterprise reliability and billing maturity.
+- The program should reuse the existing gateway/control-plane MVP, then grow toward live probing, supplier evidence, public reports, certification, enterprise monitoring, and trusted gateway routing.
 
 ## Delivery structure
 
 The roadmap is divided into **program increments**:
 
 - **PI-0 Foundation** - monorepo bootstrap, runtime stack, schemas, auth model, CI, and telemetry baseline
-- **PI-1 Core Platform MVP** - control plane skeleton, OpenAI-compatible gateway, one provider adapter, static routing, API keys, and basic console flows
-- **PI-2 Multi-Protocol and Semantic Edge** - Anthropic/Gemini support, semantic caching, MCP-aware IR, route health, route diagnostics, audit pipeline
-- **PI-3 Billing and Enterprise Hardening** - immutable ledger, pricing engine, usage dashboards, SSO, load testing
-- **PI-4 Ecosystem and Agentic Routing** - realtime WebRTC gateway with ephemeral keys, A2A routing, gateway-of-gateways adapters, advanced policy
+- **PI-1 Core Platform MVP** - control plane, gateway, provider resources, API keys, route receipts, and basic console flows
+- **PI-2 ku0 Probe MVP** - live OpenAI-compatible endpoint inspection, redacted reports, and explicit simulated/live evidence labels
+- **PI-3 Supplier Evidence Beta** - supplier profiles, shareable report pages, risk notes, supplier response, and report moderation
+- **PI-4 Reports, Verified, And Monitor** - paid report intake, certification states, scheduled monitoring, billing transparency, and enterprise readiness
+- **PI-5 Trusted Gateway Expansion** - production routing through inspected resources, realtime/MCP/A2A expansion where it strengthens supplier trust evidence
 
 ## Success criteria by the end of the roadmap
 
@@ -37,8 +40,10 @@ The roadmap is divided into **program increments**:
 2. Clients can send OpenAI-compatible traffic to the gateway and receive responses from at least one upstream provider.
 3. Routing decisions are explainable and resilient to unhealthy upstream targets.
 4. Usage is emitted from the hot path and persisted into an immutable ledger.
-5. The console exposes enough diagnostics and billing state for real operation.
-6. The repository can be built, tested, released, and observed through standard workflows.
+5. Users can run live supplier inspections and receive redacted JSON/HTML reports.
+6. Supplier pages expose status, latency, error rate, risk notes, and evidence source.
+7. Reports and certification states distinguish supplier-paid, ku0-tested, customer-submitted, simulated, and live evidence.
+8. The repository can be built, tested, released, and observed through standard workflows.
 
 ## What makes this roadmap agent-friendly
 

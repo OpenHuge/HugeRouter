@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 ARG RUST_VERSION=1.94.1
 
 FROM rust:${RUST_VERSION}-bookworm AS builder
@@ -15,7 +16,11 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 COPY services ./services
 
-RUN cargo build --locked --release --package "${SERVICE_NAME}" --bin "${BIN_NAME}"
+RUN --mount=type=cache,id=huge-router-${SERVICE_NAME}-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=huge-router-${SERVICE_NAME}-target,target=/workspace/target,sharing=locked \
+    cargo build --locked --release --package "${SERVICE_NAME}" --bin "${BIN_NAME}" \
+    && mkdir -p /workspace/build-output \
+    && cp "/workspace/target/release/${BIN_NAME}" "/workspace/build-output/${BIN_NAME}"
 
 FROM debian:bookworm-slim AS runtime
 
@@ -27,7 +32,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /workspace/target/release/${BIN_NAME} /usr/local/bin/service
+COPY --from=builder /workspace/build-output/${BIN_NAME} /usr/local/bin/service
 
 ENV RUST_LOG=info
 

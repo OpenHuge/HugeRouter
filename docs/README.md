@@ -57,6 +57,7 @@ Recent priority docs for the source-backed spec deepening pass:
 
 ## Product
 
+- [ku0 Trust Layer Product Plan V1.0](product/ku0-trust-layer-v1.md)
 - [Roadmap and Delivery Plan](product/roadmap-and-delivery-plan.md)
 - [Merchant Marketplace And Relay Evaluation Spec](product/merchant-marketplace-and-relay-evaluation-spec.md)
 - [Parallel Development Tracks](tasks/README.md)

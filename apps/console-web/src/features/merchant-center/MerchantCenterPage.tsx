@@ -52,14 +52,14 @@ export function MerchantCenterPage({
     return (
       <UiStack>
         <PageHeader
-          description="Manage small-shop setup, card-secret listings, trial relay connections, and replay-backed evaluations."
-          title="Merchant Center"
+          description="Manage supplier test endpoints, replayable evaluation evidence, and legacy private inventory workflows."
+          title="Supplier Evidence Center"
         />
         <RouteErrorState
           kind={result?.kind}
           message={result?.state === "error" ? result.message : undefined}
-          description="Merchant data could not be loaded from the control-plane service."
-          title="Merchant center unavailable"
+          description="Supplier evidence data could not be loaded from the control-plane service."
+          title="Supplier evidence unavailable"
         />
       </UiStack>
     );
@@ -237,7 +237,7 @@ function MerchantCenterContent({ data }: { data: MerchantWorkspaceData }) {
         trialConnectionId: evaluationForm.trialConnectionId,
       });
       setStatusSuccess(
-        `Recorded evaluation ${evaluation.relayEvaluationId} with replay capsule ${evaluation.replayCapsuleId}.`,
+        `Recorded supplier evidence ${evaluation.relayEvaluationId} with replay capsule ${evaluation.replayCapsuleId}.`,
       );
       await refreshWorkspace();
     } catch (error) {
@@ -271,8 +271,8 @@ function MerchantCenterContent({ data }: { data: MerchantWorkspaceData }) {
   return (
     <UiStack>
       <PageHeader
-        description="Operate a small shop, attach dedicated trial relays, and keep replay-backed evidence so repeated review does not burn live tokens."
-        title="Merchant Center"
+        description="Attach dedicated supplier test endpoints, retain redacted replay evidence, and keep legacy commerce workflows private."
+        title="Supplier Evidence Center"
       />
       <MerchantCenterIntro
         statusNotice={{

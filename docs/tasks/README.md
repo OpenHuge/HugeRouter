@@ -10,7 +10,7 @@ This directory is the execution-ready version of the project plan. The existing 
 - `ledger-worker` and `route-receipt-worker` process real event payloads into ledger/projection and route diagnostic tables. `audit-worker`, `notification-worker`, `routing-worker`, and parts of `edge-probe` still need stronger operational behavior beyond the first runtime scaffolding.
 - The workspace targets Rust `1.94.1`, Node `24.15.0`, and pnpm `10.33.0`. GitHub Actions quality and release workflows are present.
 - Test coverage is meaningful in several core paths but still uneven. The next phase should increase integration coverage around pricing, budget admission, route health, fallback diagnostics, and console workflows.
-- The product direction is now an AI traffic control plane, not a cheap-key forwarding panel. Upcoming work should prioritize cost governance, routing reliability, observability, guardrails, and enterprise controls before broad provider expansion.
+- The product direction is now ku0 Trust Layer: an AI-resource quality inspection, supplier-risk, procurement evidence, and monitored trusted-gateway platform. Upcoming work should prioritize live probing, supplier evidence, cost/billing transparency, routing reliability, observability, guardrails, and enterprise controls before broad provider expansion.
 
 ## Global Rules For Every Agent
 
@@ -62,14 +62,14 @@ This directory is the execution-ready version of the project plan. The existing 
 
 ## Next Implementation Loop
 
-The next PR sequence should move the product from a working gateway MVP to an operator-ready control plane:
+The next PR sequence should move the product from a working gateway/control-plane MVP to the first public ku0 Trust Layer beta:
 
 1. Phase 1: documentation and backlog calibration against current `main`.
-2. Phase 2: cost and budget governance, including persistent pricing catalog, request pre-admission estimates, reserve accounting, and richer margin reporting.
-3. Phase 3: routing reliability, including live health score ingestion, rate-limit and latency aware routing, circuit breaking, and explicit fallback policy.
-4. Phase 4: model capability matrix, including per-model capabilities, structured-output suitability, multimodal support, and routing-time compatibility checks.
-5. Phase 5: redaction-first observability and guardrails, including payload capture policy, PII redaction, prompt-injection checks, output validation, and audit trails.
-6. Phase 6: enterprise and channel governance, including RBAC depth, SSO hardening, tenant data-retention policy, channel pricing, and role-specific dashboards.
+2. Phase 2: baseline hardening, including explicit simulated/live evidence labels, merchant-evaluation replay coverage, route receipt diagnostics, and probe event coverage.
+3. Phase 3: live ku0 Probe MVP, including OpenAI-compatible endpoint checks, streaming checks, first-token latency, error normalization, token usage capture, and redacted JSON reports.
+4. Phase 4: supplier profiles and shareable reports, including public-safe slugs, HTML report pages, availability windows, P95 latency, error rate, streaming stability, supplier response, and moderation.
+5. Phase 5: report and certification beta, including paid report intake, Basic Checked, Billing Transparent, Risk Watch, Not Recommended, expiry, re-check triggers, and evidence source labels.
+6. Phase 6: monitored trusted gateway and enterprise governance, including cost/budget governance, routing reliability, redaction-first observability, supplier whitelists, RBAC depth, SSO hardening, and retention policy.
 
 ## Recommended Merge Order
 
