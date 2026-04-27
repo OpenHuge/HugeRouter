@@ -49,11 +49,16 @@ export function CardProductCard({
   return (
     <UiSurface padding="lg" radius="md" shadow="sm">
       <UiStack>
-        <UiText fw={700}>Add a card product</UiText>
+        <UiInline justify="space-between">
+          <UiText fw={700}>Legacy private inventory</UiText>
+          <UiChip color="gray" variant="light">
+            Legacy/private
+          </UiChip>
+        </UiInline>
         {shops.length === 0 ? (
           <EmptyCollectionState
-            description="Create a shop first, then attach card-secret products for that storefront."
-            title="No merchant shop yet"
+            description="Create an evidence workspace first. Card-secret inventory is kept as a private legacy workflow, not the public ku0 product path."
+            title="No evidence workspace yet"
           />
         ) : (
           <>
@@ -67,7 +72,7 @@ export function CardProductCard({
                       cardProductId: event.currentTarget.value,
                     }))
                   }
-                  placeholder="cardprod_trial_pack"
+                  placeholder="cardprod_legacy_trial_pack"
                   value={cardForm.cardProductId}
                 />
                 <FieldErrorText error={cardErrors.cardProductId} />
@@ -78,7 +83,7 @@ export function CardProductCard({
                     label: `${shop.displayName} (${shop.merchantShopId})`,
                     value: shop.merchantShopId,
                   }))}
-                  label="Merchant shop"
+                  label="Evidence workspace"
                   onChange={(value) =>
                     setCardForm((current) => ({
                       ...current,
@@ -204,19 +209,19 @@ export function RelayEvaluationCard({
     <UiSurface padding="lg" radius="md" shadow="sm">
       <UiStack>
         <UiInline justify="space-between">
-          <UiText fw={700}>Run relay evaluation</UiText>
-          <UiChip color="blue" variant="light">
-            Runner: simulated
+          <UiText fw={700}>Run supplier evidence check</UiText>
+          <UiChip color="yellow" variant="light">
+            Evidence source: simulated
           </UiChip>
         </UiInline>
         <UiText c="dimmed" size="sm">
-          Each run records a replay capsule so follow-up review can reuse
-          captured evidence instead of repeatedly spending live tokens.
+          This Stage 1 runner records deterministic replay evidence. It is not a
+          live upstream Probe result and must stay labeled as simulated.
         </UiText>
         {trialConnections.length === 0 ? (
           <EmptyCollectionState
-            description="Attach at least one trial relay before running replay-backed evaluation."
-            title="No trial relay yet"
+            description="Attach at least one supplier test endpoint before recording replay-backed evidence."
+            title="No supplier test endpoint yet"
           />
         ) : (
           <UiInline align="flex-end">
@@ -225,7 +230,7 @@ export function RelayEvaluationCard({
                 label: `${connection.providerLabel} (${connection.trialConnectionId})`,
                 value: connection.trialConnectionId,
               }))}
-              label="Trial connection"
+              label="Supplier test endpoint"
               onChange={(value) =>
                 setEvaluationForm({
                   trialConnectionId: value ?? "",
@@ -237,7 +242,7 @@ export function RelayEvaluationCard({
               loading={isSubmittingEvaluation}
               onClick={() => void onRunEvaluation()}
             >
-              Run evaluation
+              Run evidence check
             </UiButton>
           </UiInline>
         )}

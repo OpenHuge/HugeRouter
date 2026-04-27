@@ -1,6 +1,6 @@
 # HugeRouter
 
-Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `HeroUI` as the frontend component foundation for the console.
+Rust backend + TanStack Start frontend monorepo for **ku0 Trust Layer**, an AI-resource quality inspection, supplier-risk, procurement evidence, and monitored trusted-gateway platform. The current implementation baseline is a `pnpm` + `Turbo` workspace for JavaScript packages and a `Cargo` workspace for Rust services/crates, with `HeroUI` as the frontend component foundation for the console.
 
 ## Document Structure
 
@@ -33,6 +33,7 @@ Rust backend + TanStack Start frontend monorepo for a protocol-native AI gateway
 - [Maintainer Triage](docs/runbooks/maintainer-triage.md)
 - [Control Plane API](docs/api/control-plane-api.md)
 - [Public Gateway API](docs/api/public-gateway-api.md)
+- [ku0 Trust Layer Product Plan V1.0](docs/product/ku0-trust-layer-v1.md)
 - [Roadmap and Delivery Plan](docs/product/roadmap-and-delivery-plan.md)
 - [Execution Roadmap Pack](docs/execution/README.md)
 - [ADR Index](docs/adr/README.md)
@@ -51,6 +52,11 @@ This split specification preserves the original engineering intent:
 - Realtime WebRTC proxying targeting OpenAI Realtime API GA
 - immutable usage and ledger design
 - first-class routing, semantic caching, policy, security, and observability
+
+The commercial product direction now treats those capabilities as the substrate
+for ku0 Trust Layer: users inspect AI suppliers before purchase, monitor quality
+after adoption, buy evidence-backed reports, and route production traffic through
+trusted resources only when that strengthens the evidence loop.
 
 ## Development Baseline
 

@@ -2,6 +2,25 @@
 
 [Back to Docs Index](../README.md)
 
+## 32.0 Product Direction Update: ku0 Trust Layer
+
+As of the 2026-04-26 product analysis, the first commercial direction for this
+repository is **ku0 Trust Layer**, an AI-resource quality inspection, supplier
+risk, procurement evidence, and monitored gateway platform.
+
+The gateway remains essential infrastructure, but it should be presented as the
+evidence-producing substrate for supplier quality and trusted procurement rather
+than as the only product. For the detailed product definition and first public
+launch plan, see [ku0 Trust Layer Product Plan V1.0](ku0-trust-layer-v1.md).
+
+The planning hierarchy is now:
+
+1. ku0 Probe and Reports prove resource quality before purchase.
+2. ku0 Monitor preserves long-running evidence after adoption.
+3. ku0 Verified lets suppliers buy inspection without buying conclusions.
+4. ku0 Trusted Gateway routes only through inspected resources and feeds real
+   production quality data back into supplier trust scores.
+
 ### 32.1 Phase 0: Foundation
 
 Deliver:
@@ -27,6 +46,13 @@ Deliver:
 - usage capture
 - simple admin console
 
+ku0 Trust Layer interpretation:
+
+- treat this phase as the internal Trusted Gateway substrate
+- ensure route receipts, usage events, and provider provenance are suitable for
+  later inspection reports
+- do not market this phase as a generic relay marketplace
+
 ### 32.3 Phase 2: Multi-Protocol Gateway & Semantic Edge
 
 Deliver:
@@ -40,6 +66,12 @@ Deliver:
 - retry/fallback logic
 - route diagnostics UI
 
+ku0 Trust Layer interpretation:
+
+- use multi-protocol support to broaden inspection coverage
+- keep model and protocol compatibility results evidence-backed and scoped
+- distinguish live checks from simulated checks in both API and console surfaces
+
 ### 32.4 Phase 3: Ledger and Billing Maturity
 
 Deliver:
@@ -51,6 +83,12 @@ Deliver:
 - WeChat Pay as the first supported payment collection method
 - audit improvements
 - replay capsule and supportability maturity
+
+ku0 Trust Layer interpretation:
+
+- promote billing and metering work into Billing Transparency reports
+- calculate real effective cost, failed-request cost, retry cost, and
+  traceable billing evidence where data is available
 
 ### 32.5 Phase 4: Enterprise, Realtime, and Ecosystem
 
@@ -68,6 +106,92 @@ Deliver:
 - hardened compatibility profiles for multiple third-party relay families such as One API, New API, Sub2API, LiteLLM, and LMRouter-style deployments
 - advanced observability and analytics with agentic session tracing
 - optional orchestration-aware integrations with external agent runtimes and memory systems where product demand justifies them
+
+ku0 Trust Layer interpretation:
+
+- enterprise features should center on supplier whitelist, procurement evidence,
+  continuous monitoring, incident evidence packs, and private inspection suites
+- broad protocol expansion is valuable only when it strengthens procurement and
+  supplier trust decisions
+
+---
+
+## 32.6 First Public ku0 Launch Plan
+
+This is the concrete path from the current implementation to the first public
+version of ku0 Trust Layer.
+
+### Stage 0: Documentation And Product Repositioning
+
+Deliver:
+
+- ku0 Trust Layer product plan
+- updated docs index and roadmap
+- clear statement that card-secret/account resale is not the core product
+- existing merchant relay evaluation labeled as bootstrap supplier evidence
+
+### Stage 1: Current Baseline Hardening
+
+Deliver:
+
+- end-to-end verification of control plane, gateway, route receipts, pricing,
+  billing, merchant evaluation, replay capsule, and edge-probe flows
+- stronger tests for simulated relay evaluation and replay access
+- UI/API labels that make `simulated` impossible to confuse with live evidence
+- demo data for supplier profiles and inspection examples
+
+### Stage 2: Live ku0 Probe MVP
+
+Deliver:
+
+- live OpenAI-compatible probe runner
+- base URL, API key, configured model, non-streaming, streaming, first-token
+  latency, error-code, and token-usage checks
+- redacted JSON report output
+- stored result summaries and response hashes
+- console action for running a live endpoint inspection
+
+### Stage 3: Supplier Profiles And Shareable Reports
+
+Deliver:
+
+- supplier profile model
+- public-safe report slug
+- HTML report page
+- status summary with latest check time, availability window, latency, error
+  rate, streaming stability, and risk notes
+- supplier response and moderation fields
+
+### Stage 4: Reports And Certification Beta
+
+Deliver:
+
+- manual-assisted paid report workflow
+- single-supplier, comparison, billing anomaly, model-consistency, and launch
+  readiness report types
+- initial certification states: Basic Checked, Billing Transparent, Risk Watch,
+  and Not Recommended
+- certification expiry and re-check triggers
+- evidence labels for supplier-paid, ku0-self-tested, customer-submitted,
+  simulated, and live results
+
+### Stage 5: Public Beta Launch
+
+Deliver:
+
+- public ku0 Trust Layer homepage copy
+- curated supplier directory
+- public report examples
+- supplier response and re-check support flow
+- launch metrics dashboard
+
+Launch exit criteria:
+
+- at least 20 supplier profiles
+- at least 5 publishable live probe reports
+- at least 2 report or certification purchase-intent workflows completed
+- all public conclusions display sample window, sample count, evidence source,
+  and detection scope
 
 ---
 
@@ -227,7 +351,7 @@ This is enough to prove the architecture without prematurely committing to every
 
 ## 43. Conclusion
 
-This monorepo specification defines AI Traffic OS as a **future-facing, protocol-native AI gateway platform** rather than a conventional transit panel.
+This monorepo specification now supports ku0 Trust Layer as a **future-facing AI-resource trust and procurement evidence platform** rather than a conventional transit panel or generic gateway product.
 
 The architecture is intentionally designed around:
 
@@ -239,7 +363,7 @@ The architecture is intentionally designed around:
 - route intelligence as a first-class system capability
 - enterprise-grade security and observability foundations
 
-If implemented as specified, this platform can evolve from an initial multi-provider gateway into a durable AI traffic operating system that supports commercial, enterprise, and ecosystem-scale use cases.
+If implemented as specified, this platform can evolve from an initial multi-provider gateway substrate into a durable trust layer for AI-resource procurement, supplier monitoring, commercial reports, certification, enterprise governance, and trusted production routing.
 
 ---
 

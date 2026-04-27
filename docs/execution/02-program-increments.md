@@ -2,6 +2,12 @@
 
 [Back to Execution Index](README.md)
 
+Direction update: the original gateway-focused increments remain useful as
+engineering work packages, but the first public product target is now **ku0 Trust
+Layer**. Treat gateway, routing, billing, replay, and observability tasks as
+inputs to live supplier inspection, redacted reports, supplier profiles,
+certification, monitoring, and trusted-gateway evidence.
+
 ## PI-0 - Foundation
 
 **Goal:** Make the monorepo buildable, testable, observable, and ready for multiple agents.
@@ -62,6 +68,8 @@
 ## PI-2 - Multi-Protocol and Reliability
 
 **Goal:** Expand protocol coverage and make routing explainable and resilient.
+For the ku0 launch path, this increment also supplies the first live Probe and
+supplier-monitoring foundation.
 
 | Task ID | Task                                                                      | Workstream                         | Depends On                |
 | ------- | ------------------------------------------------------------------------- | ---------------------------------- | ------------------------- |
@@ -85,10 +93,11 @@
 - Health probes, retry budgets, quarantine logic, and route diagnostics are implemented.
 - Audit pipeline and incident alerts exist.
 - A seeded end-to-end environment is available.
+- Live inspection results can be labeled, stored, redacted, and reused as report evidence.
 
 ## PI-3 - Billing and Enterprise Hardening
 
-**Goal:** Move from usage capture to accounting-grade ledger and operational maturity.
+**Goal:** Move from usage capture to accounting-grade ledger, billing-transparency evidence, and operational maturity.
 
 | Task ID | Task                                                                    | Workstream                         | Depends On                |
 | ------- | ----------------------------------------------------------------------- | ---------------------------------- | ------------------------- |
@@ -105,10 +114,11 @@
 - Budget and balance projections are queryable.
 - Usage and billing dashboards exist in the console.
 - SSO and load/performance baselines are in place.
+- Billing Transparency reports can cite token usage, cost projections, and traceable evidence without exposing sensitive payloads.
 
 ## PI-4 - Ecosystem and Realtime
 
-**Goal:** Add advanced deployment options, gateway federation, and realtime support.
+**Goal:** Add advanced deployment options, gateway federation, and realtime support where they strengthen ku0 Trusted Gateway and supplier evidence loops.
 
 | Task ID | Task                                                               | Workstream                   | Depends On                |
 | ------- | ------------------------------------------------------------------ | ---------------------------- | ------------------------- |

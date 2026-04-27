@@ -7,7 +7,9 @@ import { MerchantCenterPage as MerchantCenterScreen } from "../features/merchant
 export const Route = createFileRoute("/app/merchant")({
   loader: () =>
     loadRouteData(async () => getConsoleDataService().getMerchantWorkspace()),
-  pendingComponent: () => <RouteLoadingState label="Loading merchant center" />,
+  pendingComponent: () => (
+    <RouteLoadingState label="Loading supplier evidence center" />
+  ),
   pendingMs: 0,
   component: MerchantCenterRoute,
 });

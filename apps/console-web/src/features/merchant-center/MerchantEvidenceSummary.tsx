@@ -84,24 +84,26 @@ export function MerchantEvidenceSummary({
       <UiStack>
         <UiInline justify="space-between">
           <UiStack gap={0}>
-            <UiText fw={700}>Replay Evidence</UiText>
+            <UiText fw={700}>Supplier Evidence</UiText>
             <UiText c="dimmed" size="sm">
               Tenant {workspace.tenantId} has {replayableEvaluations} replayable
-              evaluations for support review.
+              evaluations for supplier review.
             </UiText>
           </UiStack>
           <UiChip
             color={workspace.merchantEnabled ? "teal" : "gray"}
             variant="light"
           >
-            {workspace.merchantEnabled ? "Merchant enabled" : "Not enabled"}
+            {workspace.merchantEnabled
+              ? "Evidence workspace enabled"
+              : "Not enabled"}
           </UiChip>
         </UiInline>
         <UiGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="md">
-          <MetricBlock label="Active shops" value={activeShops} />
-          <MetricBlock label="Listed inventory" value={listedInventory} />
+          <MetricBlock label="Active workspaces" value={activeShops} />
+          <MetricBlock label="Legacy inventory" value={listedInventory} />
           <MetricBlock
-            label="Active trial relays"
+            label="Active test endpoints"
             value={activeTrialConnections}
           />
           <MetricBlock label="Replay capsules" value={replayableEvaluations} />
@@ -126,6 +128,9 @@ export function MerchantEvidenceSummary({
                 {latestEvaluation.providerLabel} at{" "}
                 {formatDateTime(latestEvaluation.createdAt)}
               </UiText>
+              <UiChip color="yellow" size="xs" variant="light">
+                Evidence source: {latestEvaluation.runnerMode}
+              </UiChip>
             </UiInline>
           ) : (
             <UiText c="dimmed" size="sm">

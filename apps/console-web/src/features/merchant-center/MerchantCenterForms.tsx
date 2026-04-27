@@ -53,12 +53,12 @@ export function MerchantCenterIntro({
       <UiAlert
         color="yellow"
         radius="md"
-        title="Trial key guardrail"
+        title="Dedicated test key guardrail"
         variant="light"
       >
-        Use a dedicated trial key only. Merchant evaluations now record
-        replayable data so support and comparison can reuse prior runs instead
-        of repeatedly spending live tokens.
+        Use a dedicated supplier test key only. Current relay evaluations are
+        simulated evidence runs, not live upstream probes. Replay capsules let
+        support and comparison reuse redacted evidence before live Probe ships.
       </UiAlert>
     </>
   );
@@ -80,9 +80,9 @@ export function ShopAndTrialCards({
     <UiInline align="stretch" grow>
       <UiSurface padding="lg" radius="md" shadow="sm">
         <UiStack>
-          <UiText fw={700}>Open a shop</UiText>
+          <UiText fw={700}>Create an evidence workspace</UiText>
           <UiTextField
-            label="Merchant shop id"
+            label="Evidence workspace id"
             onChange={(event) =>
               setShopForm((current) => ({
                 ...current,
@@ -126,7 +126,7 @@ export function ShopAndTrialCards({
                 announcement: event.currentTarget.value,
               }))
             }
-            placeholder="Fresh trial cards with replay-backed evaluation"
+            placeholder="Supplier evidence workspace for replay-backed evaluation"
             value={shopForm.announcement}
           />
           <UiInline justify="flex-end">
@@ -134,7 +134,7 @@ export function ShopAndTrialCards({
               loading={isSubmittingShop}
               onClick={() => void onCreateShop()}
             >
-              Create shop
+              Create workspace
             </UiButton>
           </UiInline>
         </UiStack>
@@ -142,9 +142,9 @@ export function ShopAndTrialCards({
 
       <UiSurface padding="lg" radius="md" shadow="sm">
         <UiStack>
-          <UiText fw={700}>Attach a trial relay</UiText>
+          <UiText fw={700}>Attach a supplier test endpoint</UiText>
           <UiTextField
-            label="Trial connection id"
+            label="Test endpoint id"
             onChange={(event) =>
               setTrialForm((current) => ({
                 ...current,
@@ -168,7 +168,7 @@ export function ShopAndTrialCards({
           />
           <FieldErrorText error={trialErrors.providerLabel} />
           <UiTextField
-            label="Endpoint"
+            label="Endpoint base URL"
             onChange={(event) =>
               setTrialForm((current) => ({
                 ...current,
@@ -180,7 +180,7 @@ export function ShopAndTrialCards({
           />
           <FieldErrorText error={trialErrors.endpointBaseUrl} />
           <UiTextField
-            label="Trial API key"
+            label="Dedicated test API key"
             onChange={(event) =>
               setTrialForm((current) => ({
                 ...current,
@@ -220,7 +220,7 @@ export function ShopAndTrialCards({
               loading={isSubmittingTrial}
               onClick={() => void onCreateTrialConnection()}
             >
-              Save trial relay
+              Save test endpoint
             </UiButton>
           </UiInline>
         </UiStack>

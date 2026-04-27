@@ -2,6 +2,13 @@
 
 [Back to Docs Index](../README.md)
 
+> Direction update: this document describes an existing implementation slice.
+> Under the ku0 Trust Layer product direction, the relay-evaluation parts remain
+> strategically important, but card-secret storefront commerce is no longer the
+> core public product path. Treat Merchant Center as a bootstrap Supplier
+> Evidence Center until the UI and domain language are fully migrated. See
+> [ku0 Trust Layer Product Plan V1.0](ku0-trust-layer-v1.md).
+
 ## 1. Problem
 
 HugeRouter currently models tenants, projects, provider resources, API keys, routes, usage, and billing, but it does not yet expose a merchant-facing workflow for:
@@ -44,6 +51,19 @@ The V1 product is not a full payment marketplace. It is a merchant operations sl
 - publish card-secret products
 - register trial relay endpoints and masked test keys
 - run and retain relay quality evaluations before or during sale
+
+For ku0 Trust Layer, the durable product surface should become:
+
+- supplier profile and evidence management
+- trial endpoint registration
+- live and replayed inspection runs
+- supplier response and re-check workflow
+- paid report and certification intake
+
+Card-secret products may remain available for legacy or private workflows, but
+they must not be the public growth engine because account sharing, credential
+resale, and unofficial subscription arbitrage weaken the platform's trust
+positioning.
 
 ## 4. Goals
 
@@ -284,8 +304,11 @@ The first implementation in this repo should ship:
 
 ## 12. Follow-Ups
 
-- secret stock ingestion and fulfillment ledger
-- public storefront publishing
-- order lifecycle and buyer access control
 - probe-based real relay evaluator
+- supplier profile and public status page
+- shareable redacted report page
+- supplier response and re-check workflow
+- ku0 Verified certification state and expiry
+- risk event library
 - admin moderation and merchant risk rules
+- legacy/private-only handling for card-secret inventory and fulfillment

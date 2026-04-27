@@ -21,8 +21,8 @@ export const tenantNav = [
   },
   {
     href: '/app/merchant',
-    label: 'Merchant',
-    description: 'Small-shop setup, card products, trial relays, and replay-backed evaluations'
+    label: 'Evidence',
+    description: 'Supplier test endpoints, replay evidence, and legacy private inventory'
   },
   {
     href: '/app/providers',

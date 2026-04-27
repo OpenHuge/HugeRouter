@@ -667,6 +667,13 @@ impl CodexAuthAccountRecord {
             version: self.version,
         }
     }
+
+    #[must_use]
+    pub fn public_view_with_active_runs(&self, active_runs: u32) -> CodexAuthAccount {
+        let mut view = self.public_view();
+        view.active_runs = active_runs;
+        view
+    }
 }
 
 fn default_oauth_account_provider() -> String {
@@ -2210,15 +2217,28 @@ impl StoreMode {
 
     pub async fn list_codex_auth_accounts(&self) -> Result<CodexAuthAccountsResponse> {
         match self {
-            Self::Memory(store) => Ok(CodexAuthAccountsResponse {
-                data: store
-                    .read()
-                    .expect("memory store read lock")
-                    .codex_auth_accounts
-                    .iter()
-                    .map(CodexAuthAccountRecord::public_view)
-                    .collect(),
-            }),
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(CodexAuthAccountsResponse {
+                    data: store
+                        .codex_auth_accounts
+                        .iter()
+                        .map(|account| {
+                            let active_runs = active_runtime_lease_count(
+                                &store,
+                                Some(account.codex_account_id.as_str()),
+                                None,
+                                None,
+                                None,
+                                account.provider.as_str(),
+                            );
+                            account.public_view_with_active_runs(
+                                u32::try_from(active_runs).unwrap_or(u32::MAX),
+                            )
+                        })
+                        .collect(),
+                })
+            }
             Self::Postgres(store) => store.list_codex_auth_accounts().await,
         }
     }
@@ -2940,7 +2960,7 @@ impl PostgresStore {
 
     pub async fn ensure_schema_ready(&self) -> Result<()> {
         for table_name in REQUIRED_TABLES {
-            let exists = sqlx::query_scalar::<_, Option<String>>("SELECT to_regclass($1)")
+            let exists = sqlx::query_scalar::<_, Option<String>>("SELECT to_regclass($1)::text")
                 .bind(table_name)
                 .fetch_one(&self.pool)
                 .await?;
@@ -3830,13 +3850,37 @@ impl PostgresStore {
         let rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY codex_account_id")
             .fetch_all(&self.pool)
             .await?;
+        let active_rows = sqlx::query(
+            "SELECT account_id, provider, COUNT(*) AS active_runs
+               FROM oauth_pool_runtime_leases
+              WHERE status = 'active' AND expires_at > $1
+              GROUP BY account_id, provider",
+        )
+        .bind(now_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+        let active_runs_by_account = active_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    (
+                        row.get::<String, _>("account_id"),
+                        row.get::<String, _>("provider"),
+                    ),
+                    u32::try_from(row.get::<i64, _>("active_runs")).unwrap_or(u32::MAX),
+                )
+            })
+            .collect::<HashMap<_, _>>();
         Ok(CodexAuthAccountsResponse {
             data: rows
                 .into_iter()
                 .map(|row| {
-                    row.get::<Json<CodexAuthAccountRecord>, _>("payload")
-                        .0
-                        .public_view()
+                    let account = row.get::<Json<CodexAuthAccountRecord>, _>("payload").0;
+                    let active_runs = active_runs_by_account
+                        .get(&(account.codex_account_id.clone(), account.provider.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    account.public_view_with_active_runs(active_runs)
                 })
                 .collect(),
         })
@@ -6533,7 +6577,14 @@ fn select_schedulable_account_index(
             Some(account.codex_account_id.as_str()),
             provider,
         );
-        let active_runs = u64::from(account.active_runs);
+        let active_runs = active_runtime_lease_count(
+            store,
+            Some(account.codex_account_id.as_str()),
+            None,
+            None,
+            None,
+            provider,
+        );
         match policy {
             "owner_priority" => (active_runs, usage, account.updated_at.clone()),
             _ => (usage, active_runs, account.updated_at.clone()),
@@ -6549,9 +6600,6 @@ fn oauth_account_is_schedulable(account: &CodexAuthAccountRecord, provider: &str
         && account_health_allows(account)
         && account.schedulable
         && account.credential_ready
-        && account
-            .concurrency_limit
-            .is_none_or(|limit| account.active_runs < limit)
         && time_gate_allows(account.rate_limited_until.as_deref())
         && time_gate_allows(account.overloaded_until.as_deref())
         && time_gate_allows(account.temp_unschedulable_until.as_deref())

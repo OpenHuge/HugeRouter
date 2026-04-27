@@ -23,6 +23,10 @@ CONTROL_PLANE_COOKIE_JAR=""
 cleanup() {
   local code=$?
   if [[ "${DOCKER_STACK_STARTED:-false}" == "true" ]]; then
+    if [[ "${code}" -ne 0 ]]; then
+      docker compose "${COMPOSE_ARGS[@]}" ps >"${LOG_ROOT}/compose-ps.txt" 2>&1 || true
+      docker compose "${COMPOSE_ARGS[@]}" logs --no-color >"${LOG_ROOT}/compose.log" 2>&1 || true
+    fi
     docker compose "${COMPOSE_ARGS[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
 
@@ -133,14 +137,19 @@ create_provider_resource() {
       capabilities: {
         supports_streaming: false,
         supports_tool_calling: false,
-        supports_json_mode: true
+        supports_json_mode: true,
+        supports_realtime: false,
+        supports_response_model_metadata: true
       },
+      supported_protocol_families: ["openai_chat", "openai_responses"],
+      is_transit_gateway: false,
       version: 1,
       created_at: "2026-04-22T00:00:00Z",
       updated_at: "2026-04-22T00:00:00Z"
     }')"
 
   curl -fsS -X POST "${CONTROL_PLANE_BASE_URL}/v1/provider-resources" \
+    -b "${CONTROL_PLANE_COOKIE_JAR}" \
     -H "content-type: application/json" \
     --data "${payload}" >/dev/null
 }
@@ -171,6 +180,7 @@ create_route_policy() {
     }')"
 
   curl -fsS -X POST "${CONTROL_PLANE_BASE_URL}/v1/route-policies" \
+    -b "${CONTROL_PLANE_COOKIE_JAR}" \
     -H "content-type: application/json" \
     --data "${payload}" >/dev/null
 }
@@ -200,9 +210,11 @@ create_and_activate_snapshot() {
     }')"
 
   curl -fsS -X POST "${CONTROL_PLANE_BASE_URL}/v1/config-snapshots" \
+    -b "${CONTROL_PLANE_COOKIE_JAR}" \
     -H "content-type: application/json" \
     --data "${payload}" >/dev/null
-  curl -fsS -X POST "${CONTROL_PLANE_BASE_URL}/v1/config-snapshots/${config_snapshot_id}/activate" >/dev/null
+  curl -fsS -X POST "${CONTROL_PLANE_BASE_URL}/v1/config-snapshots/${config_snapshot_id}/activate" \
+    -b "${CONTROL_PLANE_COOKIE_JAR}" >/dev/null
 }
 
 create_gateway_api_key() {
@@ -367,6 +379,8 @@ CONTROL_PLANE_HOST="${CONTROL_PLANE_API_ADDR%%:*}"
 CONTROL_PLANE_PORT="${CONTROL_PLANE_API_ADDR#*:}"
 GATEWAY_HOST="${GATEWAY_API_ADDR%%:*}"
 GATEWAY_PORT="${GATEWAY_API_ADDR#*:}"
+export CONTROL_PLANE_PORT
+export GATEWAY_PORT
 export CONTROL_PLANE_BASE_URL="http://${CONTROL_PLANE_HOST}:${CONTROL_PLANE_PORT}"
 export GATEWAY_BASE_URL="http://${GATEWAY_HOST}:${GATEWAY_PORT}"
 export NATS_URL="nats://127.0.0.1:${NATS_CLIENT_PORT}"
@@ -433,7 +447,7 @@ done
 DOCKER_STACK_STARTED=false
 
 log "starting smoke dependencies"
-docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" up -d postgres redis nats
+docker compose "${COMPOSE_ARGS[@]}" up -d postgres redis nats
 DOCKER_STACK_STARTED=true
 
 wait_for_http "http://127.0.0.1:${NATS_MONITOR_PORT}/healthz" 120 "nats monitor"
@@ -442,7 +456,7 @@ until docker compose "${COMPOSE_ARGS[@]}" exec -T postgres pg_isready -U "${POST
 done
 
 log "building runtime service images"
-docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" build \
+docker compose "${COMPOSE_ARGS[@]}" build \
   control-plane-api \
   gateway-api \
   ledger-worker \
@@ -457,7 +471,7 @@ log "applying runtime schema and bootstrap"
 "${REPO_ROOT}/infra/scripts/bootstrap.sh" runtime
 
 log "starting runtime services"
-docker compose "${COMPOSE_ARGS[@]}" --project-directory "${REPO_ROOT}" up -d \
+docker compose "${COMPOSE_ARGS[@]}" up -d \
   control-plane-api \
   gateway-api \
   ledger-worker \

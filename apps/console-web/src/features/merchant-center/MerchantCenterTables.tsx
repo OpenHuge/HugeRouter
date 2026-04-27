@@ -63,17 +63,17 @@ export function MerchantShopTable({ shops }: { shops: MerchantShopView[] }) {
   return (
     <UiSurface padding="lg" radius="md" shadow="sm">
       <UiStack>
-        <UiText fw={700}>Shops</UiText>
+        <UiText fw={700}>Evidence Workspaces</UiText>
         {shops.length === 0 ? (
           <EmptyCollectionState
-            description="Open your first small shop to start listing card-secret products."
-            title="No shops"
+            description="Create an evidence workspace before attaching supplier test endpoints."
+            title="No evidence workspaces"
           />
         ) : (
           <UiDataTable striped withRowBorders>
             <UiDataTable.Thead>
               <UiDataTable.Tr>
-                <UiDataTable.Th>Shop</UiDataTable.Th>
+                <UiDataTable.Th>Workspace</UiDataTable.Th>
                 <UiDataTable.Th>Status</UiDataTable.Th>
                 <UiDataTable.Th>Slug</UiDataTable.Th>
                 <UiDataTable.Th>Fulfillment</UiDataTable.Th>
@@ -113,11 +113,16 @@ export function CardProductTable({
   return (
     <UiSurface padding="lg" radius="md" shadow="sm">
       <UiStack>
-        <UiText fw={700}>Card Products</UiText>
+        <UiInline justify="space-between">
+          <UiText fw={700}>Legacy Card Inventory</UiText>
+          <UiChip color="gray" variant="light">
+            Private workflow
+          </UiChip>
+        </UiInline>
         {products.length === 0 ? (
           <EmptyCollectionState
-            description="Create a card-secret product after your merchant shop is ready."
-            title="No card products"
+            description="Legacy card-secret inventory is intentionally kept out of the public ku0 Trust Layer path."
+            title="No legacy card inventory"
           />
         ) : (
           <UiDataTable striped withRowBorders>
@@ -165,11 +170,11 @@ export function TrialConnectionTable({
   return (
     <UiSurface padding="lg" radius="md" shadow="sm">
       <UiStack>
-        <UiText fw={700}>Trial Connections</UiText>
+        <UiText fw={700}>Supplier Test Endpoints</UiText>
         {connections.length === 0 ? (
           <EmptyCollectionState
-            description="Attach a dedicated test relay before running evaluation."
-            title="No trial connections"
+            description="Attach a dedicated supplier test endpoint before recording evidence."
+            title="No supplier test endpoints"
           />
         ) : (
           <UiDataTable striped withRowBorders>
@@ -239,10 +244,10 @@ export function RelayEvaluationTable({
       <UiStack>
         <UiInline justify="space-between">
           <UiStack gap={0}>
-            <UiText fw={700}>Recent Evaluations</UiText>
+            <UiText fw={700}>Recent Supplier Evidence</UiText>
             <UiText c="dimmed" size="sm">
               {visibleEvaluations.length} of{" "}
-              {workspace.recentEvaluations.length} evaluations shown.
+              {workspace.recentEvaluations.length} evidence records shown.
             </UiText>
           </UiStack>
           <UiSegmented
@@ -261,8 +266,8 @@ export function RelayEvaluationTable({
         </UiInline>
         {workspace.recentEvaluations.length === 0 ? (
           <EmptyCollectionState
-            description="Run your first evaluation to produce replay-backed merchant evidence."
-            title="No evaluations"
+            description="Run your first evidence check to produce replay-backed supplier evidence."
+            title="No supplier evidence"
           />
         ) : visibleEvaluations.length === 0 ? (
           <EmptyCollectionState
@@ -276,6 +281,7 @@ export function RelayEvaluationTable({
                 <UiDataTable.Th>Provider</UiDataTable.Th>
                 <UiDataTable.Th>Verdict</UiDataTable.Th>
                 <UiDataTable.Th>Score</UiDataTable.Th>
+                <UiDataTable.Th>Evidence Source</UiDataTable.Th>
                 <UiDataTable.Th>Replay Capsule</UiDataTable.Th>
                 <UiDataTable.Th>Saved Tokens</UiDataTable.Th>
                 <UiDataTable.Th />
@@ -308,6 +314,16 @@ export function RelayEvaluationTable({
                     </UiDataTable.Td>
                     <UiDataTable.Td>{evaluation.overallScore}</UiDataTable.Td>
                     <UiDataTable.Td>
+                      <UiStack gap={2}>
+                        <UiChip color="yellow" size="xs" variant="light">
+                          {evaluation.runnerMode}
+                        </UiChip>
+                        <UiText c="dimmed" size="xs">
+                          Not live upstream evidence
+                        </UiText>
+                      </UiStack>
+                    </UiDataTable.Td>
+                    <UiDataTable.Td>
                       <UiInline gap="xs">
                         <UiText>{evaluation.replayCapsuleId}</UiText>
                         {isSelected ? (
@@ -316,9 +332,6 @@ export function RelayEvaluationTable({
                           </UiChip>
                         ) : null}
                       </UiInline>
-                      <UiText c="dimmed" size="sm">
-                        {evaluation.runnerMode}
-                      </UiText>
                     </UiDataTable.Td>
                     <UiDataTable.Td>
                       {evaluation.estimatedTokensSaved}
