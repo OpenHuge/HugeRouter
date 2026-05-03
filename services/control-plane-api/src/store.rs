@@ -44,18 +44,20 @@ use core_domain::{
     RouteReceipt, RouteReceiptId, Tenant, TenantId, TenantMembership, TenantMembershipId,
     TenantMembershipRole, TenantMembershipStatus, TenantSummary, TrialConnection,
     TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary,
-    UserId, UserIdentity,
+    UsageMetrics, UserId, UserIdentity,
 };
 use metering::{PricingCatalog, default_budget_micros};
 use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
-    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse,
-    PricingCatalogResponse, PricingSimulationRequest, PricingSimulationResponse, ProjectsResponse,
-    ProtocolFamily, ProviderResourcesResponse, RouteDiagnosticDecision, RouteDiagnosticTarget,
+    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, OpeningGrant,
+    OpeningGrantsResponse, PricingCatalogResponse, PricingSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse, ProtocolFamily, ProviderResourcesResponse,
+    RenewalIntent, RenewalIntentsResponse, RouteDiagnosticDecision, RouteDiagnosticTarget,
     RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptDecisionTraceStep,
     RouteReceiptDiagnosticsResponse, RouteReceiptPolicyCheck, RouteReceiptProviderAttempt,
     RouteReceiptResponse, RouteReceiptSummary, RouteSimulationRequest, RouteSimulationResponse,
-    TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
+    SaleReadiness, SaleReadyCheck, SaleReadyHandoff, SaleReadyPackageResponse, TenantsResponse,
+    UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
 };
 use routing_engine::{
     ProviderTargetKind, ProviderTargetRuntime, RoutingConfig, RoutingRequest, health_state_slug,
@@ -77,6 +79,9 @@ const DEFAULT_OAUTH_POOL_RUNTIME_LEASE_TTL_SECONDS: u64 = 120;
 const DEFAULT_OAUTH_POOL_SESSION_BINDING_TTL_SECONDS: u64 = 60 * 60 * 24;
 const OAUTH_POOL_COOLDOWN_SECONDS: u64 = 60 * 5;
 const OAUTH_POOL_MAX_COOLDOWN_SECONDS: u64 = 60 * 60;
+const PROVIDER_RESOURCE_INTAKE_PENDING_PROBE: &str = "manual_intake_pending_live_probe";
+const PROVIDER_RESOURCE_INTAKE_PENDING_MESSAGE: &str =
+    "Resource registered but not route eligible until live probe or operator approval.";
 
 const PROVIDER_CATALOG: &[(AuthProvider, &str, &str)] = &[
     (
@@ -141,8 +146,10 @@ pub struct MemoryStore {
     route_receipts: HashMap<String, RouteReceipt>,
     billing_export_jobs: Vec<BillingExportJobRecord>,
     wechat_payment_orders: HashMap<String, WechatPaymentOrderRecord>,
+    renewal_intents: Vec<RenewalIntent>,
     route_policy_disabled_ids: HashSet<String>,
     api_keys: Vec<ApiKeyRecord>,
+    opening_grants: Vec<OpeningGrantRecord>,
     codex_auth_accounts: Vec<CodexAuthAccountRecord>,
     oauth_sharing_leases: Vec<OAuthSharingLeaseRecord>,
     oauth_carpools: Vec<OAuthCarpoolRecord>,
@@ -162,6 +169,55 @@ pub struct ApiKeyRecord {
     pub created_at: String,
     pub updated_at: String,
     pub version: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpeningGrantDraft {
+    pub grant_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub grantee_kind: String,
+    pub grantee_id: String,
+    pub grantee_label: Option<String>,
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub route_policy_id: RoutePolicyId,
+    pub budget_policy_id: BudgetPolicyId,
+    pub provider_resource_ids: Vec<ProviderResourceId>,
+    pub credential_kind: String,
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpeningGrantRecord {
+    pub grant_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub grantee_kind: String,
+    pub grantee_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grantee_label: Option<String>,
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub route_policy_id: RoutePolicyId,
+    pub budget_policy_id: BudgetPolicyId,
+    pub provider_resource_ids: Vec<ProviderResourceId>,
+    pub credential_kind: String,
+    pub credential_id: String,
+    pub credential_key_prefix: String,
+    pub credential_last_four: String,
+    pub credential_hash: String,
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+    pub status: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +252,32 @@ pub struct WechatPaymentOrderRecord {
 #[derive(Debug, Clone, Serialize)]
 pub struct WechatPaymentOrderResponse {
     pub data: WechatPaymentOrderRecord,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenewalIntentDraft {
+    pub renewal_intent_id: String,
+    pub out_trade_no: String,
+    pub grant_id: String,
+    pub renew_expires_at: String,
+    pub reason: Option<String>,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenewalIntentFilters {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub grant_id: Option<String>,
+    pub out_trade_no: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum RenewalIntentCreateResult {
+    Created(RenewalIntent),
+    OrderNotFound,
+    GrantNotFound,
+    GrantMismatch,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -569,9 +651,15 @@ pub enum UsageBreakdownGroupBy {
 #[derive(Debug, Clone)]
 pub struct ResolvedApiKey {
     pub api_key_id: String,
+    pub grant_id: Option<String>,
     pub tenant_id: TenantId,
     pub project_id: Option<ProjectId>,
     pub is_active: bool,
+    pub status: String,
+    pub config_snapshot_id: Option<ConfigSnapshotId>,
+    pub route_policy_id: Option<RoutePolicyId>,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -629,10 +717,70 @@ impl ApiKeyRecord {
             .find(|resource| resource.provider_resource_id == self.provider_resource_id)?;
         Some(ResolvedApiKey {
             api_key_id: self.api_key_id.clone(),
+            grant_id: None,
             tenant_id: provider_resource.tenant_id.clone(),
             project_id: provider_resource.project_id.clone(),
             is_active: true,
+            status: "active".to_string(),
+            config_snapshot_id: None,
+            route_policy_id: None,
+            scopes: Vec::new(),
+            expires_at: None,
         })
+    }
+}
+
+impl OpeningGrantRecord {
+    fn effective_status(&self) -> String {
+        if self.status == "active" && timestamp_is_expired(&self.expires_at) {
+            "expired".to_string()
+        } else {
+            self.status.clone()
+        }
+    }
+
+    fn public_view(&self) -> OpeningGrant {
+        OpeningGrant {
+            grant_id: self.grant_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            grantee_kind: self.grantee_kind.clone(),
+            grantee_id: self.grantee_id.clone(),
+            grantee_label: self.grantee_label.clone(),
+            config_snapshot_id: self.config_snapshot_id.clone(),
+            route_policy_id: self.route_policy_id.clone(),
+            budget_policy_id: self.budget_policy_id.clone(),
+            provider_resource_ids: self.provider_resource_ids.clone(),
+            credential_kind: self.credential_kind.clone(),
+            credential_id: self.credential_id.clone(),
+            credential_key_prefix: self.credential_key_prefix.clone(),
+            credential_last_four: self.credential_last_four.clone(),
+            scopes: self.scopes.clone(),
+            expires_at: self.expires_at.clone(),
+            status: self.effective_status(),
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+            revoked_at: self.revoked_at.clone(),
+            revoked_by: self.revoked_by.clone(),
+        }
+    }
+
+    fn to_resolved(&self) -> ResolvedApiKey {
+        let status = self.effective_status();
+        ResolvedApiKey {
+            api_key_id: self.credential_id.clone(),
+            grant_id: Some(self.grant_id.clone()),
+            tenant_id: self.tenant_id.clone(),
+            project_id: Some(self.project_id.clone()),
+            is_active: status == "active",
+            status,
+            config_snapshot_id: Some(self.config_snapshot_id.clone()),
+            route_policy_id: Some(self.route_policy_id.clone()),
+            scopes: self.scopes.clone(),
+            expires_at: Some(self.expires_at.clone()),
+        }
     }
 }
 
@@ -1332,8 +1480,10 @@ impl MemoryStore {
                 .collect(),
             billing_export_jobs: Vec::new(),
             wechat_payment_orders: HashMap::new(),
+            renewal_intents: Vec::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
+            opening_grants: Vec::new(),
             codex_auth_accounts: Vec::new(),
             oauth_sharing_leases: Vec::new(),
             oauth_carpools: Vec::new(),
@@ -1993,6 +2143,7 @@ impl StoreMode {
         &self,
         mut provider_resource: ProviderResource,
     ) -> Result<ProviderResource> {
+        fail_close_new_provider_resource(&mut provider_resource);
         provider_resource.version = 1;
         provider_resource.created_at = now_rfc3339();
         provider_resource.updated_at = now_rfc3339();
@@ -2212,6 +2363,68 @@ impl StoreMode {
                 })
             }
             Self::Postgres(store) => store.list_api_keys().await,
+        }
+    }
+
+    pub async fn create_opening_grant(
+        &self,
+        draft: OpeningGrantDraft,
+        credential_plaintext: &str,
+    ) -> Result<OpeningGrant> {
+        let now = now_rfc3339();
+        let credential_hash = hash_api_key(credential_plaintext);
+        let record = OpeningGrantRecord {
+            grant_id: draft.grant_id,
+            tenant_id: draft.tenant_id,
+            project_id: draft.project_id,
+            grantee_kind: draft.grantee_kind,
+            grantee_id: draft.grantee_id,
+            grantee_label: draft.grantee_label,
+            config_snapshot_id: draft.config_snapshot_id,
+            route_policy_id: draft.route_policy_id,
+            budget_policy_id: draft.budget_policy_id,
+            provider_resource_ids: draft.provider_resource_ids,
+            credential_kind: draft.credential_kind,
+            credential_id: format!("cred_{}", &credential_hash[..16]),
+            credential_key_prefix: api_key_prefix(credential_plaintext),
+            credential_last_four: credential_last_four(credential_plaintext),
+            credential_hash,
+            scopes: draft.scopes,
+            expires_at: draft.expires_at,
+            status: "active".to_string(),
+            created_by: draft.created_by,
+            created_at: now.clone(),
+            updated_at: now,
+            version: 1,
+            revoked_at: None,
+            revoked_by: None,
+        };
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .opening_grants
+                    .push(record.clone());
+                Ok(record.public_view())
+            }
+            Self::Postgres(store) => store.create_opening_grant(&record).await,
+        }
+    }
+
+    pub async fn list_opening_grants(&self) -> Result<OpeningGrantsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(OpeningGrantsResponse {
+                    data: store
+                        .opening_grants
+                        .iter()
+                        .map(OpeningGrantRecord::public_view)
+                        .collect(),
+                })
+            }
+            Self::Postgres(store) => store.list_opening_grants().await,
         }
     }
 
@@ -2503,11 +2716,39 @@ impl StoreMode {
         }
     }
 
+    pub async fn revoke_opening_grant(
+        &self,
+        grant_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+    ) -> Result<ConcurrencyResult<OpeningGrant>> {
+        match self {
+            Self::Memory(store) => Ok(revoke_memory_opening_grant(
+                &mut store.write().expect("memory store write lock"),
+                grant_id,
+                expected_version,
+                revoked_by,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .revoke_opening_grant(grant_id, expected_version, revoked_by)
+                    .await
+            }
+        }
+    }
+
     pub async fn resolve_api_key(&self, api_key: &str) -> Result<Option<ResolvedApiKey>> {
         let hash = hash_api_key(api_key);
         match self {
             Self::Memory(store) => {
                 let store = store.read().expect("memory store read lock");
+                if let Some(grant) = store
+                    .opening_grants
+                    .iter()
+                    .find(|item| item.credential_hash == hash)
+                {
+                    return Ok(Some(grant.to_resolved()));
+                }
                 Ok(store
                     .api_keys
                     .iter()
@@ -2539,6 +2780,64 @@ impl StoreMode {
             }
             Self::Postgres(store) => store.get_config_snapshot(config_snapshot_id).await,
         }
+    }
+
+    pub async fn get_config_snapshot_sale_readiness(
+        &self,
+        config_snapshot_id: &str,
+    ) -> Result<Option<SaleReadyPackageResponse>> {
+        let Some(snapshot) = self.get_config_snapshot(config_snapshot_id).await? else {
+            return Ok(None);
+        };
+        let snapshot = snapshot.config_snapshot;
+        let route_policy = self
+            .get_route_policy(snapshot.route_policy_id.as_str())
+            .await?;
+        let mut provider_resources = Vec::with_capacity(snapshot.provider_resource_ids.len());
+        let mut missing_provider_resource_ids = Vec::new();
+        for provider_resource_id in &snapshot.provider_resource_ids {
+            match self
+                .get_provider_resource(provider_resource_id.as_str())
+                .await?
+            {
+                Some(resource) => provider_resources.push(resource),
+                None => missing_provider_resource_ids.push(provider_resource_id.to_string()),
+            }
+        }
+
+        let active_snapshot_id = self
+            .get_config_snapshot(ACTIVE_CONFIG_ALIAS)
+            .await?
+            .map(|response| response.config_snapshot.config_snapshot_id);
+        let route_simulation =
+            sale_ready_route_simulation(&snapshot, route_policy.as_ref(), &provider_resources);
+        let pricing = match sale_ready_pricing_request(
+            route_policy.as_ref(),
+            route_simulation.as_ref(),
+            &provider_resources,
+        ) {
+            Some(request) => Some(self.create_pricing_simulation(request).await?),
+            None => None,
+        };
+        let budget = Some(
+            self.get_balance_projection(
+                snapshot.tenant_id.as_str(),
+                Some(snapshot.project_id.to_string()),
+            )
+            .await?
+            .data,
+        );
+
+        Ok(Some(build_sale_ready_package_response(
+            snapshot,
+            route_policy,
+            provider_resources,
+            missing_provider_resource_ids,
+            active_snapshot_id,
+            route_simulation,
+            pricing,
+            budget,
+        )))
     }
 
     pub async fn activate_config_snapshot(
@@ -2766,7 +3065,12 @@ impl StoreMode {
                         .expect("memory store read lock")
                         .billing_export_jobs
                         .iter()
-                        .map(|record| record.job.clone())
+                        .map(|record| {
+                            maybe_complete_memory_export_job(
+                                record.job.clone(),
+                                record.content.is_some(),
+                            )
+                        })
                         .collect(),
                     tenant_id,
                     project_id,
@@ -2863,6 +3167,34 @@ impl StoreMode {
                 Ok(WechatPaymentOrderResponse { data: record })
             }
             Self::Postgres(store) => store.update_wechat_payment_order(record).await,
+        }
+    }
+
+    pub async fn create_renewal_intent(
+        &self,
+        draft: RenewalIntentDraft,
+    ) -> Result<RenewalIntentCreateResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(create_memory_renewal_intent(&mut store, draft))
+            }
+            Self::Postgres(store) => store.create_renewal_intent(draft).await,
+        }
+    }
+
+    pub async fn list_renewal_intents(
+        &self,
+        filters: RenewalIntentFilters,
+    ) -> Result<RenewalIntentsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(RenewalIntentsResponse {
+                    data: filter_renewal_intents(store.renewal_intents.clone(), &filters),
+                })
+            }
+            Self::Postgres(store) => store.list_renewal_intents(filters).await,
         }
     }
 
@@ -3846,6 +4178,44 @@ impl PostgresStore {
         })
     }
 
+    async fn create_opening_grant(&self, record: &OpeningGrantRecord) -> Result<OpeningGrant> {
+        sqlx::query(
+            "INSERT INTO opening_grants
+                (grant_id, tenant_id, project_id, config_snapshot_id, grantee_kind, grantee_id, status, credential_hash, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        )
+        .bind(&record.grant_id)
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_str())
+        .bind(record.config_snapshot_id.as_str())
+        .bind(&record.grantee_kind)
+        .bind(&record.grantee_id)
+        .bind(&record.status)
+        .bind(&record.credential_hash)
+        .bind(Json(record))
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(record.public_view())
+    }
+
+    async fn list_opening_grants(&self) -> Result<OpeningGrantsResponse> {
+        let rows = sqlx::query("SELECT payload FROM opening_grants ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(OpeningGrantsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<OpeningGrantRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        })
+    }
+
     async fn list_codex_auth_accounts(&self) -> Result<CodexAuthAccountsResponse> {
         let rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY codex_account_id")
             .fetch_all(&self.pool)
@@ -4169,8 +4539,10 @@ impl PostgresStore {
                 .await?,
             oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
                 .await?,
+            oauth_sharing_audit_events: load_oauth_sharing_audit_records_from_tx(&mut tx).await?,
             ..MemoryStore::default()
         };
+        let audit_len = memory.oauth_sharing_audit_events.len();
         let result = heartbeat_memory_runtime_lease(&mut memory, runtime_lease_id);
         for account in &memory.codex_auth_accounts {
             persist_codex_auth_account_tx(&mut tx, account).await?;
@@ -4180,6 +4552,9 @@ impl PostgresStore {
         }
         for binding in &memory.oauth_pool_session_bindings {
             upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+        for event in memory.oauth_sharing_audit_events.iter().skip(audit_len) {
+            insert_oauth_sharing_audit_event_tx(&mut tx, event).await?;
         }
         tx.commit().await?;
         Ok(result)
@@ -4196,8 +4571,10 @@ impl PostgresStore {
                 .await?,
             oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
                 .await?,
+            oauth_sharing_audit_events: load_oauth_sharing_audit_records_from_tx(&mut tx).await?,
             ..MemoryStore::default()
         };
+        let audit_len = memory.oauth_sharing_audit_events.len();
         let result = release_memory_runtime_lease(&mut memory, runtime_lease_id);
         for account in &memory.codex_auth_accounts {
             persist_codex_auth_account_tx(&mut tx, account).await?;
@@ -4207,6 +4584,9 @@ impl PostgresStore {
         }
         for binding in &memory.oauth_pool_session_bindings {
             upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+        for event in memory.oauth_sharing_audit_events.iter().skip(audit_len) {
+            insert_oauth_sharing_audit_event_tx(&mut tx, event).await?;
         }
         tx.commit().await?;
         Ok(result)
@@ -4340,7 +4720,58 @@ impl PostgresStore {
         }))
     }
 
+    async fn revoke_opening_grant(
+        &self,
+        grant_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+    ) -> Result<ConcurrencyResult<OpeningGrant>> {
+        let row = sqlx::query("SELECT payload FROM opening_grants WHERE grant_id = $1")
+            .bind(grant_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let mut record = row.get::<Json<OpeningGrantRecord>, _>("payload").0;
+        if record.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let now = now_rfc3339();
+        record.status = "revoked".to_string();
+        record.revoked_at = Some(now.clone());
+        record.revoked_by = Some(revoked_by.to_string());
+        record.updated_at = now;
+        record.version = record.version.saturating_add(1);
+        sqlx::query(
+            "UPDATE opening_grants
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE grant_id = $1",
+        )
+        .bind(&record.grant_id)
+        .bind(&record.status)
+        .bind(Json(&record))
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(ConcurrencyResult::Applied(record.public_view()))
+    }
+
     async fn resolve_api_key(&self, hash: &str) -> Result<Option<ResolvedApiKey>> {
+        let grant_row = sqlx::query(
+            "SELECT payload
+               FROM opening_grants
+              WHERE credential_hash = $1
+              LIMIT 1",
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(row) = grant_row {
+            let grant = row.get::<Json<OpeningGrantRecord>, _>("payload").0;
+            return Ok(Some(grant.to_resolved()));
+        }
+
         let row = sqlx::query(
             "SELECT ak.api_key_id, ak.provider_resource_id, ak.is_active, ak.version, ak.created_at, ak.updated_at,
                     pr.tenant_id, pr.project_id
@@ -4357,6 +4788,7 @@ impl PostgresStore {
         };
         Ok(Some(ResolvedApiKey {
             api_key_id: row.get::<String, _>("api_key_id"),
+            grant_id: None,
             tenant_id: TenantId::parse(row.get::<String, _>("tenant_id"))
                 .context("invalid tenant id for api key")?,
             project_id: row
@@ -4366,6 +4798,15 @@ impl PostgresStore {
                 .ok()
                 .flatten(),
             is_active: row.get::<bool, _>("is_active"),
+            status: if row.get::<bool, _>("is_active") {
+                "active".to_string()
+            } else {
+                "revoked".to_string()
+            },
+            config_snapshot_id: None,
+            route_policy_id: None,
+            scopes: Vec::new(),
+            expires_at: None,
         }))
     }
 
@@ -4624,12 +5065,12 @@ impl PostgresStore {
         let row = sqlx::query(
             r#"
             SELECT
-                COALESCE(SUM(event_count), 0) AS event_count,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(provider_cost_micros), 0) AS provider_cost_micros,
-                COALESCE(SUM(billable_cost_micros), 0) AS billable_cost_micros,
+                COALESCE(SUM(event_count), 0)::BIGINT AS event_count,
+                COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
+                COALESCE(SUM(cached_input_tokens), 0)::BIGINT AS cached_input_tokens,
+                COALESCE(SUM(provider_cost_micros), 0)::BIGINT AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0)::BIGINT AS billable_cost_micros,
                 COALESCE(MIN(currency), 'USD') AS currency
             FROM usage_daily_projections
             WHERE tenant_id = $1
@@ -4711,11 +5152,11 @@ impl PostgresStore {
                 {bucket_select},
                 {provider_select},
                 {model_select},
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(provider_cost_micros), 0) AS provider_cost_micros,
-                COALESCE(SUM(billable_cost_micros), 0) AS billable_cost_micros,
+                COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
+                COALESCE(SUM(cached_input_tokens), 0)::BIGINT AS cached_input_tokens,
+                COALESCE(SUM(provider_cost_micros), 0)::BIGINT AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0)::BIGINT AS billable_cost_micros,
                 COALESCE(MIN(currency), 'USD') AS currency
             FROM usage_daily_projections
             WHERE tenant_id = $1
@@ -4802,7 +5243,10 @@ impl PostgresStore {
                 configured_budget_micros,
                 remaining_budget_micros,
                 threshold_status,
-                last_projected_at::text AS last_projected_at
+                to_char(
+                    last_projected_at AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                ) AS last_projected_at
             FROM balance_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
@@ -5132,6 +5576,92 @@ impl PostgresStore {
         .await?;
 
         Ok(WechatPaymentOrderResponse { data: record })
+    }
+
+    async fn create_renewal_intent(
+        &self,
+        draft: RenewalIntentDraft,
+    ) -> Result<RenewalIntentCreateResult> {
+        let mut tx = self.pool.begin().await?;
+        let order_row = sqlx::query(
+            "SELECT payload FROM wechat_payment_orders WHERE out_trade_no = $1 FOR UPDATE",
+        )
+        .bind(&draft.out_trade_no)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(order_row) = order_row else {
+            tx.commit().await?;
+            return Ok(RenewalIntentCreateResult::OrderNotFound);
+        };
+        let order = order_row
+            .get::<Json<WechatPaymentOrderRecord>, _>("payload")
+            .0;
+
+        let grant_row =
+            sqlx::query("SELECT payload FROM opening_grants WHERE grant_id = $1 FOR UPDATE")
+                .bind(&draft.grant_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some(grant_row) = grant_row else {
+            tx.commit().await?;
+            return Ok(RenewalIntentCreateResult::GrantNotFound);
+        };
+        let mut grant = grant_row.get::<Json<OpeningGrantRecord>, _>("payload").0;
+        if !renewal_order_matches_grant(&order, &grant) {
+            tx.commit().await?;
+            return Ok(RenewalIntentCreateResult::GrantMismatch);
+        }
+
+        let intent = build_renewal_intent(&draft, &order, &mut grant);
+        if intent.status == "renewed" {
+            sqlx::query(
+                "UPDATE opening_grants
+                    SET status = $2, payload = $3, updated_at = $4
+                  WHERE grant_id = $1",
+            )
+            .bind(&grant.grant_id)
+            .bind(&grant.status)
+            .bind(Json(&grant))
+            .bind(&grant.updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "INSERT INTO billing_renewal_intents
+                (renewal_intent_id, out_trade_no, grant_id, tenant_id, project_id, status, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(&intent.renewal_intent_id)
+        .bind(&intent.out_trade_no)
+        .bind(&intent.grant_id)
+        .bind(intent.tenant_id.as_str())
+        .bind(intent.project_id.as_str())
+        .bind(&intent.status)
+        .bind(Json(&intent))
+        .bind(&intent.created_at)
+        .bind(&intent.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(RenewalIntentCreateResult::Created(intent))
+    }
+
+    async fn list_renewal_intents(
+        &self,
+        filters: RenewalIntentFilters,
+    ) -> Result<RenewalIntentsResponse> {
+        let rows =
+            sqlx::query("SELECT payload FROM billing_renewal_intents ORDER BY created_at DESC")
+                .fetch_all(&self.pool)
+                .await?;
+        let intents = rows
+            .into_iter()
+            .map(|row| row.get::<Json<RenewalIntent>, _>("payload").0)
+            .collect::<Vec<_>>();
+        Ok(RenewalIntentsResponse {
+            data: filter_renewal_intents(intents, &filters),
+        })
     }
 
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
@@ -5703,6 +6233,28 @@ fn disable_memory_provider_resource(
     ConcurrencyResult::Applied(disabled)
 }
 
+fn fail_close_new_provider_resource(provider_resource: &mut ProviderResource) {
+    if provider_resource.status != ProviderResourceStatus::Active {
+        return;
+    }
+
+    if matches!(
+        provider_resource.health_state,
+        HealthState::Healthy | HealthState::Degraded
+    ) {
+        provider_resource.health_state = HealthState::Quarantined;
+    }
+
+    if provider_resource.health_state == HealthState::Quarantined {
+        provider_resource
+            .quarantine_reason
+            .get_or_insert_with(|| PROVIDER_RESOURCE_INTAKE_PENDING_PROBE.to_string());
+        provider_resource
+            .health_message
+            .get_or_insert_with(|| PROVIDER_RESOURCE_INTAKE_PENDING_MESSAGE.to_string());
+    }
+}
+
 fn update_memory_route_policy(
     store: &mut MemoryStore,
     route_policy: &RoutePolicy,
@@ -5814,6 +6366,38 @@ fn revoke_memory_api_key(
         store.api_keys[index] = updated.clone();
         ConcurrencyResult::Applied(updated.public_view())
     }
+}
+
+fn revoke_memory_opening_grant(
+    store: &mut MemoryStore,
+    grant_id: &str,
+    expected_version: u64,
+    revoked_by: &str,
+) -> ConcurrencyResult<OpeningGrant> {
+    let index = store
+        .opening_grants
+        .iter()
+        .position(|item| item.grant_id == grant_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .opening_grants
+        .get(index)
+        .expect("indexed opening grant should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+
+    let now = now_rfc3339();
+    let mut updated = current.clone();
+    updated.status = "revoked".to_string();
+    updated.revoked_at = Some(now.clone());
+    updated.revoked_by = Some(revoked_by.to_string());
+    updated.updated_at = now;
+    updated.version = expected_version.saturating_add(1);
+    store.opening_grants[index] = updated.clone();
+    ConcurrencyResult::Applied(updated.public_view())
 }
 
 fn normalize_oauth_sharing_lease(record: &mut OAuthSharingLeaseRecord) {
@@ -6043,14 +6627,47 @@ fn oauth_audit_event_matches(
             .is_none_or(|value| event.account_id.as_deref() == Some(value))
 }
 
+fn runtime_lease_audit_metadata(runtime_lease: &OAuthPoolRuntimeLeaseRecord) -> serde_json::Value {
+    serde_json::json!({
+        "runtime_lease_id": runtime_lease.runtime_lease_id,
+        "status": runtime_lease.status,
+        "expires_at": runtime_lease.expires_at,
+        "heartbeat_at": runtime_lease.heartbeat_at,
+        "released_at": runtime_lease.released_at,
+        "fencing_token": runtime_lease.fencing_token,
+    })
+}
+
+fn push_runtime_lease_audit_event(
+    store: &mut MemoryStore,
+    event_type: &str,
+    runtime_lease: &OAuthPoolRuntimeLeaseRecord,
+    reason: &str,
+) {
+    push_oauth_audit_event(
+        store,
+        event_type,
+        runtime_lease.provider.as_str(),
+        runtime_lease.lease_id.as_deref(),
+        runtime_lease.carpool_id.as_deref(),
+        runtime_lease.workspace_id.as_deref(),
+        Some(runtime_lease.account_id.as_str()),
+        runtime_lease.pool_id.as_deref(),
+        reason,
+        runtime_lease_audit_metadata(runtime_lease),
+    );
+}
+
 fn cleanup_memory_runtime_leases(store: &mut MemoryStore) {
     let now = now_rfc3339();
     let mut expired_account_ids = Vec::new();
+    let mut expired_runtime_leases = Vec::new();
     for runtime_lease in &mut store.oauth_pool_runtime_leases {
         if runtime_lease.status == "active" && timestamp_is_expired(&runtime_lease.expires_at) {
             runtime_lease.status = "expired".to_string();
             runtime_lease.released_at = Some(now.clone());
             expired_account_ids.push(runtime_lease.account_id.clone());
+            expired_runtime_leases.push(runtime_lease.clone());
         }
     }
 
@@ -6064,6 +6681,15 @@ fn cleanup_memory_runtime_leases(store: &mut MemoryStore) {
             account.updated_at = now.clone();
             account.version = account.version.saturating_add(1);
         }
+    }
+
+    for runtime_lease in expired_runtime_leases {
+        push_runtime_lease_audit_event(
+            store,
+            "runtime_lease_expire",
+            &runtime_lease,
+            "runtime lease expired",
+        );
     }
 
     for binding in &mut store.oauth_pool_session_bindings {
@@ -6753,7 +7379,14 @@ fn heartbeat_memory_runtime_lease(
         return Some(runtime_lease.clone());
     }
     runtime_lease.heartbeat_at = now;
-    Some(runtime_lease.clone())
+    let runtime_lease = runtime_lease.clone();
+    push_runtime_lease_audit_event(
+        store,
+        "runtime_lease_heartbeat",
+        &runtime_lease,
+        "runtime lease heartbeat recorded",
+    );
+    Some(runtime_lease)
 }
 
 fn release_memory_runtime_lease(
@@ -6779,6 +7412,14 @@ fn release_memory_runtime_lease(
             account.updated_at = now.clone();
             account.version = account.version.saturating_add(1);
         }
+        let runtime_lease = runtime_lease.clone();
+        push_runtime_lease_audit_event(
+            store,
+            "runtime_lease_release",
+            &runtime_lease,
+            "runtime lease released",
+        );
+        return Some(runtime_lease);
     }
     Some(runtime_lease.clone())
 }
@@ -6970,6 +7611,15 @@ fn api_key_prefix(api_key: &str) -> String {
         api_key.to_string()
     } else {
         format!("{}...", &api_key[..6])
+    }
+}
+
+fn credential_last_four(credential: &str) -> String {
+    let len = credential.len();
+    if len <= 4 {
+        credential.to_string()
+    } else {
+        credential[len - 4..].to_string()
     }
 }
 
@@ -7253,6 +7903,139 @@ fn filter_billing_export_jobs(
     jobs
 }
 
+fn create_memory_renewal_intent(
+    store: &mut MemoryStore,
+    draft: RenewalIntentDraft,
+) -> RenewalIntentCreateResult {
+    let Some(order) = store
+        .wechat_payment_orders
+        .get(&draft.out_trade_no)
+        .cloned()
+    else {
+        return RenewalIntentCreateResult::OrderNotFound;
+    };
+    let Some(grant) = store
+        .opening_grants
+        .iter_mut()
+        .find(|grant| grant.grant_id == draft.grant_id)
+    else {
+        return RenewalIntentCreateResult::GrantNotFound;
+    };
+    if !renewal_order_matches_grant(&order, grant) {
+        return RenewalIntentCreateResult::GrantMismatch;
+    }
+
+    let intent = build_renewal_intent(&draft, &order, grant);
+    store.renewal_intents.push(intent.clone());
+    RenewalIntentCreateResult::Created(intent)
+}
+
+fn renewal_order_matches_grant(
+    order: &WechatPaymentOrderRecord,
+    grant: &OpeningGrantRecord,
+) -> bool {
+    order.tenant_id == grant.tenant_id.as_str()
+        && order.project_id.as_deref() == Some(grant.project_id.as_str())
+}
+
+fn build_renewal_intent(
+    draft: &RenewalIntentDraft,
+    order: &WechatPaymentOrderRecord,
+    grant: &mut OpeningGrantRecord,
+) -> RenewalIntent {
+    let now = now_rfc3339();
+    let previous_grant_status = grant.effective_status();
+    let previous_expires_at = grant.expires_at.clone();
+    let requested_reason = draft
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let (status, reason_code, reason, applied_at) = if order.status != "paid" {
+        (
+            "renewal_blocked",
+            "payment_not_paid",
+            "WeChat Pay order is not paid; future grant state was not restored.",
+            None,
+        )
+    } else if !matches!(previous_grant_status.as_str(), "active" | "expired") {
+        (
+            "manual_review",
+            "node6_state_missing_or_unrecoverable",
+            "Opening grant state is not automatically recoverable; manual review is required.",
+            None,
+        )
+    } else if !timestamp_is_future(&draft.renew_expires_at) {
+        (
+            "renewal_blocked",
+            "renew_expires_at_not_future",
+            "Renewal expiry is not in the future; future grant state was not restored.",
+            None,
+        )
+    } else {
+        grant.status = "active".to_string();
+        grant.expires_at = draft.renew_expires_at.clone();
+        grant.updated_at = now.clone();
+        grant.version = grant.version.saturating_add(1);
+        (
+            "renewed",
+            "payment_paid_grant_recovered",
+            "Paid order matched the opening grant; only future grant state was restored.",
+            Some(now.clone()),
+        )
+    };
+
+    RenewalIntent {
+        renewal_intent_id: draft.renewal_intent_id.clone(),
+        out_trade_no: draft.out_trade_no.clone(),
+        grant_id: draft.grant_id.clone(),
+        tenant_id: grant.tenant_id.clone(),
+        project_id: grant.project_id.clone(),
+        payment_status: order.status.clone(),
+        previous_grant_status,
+        previous_expires_at,
+        renew_expires_at: draft.renew_expires_at.clone(),
+        status: status.to_string(),
+        reason_code: reason_code.to_string(),
+        reason: requested_reason.unwrap_or(reason).to_string(),
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        applied_at,
+    }
+}
+
+fn filter_renewal_intents(
+    mut intents: Vec<RenewalIntent>,
+    filters: &RenewalIntentFilters,
+) -> Vec<RenewalIntent> {
+    intents.retain(|intent| {
+        if let Some(tenant_id) = filters.tenant_id.as_deref()
+            && intent.tenant_id.as_str() != tenant_id
+        {
+            return false;
+        }
+        if let Some(project_id) = filters.project_id.as_deref()
+            && intent.project_id.as_str() != project_id
+        {
+            return false;
+        }
+        if let Some(grant_id) = filters.grant_id.as_deref()
+            && intent.grant_id != grant_id
+        {
+            return false;
+        }
+        if let Some(out_trade_no) = filters.out_trade_no.as_deref()
+            && intent.out_trade_no != out_trade_no
+        {
+            return false;
+        }
+        true
+    });
+    intents.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    intents
+}
+
 async fn render_billing_export_csv(
     store: &PostgresStore,
     tenant_id: Option<&str>,
@@ -7329,6 +8112,281 @@ async fn maybe_complete_postgres_export_job(
             .map(ProjectId::parse)
             .transpose()?,
     })
+}
+
+fn sale_ready_route_simulation(
+    snapshot: &ConfigSnapshot,
+    route_policy: Option<&RoutePolicy>,
+    provider_resources: &[ProviderResource],
+) -> Option<RouteSimulationResponse> {
+    let route_policy = route_policy?;
+    let protocol_family = parse_protocol_family(&route_policy.protocol_family)?;
+    let region = route_policy
+        .preferred_regions
+        .first()
+        .cloned()
+        .or_else(|| {
+            provider_resources
+                .first()
+                .map(|resource| resource.region.clone())
+        })
+        .unwrap_or_else(|| "global".to_string());
+    let request = RouteSimulationRequest {
+        tenant_id: snapshot.tenant_id.clone(),
+        project_id: snapshot.project_id.clone(),
+        credential_scope: core_domain::CredentialId::parse("cred_sale_ready_diagnostics").unwrap(),
+        protocol_family,
+        model_alias: route_policy.model_alias.clone(),
+        required_capabilities: route_policy.required_capabilities.clone(),
+        region,
+        expected_prompt_tokens: 1_000,
+        expected_max_output_tokens: 1_000,
+        traffic_class: "sale_ready_preview".to_string(),
+    };
+
+    build_route_simulation_response(
+        provider_resources,
+        &[route_policy.clone()],
+        snapshot,
+        &request,
+    )
+    .ok()
+}
+
+fn sale_ready_pricing_request(
+    route_policy: Option<&RoutePolicy>,
+    route_simulation: Option<&RouteSimulationResponse>,
+    provider_resources: &[ProviderResource],
+) -> Option<PricingSimulationRequest> {
+    let route_policy = route_policy?;
+    let selected_resource_id =
+        route_simulation.and_then(|simulation| simulation.selected_target.as_ref());
+    let provider_resource = selected_resource_id
+        .and_then(|provider_resource_id| {
+            provider_resources
+                .iter()
+                .find(|resource| resource.provider_resource_id == *provider_resource_id)
+        })
+        .or_else(|| provider_resources.first())?;
+
+    Some(PricingSimulationRequest {
+        provider_id: provider_resource.provider_id.clone(),
+        model_alias: route_policy.model_alias.clone(),
+        usage: UsageMetrics {
+            input_tokens: 1_000,
+            output_tokens: 1_000,
+            cached_input_tokens: 0,
+        },
+        region: Some(provider_resource.region.clone()),
+        image_generation_units: None,
+        audio_seconds: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_sale_ready_package_response(
+    snapshot: ConfigSnapshot,
+    route_policy: Option<RoutePolicy>,
+    provider_resources: Vec<ProviderResource>,
+    missing_provider_resource_ids: Vec<String>,
+    active_snapshot_id: Option<ConfigSnapshotId>,
+    route_simulation: Option<RouteSimulationResponse>,
+    pricing: Option<PricingSimulationResponse>,
+    budget: Option<BalanceProjection>,
+) -> SaleReadyPackageResponse {
+    let carrier_check = match snapshot.status {
+        ConfigSnapshotStatus::Draft | ConfigSnapshotStatus::Active => sale_ready_check(
+            "carrier",
+            "pass",
+            "carrier_confirmed",
+            "ConfigSnapshot is the sale-ready package carrier.",
+        ),
+        ConfigSnapshotStatus::Superseded => sale_ready_check(
+            "carrier",
+            "blocked",
+            "snapshot_superseded",
+            "Superseded config snapshots cannot be sold.",
+        ),
+    };
+    let route_check = if route_policy.as_ref().is_some_and(|policy| {
+        parse_protocol_family(&policy.protocol_family).is_some()
+            && policy.required_capabilities.iter().all(|capability| {
+                route_capability_supported_by_provider_capabilities(capability.as_str())
+            })
+    }) {
+        sale_ready_check(
+            "route",
+            "pass",
+            "route_policy_valid",
+            "Route policy protocol and capabilities are supported.",
+        )
+    } else {
+        sale_ready_check(
+            "route",
+            "blocked",
+            "blocked_route_policy",
+            "Route policy is missing or contains unsupported protocol/capability requirements.",
+        )
+    };
+    let resource_check = if snapshot.provider_resource_ids.is_empty() {
+        sale_ready_check(
+            "resource",
+            "blocked",
+            "blocked_no_resource",
+            "ConfigSnapshot does not reference any provider resources.",
+        )
+    } else if !missing_provider_resource_ids.is_empty() {
+        sale_ready_check(
+            "resource",
+            "blocked",
+            "blocked_missing_resource",
+            format!(
+                "Missing provider resources: {}.",
+                missing_provider_resource_ids.join(", ")
+            ),
+        )
+    } else if route_simulation
+        .as_ref()
+        .is_some_and(|simulation| simulation.admission_result == AdmissionResult::Admitted)
+    {
+        sale_ready_check(
+            "resource",
+            "pass",
+            "resource_set_routeable",
+            "Provider resource set produces at least one route candidate.",
+        )
+    } else {
+        sale_ready_check(
+            "resource",
+            "blocked",
+            "blocked_no_candidate",
+            "Provider resource set cannot produce a route candidate.",
+        )
+    };
+    let price_check = if pricing
+        .as_ref()
+        .is_some_and(|pricing| !pricing.line_items.is_empty())
+    {
+        sale_ready_check(
+            "price",
+            "pass",
+            "pricing_available",
+            "Pricing simulation produced a billable quote.",
+        )
+    } else {
+        sale_ready_check(
+            "price",
+            "blocked",
+            "blocked_no_price",
+            "Pricing simulation could not produce a billable quote.",
+        )
+    };
+    let budget_check = match budget.as_ref() {
+        Some(budget) if budget.threshold_status != "exceeded" => sale_ready_check(
+            "budget",
+            "pass",
+            "budget_available",
+            "Balance projection can explain budget and remaining threshold.",
+        ),
+        Some(_) => sale_ready_check(
+            "budget",
+            "blocked",
+            "blocked_budget",
+            "Balance projection reports an exceeded threshold.",
+        ),
+        None => sale_ready_check(
+            "budget",
+            "blocked",
+            "blocked_budget_unknown",
+            "Balance projection is not available.",
+        ),
+    };
+    let gateway_check = if active_snapshot_id.as_ref() == Some(&snapshot.config_snapshot_id) {
+        sale_ready_check(
+            "gateway",
+            "pass",
+            "gateway_active_config",
+            "Gateway active config pointer references this snapshot.",
+        )
+    } else {
+        sale_ready_check(
+            "gateway",
+            "blocked",
+            "blocked_gateway_config",
+            "Gateway active config pointer does not reference this snapshot.",
+        )
+    };
+    let boundary_check = sale_ready_check(
+        "boundary",
+        "pass",
+        "customer_key_deferred",
+        "Node 2 does not create customer API keys; Node 3 handles opening.",
+    );
+    let checks = vec![
+        carrier_check,
+        route_check,
+        resource_check,
+        price_check,
+        budget_check,
+        gateway_check,
+        boundary_check,
+    ];
+    let blocking_check = checks
+        .iter()
+        .find(|check| check.status == "blocked" && check.name != "boundary");
+    let readiness = match blocking_check {
+        None => SaleReadiness {
+            status: "sale_ready".to_string(),
+            reason_code: "sale_ready".to_string(),
+            reason: "ConfigSnapshot is ready to hand off to customer opening.".to_string(),
+            checks: checks.clone(),
+        },
+        Some(check) => SaleReadiness {
+            status: match snapshot.status {
+                ConfigSnapshotStatus::Draft => "draft_blocked",
+                ConfigSnapshotStatus::Active | ConfigSnapshotStatus::Superseded => "suspended",
+            }
+            .to_string(),
+            reason_code: check.reason_code.clone(),
+            reason: check.reason.clone(),
+            checks: checks.clone(),
+        },
+    };
+    let handoff = SaleReadyHandoff {
+        tenant_id: snapshot.tenant_id.clone(),
+        project_id: snapshot.project_id.clone(),
+        config_snapshot_id: snapshot.config_snapshot_id.clone(),
+        route_policy_id: snapshot.route_policy_id.clone(),
+        budget_policy_id: snapshot.budget_policy_id.clone(),
+        provider_resource_ids: snapshot.provider_resource_ids.clone(),
+        readiness_status: readiness.status.clone(),
+    };
+
+    SaleReadyPackageResponse {
+        config_snapshot: snapshot,
+        route_policy,
+        provider_resources,
+        route_simulation,
+        pricing,
+        budget,
+        readiness,
+        handoff,
+        creates_customer_api_key: false,
+    }
+}
+
+fn sale_ready_check(
+    name: &str,
+    status: &str,
+    reason_code: &str,
+    reason: impl Into<String>,
+) -> SaleReadyCheck {
+    SaleReadyCheck {
+        name: name.to_string(),
+        status: status.to_string(),
+        reason_code: reason_code.to_string(),
+        reason: reason.into(),
+    }
 }
 
 fn build_route_simulation_response(
@@ -7421,6 +8479,19 @@ const fn protocol_family_slug(protocol_family: &ProtocolFamily) -> &'static str 
         ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
         ProtocolFamily::AnthropicMessages => "anthropic_messages",
         ProtocolFamily::GeminiGenerateContent => "gemini_generate_content",
+    }
+}
+
+fn parse_protocol_family(protocol_family: &str) -> Option<ProtocolFamily> {
+    match protocol_family {
+        "openai_chat" => Some(ProtocolFamily::OpenAiChat),
+        "openai_responses" => Some(ProtocolFamily::OpenAiResponses),
+        "openai_images" => Some(ProtocolFamily::OpenAiImages),
+        "mcp_streamable_http" => Some(ProtocolFamily::McpStreamableHttp),
+        "realtime_webrtc" => Some(ProtocolFamily::RealtimeWebRtc),
+        "anthropic_messages" => Some(ProtocolFamily::AnthropicMessages),
+        "gemini_generate_content" => Some(ProtocolFamily::GeminiGenerateContent),
+        _ => None,
     }
 }
 
@@ -7679,65 +8750,73 @@ fn build_route_diagnostics_response(
                     .any(|id| id == &provider_resource.provider_resource_id)
             });
 
-            let (decision, reason_code, reason, recent_receipt_reason) = if recent_receipt
-                .and_then(|receipt| receipt.selected_target.as_ref())
-                .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
-            {
-                (
-                    RouteDiagnosticDecision::Selected,
-                    "selected_recent_receipt".to_string(),
-                    "Selected by the most recent route receipt.".to_string(),
-                    None,
-                )
-            } else if let Some(excluded) = recent_exclusion {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    excluded.reason_code.clone(),
-                    excluded.reason.clone(),
-                    Some(excluded.reason.clone()),
-                )
-            } else if !supports_protocol_family {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    "protocol_family_unsupported".to_string(),
-                    format!(
-                        "Provider does not advertise protocol family `{}`.",
-                        route_policy.protocol_family
-                    ),
-                    None,
-                )
-            } else if !capability_gaps.is_empty() {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    format!("capability_gap_{}", capability_gaps[0]),
-                    format!(
-                        "Missing required capabilities: {}.",
-                        capability_gaps.join(", ")
-                    ),
-                    None,
-                )
-            } else if is_health_blocked(provider_resource.health_state) {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    format!(
-                        "health_{}",
-                        health_state_slug(provider_resource.health_state)
-                    ),
-                    provider_resource
-                        .health_message
-                        .clone()
-                        .unwrap_or_else(|| "Provider health state blocks routing.".to_string()),
-                    None,
-                )
-            } else {
-                (
-                    RouteDiagnosticDecision::Eligible,
-                    "eligible".to_string(),
-                    "Provider satisfies current protocol, capability, and health requirements."
-                        .to_string(),
-                    None,
-                )
-            };
+            let (decision, reason_code, reason, recent_receipt_reason) =
+                if provider_resource.status != ProviderResourceStatus::Active {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        "provider_inactive".to_string(),
+                        format!("Provider status is {:?}.", provider_resource.status),
+                        None,
+                    )
+                } else if !supports_protocol_family {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        "protocol_family_unsupported".to_string(),
+                        format!(
+                            "Provider does not advertise protocol family `{}`.",
+                            route_policy.protocol_family
+                        ),
+                        None,
+                    )
+                } else if !capability_gaps.is_empty() {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        format!("capability_gap_{}", capability_gaps[0]),
+                        format!(
+                            "Missing required capabilities: {}.",
+                            capability_gaps.join(", ")
+                        ),
+                        None,
+                    )
+                } else if is_health_blocked(provider_resource.health_state) {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        format!(
+                            "health_{}",
+                            health_state_slug(provider_resource.health_state)
+                        ),
+                        provider_resource
+                            .health_message
+                            .clone()
+                            .unwrap_or_else(|| "Provider health state blocks routing.".to_string()),
+                        None,
+                    )
+                } else if recent_receipt
+                    .and_then(|receipt| receipt.selected_target.as_ref())
+                    .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
+                {
+                    (
+                        RouteDiagnosticDecision::Selected,
+                        "selected_recent_receipt".to_string(),
+                        "Selected by the most recent route receipt.".to_string(),
+                        None,
+                    )
+                } else if let Some(excluded) = recent_exclusion {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        excluded.reason_code.clone(),
+                        excluded.reason.clone(),
+                        Some(excluded.reason.clone()),
+                    )
+                } else {
+                    (
+                        RouteDiagnosticDecision::Eligible,
+                        "eligible".to_string(),
+                        "Provider satisfies current protocol, capability, and health requirements."
+                            .to_string(),
+                        None,
+                    )
+                };
 
             RouteDiagnosticTarget {
                 provider_resource,
@@ -8051,8 +9130,7 @@ fn link(
     can_unlink: bool,
 ) -> AuthProviderLink {
     AuthProviderLink {
-        link_id: core_domain::AuthProviderLinkId::parse(format!("authlink_{provider_subject}"))
-            .unwrap(),
+        link_id: auth_provider_link_id(provider, provider_subject),
         provider,
         provider_subject: provider_subject.to_string(),
         email: email.map(std::string::ToString::to_string),
@@ -8062,14 +9140,36 @@ fn link(
     }
 }
 
+fn auth_provider_link_id(
+    provider: AuthProvider,
+    provider_subject: &str,
+) -> core_domain::AuthProviderLinkId {
+    let digest = Sha256::digest(format!(
+        "{}:{provider_subject}",
+        auth_provider_slug(provider)
+    ));
+    let suffix = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+
+    core_domain::AuthProviderLinkId::parse(format!(
+        "authlink_{}_{suffix}",
+        auth_provider_slug(provider)
+    ))
+    .unwrap()
+}
+
 #[cfg(test)]
 mod parity_tests;
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ProjectId, ProviderResource,
-        ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptFilters,
+        AdmissionResult, ConcurrencyResult, ConfigSnapshot, ConfigSnapshotId, HealthState,
+        ProjectId, ProviderResource, ProviderResourceId, ProviderResourceStatus,
+        RouteDiagnosticDecision, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptFilters,
         StoreMode, TenantId,
     };
     use core_domain::{ExcludedTarget, RouteReceiptId, ScoreBreakdown};
@@ -8159,6 +9259,65 @@ mod tests {
         }
     }
 
+    #[test]
+    fn auth_provider_link_ids_match_shared_schema_character_set() {
+        let link = super::link(
+            core_domain::AuthProvider::Email,
+            "ops@huge-router.dev",
+            Some("ops@huge-router.dev"),
+            false,
+        );
+
+        assert!(link.link_id.as_str().starts_with("authlink_email_"));
+        assert!(
+            link.link_id
+                .as_str()
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric()
+                    || character == '_'
+                    || character == '-')
+        );
+    }
+
+    #[test]
+    fn cleanup_runtime_leases_records_expiration_audit() {
+        let mut store = super::MemoryStore {
+            oauth_pool_runtime_leases: vec![super::OAuthPoolRuntimeLeaseRecord {
+                runtime_lease_id: "opoollease_expired".to_string(),
+                account_id: "codexacct_expired".to_string(),
+                provider: "codex".to_string(),
+                pool_id: Some("prvrsrc_codex_pool".to_string()),
+                lease_id: Some("lease_codex_share".to_string()),
+                carpool_id: None,
+                workspace_id: Some("tenant_acme".to_string()),
+                session_key: Some("session-expired".to_string()),
+                holder_id: Some("gateway-a".to_string()),
+                operation_id: Some("op-expired".to_string()),
+                status: "active".to_string(),
+                expires_at: "2000-01-01T00:00:00Z".to_string(),
+                heartbeat_at: "2000-01-01T00:00:00Z".to_string(),
+                released_at: None,
+                fencing_token: 7,
+                created_at: "2000-01-01T00:00:00Z".to_string(),
+            }],
+            ..super::MemoryStore::default()
+        };
+
+        super::cleanup_memory_runtime_leases(&mut store);
+
+        assert_eq!(store.oauth_pool_runtime_leases[0].status, "expired");
+        let event = store
+            .oauth_sharing_audit_events
+            .iter()
+            .find(|event| event.event_type == "runtime_lease_expire")
+            .expect("runtime lease expiration should be audited");
+        assert_eq!(
+            event.metadata["runtime_lease_id"].as_str(),
+            Some("opoollease_expired")
+        );
+        assert_eq!(event.lease_id.as_deref(), Some("lease_codex_share"));
+    }
+
     #[tokio::test]
     async fn oauth_login_flow_preserves_redirect_target() {
         let store = StoreMode::memory();
@@ -8209,6 +9368,68 @@ mod tests {
             ConcurrencyResult::Applied(resource) => assert_eq!(resource.version, 2),
             _ => panic!("expected applied update"),
         }
+    }
+
+    #[tokio::test]
+    async fn memory_store_fail_closes_new_provider_resources_until_probe() {
+        let store = StoreMode::memory();
+        let mut resource = sample_provider_resource();
+        resource.provider_resource_id =
+            ProviderResourceId::parse("prvrsrc_cp_store_intake").unwrap();
+        resource.health_state = HealthState::Healthy;
+        resource.health_message = None;
+        resource.quarantine_reason = None;
+
+        let created = store.create_provider_resource(resource).await.unwrap();
+
+        assert_eq!(created.status, ProviderResourceStatus::Active);
+        assert_eq!(created.health_state, HealthState::Quarantined);
+        assert_eq!(
+            created.quarantine_reason.as_deref(),
+            Some(super::PROVIDER_RESOURCE_INTAKE_PENDING_PROBE)
+        );
+        assert_eq!(
+            created.health_message.as_deref(),
+            Some(super::PROVIDER_RESOURCE_INTAKE_PENDING_MESSAGE)
+        );
+    }
+
+    #[test]
+    fn route_diagnostics_excludes_non_active_provider_status() {
+        let mut resource = sample_provider_resource();
+        resource.status = ProviderResourceStatus::Disabled;
+        resource.health_state = HealthState::Healthy;
+        let provider_resource_id = resource.provider_resource_id.clone();
+        let route_policy = sample_route_policy();
+        let snapshot = ConfigSnapshot {
+            config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_cp_store").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            revision: 1,
+            budget_policy_id: core_domain::BudgetPolicyId::parse("budgetpol_default").unwrap(),
+            route_policy_id: route_policy.route_policy_id.clone(),
+            provider_resource_ids: vec![provider_resource_id],
+            status: core_domain::ConfigSnapshotStatus::Active,
+            activated_at: Some("2026-04-22T00:00:00Z".to_string()),
+        };
+
+        let diagnostics = super::build_route_diagnostics_response(
+            &[resource],
+            &[route_policy],
+            &[snapshot],
+            &[],
+            "routepol_cp_store",
+            Some("cfgsnap_cp_store"),
+        )
+        .expect("route diagnostics");
+
+        assert_eq!(diagnostics.targets.len(), 1);
+        assert!(matches!(
+            diagnostics.targets[0].decision,
+            RouteDiagnosticDecision::Excluded
+        ));
+        assert_eq!(diagnostics.targets[0].reason_code, "provider_inactive");
+        assert!(diagnostics.targets[0].reason.contains("Disabled"));
     }
 
     #[tokio::test]

@@ -433,20 +433,7 @@ async fn returns_validation_failure_for_bad_request_shape() {
 #[tokio::test]
 async fn rejects_request_when_budget_is_exceeded_before_upstream_call() {
     let adapter = Arc::new(MockAdapter {
-        outcomes: BTreeMap::from([(
-            "prvrsrc_openai_primary".to_string(),
-            Ok(ProviderResponse {
-                response_id: Some("resp_should_not_happen".to_string()),
-                model: "gpt-4.1-mini".to_string(),
-                output_text: "unexpected".to_string(),
-                finish_reason: "stop".to_string(),
-                usage: ProviderUsage {
-                    input_tokens: 1,
-                    output_tokens: 1,
-                    cached_input_tokens: 0,
-                },
-            }),
-        )]),
+        outcomes: BTreeMap::new(),
     });
     let mut registry = ProviderAdapterRegistry::new();
     registry.register(adapter).unwrap();

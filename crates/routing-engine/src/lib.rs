@@ -366,6 +366,42 @@ mod tests {
     }
 
     #[test]
+    fn excludes_non_active_target_before_ranking() {
+        let mut target = target("prvrsrc_disabled", "us-east-1", HealthState::Healthy);
+        target.resource.status = ProviderResourceStatus::Disabled;
+        let config = config(vec![target]);
+        let request = RoutingRequest {
+            protocol_family: "openai_chat".to_string(),
+            model_alias: "reasoning-fast".to_string(),
+        };
+
+        let route = evaluate_route(&config, &request);
+
+        assert_eq!(route.admission_result, AdmissionResult::RejectedNoCandidate);
+        assert!(route.ranked_targets.is_empty());
+        assert_eq!(route.excluded_targets[0].reason_code, "provider_inactive");
+    }
+
+    #[test]
+    fn excludes_health_blocked_target_before_ranking() {
+        let config = config(vec![target(
+            "prvrsrc_quarantined",
+            "us-east-1",
+            HealthState::Quarantined,
+        )]);
+        let request = RoutingRequest {
+            protocol_family: "openai_chat".to_string(),
+            model_alias: "reasoning-fast".to_string(),
+        };
+
+        let route = evaluate_route(&config, &request);
+
+        assert_eq!(route.admission_result, AdmissionResult::RejectedNoCandidate);
+        assert!(route.ranked_targets.is_empty());
+        assert_eq!(route.excluded_targets[0].reason_code, "health_quarantined");
+    }
+
+    #[test]
     fn ranks_preferred_region_first() {
         let config = config(vec![
             target("prvrsrc_west", "us-west-2", HealthState::Healthy),

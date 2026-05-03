@@ -190,6 +190,18 @@ CREATE TABLE IF NOT EXISTS wechat_payment_orders (
     payload JSONB NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS billing_renewal_intents (
+    renewal_intent_id TEXT PRIMARY KEY,
+    out_trade_no TEXT NOT NULL,
+    grant_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
     catalog_id TEXT NOT NULL,
     catalog_version INTEGER NOT NULL,
@@ -307,6 +319,7 @@ CREATE TABLE IF NOT EXISTS oauth_sharing_audit_events (
 CREATE TABLE IF NOT EXISTS ledger_entries (
     ledger_entry_id TEXT PRIMARY KEY,
     usage_event_id TEXT NOT NULL,
+    grant_id TEXT NULL,
     usage_phase TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
@@ -325,6 +338,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 );
 
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_cost_micros BIGINT;
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS grant_id TEXT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS billable_cost_micros BIGINT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_id TEXT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS model_alias TEXT;

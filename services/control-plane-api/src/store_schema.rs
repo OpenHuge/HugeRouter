@@ -4,6 +4,7 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "provider_resources",
     "route_policies",
     "api_keys",
+    "opening_grants",
     "config_snapshots",
     "active_config_pointers",
     "users",
@@ -20,6 +21,7 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "route_receipt_diagnostics",
     "billing_export_jobs",
     "wechat_payment_orders",
+    "billing_renewal_intents",
     "pricing_catalog_entries",
     "codex_auth_accounts",
     "oauth_sharing_leases",
@@ -65,6 +67,19 @@ pub const MIGRATIONS: &[&str] = &[
         hash TEXT NOT NULL UNIQUE,
         is_active BOOLEAN NOT NULL,
         version BIGINT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS opening_grants (
+        grant_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        config_snapshot_id TEXT NOT NULL,
+        grantee_kind TEXT NOT NULL,
+        grantee_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        credential_hash TEXT NOT NULL UNIQUE,
+        payload JSONB NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )",
@@ -196,6 +211,17 @@ pub const MIGRATIONS: &[&str] = &[
         expires_at TEXT NOT NULL,
         paid_at TEXT NULL,
         payload JSONB NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS billing_renewal_intents (
+        renewal_intent_id TEXT PRIMARY KEY,
+        out_trade_no TEXT NOT NULL,
+        grant_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
     )",
     r"CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
         catalog_id TEXT NOT NULL,

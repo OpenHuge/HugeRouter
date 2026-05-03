@@ -110,6 +110,15 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         schema_artifact::<BillingExportJobsResponse>(
             "schemas/jsonschema/billing-export-jobs-response.v1.schema.json",
         )?,
+        schema_artifact::<CreateRenewalIntentRequest>(
+            "schemas/jsonschema/renewal-intent-request.v1.schema.json",
+        )?,
+        schema_artifact::<RenewalIntentResponse>(
+            "schemas/jsonschema/renewal-intent-response.v1.schema.json",
+        )?,
+        schema_artifact::<RenewalIntentsResponse>(
+            "schemas/jsonschema/renewal-intents-response.v1.schema.json",
+        )?,
         schema_artifact::<RouteSimulationRequest>(
             "schemas/jsonschema/route-simulation-request.v1.schema.json",
         )?,
@@ -180,6 +189,11 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let billing_export_job = sample_billing_export_job_response();
     let billing_export_jobs = BillingExportJobsResponse {
         data: vec![billing_export_job.data.clone()],
+    };
+    let renewal_intent_request = sample_create_renewal_intent_request();
+    let renewal_intent_response = sample_renewal_intent_response();
+    let renewal_intents_response = RenewalIntentsResponse {
+        data: vec![renewal_intent_response.data.clone()],
     };
     let usage_message = sample_usage_event_recorded_message();
     let snapshot_message = sample_config_snapshot_activated_message();
@@ -309,6 +323,18 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
             &billing_export_jobs,
         )?,
         example_artifact(
+            "schemas/examples/control-plane/renewal-intent.request.json",
+            &renewal_intent_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/renewal-intent.response.json",
+            &renewal_intent_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/renewal-intents.response.json",
+            &renewal_intents_response,
+        )?,
+        example_artifact(
             "schemas/examples/events/usage-event-recorded.message.json",
             &usage_message,
         )?,
@@ -358,6 +384,8 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'createBillingExport', method: 'POST', path: '/v1/billing/exports' }},\n\
   {{ id: 'listBillingExports', method: 'GET', path: '/v1/billing/exports' }},\n\
   {{ id: 'getBillingExport', method: 'GET', path: '/v1/billing/exports/{{export_job_id}}' }},\n\
+  {{ id: 'createRenewalIntent', method: 'POST', path: '/v1/billing/renewal-intents' }},\n\
+  {{ id: 'listRenewalIntents', method: 'GET', path: '/v1/billing/renewal-intents' }},\n\
   {{ id: 'simulateRoute', method: 'POST', path: '/v1/route-simulations' }},\n\
   {{ id: 'listRouteReceipts', method: 'GET', path: '/v1/route-receipts' }},\n\
   {{ id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{{route_receipt_id}}' }},\n\

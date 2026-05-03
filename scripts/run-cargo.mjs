@@ -61,13 +61,18 @@ function runOnWindows() {
 
   const cargoCommand = ['cargo', ...cargoArgs].join(' ')
   const command = `call "${devCmd}" -arch=x64 -host_arch=x64 && ${cargoCommand}`
+  const cargoPathEntries = [
+    process.env.HUGEROUTER_RUST_BIN,
+    process.env.CARGO_HOME ? path.join(process.env.CARGO_HOME, 'bin') : null,
+    path.join(process.env.USERPROFILE ?? '', '.cargo', 'bin')
+  ].filter((entry) => entry && existsSync(entry))
 
   const result = spawnSync(command, {
     stdio: 'inherit',
     shell: true,
     env: {
       ...process.env,
-      PATH: `${path.join(process.env.USERPROFILE ?? '', '.cargo', 'bin')};${process.env.PATH ?? ''}`
+      PATH: `${cargoPathEntries.join(';')};${process.env.PATH ?? ''}`
     }
   })
 

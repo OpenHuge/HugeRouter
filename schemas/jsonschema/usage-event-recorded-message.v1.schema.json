@@ -111,6 +111,12 @@
         "estimated_cost": {
           "$ref": "#/definitions/MonetaryAmount"
         },
+        "grant_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "idempotency_key": {
           "type": "string"
         },

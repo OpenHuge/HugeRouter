@@ -160,6 +160,12 @@ function BillingPage() {
   }
 
   async function onQueueExport() {
+    if (!data.canManageBillingExports) {
+      setStatusError("This account can view billing but cannot queue exports.");
+      setStatusSuccess(null);
+      return;
+    }
+
     setQueueingExport(true);
     setStatusError(null);
     setStatusSuccess(null);
@@ -368,13 +374,19 @@ function BillingPage() {
         <UiStack gap="xs">
           <UiText>Projection updated at: {data.lastProjectedAt}</UiText>
           <UiInline>
-            <UiButton
-              loading={queueingExport}
-              onClick={() => void onQueueExport()}
-              variant="light"
-            >
-              Queue export
-            </UiButton>
+            {data.canManageBillingExports ? (
+              <UiButton
+                loading={queueingExport}
+                onClick={() => void onQueueExport()}
+                variant="light"
+              >
+                Queue export
+              </UiButton>
+            ) : (
+              <UiText c="dimmed" size="sm">
+                Export queue is admin-only for this workspace.
+              </UiText>
+            )}
             <UiButton
               loading={refreshingExports}
               onClick={() => void refreshBillingExports()}
@@ -388,8 +400,8 @@ function BillingPage() {
       <UiSurface padding="lg" radius="md" shadow="sm">
         <UiInline justify="space-between" mb="md">
           <UiText fw={700}>WeChat Pay recharge</UiText>
-          <UiChip color="green" variant="light">
-            API v3
+          <UiChip color="yellow" variant="light">
+            sandbox/manual gate
           </UiChip>
         </UiInline>
         <UiStack gap="sm">

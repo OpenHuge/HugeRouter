@@ -18,6 +18,10 @@ use utoipa::OpenApi;
         get_provider_resource,
         list_route_policies,
         get_config_snapshot,
+        get_config_snapshot_sale_readiness,
+        list_opening_grants,
+        create_opening_grant,
+        revoke_opening_grant,
         activate_config_snapshot,
         get_usage_summary,
         get_usage_breakdown,
@@ -27,6 +31,8 @@ use utoipa::OpenApi;
         create_billing_export,
         list_billing_exports,
         get_billing_export,
+        create_renewal_intent,
+        list_renewal_intents,
         create_route_simulation,
         list_route_receipts,
         get_route_receipt,
@@ -42,6 +48,12 @@ use utoipa::OpenApi;
             EligibleCandidate,
             ErrorEnvelope,
             MonetaryAmount,
+            CreateOpeningGrantRequest,
+            CreateRenewalIntentRequest,
+            OpeningCredential,
+            OpeningGrant,
+            OpeningGrantCreateResponse,
+            OpeningGrantsResponse,
             Project,
             ProjectId,
             ProjectsResponse,
@@ -68,6 +80,10 @@ use utoipa::OpenApi;
             RouteReceiptSummary,
             RouteSimulationRequest,
             RouteSimulationResponse,
+            SaleReadyCheck,
+            SaleReadyHandoff,
+            SaleReadyPackageResponse,
+            SaleReadiness,
             Tenant,
             TenantId,
             TenantsResponse,
@@ -81,12 +97,16 @@ use utoipa::OpenApi;
             BillingExportJobResponse,
             BillingExportJobsResponse,
             BillingExportRequest,
+            RenewalIntent,
+            RenewalIntentResponse,
+            RenewalIntentsResponse,
             UsageMetrics,
         )
     ),
     tags(
         (name = "tenants", description = "Tenant and project resources"),
         (name = "routing", description = "Provider resources, route policies, and simulations"),
+        (name = "openings", description = "Customer and agent opening grants"),
         (name = "snapshots", description = "Config snapshot read and activation endpoints"),
     )
 )]
@@ -219,6 +239,63 @@ const fn list_route_policies() {}
 )]
 #[allow(dead_code)]
 const fn get_config_snapshot() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/config-snapshots/{config_snapshot_id}/sale-readiness",
+    tag = "snapshots",
+    params(
+        ("config_snapshot_id" = String, Path, description = "HugeRouter config snapshot id")
+    ),
+    responses(
+        (status = 200, description = "Get derived sale-ready package diagnostics", body = SaleReadyPackageResponse),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn get_config_snapshot_sale_readiness() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/opening-grants",
+    tag = "openings",
+    responses(
+        (status = 200, description = "List opening grants", body = OpeningGrantsResponse),
+        (status = 500, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn list_opening_grants() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/opening-grants",
+    tag = "openings",
+    request_body = CreateOpeningGrantRequest,
+    responses(
+        (status = 200, description = "Create an opening grant and return the credential plaintext once", body = OpeningGrantCreateResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+        (status = 409, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn create_opening_grant() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/opening-grants/{grant_id}/revoke",
+    tag = "openings",
+    params(
+        ("grant_id" = String, Path, description = "Opening grant id")
+    ),
+    responses(
+        (status = 200, description = "Revoke an opening grant", body = OpeningGrant),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+        (status = 409, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn revoke_opening_grant() {}
 
 #[utoipa::path(
     post,
@@ -358,6 +435,39 @@ const fn list_billing_exports() {}
 )]
 #[allow(dead_code)]
 const fn get_billing_export() {}
+
+#[utoipa::path(
+    post,
+    path = "/v1/billing/renewal-intents",
+    tag = "routing",
+    request_body = CreateRenewalIntentRequest,
+    responses(
+        (status = 200, description = "Create a payment-backed renewal intent and apply future grant state when eligible", body = RenewalIntentResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+        (status = 404, description = "Normalized error", body = ErrorEnvelope),
+        (status = 409, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn create_renewal_intent() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/billing/renewal-intents",
+    tag = "routing",
+    params(
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
+        ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("grant_id" = Option<String>, Query, description = "Filter by opening grant id"),
+        ("out_trade_no" = Option<String>, Query, description = "Filter by WeChat Pay order id")
+    ),
+    responses(
+        (status = 200, description = "List renewal intents", body = RenewalIntentsResponse),
+        (status = 400, description = "Normalized error", body = ErrorEnvelope),
+    )
+)]
+#[allow(dead_code)]
+const fn list_renewal_intents() {}
 
 #[utoipa::path(
     post,

@@ -10,7 +10,7 @@
     "build": "tsc --project tsconfig.json",
     "lint": "pnpm --dir ../.. exec oxlint packages/test-utils --deny-warnings",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "../../apps/console-web/node_modules/.bin/vitest run --environment jsdom --globals",
+    "test": "pnpm exec vitest run --environment jsdom --globals",
     "generate": "node -e \"console.log('No generated assets for test-utils yet')\""
   },
   "dependencies": {

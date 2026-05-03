@@ -282,9 +282,12 @@ impl StaticApiKeyScopeStore {
         Self {
             scope: GatewayApiKeyScope {
                 credential_id: "cred_gateway_test".to_string(),
+                grant_id: None,
                 tenant_id: "tenant_acme".to_string(),
                 project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
+                config_snapshot_id: None,
+                route_policy_id: None,
                 scopes: Vec::new(),
             },
         }
@@ -450,9 +453,12 @@ async fn control_plane_api_key_resolution(
     }
     Ok(Json(GatewayApiKeyResolveResponse {
         credential_id: "cred_gateway_test".to_string(),
+        grant_id: None,
         tenant_id: "tenant_acme".to_string(),
         project_id: Some("proj_core".to_string()),
         status: "active".to_string(),
+        config_snapshot_id: None,
+        route_policy_id: None,
         scopes: Vec::new(),
     }))
 }

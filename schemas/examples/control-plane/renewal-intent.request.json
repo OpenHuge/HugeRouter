@@ -1,0 +1,6 @@
+{
+  "out_trade_no": "wxpay_renew_123",
+  "grant_id": "opengrant_customer_123",
+  "renew_expires_at": "2026-06-03T00:00:00Z",
+  "reason": "customer renewal paid via WeChat Pay"
+}

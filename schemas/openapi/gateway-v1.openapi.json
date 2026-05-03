@@ -1130,6 +1130,12 @@
           "estimated_cost": {
             "$ref": "#/components/schemas/MonetaryAmount"
           },
+          "grant_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "idempotency_key": {
             "type": "string"
           },

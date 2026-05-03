@@ -258,6 +258,11 @@ VALUES
         'user_ops',
         'ops@huge-router.dev',
         $json${"userId":"user_ops","primaryEmail":"ops@huge-router.dev","displayName":"Operations Admin","avatarUrl":null,"createdAt":"2026-04-22T00:00:00Z","lastLoginAt":null}$json$::jsonb
+    ),
+    (
+        'user_developer',
+        'developer@huge-router.dev',
+        $json${"userId":"user_developer","primaryEmail":"developer@huge-router.dev","displayName":"Acme Developer","avatarUrl":null,"createdAt":"2026-04-22T00:00:00Z","lastLoginAt":null}$json$::jsonb
     )
 ON CONFLICT (user_id) DO UPDATE
 SET primary_email = EXCLUDED.primary_email,
@@ -282,6 +287,12 @@ VALUES
         'user_ops',
         'tenant_northstar',
         $json${"membershipId":"tmemb_northstar","tenant":{"id":"tenant_northstar","slug":"northstar-labs","displayName":"Northstar Labs"},"role":"member","status":"active"}$json$::jsonb
+    ),
+    (
+        'tmemb_developer_acme',
+        'user_developer',
+        'tenant_acme',
+        $json${"membershipId":"tmemb_developer_acme","tenant":{"id":"tenant_acme","slug":"acme-retail","displayName":"Acme Retail"},"role":"member","status":"active"}$json$::jsonb
     )
 ON CONFLICT (membership_id) DO UPDATE
 SET user_id = EXCLUDED.user_id,
@@ -299,13 +310,13 @@ INSERT INTO auth_provider_links (
 )
 VALUES
     (
-        'authlink_ops@huge-router.dev',
+        'authlink_email_ops',
         'user_ops',
         'email',
         'ops@huge-router.dev',
         'ops@huge-router.dev',
         FALSE,
-        $json${"linkId":"authlink_ops@huge-router.dev","provider":"email","providerSubject":"ops@huge-router.dev","email":"ops@huge-router.dev","linkedAt":"2026-04-22T00:00:00Z","lastUsedAt":null,"canUnlink":false}$json$::jsonb
+        $json${"linkId":"authlink_email_ops","provider":"email","providerSubject":"ops@huge-router.dev","email":"ops@huge-router.dev","linkedAt":"2026-04-22T00:00:00Z","lastUsedAt":null,"canUnlink":false}$json$::jsonb
     ),
     (
         'authlink_github_ops',
@@ -333,6 +344,15 @@ VALUES
         'ops@huge-router.dev',
         TRUE,
         $json${"linkId":"authlink_wechat_ops","provider":"wechat","providerSubject":"wechat_ops","email":"ops@huge-router.dev","linkedAt":"2026-04-22T00:00:00Z","lastUsedAt":null,"canUnlink":true}$json$::jsonb
+    ),
+    (
+        'authlink_email_developer',
+        'user_developer',
+        'email',
+        'developer@huge-router.dev',
+        'developer@huge-router.dev',
+        FALSE,
+        $json${"linkId":"authlink_email_developer","provider":"email","providerSubject":"developer@huge-router.dev","email":"developer@huge-router.dev","linkedAt":"2026-04-22T00:00:00Z","lastUsedAt":null,"canUnlink":false}$json$::jsonb
     )
 ON CONFLICT (link_id) DO UPDATE
 SET user_id = EXCLUDED.user_id,

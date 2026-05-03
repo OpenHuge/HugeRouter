@@ -43,8 +43,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs::File,
-    io::Read,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -406,9 +404,13 @@ struct ActiveGatewayConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyScope {
     credential_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    grant_id: Option<String>,
     tenant_id: String,
     project_id: Option<String>,
     status: String,
+    config_snapshot_id: Option<String>,
+    route_policy_id: Option<String>,
     #[serde(default)]
     scopes: Vec<String>,
 }
@@ -753,6 +755,7 @@ async fn process_normalized_request(
         route,
         normalized_request,
         context.clone(),
+        api_key_scope.grant_id.clone(),
         request_headers,
         gateway_origin,
     )
@@ -889,6 +892,7 @@ async fn process_normalized_image_request(
         normalized_request,
         image_request,
         context,
+        api_key_scope.grant_id.clone(),
         request_headers,
         gateway_origin,
     )
@@ -954,6 +958,7 @@ async fn execute_image_route(
     request: NormalizedChatRequest,
     image_request: ProviderImageRequest,
     context: RequestContext,
+    grant_id: Option<String>,
     request_headers: BTreeMap<String, String>,
     gateway_origin: Option<String>,
 ) -> Result<ImageExecutionSuccess, GatewayError> {
@@ -1099,8 +1104,13 @@ async fn execute_image_route(
                     debug_headers.clone(),
                 )
                 .await?;
-                let usage_event =
-                    build_image_usage_event(&route_receipt, target, &request, &image_response);
+                let usage_event = build_image_usage_event(
+                    &route_receipt,
+                    target,
+                    &request,
+                    &image_response,
+                    grant_id.as_deref(),
+                );
                 state
                     .event_sink
                     .publish(&route_receipt, &usage_event, &context)
@@ -1237,6 +1247,7 @@ async fn execute_route(
     route: RouteEvaluation,
     request: NormalizedChatRequest,
     context: RequestContext,
+    grant_id: Option<String>,
     request_headers: BTreeMap<String, String>,
     gateway_origin: Option<String>,
 ) -> Result<ExecutionSuccess, GatewayError> {
@@ -1416,8 +1427,13 @@ async fn execute_route(
                     debug_headers.clone(),
                 )
                 .await?;
-                let usage_event =
-                    build_usage_event(&route_receipt, target, &request, &provider_response);
+                let usage_event = build_usage_event(
+                    &route_receipt,
+                    target,
+                    &request,
+                    &provider_response,
+                    grant_id.as_deref(),
+                );
                 state
                     .event_sink
                     .publish(&route_receipt, &usage_event, &context)
@@ -1715,6 +1731,38 @@ fn ensure_scope_matches_config(
         ));
     }
 
+    if let Some(config_snapshot_id) = api_key_scope.config_snapshot_id.as_deref()
+        && config_snapshot_id != active_config.config_snapshot.config_snapshot_id.as_str()
+    {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key config snapshot scope does not match the active gateway configuration"
+                    .to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    if let Some(route_policy_id) = api_key_scope.route_policy_id.as_deref()
+        && route_policy_id != active_config.route_policy.route_policy_id.as_str()
+    {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key route policy scope does not match the active gateway configuration"
+                    .to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
     Ok(())
 }
 
@@ -1724,11 +1772,7 @@ fn ensure_route_token_scope(
     normalized_request: &NormalizedChatRequest,
     context: &RequestContext,
 ) -> Result<(), GatewayError> {
-    if api_key_scope.scopes.is_empty()
-        || !api_key_scope
-            .credential_id
-            .starts_with(ROUTE_TOKEN_CREDENTIAL_SCOPE_PREFIX)
-    {
+    if api_key_scope.scopes.is_empty() {
         return Ok(());
     }
 
@@ -2753,6 +2797,12 @@ struct GatewayApiKeyResolveRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyResolveResponse {
     credential_id: String,
+    #[serde(default)]
+    grant_id: Option<String>,
+    #[serde(default)]
+    config_snapshot_id: Option<String>,
+    #[serde(default)]
+    route_policy_id: Option<String>,
     project_id: Option<String>,
     status: String,
     tenant_id: String,
@@ -3017,10 +3067,19 @@ fn unix_timestamp_millis() -> u64 {
 
 fn random_route_token() -> Result<String, String> {
     let mut token_bytes = [0_u8; 32];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut token_bytes))
-        .map_err(|error| format!("failed to read route token entropy: {error}"))?;
+    fill_route_token_entropy(&mut token_bytes)?;
     Ok(format!("{ROUTE_TOKEN_PREFIX}{}", hex_encode(&token_bytes)))
+}
+
+#[cfg(not(windows))]
+fn fill_route_token_entropy(dest: &mut [u8]) -> Result<(), String> {
+    getrandom::fill(dest).map_err(|error| format!("failed to read route token entropy: {error}"))
+}
+
+#[cfg(windows)]
+fn fill_route_token_entropy(dest: &mut [u8]) -> Result<(), String> {
+    getrandom02::getrandom(dest)
+        .map_err(|error| format!("failed to read route token entropy: {error}"))
 }
 
 fn route_token_hash(token: &str) -> String {
@@ -3116,9 +3175,12 @@ impl RouteTokenStore for InMemoryRouteTokenStore {
                     .unwrap_or("unknown")
                     .trim_start_matches(ROUTE_TOKEN_ID_PREFIX)
             ),
+            grant_id: None,
             tenant_id: record.tenant_id,
             project_id: record.project_id,
             status: "active".to_string(),
+            config_snapshot_id: None,
+            route_policy_id: None,
             scopes: record.summary.scopes,
         })
     }
@@ -3359,9 +3421,12 @@ impl ControlPlaneApiKeyStore {
             .await
             .map(|payload| GatewayApiKeyScope {
                 credential_id: payload.credential_id,
+                grant_id: payload.grant_id,
                 tenant_id: payload.tenant_id,
                 project_id: payload.project_id,
                 status: payload.status,
+                config_snapshot_id: payload.config_snapshot_id,
+                route_policy_id: payload.route_policy_id,
                 scopes: payload.scopes,
             })
             .map_err(|error| format!("failed to decode API key resolution payload: {error}"))

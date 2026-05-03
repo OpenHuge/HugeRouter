@@ -462,13 +462,31 @@ export function handleMutationRequest(
     const segments = path.split("/");
     const apiKeyId = decodeURIComponent(segments[3] ?? "");
 
-    if (init?.method === "DELETE" || init?.method === "POST") {
-      state.apiKeys = state.apiKeys.map((key) =>
-        key.api_key_id === apiKeyId
-          ? { ...key, is_active: false, version: key.version + 1 }
-          : key,
+    if (init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const index = state.apiKeys.findIndex(
+        (key) => key.api_key_id === apiKeyId,
       );
-      return emptyResponse(200);
+
+      if (index < 0) {
+        return notFoundResponse("api_key_not_found", "API key not found.");
+      }
+
+      if (state.apiKeys[index]?.version !== expectedVersion) {
+        return staleVersionResponse(
+          "api_key_version_conflict",
+          "API key version is stale.",
+        );
+      }
+
+      const revoked = {
+        ...state.apiKeys[index],
+        is_active: false,
+        version: expectedVersion + 1,
+      };
+      state.apiKeys[index] = revoked;
+      return jsonResponse(200, revoked);
     }
 
     return emptyResponse(405);

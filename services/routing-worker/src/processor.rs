@@ -215,13 +215,21 @@ fn resolve_next_states(
     unhealthy_streak: u32,
     quarantine_threshold: u32,
 ) -> (HealthState, ProviderResourceStatus) {
-    if provider_resource.status == ProviderResourceStatus::Quarantined
-        || provider_resource.health_state == HealthState::Quarantined
-    {
-        return (
-            HealthState::Quarantined,
-            ProviderResourceStatus::Quarantined,
-        );
+    if provider_resource.status != ProviderResourceStatus::Active {
+        return (provider_resource.health_state, provider_resource.status);
+    }
+
+    if matches!(
+        provider_resource.health_state,
+        HealthState::Quarantined | HealthState::Draining | HealthState::Disabled
+    ) {
+        let status = match provider_resource.health_state {
+            HealthState::Quarantined => ProviderResourceStatus::Quarantined,
+            HealthState::Draining => ProviderResourceStatus::Draining,
+            HealthState::Disabled => ProviderResourceStatus::Disabled,
+            HealthState::Healthy | HealthState::Degraded => ProviderResourceStatus::Active,
+        };
+        return (provider_resource.health_state, status);
     }
 
     let next_health_state = match observed_status {
@@ -390,6 +398,19 @@ mod tests {
 
         assert_eq!(next_health, HealthState::Quarantined);
         assert_eq!(next_status, ProviderResourceStatus::Quarantined);
+    }
+
+    #[test]
+    fn preserves_manual_disabled_until_operator_override() {
+        let mut provider_resource = sample_provider_resource();
+        provider_resource.status = ProviderResourceStatus::Disabled;
+        provider_resource.health_state = HealthState::Healthy;
+
+        let (next_health, next_status) =
+            resolve_next_states(&provider_resource, ObservedProbeStatus::Healthy, 0, 3);
+
+        assert_eq!(next_health, HealthState::Healthy);
+        assert_eq!(next_status, ProviderResourceStatus::Disabled);
     }
 
     #[test]

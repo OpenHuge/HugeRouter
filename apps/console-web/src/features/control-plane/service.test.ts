@@ -224,6 +224,7 @@ describe("console data service", () => {
           activeProjectId: undefined,
           availableProjects: [],
           billableTotalUsd: "0.000001",
+          canManageBillingExports: true,
           configuredBudgetUsd: "10.000000",
           exportJobs: [],
           lastProjectedAt: "2026-04-22T00:00:00Z",

@@ -1,5 +1,5 @@
 export const CONTRACT_VERSION = "v1" as const;
-export const CONTRACT_DIGEST = "c21eb801f936e0f865682899d028ee4e73e412dcdcd91da076fc9ae59ae8eac4" as const;
+export const CONTRACT_DIGEST = "8d205559b38341ba5b4c2d214efb765022108fd8f8d324c662acc6fc797e3852" as const;
 export const COMPATIBILITY_RULES = [
 'Breaking changes require a new explicit contract version or a new endpoint family.',
 'Additive fields must remain optional until all first-party consumers can tolerate them.',

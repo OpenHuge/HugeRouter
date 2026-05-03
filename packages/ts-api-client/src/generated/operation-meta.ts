@@ -1,5 +1,5 @@
 export const CONTRACT_VERSION = "v1" as const;
-export const CONTRACT_DIGEST = "c21eb801f936e0f865682899d028ee4e73e412dcdcd91da076fc9ae59ae8eac4" as const;
+export const CONTRACT_DIGEST = "8d205559b38341ba5b4c2d214efb765022108fd8f8d324c662acc6fc797e3852" as const;
 export const CONTROL_PLANE_OPERATIONS = [
 { id: 'listTenants', method: 'GET', path: '/v1/tenants' },
 { id: 'listProjects', method: 'GET', path: '/v1/projects' },
@@ -16,6 +16,8 @@ export const CONTROL_PLANE_OPERATIONS = [
 { id: 'createBillingExport', method: 'POST', path: '/v1/billing/exports' },
 { id: 'listBillingExports', method: 'GET', path: '/v1/billing/exports' },
 { id: 'getBillingExport', method: 'GET', path: '/v1/billing/exports/{export_job_id}' },
+{ id: 'createRenewalIntent', method: 'POST', path: '/v1/billing/renewal-intents' },
+{ id: 'listRenewalIntents', method: 'GET', path: '/v1/billing/renewal-intents' },
 { id: 'simulateRoute', method: 'POST', path: '/v1/route-simulations' },
 { id: 'listRouteReceipts', method: 'GET', path: '/v1/route-receipts' },
 { id: 'getRouteReceipt', method: 'GET', path: '/v1/route-receipts/{route_receipt_id}' },

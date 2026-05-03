@@ -162,6 +162,7 @@ pub fn sample_usage_event() -> UsageEvent {
     UsageEvent {
         usage_event_id: core_domain::UsageEventId::parse("usageevt_123").unwrap(),
         route_receipt_id: RouteReceiptId::parse("routercpt_123").unwrap(),
+        grant_id: Some("grant_acme_customer".to_string()),
         tenant_id: TenantId::parse("tenant_acme").unwrap(),
         project_id: ProjectId::parse("proj_core").unwrap(),
         provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
@@ -591,6 +592,39 @@ pub fn sample_billing_export_job_response() -> BillingExportJobResponse {
             error_message: None,
             tenant_id: Some(TenantId::parse("tenant_acme").unwrap()),
             project_id: Some(ProjectId::parse("proj_core").unwrap()),
+        },
+    }
+}
+
+pub fn sample_create_renewal_intent_request() -> CreateRenewalIntentRequest {
+    CreateRenewalIntentRequest {
+        out_trade_no: "wxpay_renew_123".to_string(),
+        grant_id: "opengrant_customer_123".to_string(),
+        renew_expires_at: "2026-06-03T00:00:00Z".to_string(),
+        reason: Some("customer renewal paid via WeChat Pay".to_string()),
+    }
+}
+
+pub fn sample_renewal_intent_response() -> RenewalIntentResponse {
+    RenewalIntentResponse {
+        data: RenewalIntent {
+            renewal_intent_id: "renewal_123".to_string(),
+            out_trade_no: "wxpay_renew_123".to_string(),
+            grant_id: "opengrant_customer_123".to_string(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            payment_status: "paid".to_string(),
+            previous_grant_status: "expired".to_string(),
+            previous_expires_at: "2026-05-03T00:00:00Z".to_string(),
+            renew_expires_at: "2026-06-03T00:00:00Z".to_string(),
+            status: "renewed".to_string(),
+            reason_code: "payment_paid_grant_recovered".to_string(),
+            reason: "Paid order matched the opening grant; only future grant state was restored."
+                .to_string(),
+            created_by: "user_ops_admin".to_string(),
+            created_at: "2026-05-03T12:00:00Z".to_string(),
+            updated_at: "2026-05-03T12:00:00Z".to_string(),
+            applied_at: Some("2026-05-03T12:00:00Z".to_string()),
         },
     }
 }

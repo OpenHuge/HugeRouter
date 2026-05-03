@@ -768,6 +768,43 @@ describe("console routes", () => {
     expect(screen.getByText("Within budget")).toBeInTheDocument();
   });
 
+  it("hides billing export queue action for read-only billing sessions", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const baseService = getConsoleDataService();
+
+    setConsoleDataServiceForTests({
+      ...baseService,
+      getBillingDashboard: () =>
+        Promise.resolve({
+          activeProjectId: undefined,
+          availableProjects: [],
+          billableTotalUsd: "0.000001",
+          canManageBillingExports: false,
+          configuredBudgetUsd: "1.000000",
+          exportJobs: [],
+          lastProjectedAt: "2026-04-22T00:00:00Z",
+          projectionLagSeconds: 0,
+          providerCostTotalUsd: "0.000001",
+          rangeLabel: "Last 30 days",
+          remainingBudgetUsd: "0.999999",
+          thresholdStatus: "ok",
+        }),
+    });
+
+    await renderRoute("/app/billing");
+
+    expect(
+      await screen.findByText("Export queue is admin-only for this workspace."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Queue export" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders billing loading state while dashboard data is pending", async () => {
     signIn({
       email: "tenant@acme.dev",
@@ -793,6 +830,7 @@ describe("console routes", () => {
       activeProjectId: undefined,
       availableProjects: [],
       billableTotalUsd: "0.000001",
+      canManageBillingExports: true,
       configuredBudgetUsd: "1.000000",
       exportJobs: [],
       lastProjectedAt: "2026-04-22T00:00:00Z",

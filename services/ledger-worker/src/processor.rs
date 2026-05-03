@@ -43,6 +43,7 @@ pub struct UsagePersistenceOutcome {
 pub struct PendingLedgerEntry {
     pub ledger_entry_id: String,
     pub usage_event_id: UsageEventId,
+    pub grant_id: Option<String>,
     pub ledger_entry_type: String,
     pub amount_micros: i64,
     pub provider_cost_micros: i64,
@@ -72,6 +73,7 @@ pub async fn ensure_ledger_table(pool: &PgPool) -> Result<()> {
         CREATE TABLE IF NOT EXISTS ledger_entries (
             ledger_entry_id TEXT PRIMARY KEY,
             usage_event_id TEXT NOT NULL,
+            grant_id TEXT NULL,
             usage_phase TEXT NOT NULL,
             tenant_id TEXT NOT NULL,
             project_id TEXT NOT NULL,
@@ -100,6 +102,7 @@ pub async fn ensure_ledger_table(pool: &PgPool) -> Result<()> {
 pub async fn ensure_projection_tables(pool: &PgPool) -> Result<()> {
     for statement in [
         r#"ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_cost_micros BIGINT"#,
+        r#"ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS grant_id TEXT"#,
         r#"ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS billable_cost_micros BIGINT"#,
         r#"ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_id TEXT"#,
         r#"ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS model_alias TEXT"#,
@@ -265,6 +268,7 @@ pub async fn build_pending_entry(
     Ok(PendingLedgerEntry {
         ledger_entry_id: ledger_entry_id(&event.idempotency_key),
         usage_event_id: event.payload.usage_event.usage_event_id.clone(),
+        grant_id: event.payload.usage_event.grant_id.clone(),
         ledger_entry_type: "usage_debit".to_string(),
         amount_micros: quote.billable_cost_micros,
         provider_cost_micros: quote.provider_cost_micros,
@@ -524,6 +528,7 @@ pub async fn rebuild_projections(pool: &PgPool) -> Result<()> {
         SELECT
             ledger_entry_id,
             usage_event_id,
+            grant_id,
             ledger_entry_type,
             amount_micros,
             provider_cost_micros,
@@ -557,6 +562,7 @@ pub async fn rebuild_projections(pool: &PgPool) -> Result<()> {
         let entry = PendingLedgerEntry {
             ledger_entry_id: row.try_get("ledger_entry_id")?,
             usage_event_id: UsageEventId::parse(row.try_get::<String, _>("usage_event_id")?)?,
+            grant_id: row.try_get("grant_id")?,
             ledger_entry_type: row.try_get("ledger_entry_type")?,
             amount_micros: row.try_get("amount_micros")?,
             provider_cost_micros: row
@@ -628,6 +634,7 @@ pub async fn persist_usage_event(
         INSERT INTO ledger_entries (
             ledger_entry_id,
             usage_event_id,
+            grant_id,
             usage_phase,
             tenant_id,
             project_id,
@@ -650,12 +657,13 @@ pub async fn persist_usage_event(
             source_request_id,
             source_trace_id
         ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::timestamptz,$19,$20,$21,$22,$23
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::timestamptz,$20,$21,$22,$23,$24
         ) ON CONFLICT (idempotency_key) DO NOTHING
         "#,
     )
     .bind(&entry.ledger_entry_id)
     .bind(entry.usage_event_id.to_string())
+    .bind(&entry.grant_id)
     .bind(&entry.usage_phase)
     .bind(&entry.tenant_id)
     .bind(&entry.project_id)

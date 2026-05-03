@@ -84,6 +84,7 @@ pub fn build_usage_event(
     target: &ProviderTargetRuntime,
     request: &NormalizedChatRequest,
     response: &ProviderResponse,
+    grant_id: Option<&str>,
 ) -> UsageEvent {
     let usage = UsageMetrics {
         input_tokens: response.usage.input_tokens,
@@ -103,6 +104,7 @@ pub fn build_usage_event(
         ))
         .expect("usage event id should be valid"),
         route_receipt_id: route_receipt.route_receipt_id.clone(),
+        grant_id: grant_id.map(str::to_string),
         tenant_id: route_receipt.tenant_id.clone(),
         project_id: route_receipt.project_id.clone(),
         provider_resource_id: target.resource.provider_resource_id.clone(),
@@ -123,6 +125,7 @@ pub fn build_image_usage_event(
     target: &ProviderTargetRuntime,
     request: &NormalizedChatRequest,
     response: &ProviderImageResponse,
+    grant_id: Option<&str>,
 ) -> UsageEvent {
     let usage = UsageMetrics {
         input_tokens: response
@@ -149,6 +152,7 @@ pub fn build_image_usage_event(
         ))
         .expect("usage event id should be valid"),
         route_receipt_id: route_receipt.route_receipt_id.clone(),
+        grant_id: grant_id.map(str::to_string),
         tenant_id: route_receipt.tenant_id.clone(),
         project_id: route_receipt.project_id.clone(),
         provider_resource_id: target.resource.provider_resource_id.clone(),

@@ -2,7 +2,7 @@
   "contract_version": "v1",
   "generation_command": "pnpm generate",
   "source_of_truth": "Rust crates `core-domain` and `protocol-ir`",
-  "contract_digest": "c21eb801f936e0f865682899d028ee4e73e412dcdcd91da076fc9ae59ae8eac4",
+  "contract_digest": "8d205559b38341ba5b4c2d214efb765022108fd8f8d324c662acc6fc797e3852",
   "stable_contracts": [
     "tenant",
     "project",
@@ -72,6 +72,9 @@
     "schemas/jsonschema/billing-export-request.v1.schema.json",
     "schemas/jsonschema/billing-export-job-response.v1.schema.json",
     "schemas/jsonschema/billing-export-jobs-response.v1.schema.json",
+    "schemas/jsonschema/renewal-intent-request.v1.schema.json",
+    "schemas/jsonschema/renewal-intent-response.v1.schema.json",
+    "schemas/jsonschema/renewal-intents-response.v1.schema.json",
     "schemas/jsonschema/route-simulation-request.v1.schema.json",
     "schemas/jsonschema/route-simulation-response.v1.schema.json",
     "schemas/jsonschema/usage-event-recorded-message.v1.schema.json",
@@ -107,6 +110,9 @@
     "schemas/examples/control-plane/billing-export.request.json",
     "schemas/examples/control-plane/billing-export.response.json",
     "schemas/examples/control-plane/billing-exports.response.json",
+    "schemas/examples/control-plane/renewal-intent.request.json",
+    "schemas/examples/control-plane/renewal-intent.response.json",
+    "schemas/examples/control-plane/renewal-intents.response.json",
     "schemas/examples/events/usage-event-recorded.message.json",
     "schemas/examples/events/config-snapshot-activated.message.json",
     "schemas/examples/domain/usage-event.json"

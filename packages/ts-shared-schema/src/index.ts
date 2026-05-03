@@ -22,6 +22,20 @@ const prefixedId = (prefix: string) =>
     .string()
     .regex(new RegExp(`^${prefix}[A-Za-z0-9][A-Za-z0-9_-]*$`), `Expected id with prefix ${prefix}`)
 
+const endpointBaseUrlSchema = z.url().refine(
+  (value) => {
+    const parsed = new URL(value)
+    if (parsed.protocol === 'https:') {
+      return true
+    }
+    if (parsed.protocol !== 'http:') {
+      return false
+    }
+    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+  },
+  { message: 'Expected an https endpoint or a local loopback http endpoint' }
+)
+
 export const contractVersion = CONTRACT_VERSION
 export const contractDigest = CONTRACT_DIGEST
 export const compatibilityRules = [...COMPATIBILITY_RULES]
@@ -112,7 +126,7 @@ export const providerResourceSchema = z.object({
   credential_owner_type: z.enum(['platform', 'tenant', 'project', 'partner']),
   deployment_scope: z.enum(['shared', 'tenant_dedicated', 'project_dedicated']),
   region: z.string().min(1),
-  endpoint_base_url: z.url().regex(/^https:\/\//, 'Expected an https endpoint'),
+  endpoint_base_url: endpointBaseUrlSchema,
   auth_kind: z.enum(['api_key', 'oauth_client_credentials', 'session_broker']),
   health_state: z.enum(['healthy', 'degraded', 'quarantined', 'draining', 'disabled']),
   health_message: z.string().min(1).optional(),
@@ -185,7 +199,7 @@ export const trialConnectionSchema = z.object({
   trial_connection_id: trialConnectionIdSchema,
   tenant_id: tenantIdSchema,
   provider_label: z.string().min(1),
-  endpoint_base_url: z.url().regex(/^https:\/\//, 'Expected an https endpoint'),
+  endpoint_base_url: endpointBaseUrlSchema,
   api_key_masked: z.string().min(1),
   target_model: z.string().min(1),
   status: trialConnectionStatusSchema,
@@ -221,7 +235,7 @@ export const relayEvaluationSchema = z.object({
   trial_connection_id: trialConnectionIdSchema,
   replay_capsule_id: replayCapsuleIdSchema,
   provider_label: z.string().min(1),
-  endpoint_base_url: z.url().regex(/^https:\/\//, 'Expected an https endpoint'),
+  endpoint_base_url: endpointBaseUrlSchema,
   target_model: z.string().min(1),
   runner_mode: relayEvaluationRunnerModeSchema,
   sample_request_count: z.number().int().nonnegative(),

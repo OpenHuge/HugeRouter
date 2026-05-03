@@ -219,6 +219,7 @@ export type BillingDashboardData = {
   activeProjectId?: string;
   availableProjects: ProjectSummary[];
   billableTotalUsd: string;
+  canManageBillingExports: boolean;
   configuredBudgetUsd: string;
   exportJobs: BillingExportJobView[];
   lastProjectedAt: string;

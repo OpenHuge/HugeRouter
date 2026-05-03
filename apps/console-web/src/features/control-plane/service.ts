@@ -561,12 +561,31 @@ function getActiveTenantId() {
   return envelope.state.session.activeTenant?.tenantId ?? null;
 }
 
+function getActiveTenantMembership() {
+  const envelope = getAuthEnvelope();
+
+  if (envelope?.state.kind !== "authenticated") {
+    return null;
+  }
+
+  return envelope.state.session.activeTenant ?? null;
+}
+
 function isPlatformAdmin() {
   const envelope = getAuthEnvelope();
 
   return envelope?.state.kind === "authenticated"
     ? envelope.state.session.user.isPlatformAdmin
     : false;
+}
+
+function canManageActiveTenant() {
+  if (isPlatformAdmin()) {
+    return true;
+  }
+
+  const membership = getActiveTenantMembership();
+  return membership?.role === "owner" || membership?.role === "admin";
 }
 
 function tenantIdFromRecord(item: unknown) {
@@ -1219,6 +1238,10 @@ export function getControlPlaneActionErrorMessage(
 
   if (kind === "billing-export-queue") {
     return "The billing export could not be queued right now.";
+  }
+
+  if (code === "wechat_pay_not_configured") {
+    return "WeChat Pay is not configured; keep recharge and renewal in manual-only mode until sandbox credentials are available.";
   }
 
   if (kind === "wechat-pay-prepay") {
@@ -2094,34 +2117,16 @@ async function getRouteDiagnosticsFromControlPlane(routePolicyId: string) {
 
 async function revokeApiKeyFromControlPlane(apiKeyId: string, version: number) {
   const endpoint = `/v1/api-keys/${encodeURIComponent(apiKeyId)}/revoke`;
-  const body = JSON.stringify({ version });
+  const body = JSON.stringify({ expected_version: version });
 
-  const requestBodyHeaders = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-
-  try {
-    await requestControlPlaneJson(endpoint, () => undefined, {
-      body,
-      headers: requestBodyHeaders,
-      method: "DELETE",
-    });
-
-    return;
-  } catch (error) {
-    if (isRecoverableMissingEndpoint(error)) {
-      await requestControlPlaneJson(endpoint, () => undefined, {
-        body,
-        headers: requestBodyHeaders,
-        method: "POST",
-      });
-
-      return;
-    }
-
-    throw error;
-  }
+  await requestControlPlaneJson(endpoint, () => undefined, {
+    body,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
 }
 
 async function downloadBillingExportFromControlPlane(exportJobId: string) {
@@ -2399,6 +2404,7 @@ const defaultConsoleDataService: ConsoleDataService = {
       activeProjectId: projectId,
       availableProjects: projects,
       billableTotalUsd: formatUsdAmount(projection.data.billable_total),
+      canManageBillingExports: canManageActiveTenant(),
       configuredBudgetUsd: formatUsdAmount(projection.data.configured_budget),
       exportJobs: exportJobs.data.map(toBillingExportJobView),
       lastProjectedAt: projection.data.last_projected_at,

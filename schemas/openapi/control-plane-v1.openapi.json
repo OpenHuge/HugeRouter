@@ -189,6 +189,132 @@
         }
       }
     },
+    "/v1/billing/renewal-intents": {
+      "get": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "list_renewal_intents",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Filter by tenant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Filter by project id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "query",
+            "description": "Filter by opening grant id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "out_trade_no",
+            "in": "query",
+            "description": "Filter by WeChat Pay order id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List renewal intents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenewalIntentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "routing"
+        ],
+        "operationId": "create_renewal_intent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRenewalIntentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Create a payment-backed renewal intent and apply future grant state when eligible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenewalIntentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config-snapshots/{config_snapshot_id}": {
       "get": {
         "tags": [
@@ -254,6 +380,176 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConfigSnapshotResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config-snapshots/{config_snapshot_id}/sale-readiness": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "operationId": "get_config_snapshot_sale_readiness",
+        "parameters": [
+          {
+            "name": "config_snapshot_id",
+            "in": "path",
+            "description": "HugeRouter config snapshot id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get derived sale-ready package diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaleReadyPackageResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/opening-grants": {
+      "get": {
+        "tags": [
+          "openings"
+        ],
+        "operationId": "list_opening_grants",
+        "responses": {
+          "200": {
+            "description": "List opening grants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningGrantsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "openings"
+        ],
+        "operationId": "create_opening_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOpeningGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Create an opening grant and return the credential plaintext once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningGrantCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/opening-grants/{grant_id}/revoke": {
+      "post": {
+        "tags": [
+          "openings"
+        ],
+        "operationId": "revoke_opening_grant",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "description": "Opening grant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoke an opening grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningGrant"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -1142,6 +1438,72 @@
           "superseded"
         ]
       },
+      "CreateOpeningGrantRequest": {
+        "type": "object",
+        "required": [
+          "config_snapshot_id",
+          "grantee_kind",
+          "grantee_id",
+          "expires_at"
+        ],
+        "properties": {
+          "config_snapshot_id": {
+            "$ref": "#/components/schemas/ConfigSnapshotId"
+          },
+          "credential_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "grantee_id": {
+            "type": "string"
+          },
+          "grantee_kind": {
+            "type": "string"
+          },
+          "grantee_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateRenewalIntentRequest": {
+        "type": "object",
+        "required": [
+          "out_trade_no",
+          "grant_id",
+          "renew_expires_at"
+        ],
+        "properties": {
+          "grant_id": {
+            "type": "string"
+          },
+          "out_trade_no": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "renew_expires_at": {
+            "type": "string"
+          }
+        }
+      },
       "CredentialId": {
         "type": "string"
       },
@@ -1299,6 +1661,177 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ValidationIssue"
+            }
+          }
+        }
+      },
+      "OpeningCredential": {
+        "type": "object",
+        "required": [
+          "credential_kind",
+          "credential_id",
+          "key_prefix",
+          "last_four"
+        ],
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_kind": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "last_four": {
+            "type": "string"
+          },
+          "plaintext": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OpeningGrant": {
+        "type": "object",
+        "required": [
+          "grant_id",
+          "tenant_id",
+          "project_id",
+          "grantee_kind",
+          "grantee_id",
+          "config_snapshot_id",
+          "route_policy_id",
+          "budget_policy_id",
+          "provider_resource_ids",
+          "credential_kind",
+          "credential_id",
+          "credential_key_prefix",
+          "credential_last_four",
+          "scopes",
+          "expires_at",
+          "status",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "budget_policy_id": {
+            "$ref": "#/components/schemas/BudgetPolicyId"
+          },
+          "config_snapshot_id": {
+            "$ref": "#/components/schemas/ConfigSnapshotId"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_key_prefix": {
+            "type": "string"
+          },
+          "credential_kind": {
+            "type": "string"
+          },
+          "credential_last_four": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          },
+          "grantee_id": {
+            "type": "string"
+          },
+          "grantee_kind": {
+            "type": "string"
+          },
+          "grantee_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider_resource_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceId"
+            }
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route_policy_id": {
+            "$ref": "#/components/schemas/RoutePolicyId"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "OpeningGrantCreateResponse": {
+        "type": "object",
+        "required": [
+          "grant",
+          "credential"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/OpeningCredential"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/OpeningGrant"
+          }
+        }
+      },
+      "OpeningGrantsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpeningGrant"
             }
           }
         }
@@ -1722,6 +2255,104 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ProviderResource"
+            }
+          }
+        }
+      },
+      "RenewalIntent": {
+        "type": "object",
+        "required": [
+          "renewal_intent_id",
+          "out_trade_no",
+          "grant_id",
+          "tenant_id",
+          "project_id",
+          "payment_status",
+          "previous_grant_status",
+          "previous_expires_at",
+          "renew_expires_at",
+          "status",
+          "reason_code",
+          "reason",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "applied_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          },
+          "out_trade_no": {
+            "type": "string"
+          },
+          "payment_status": {
+            "type": "string"
+          },
+          "previous_expires_at": {
+            "type": "string"
+          },
+          "previous_grant_status": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "renew_expires_at": {
+            "type": "string"
+          },
+          "renewal_intent_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "RenewalIntentResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RenewalIntent"
+          }
+        }
+      },
+      "RenewalIntentsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RenewalIntent"
             }
           }
         }
@@ -2349,6 +2980,163 @@
           }
         }
       },
+      "SaleReadiness": {
+        "type": "object",
+        "required": [
+          "status",
+          "reason_code",
+          "reason",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaleReadyCheck"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SaleReadyCheck": {
+        "type": "object",
+        "required": [
+          "name",
+          "status",
+          "reason_code",
+          "reason"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SaleReadyHandoff": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "project_id",
+          "config_snapshot_id",
+          "route_policy_id",
+          "budget_policy_id",
+          "provider_resource_ids",
+          "readiness_status"
+        ],
+        "properties": {
+          "budget_policy_id": {
+            "$ref": "#/components/schemas/BudgetPolicyId"
+          },
+          "config_snapshot_id": {
+            "$ref": "#/components/schemas/ConfigSnapshotId"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider_resource_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceId"
+            }
+          },
+          "readiness_status": {
+            "type": "string"
+          },
+          "route_policy_id": {
+            "$ref": "#/components/schemas/RoutePolicyId"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          }
+        }
+      },
+      "SaleReadyPackageResponse": {
+        "type": "object",
+        "required": [
+          "config_snapshot",
+          "provider_resources",
+          "readiness",
+          "handoff",
+          "creates_customer_api_key"
+        ],
+        "properties": {
+          "budget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BalanceProjection"
+              }
+            ]
+          },
+          "config_snapshot": {
+            "$ref": "#/components/schemas/ConfigSnapshot"
+          },
+          "creates_customer_api_key": {
+            "type": "boolean"
+          },
+          "handoff": {
+            "$ref": "#/components/schemas/SaleReadyHandoff"
+          },
+          "pricing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PricingSimulationResponse"
+              }
+            ]
+          },
+          "provider_resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResource"
+            }
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/SaleReadiness"
+          },
+          "route_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoutePolicy"
+              }
+            ]
+          },
+          "route_simulation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteSimulationResponse"
+              }
+            ]
+          }
+        }
+      },
       "ScoreBreakdown": {
         "type": "object",
         "required": [
@@ -2624,6 +3412,10 @@
     {
       "name": "routing",
       "description": "Provider resources, route policies, and simulations"
+    },
+    {
+      "name": "openings",
+      "description": "Customer and agent opening grants"
     },
     {
       "name": "snapshots",

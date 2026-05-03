@@ -5,26 +5,34 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const mode = process.argv[2]
 
+function pnpmInvocation(scriptName) {
+  if (process.platform === 'win32') {
+    return ['cmd.exe', ['/d', '/s', '/c', 'pnpm.cmd', scriptName]]
+  }
+
+  return ['pnpm', [scriptName]]
+}
+
 const pipelines = {
   lint: [
     ['Verify toolchain', [process.execPath, ['./scripts/verify-toolchain.mjs']]],
-    ['JavaScript lint', ['pnpm', ['js:lint']]],
-    ['Rust lint', ['pnpm', ['rust:lint']]]
+    ['JavaScript lint', pnpmInvocation('js:lint')],
+    ['Rust lint', pnpmInvocation('rust:lint')]
   ],
   typecheck: [
     ['Verify toolchain', [process.execPath, ['./scripts/verify-toolchain.mjs']]],
-    ['JavaScript typecheck', ['pnpm', ['js:typecheck']]],
-    ['Rust check', ['pnpm', ['rust:check']]]
+    ['JavaScript typecheck', pnpmInvocation('js:typecheck')],
+    ['Rust check', pnpmInvocation('rust:check')]
   ],
   test: [
     ['Verify toolchain', [process.execPath, ['./scripts/verify-toolchain.mjs']]],
-    ['JavaScript test', ['pnpm', ['js:test']]],
-    ['Rust test', ['pnpm', ['rust:test']]]
+    ['JavaScript test', pnpmInvocation('js:test')],
+    ['Rust test', pnpmInvocation('rust:test')]
   ],
   build: [
     ['Verify toolchain', [process.execPath, ['./scripts/verify-toolchain.mjs']]],
-    ['JavaScript build', ['pnpm', ['js:build']]],
-    ['Rust check', ['pnpm', ['rust:check']]]
+    ['JavaScript build', pnpmInvocation('js:build')],
+    ['Rust check', pnpmInvocation('rust:check')]
   ]
 }
 

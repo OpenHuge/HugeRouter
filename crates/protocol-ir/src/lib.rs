@@ -679,6 +679,46 @@ pub struct BillingExportJobsResponse {
     pub data: Vec<BillingExportJob>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateRenewalIntentRequest {
+    pub out_trade_no: String,
+    pub grant_id: String,
+    pub renew_expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RenewalIntent {
+    pub renewal_intent_id: String,
+    pub out_trade_no: String,
+    pub grant_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub payment_status: String,
+    pub previous_grant_status: String,
+    pub previous_expires_at: String,
+    pub renew_expires_at: String,
+    pub status: String,
+    pub reason_code: String,
+    pub reason: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RenewalIntentResponse {
+    pub data: RenewalIntent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RenewalIntentsResponse {
+    pub data: Vec<RenewalIntent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct EligibleCandidate {
     pub provider_resource_id: ProviderResourceId,
@@ -734,6 +774,115 @@ pub struct RoutePoliciesResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ConfigSnapshotResponse {
     pub config_snapshot: ConfigSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadyCheck {
+    pub name: String,
+    pub status: String,
+    pub reason_code: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadiness {
+    pub status: String,
+    pub reason_code: String,
+    pub reason: String,
+    pub checks: Vec<SaleReadyCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadyHandoff {
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub route_policy_id: RoutePolicyId,
+    pub budget_policy_id: core_domain::BudgetPolicyId,
+    pub provider_resource_ids: Vec<ProviderResourceId>,
+    pub readiness_status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadyPackageResponse {
+    pub config_snapshot: ConfigSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_policy: Option<RoutePolicy>,
+    pub provider_resources: Vec<ProviderResource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_simulation: Option<RouteSimulationResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<PricingSimulationResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BalanceProjection>,
+    pub readiness: SaleReadiness,
+    pub handoff: SaleReadyHandoff,
+    pub creates_customer_api_key: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateOpeningGrantRequest {
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub grantee_kind: String,
+    pub grantee_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grantee_label: Option<String>,
+    pub expires_at: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrant {
+    pub grant_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub grantee_kind: String,
+    pub grantee_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grantee_label: Option<String>,
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub route_policy_id: RoutePolicyId,
+    pub budget_policy_id: core_domain::BudgetPolicyId,
+    pub provider_resource_ids: Vec<ProviderResourceId>,
+    pub credential_kind: String,
+    pub credential_id: String,
+    pub credential_key_prefix: String,
+    pub credential_last_four: String,
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+    pub status: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningCredential {
+    pub credential_kind: String,
+    pub credential_id: String,
+    pub key_prefix: String,
+    pub last_four: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plaintext: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrantCreateResponse {
+    pub grant: OpeningGrant,
+    pub credential: OpeningCredential,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrantsResponse {
+    pub data: Vec<OpeningGrant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]

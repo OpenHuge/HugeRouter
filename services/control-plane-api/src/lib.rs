@@ -21,7 +21,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD as BASE64_URL_SAFE_NO_PAD},
+};
 use core_domain::{
     AuthKind, AuthProvider, AuthProviderLinksResponse, AuthSessionResponse, ConfigSnapshot,
     CredentialOwnerType, DeploymentScope, EmailLoginCompleteRequest, EmailLoginStartRequest,
@@ -32,10 +35,13 @@ use core_domain::{
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
-    BillingExportRequest, ConfigSnapshotResponse, PricingCatalogResponse, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse,
-    RouteDiagnosticsResponse, RoutePoliciesResponse, RouteSimulationRequest,
-    RouteSimulationResponse, TenantsResponse, UsageBreakdownResponse, UsageSummaryResponse,
+    BillingExportRequest, ConfigSnapshotResponse, CreateOpeningGrantRequest,
+    CreateRenewalIntentRequest, OpeningCredential, OpeningGrant, OpeningGrantCreateResponse,
+    OpeningGrantsResponse, PricingCatalogResponse, PricingSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RenewalIntentResponse,
+    RenewalIntentsResponse, RouteDiagnosticsResponse, RoutePoliciesResponse,
+    RouteSimulationRequest, RouteSimulationResponse, SaleReadyPackageResponse, TenantsResponse,
+    UsageBreakdownResponse, UsageSummaryResponse,
 };
 use reqwest::Client as HttpClient;
 use ring::{aead, rand};
@@ -48,10 +54,12 @@ use store::{
     ConcurrencyResult, ConfigSnapshotsResponse, EncryptedSecretBlob, IdentityLookup,
     OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolAccountFeedback, OAuthPoolSelectionRequest,
     OAuthSharingLeaseRecord, OAuthSharingLeasesResponse, OAuthSharingUsageBudget,
-    OAuthSharingUsageFilters, OAuthSharingUsageResponse, ProviderResourceFilters,
+    OAuthSharingUsageFilters, OAuthSharingUsageResponse, OpeningGrantDraft,
+    ProviderResourceFilters, RenewalIntentCreateResult, RenewalIntentDraft, RenewalIntentFilters,
     SESSION_TTL_SECONDS, StoreMode, WechatPaymentOrderRecord, WechatPaymentOrderResponse,
     auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 use wechat_pay::{
@@ -65,6 +73,9 @@ const PLATFORM_ADMIN_TENANT_SLUG: &str = "platform-admin";
 const SESSION_COOKIE_NAME: &str = "huge_router_session";
 const CODEX_AUTH_ENCRYPTION_ALGORITHM: &str = "AES-256-GCM";
 const DEFAULT_CODEX_REVERSE_PROXY_ENDPOINT: &str = "https://chatgpt-reverse-proxy.local/v1";
+const OPENING_CREDENTIAL_KIND_API_KEY: &str = "api_key";
+const OPENING_SCOPE_ROUTE_CODEX: &str = "route:codex";
+const OPENING_SCOPE_PROVIDER_COMMERCIAL: &str = "provider:hugerouter-commercial";
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
@@ -140,10 +151,20 @@ struct GatewayApiKeyResolveRequest {
 #[derive(Debug, Clone, Serialize)]
 struct GatewayApiKeyResolveResponse {
     pub credential_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
     pub tenant_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,6 +336,14 @@ struct BalanceProjectionQuery {
 struct BillingExportsQuery {
     pub tenant_id: Option<String>,
     pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RenewalIntentsQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub grant_id: Option<String>,
+    pub out_trade_no: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -496,6 +525,10 @@ impl ControlPlaneAuthorizer {
                     .map(|membership| membership.tenant.id.as_str())
             })
     }
+
+    fn actor_id(&self) -> String {
+        self.session.session.user.user_id.as_str().to_string()
+    }
 }
 
 /// # Errors
@@ -621,6 +654,18 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             get(get_config_snapshot),
         )
         .route(
+            "/v1/config-snapshots/{config_snapshot_id}/sale-readiness",
+            get(get_config_snapshot_sale_readiness),
+        )
+        .route(
+            "/v1/opening-grants",
+            get(list_opening_grants).post(create_opening_grant),
+        )
+        .route(
+            "/v1/opening-grants/{grant_id}/revoke",
+            post(revoke_opening_grant),
+        )
+        .route(
             "/v1/config-snapshots",
             get(list_config_snapshots).post(create_config_snapshot),
         )
@@ -707,6 +752,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/v1/billing/exports/{export_job_id}/download",
             get(download_billing_export),
+        )
+        .route(
+            "/v1/billing/renewal-intents",
+            get(list_renewal_intents).post(create_renewal_intent),
         )
         .route(
             "/v1/billing/wechat-pay/prepay",
@@ -1350,6 +1399,13 @@ async fn update_provider_resource(
         ensure_project_matches_tenant(&project, provider_resource.tenant_id.as_str(), &context)?;
         authz.ensure_manage_project(&project, &context)?;
     }
+    provider_resource.validate().map_err(|error| {
+        ApiError::bad_request(
+            "provider_resource_invalid",
+            format!("provider resource validation failed: {error}"),
+            &context,
+        )
+    })?;
 
     let response = state
         .store
@@ -1726,6 +1782,178 @@ async fn create_api_key(
                 )
             })?,
     ))
+}
+
+async fn list_opening_grants(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Json<OpeningGrantsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let mut response = state.store.list_opening_grants().await.map_err(|error| {
+        ApiError::internal(
+            "storage_unavailable",
+            format!("failed to list opening grants: {error}"),
+            &context,
+        )
+    })?;
+    response.data = authz.filter_by_tenant(response.data, |grant| grant.tenant_id.as_str());
+    Ok(Json(response))
+}
+
+async fn create_opening_grant(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateOpeningGrantRequest>,
+) -> Result<Json<OpeningGrantCreateResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let package = state
+        .store
+        .get_config_snapshot_sale_readiness(request.config_snapshot_id.as_str())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load sale-ready package: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "config_snapshot_not_found",
+                format!(
+                    "config snapshot `{}` was not found",
+                    request.config_snapshot_id
+                ),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(package.handoff.tenant_id.as_str(), &context)?;
+    if package.readiness.status != "sale_ready" {
+        return Err(ApiError::conflict(
+            "sale_ready_blocked",
+            format!(
+                "config snapshot `{}` is not sale-ready: {}",
+                package.handoff.config_snapshot_id, package.readiness.reason
+            ),
+            &context,
+        ));
+    }
+
+    validate_opening_grantee(&request, &context)?;
+    validate_opening_expires_at(&request.expires_at, &context)?;
+    let credential_kind = request
+        .credential_kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(OPENING_CREDENTIAL_KIND_API_KEY);
+    if credential_kind != OPENING_CREDENTIAL_KIND_API_KEY {
+        return Err(ApiError::bad_request(
+            "opening_credential_kind_invalid",
+            "credential_kind must be api_key for the current opening carrier".to_string(),
+            &context,
+        ));
+    }
+    let scopes = opening_scopes(&request.scopes, &package, &context)?;
+    let plaintext = generate_opening_api_key(&context)?;
+    let draft = OpeningGrantDraft {
+        grant_id: format!("opengrant_{}", context.sequence),
+        tenant_id: package.handoff.tenant_id.clone(),
+        project_id: package.handoff.project_id.clone(),
+        grantee_kind: request.grantee_kind.trim().to_string(),
+        grantee_id: request.grantee_id.trim().to_string(),
+        grantee_label: request
+            .grantee_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        config_snapshot_id: package.handoff.config_snapshot_id.clone(),
+        route_policy_id: package.handoff.route_policy_id.clone(),
+        budget_policy_id: package.handoff.budget_policy_id.clone(),
+        provider_resource_ids: package.handoff.provider_resource_ids.clone(),
+        credential_kind: credential_kind.to_string(),
+        scopes,
+        expires_at: request.expires_at.trim().to_string(),
+        created_by: authz.actor_id(),
+    };
+    let grant = state
+        .store
+        .create_opening_grant(draft, &plaintext)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to create opening grant: {error}"),
+                &context,
+            )
+        })?;
+    let credential = OpeningCredential {
+        credential_kind: grant.credential_kind.clone(),
+        credential_id: grant.credential_id.clone(),
+        key_prefix: grant.credential_key_prefix.clone(),
+        last_four: grant.credential_last_four.clone(),
+        plaintext: Some(plaintext),
+    };
+
+    Ok(Json(OpeningGrantCreateResponse { grant, credential }))
+}
+
+async fn revoke_opening_grant(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(grant_id): Path<String>,
+    Json(request): Json<ConcurrencyRequest>,
+) -> Result<Json<OpeningGrant>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let existing = state
+        .store
+        .list_opening_grants()
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load opening grant: {error}"),
+                &context,
+            )
+        })?
+        .data
+        .into_iter()
+        .find(|grant| grant.grant_id == grant_id)
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "opening_grant_not_found",
+                format!("opening grant `{grant_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(existing.tenant_id.as_str(), &context)?;
+    match state
+        .store
+        .revoke_opening_grant(&grant_id, request.expected_version, &authz.actor_id())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to revoke opening grant: {error}"),
+                &context,
+            )
+        })? {
+        ConcurrencyResult::Applied(grant) => Ok(Json(grant)),
+        ConcurrencyResult::NotFound => Err(ApiError::not_found(
+            "opening_grant_not_found",
+            format!("opening grant `{grant_id}` was not found"),
+            &context,
+        )),
+        ConcurrencyResult::VersionConflict => Err(ApiError::conflict(
+            "opening_grant_version_conflict",
+            "opening grant version conflict".to_string(),
+            &context,
+        )),
+    }
 }
 
 async fn list_codex_auth_accounts(
@@ -2241,18 +2469,35 @@ async fn resolve_api_key_for_gateway(
         })?;
 
     if !resolved.is_active {
-        return Err(ApiError::forbidden(
-            "api_key_inactive",
-            "api key is inactive".to_string(),
-            &context,
-        ));
+        let (code, message) = match resolved.status.as_str() {
+            "expired" => ("api_key_expired", "api key is expired"),
+            "revoked" => ("api_key_revoked", "api key is revoked"),
+            status => (
+                "api_key_inactive",
+                if status.trim().is_empty() {
+                    "api key is inactive"
+                } else {
+                    "api key status is not active"
+                },
+            ),
+        };
+        return Err(ApiError::forbidden(code, message.to_string(), &context));
     }
 
     Ok(Json(GatewayApiKeyResolveResponse {
         credential_id: resolved.api_key_id,
+        grant_id: resolved.grant_id,
         tenant_id: resolved.tenant_id.to_string(),
         project_id: resolved.project_id.map(|project_id| project_id.to_string()),
-        status: "active".to_string(),
+        status: resolved.status,
+        config_snapshot_id: resolved
+            .config_snapshot_id
+            .map(|config_snapshot_id| config_snapshot_id.to_string()),
+        route_policy_id: resolved
+            .route_policy_id
+            .map(|route_policy_id| route_policy_id.to_string()),
+        scopes: resolved.scopes,
+        expires_at: resolved.expires_at,
     }))
 }
 
@@ -2574,6 +2819,35 @@ async fn get_config_snapshot(
         })?;
     authz.ensure_read_tenant(snapshot.config_snapshot.tenant_id.as_str(), &context)?;
     Ok(Json(snapshot))
+}
+
+async fn get_config_snapshot_sale_readiness(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(config_snapshot_id): Path<String>,
+) -> Result<Json<SaleReadyPackageResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let response = state
+        .store
+        .get_config_snapshot_sale_readiness(&config_snapshot_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load sale readiness: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "config_snapshot_not_found",
+                format!("config snapshot `{config_snapshot_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(response.config_snapshot.tenant_id.as_str(), &context)?;
+    Ok(Json(response))
 }
 
 async fn activate_config_snapshot(
@@ -2946,6 +3220,155 @@ async fn download_billing_export(
         response.1,
     )
         .into_response())
+}
+
+async fn create_renewal_intent(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateRenewalIntentRequest>,
+) -> Result<Json<RenewalIntentResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let out_trade_no = request.out_trade_no.trim();
+    let grant_id = request.grant_id.trim();
+    if out_trade_no.is_empty() {
+        return Err(ApiError::bad_request(
+            "renewal_out_trade_no_required",
+            "out_trade_no is required".to_string(),
+            &context,
+        ));
+    }
+    if grant_id.is_empty() {
+        return Err(ApiError::bad_request(
+            "renewal_grant_id_required",
+            "grant_id is required".to_string(),
+            &context,
+        ));
+    }
+    validate_renewal_expires_at(&request.renew_expires_at, &context)?;
+
+    let order = state
+        .store
+        .get_wechat_payment_order(out_trade_no)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "wechat_pay_order_unavailable",
+                format!("failed to load WeChat Pay order: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "wechat_pay_order_not_found",
+                format!("WeChat Pay order `{out_trade_no}` was not found"),
+                &context,
+            )
+        })?
+        .data;
+    authz.ensure_manage_tenant(&order.tenant_id, &context)?;
+
+    let grant = state
+        .store
+        .list_opening_grants()
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load opening grant: {error}"),
+                &context,
+            )
+        })?
+        .data
+        .into_iter()
+        .find(|grant| grant.grant_id == grant_id)
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "opening_grant_not_found",
+                format!("opening grant `{grant_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(grant.tenant_id.as_str(), &context)?;
+
+    if order.tenant_id != grant.tenant_id.as_str()
+        || order.project_id.as_deref() != Some(grant.project_id.as_str())
+    {
+        return Err(ApiError::conflict(
+            "renewal_grant_mismatch",
+            "paid order tenant/project does not match the opening grant".to_string(),
+            &context,
+        ));
+    }
+
+    let draft = RenewalIntentDraft {
+        renewal_intent_id: format!("renewal_{}", context.sequence),
+        out_trade_no: out_trade_no.to_string(),
+        grant_id: grant_id.to_string(),
+        renew_expires_at: request.renew_expires_at.trim().to_string(),
+        reason: request.reason,
+        created_by: authz.actor_id(),
+    };
+    match state
+        .store
+        .create_renewal_intent(draft)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "renewal_intent_persist_failed",
+                format!("failed to create renewal intent: {error}"),
+                &context,
+            )
+        })? {
+        RenewalIntentCreateResult::Created(intent) => {
+            Ok(Json(RenewalIntentResponse { data: intent }))
+        }
+        RenewalIntentCreateResult::OrderNotFound => Err(ApiError::not_found(
+            "wechat_pay_order_not_found",
+            format!("WeChat Pay order `{out_trade_no}` was not found"),
+            &context,
+        )),
+        RenewalIntentCreateResult::GrantNotFound => Err(ApiError::not_found(
+            "opening_grant_not_found",
+            format!("opening grant `{grant_id}` was not found"),
+            &context,
+        )),
+        RenewalIntentCreateResult::GrantMismatch => Err(ApiError::conflict(
+            "renewal_grant_mismatch",
+            "paid order tenant/project does not match the opening grant".to_string(),
+            &context,
+        )),
+    }
+}
+
+async fn list_renewal_intents(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<RenewalIntentsQuery>,
+) -> Result<Json<RenewalIntentsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    if let Some(tenant_id) = query.tenant_id.as_deref() {
+        authz.ensure_read_tenant(tenant_id, &context)?;
+    }
+    let mut response = state
+        .store
+        .list_renewal_intents(RenewalIntentFilters {
+            tenant_id: query.tenant_id,
+            project_id: query.project_id,
+            grant_id: query.grant_id,
+            out_trade_no: query.out_trade_no,
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "renewal_intents_unavailable",
+                format!("failed to list renewal intents: {error}"),
+                &context,
+            )
+        })?;
+    response.data = authz.filter_by_tenant(response.data, |intent| intent.tenant_id.as_str());
+    Ok(Json(response))
 }
 
 async fn create_wechat_pay_prepay(
@@ -3500,6 +3923,129 @@ fn validate_codex_auth_json(auth_json: &Value, context: &RequestContext) -> Resu
 
 fn tenant_visible_to_authorizer(authz: &ControlPlaneAuthorizer, tenant_id: Option<&str>) -> bool {
     tenant_id.is_some_and(|tenant_id| authz.membership(tenant_id).is_some())
+}
+
+fn validate_opening_grantee(
+    request: &CreateOpeningGrantRequest,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    let grantee_kind = request.grantee_kind.trim();
+    if !matches!(grantee_kind, "customer" | "agent" | "internal_test") {
+        return Err(ApiError::bad_request(
+            "opening_grantee_kind_invalid",
+            "grantee_kind must be customer, agent, or internal_test".to_string(),
+            context,
+        ));
+    }
+    if request.grantee_id.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "opening_grantee_required",
+            "grantee_id is required".to_string(),
+            context,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_opening_expires_at(expires_at: &str, context: &RequestContext) -> Result<(), ApiError> {
+    let expires_at = expires_at.trim();
+    let timestamp = OffsetDateTime::parse(expires_at, &Rfc3339).map_err(|error| {
+        ApiError::bad_request(
+            "opening_expires_at_invalid",
+            format!("expires_at must be RFC3339: {error}"),
+            context,
+        )
+    })?;
+    if timestamp <= OffsetDateTime::now_utc() {
+        return Err(ApiError::bad_request(
+            "opening_expires_at_invalid",
+            "expires_at must be in the future".to_string(),
+            context,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_renewal_expires_at(
+    renew_expires_at: &str,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    let renew_expires_at = renew_expires_at.trim();
+    let timestamp = OffsetDateTime::parse(renew_expires_at, &Rfc3339).map_err(|error| {
+        ApiError::bad_request(
+            "renew_expires_at_invalid",
+            format!("renew_expires_at must be RFC3339: {error}"),
+            context,
+        )
+    })?;
+    if timestamp <= OffsetDateTime::now_utc() {
+        return Err(ApiError::bad_request(
+            "renew_expires_at_invalid",
+            "renew_expires_at must be in the future".to_string(),
+            context,
+        ));
+    }
+    Ok(())
+}
+
+fn opening_scopes(
+    requested_scopes: &[String],
+    package: &SaleReadyPackageResponse,
+    context: &RequestContext,
+) -> Result<Vec<String>, ApiError> {
+    let mut scopes = if requested_scopes.is_empty() {
+        let mut scopes = vec![
+            OPENING_SCOPE_ROUTE_CODEX.to_string(),
+            OPENING_SCOPE_PROVIDER_COMMERCIAL.to_string(),
+        ];
+        if let Some(route_policy) = &package.route_policy {
+            scopes.push(format!("protocol:{}", route_policy.protocol_family));
+            scopes.push(format!("model:{}", route_policy.model_alias));
+        }
+        scopes
+    } else {
+        requested_scopes
+            .iter()
+            .map(|scope| scope.trim())
+            .filter(|scope| !scope.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    scopes.sort();
+    scopes.dedup();
+
+    let has_route_scope = scopes
+        .iter()
+        .any(|scope| scope == OPENING_SCOPE_ROUTE_CODEX);
+    let has_provider_scope = scopes
+        .iter()
+        .any(|scope| scope == OPENING_SCOPE_PROVIDER_COMMERCIAL);
+    if !has_route_scope || !has_provider_scope {
+        return Err(ApiError::bad_request(
+            "opening_scope_invalid",
+            format!(
+                "scopes must include `{OPENING_SCOPE_ROUTE_CODEX}` and `{OPENING_SCOPE_PROVIDER_COMMERCIAL}`"
+            ),
+            context,
+        ));
+    }
+    Ok(scopes)
+}
+
+fn generate_opening_api_key(context: &RequestContext) -> Result<String, ApiError> {
+    let rng = rand::SystemRandom::new();
+    let mut token_bytes = [0_u8; 24];
+    rand::SecureRandom::fill(&rng, &mut token_bytes).map_err(|_| {
+        ApiError::internal(
+            "credential_generation_failed",
+            "failed to generate opening credential".to_string(),
+            context,
+        )
+    })?;
+    Ok(format!(
+        "akp_{}",
+        BASE64_URL_SAFE_NO_PAD.encode(token_bytes)
+    ))
 }
 
 fn validate_oauth_pool_provider(provider: &str, context: &RequestContext) -> Result<(), ApiError> {
@@ -4971,7 +5517,10 @@ mod tests {
         ControlPlaneState, OAuthProviderConfig, app_with_state, ensure_oauth_payload_ok,
         oauth_authorization_url_from_config, resolve_oidc_membership,
     };
-    use crate::store::{IdentityLookup, SESSION_TTL_SECONDS, UserIdentityKey, UserSeed};
+    use crate::store::{
+        IdentityLookup, OAuthSharingUsageFilters, OpeningGrantDraft, SESSION_TTL_SECONDS,
+        UserIdentityKey, UserSeed, WechatPaymentOrderRecord,
+    };
     use axum::{
         body::{Body, to_bytes},
         http::{
@@ -4980,10 +5529,11 @@ mod tests {
         },
     };
     use core_domain::{
-        AdmissionResult, AuthProvider, AuthProviderLink, AuthProviderLinkId, ConfigSnapshotId,
-        ExcludedTarget, FallbackTransition, ProjectId, ProviderResourceId, RoutePolicyId,
-        RouteReceipt, ScoreBreakdown, TenantId, TenantMembership, TenantMembershipId,
-        TenantMembershipRole, TenantMembershipStatus, TenantSummary, UserId, UserIdentity,
+        AdmissionResult, AuthProvider, AuthProviderLink, AuthProviderLinkId, BudgetPolicyId,
+        ConfigSnapshotId, ExcludedTarget, FallbackTransition, ProjectId, ProviderResourceId,
+        RoutePolicyId, RouteReceipt, ScoreBreakdown, TenantId, TenantMembership,
+        TenantMembershipId, TenantMembershipRole, TenantMembershipStatus, TenantSummary, UserId,
+        UserIdentity,
     };
     use serde_json::{Value, json};
     use std::sync::{Arc, RwLock};
@@ -6313,6 +6863,8 @@ mod tests {
             serde_json::from_slice(&to_bytes(listed.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(listed_body["data"][0]["export_job_id"], export_job_id);
+        assert_eq!(listed_body["data"][0]["status"], "completed");
+        assert!(listed_body["data"][0]["completed_at"].as_str().is_some());
 
         let fetched = app
             .clone()
@@ -6554,6 +7106,12 @@ mod tests {
                 .unwrap();
         assert_eq!(created["provider_resource_id"], "prvrsrc_cp_test");
         assert_eq!(created["version"], 1);
+        assert_eq!(created["status"], "active");
+        assert_eq!(created["health_state"], "quarantined");
+        assert_eq!(
+            created["quarantine_reason"],
+            "manual_intake_pending_live_probe"
+        );
 
         let stale_update = app
             .clone()
@@ -6970,6 +7528,28 @@ mod tests {
         assert_eq!(feedback.status(), StatusCode::OK);
         let feedback = response_json(feedback).await;
         assert_eq!(feedback["account"]["health_state"], "quarantined");
+        let usage = state
+            .store
+            .read_oauth_sharing_usage(OAuthSharingUsageFilters {
+                lease_id: None,
+                carpool_id: None,
+                workspace_id: Some("tenant_acme"),
+                provider: Some("codex"),
+                account_id: first["codex_account_id"].as_str(),
+            })
+            .await
+            .unwrap();
+        let event_types = usage
+            .audit_events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>();
+        assert!(event_types.contains(&"runtime_lease_heartbeat"));
+        assert!(event_types.contains(&"runtime_lease_release"));
+        assert!(event_types.contains(&"quarantine"));
+        assert!(usage.audit_events.iter().any(|event| {
+            event.metadata["runtime_lease_id"].as_str() == Some(runtime_lease_id.as_str())
+        }));
 
         let blocked = app
             .oneshot(
@@ -7523,6 +8103,613 @@ mod tests {
                 .unwrap();
         assert_eq!(activated["config_snapshot"]["status"], "active");
         assert!(activated["config_snapshot"]["activated_at"].is_string());
+    }
+
+    #[tokio::test]
+    async fn config_snapshot_sale_readiness_returns_sale_ready_handoff() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let response = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/config-snapshots/cfgsnap_gateway_v1/sale-readiness",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+
+        assert_eq!(body["readiness"]["status"], "sale_ready");
+        assert_eq!(body["handoff"]["config_snapshot_id"], "cfgsnap_gateway_v1");
+        assert_eq!(
+            body["handoff"]["route_policy_id"],
+            "routepol_openai_chat_default"
+        );
+        assert_eq!(body["creates_customer_api_key"], false);
+        assert_eq!(body["route_simulation"]["admission_result"], "admitted");
+        assert!(body["pricing"]["line_items"].as_array().unwrap().len() >= 2);
+        assert_eq!(body["budget"]["threshold_status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn config_snapshot_sale_readiness_blocks_draft_without_customer_key() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let create = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/config-snapshots",
+                Some(&admin_cookie),
+                Some(json!({
+                    "config_snapshot_id":"cfgsnap_cp_sale_draft",
+                    "tenant_id":"tenant_acme",
+                    "project_id":"proj_core",
+                    "revision":2,
+                    "status":"active",
+                    "activated_at":"2026-04-22T00:00:00Z",
+                    "provider_resource_ids":["prvrsrc_openai_backup"],
+                    "route_policy_id":"routepol_openai_chat_default",
+                    "budget_policy_id":"budgetpol_default"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(request(
+                "GET",
+                "/v1/config-snapshots/cfgsnap_cp_sale_draft/sale-readiness",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+
+        assert_eq!(body["config_snapshot"]["status"], "draft");
+        assert_eq!(body["readiness"]["status"], "draft_blocked");
+        assert_eq!(body["readiness"]["reason_code"], "blocked_gateway_config");
+        assert_eq!(body["creates_customer_api_key"], false);
+        assert_eq!(body["handoff"]["readiness_status"], "draft_blocked");
+    }
+
+    #[tokio::test]
+    async fn opening_grants_create_from_sale_ready_package_returns_one_time_credential() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let create = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/opening-grants",
+                Some(&admin_cookie),
+                Some(json!({
+                    "config_snapshot_id":"cfgsnap_gateway_v1",
+                    "grantee_kind":"customer",
+                    "grantee_id":"cust_acme_launch",
+                    "grantee_label":"Acme Launch Customer",
+                    "expires_at": crate::expires_at(3600)
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+        let body = response_json(create).await;
+        let plaintext = body["credential"]["plaintext"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(plaintext.starts_with("akp_"));
+        assert_eq!(body["grant"]["status"], "active");
+        assert_eq!(body["grant"]["grantee_kind"], "customer");
+        assert_eq!(body["grant"]["config_snapshot_id"], "cfgsnap_gateway_v1");
+        assert_eq!(body["grant"].get("credential_hash"), None);
+        assert!(
+            body["grant"]["scopes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|scope| scope == "route:codex")
+        );
+        let grant_id = body["grant"]["grant_id"].as_str().unwrap().to_string();
+
+        let list = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/opening-grants",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(list.status(), StatusCode::OK);
+        let list_body = response_json(list).await;
+        let listed = list_body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|grant| grant["grant_id"] == grant_id)
+            .unwrap();
+        assert_eq!(listed.get("credential"), None);
+        assert_eq!(listed.get("plaintext"), None);
+        assert_eq!(listed.get("credential_hash"), None);
+
+        let resolve = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "api_key": plaintext
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolve.status(), StatusCode::OK);
+        let resolved = response_json(resolve).await;
+        assert_eq!(resolved["grant_id"], grant_id);
+        assert_eq!(resolved["config_snapshot_id"], "cfgsnap_gateway_v1");
+        assert_eq!(resolved["route_policy_id"], "routepol_openai_chat_default");
+        assert!(
+            resolved["scopes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|scope| scope == "provider:hugerouter-commercial")
+        );
+    }
+
+    #[tokio::test]
+    async fn opening_grants_block_non_sale_ready_package() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let create_snapshot = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/config-snapshots",
+                Some(&admin_cookie),
+                Some(json!({
+                    "config_snapshot_id":"cfgsnap_opening_blocked",
+                    "tenant_id":"tenant_acme",
+                    "project_id":"proj_core",
+                    "revision":2,
+                    "status":"active",
+                    "activated_at":"2026-04-22T00:00:00Z",
+                    "provider_resource_ids":["prvrsrc_openai_backup"],
+                    "route_policy_id":"routepol_openai_chat_default",
+                    "budget_policy_id":"budgetpol_default"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(create_snapshot.status(), StatusCode::OK);
+
+        let create_grant = app
+            .oneshot(request(
+                "POST",
+                "/v1/opening-grants",
+                Some(&admin_cookie),
+                Some(json!({
+                    "config_snapshot_id":"cfgsnap_opening_blocked",
+                    "grantee_kind":"agent",
+                    "grantee_id":"agent_blocked",
+                    "expires_at": crate::expires_at(3600)
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(create_grant.status(), StatusCode::CONFLICT);
+        let body = response_json(create_grant).await;
+        assert_eq!(body["code"], "sale_ready_blocked");
+    }
+
+    #[tokio::test]
+    async fn opening_grant_revoke_blocks_gateway_resolution() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+
+        let create = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/opening-grants",
+                Some(&admin_cookie),
+                Some(json!({
+                    "config_snapshot_id":"cfgsnap_gateway_v1",
+                    "grantee_kind":"customer",
+                    "grantee_id":"cust_revoke",
+                    "expires_at": crate::expires_at(3600)
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+        let body = response_json(create).await;
+        let plaintext = body["credential"]["plaintext"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let grant_id = body["grant"]["grant_id"].as_str().unwrap().to_string();
+        let version = body["grant"]["version"].as_u64().unwrap();
+
+        let revoke = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                format!("/v1/opening-grants/{grant_id}/revoke").as_str(),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": version
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), StatusCode::OK);
+        let revoked = response_json(revoke).await;
+        assert_eq!(revoked["status"], "revoked");
+
+        let resolve = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "api_key": plaintext
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolve.status(), StatusCode::FORBIDDEN);
+        let body = response_json(resolve).await;
+        assert_eq!(body["code"], "api_key_revoked");
+    }
+
+    #[tokio::test]
+    async fn expired_opening_grant_blocks_gateway_resolution_with_reason() {
+        let (state, _admin_cookie, app) = platform_admin_app().await;
+        let plaintext = "akp_expired_opening_grant";
+        state
+            .store
+            .create_opening_grant(
+                OpeningGrantDraft {
+                    grant_id: "grant_expired_customer".to_string(),
+                    tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                    project_id: ProjectId::parse("proj_core").unwrap(),
+                    grantee_kind: "customer".to_string(),
+                    grantee_id: "cust_expired".to_string(),
+                    grantee_label: Some("Expired customer".to_string()),
+                    config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_gateway_v1").unwrap(),
+                    route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default").unwrap(),
+                    budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
+                    provider_resource_ids: vec![
+                        ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
+                    ],
+                    credential_kind: "customer_api_key".to_string(),
+                    scopes: vec!["route:codex".to_string()],
+                    expires_at: "2000-01-01T00:00:00Z".to_string(),
+                    created_by: "test".to_string(),
+                },
+                plaintext,
+            )
+            .await
+            .unwrap();
+
+        let resolve = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "api_key": plaintext
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolve.status(), StatusCode::FORBIDDEN);
+        let body = response_json(resolve).await;
+        assert_eq!(body["code"], "api_key_expired");
+    }
+
+    #[tokio::test]
+    async fn paid_order_renewal_intent_restores_opening_grant_future_state() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let plaintext = "akp_renew_paid_opening_grant";
+        let grant_id = "grant_renew_paid_customer";
+        state
+            .store
+            .create_opening_grant(
+                OpeningGrantDraft {
+                    grant_id: grant_id.to_string(),
+                    tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                    project_id: ProjectId::parse("proj_core").unwrap(),
+                    grantee_kind: "customer".to_string(),
+                    grantee_id: "cust_renew_paid".to_string(),
+                    grantee_label: Some("Renew paid customer".to_string()),
+                    config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_gateway_v1").unwrap(),
+                    route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default").unwrap(),
+                    budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
+                    provider_resource_ids: vec![
+                        ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
+                    ],
+                    credential_kind: "api_key".to_string(),
+                    scopes: vec!["route:codex".to_string()],
+                    expires_at: "2000-01-01T00:00:00Z".to_string(),
+                    created_by: "test".to_string(),
+                },
+                plaintext,
+            )
+            .await
+            .unwrap();
+        let paid_at = crate::now_rfc3339();
+        state
+            .store
+            .create_wechat_payment_order(WechatPaymentOrderRecord {
+                out_trade_no: "wx_renew_paid_order".to_string(),
+                tenant_id: "tenant_acme".to_string(),
+                project_id: Some("proj_core".to_string()),
+                amount_total: 10_000,
+                currency: "CNY".to_string(),
+                channel: "native".to_string(),
+                status: "paid".to_string(),
+                trade_state: Some("SUCCESS".to_string()),
+                code_url: None,
+                prepay_id: Some("prepay_paid".to_string()),
+                transaction_id: Some("tx_paid".to_string()),
+                notification_id: Some("notify_paid".to_string()),
+                created_at: paid_at.clone(),
+                updated_at: paid_at.clone(),
+                expires_at: crate::expires_at(1_800),
+                paid_at: Some(paid_at),
+                metadata: json!({"purpose":"renewal"}),
+            })
+            .await
+            .unwrap();
+
+        let renew_expires_at = crate::expires_at(86_400);
+        let renewal = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/billing/renewal-intents",
+                Some(&admin_cookie),
+                Some(json!({
+                    "out_trade_no": "wx_renew_paid_order",
+                    "grant_id": grant_id,
+                    "renew_expires_at": renew_expires_at
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(renewal.status(), StatusCode::OK);
+        let body = response_json(renewal).await;
+        assert_eq!(body["data"]["status"], "renewed");
+        assert_eq!(body["data"]["reason_code"], "payment_paid_grant_recovered");
+        assert_eq!(body["data"]["previous_grant_status"], "expired");
+        assert_eq!(body["data"]["previous_expires_at"], "2000-01-01T00:00:00Z");
+        assert_eq!(body["data"]["renew_expires_at"], renew_expires_at);
+        assert!(body["data"]["applied_at"].as_str().is_some());
+
+        let grants = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/opening-grants",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(grants.status(), StatusCode::OK);
+        let grants_body = response_json(grants).await;
+        let renewed = grants_body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|grant| grant["grant_id"] == grant_id)
+            .unwrap();
+        assert_eq!(renewed["status"], "active");
+        assert_eq!(renewed["expires_at"], renew_expires_at);
+
+        let listed = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/billing/renewal-intents?tenant_id=tenant_acme&project_id=proj_core",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_body = response_json(listed).await;
+        assert!(
+            listed_body["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|intent| intent["out_trade_no"] == "wx_renew_paid_order"
+                    && intent["grant_id"] == grant_id)
+        );
+
+        let resolve = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({ "api_key": plaintext }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolve.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn unpaid_order_renewal_intent_is_blocked_without_restoring_grant() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let plaintext = "akp_renew_unpaid_opening_grant";
+        let grant_id = "grant_renew_unpaid_customer";
+        state
+            .store
+            .create_opening_grant(
+                OpeningGrantDraft {
+                    grant_id: grant_id.to_string(),
+                    tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                    project_id: ProjectId::parse("proj_core").unwrap(),
+                    grantee_kind: "customer".to_string(),
+                    grantee_id: "cust_renew_unpaid".to_string(),
+                    grantee_label: Some("Renew unpaid customer".to_string()),
+                    config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_gateway_v1").unwrap(),
+                    route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default").unwrap(),
+                    budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
+                    provider_resource_ids: vec![
+                        ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
+                    ],
+                    credential_kind: "api_key".to_string(),
+                    scopes: vec!["route:codex".to_string()],
+                    expires_at: "2000-01-01T00:00:00Z".to_string(),
+                    created_by: "test".to_string(),
+                },
+                plaintext,
+            )
+            .await
+            .unwrap();
+        let now = crate::now_rfc3339();
+        state
+            .store
+            .create_wechat_payment_order(WechatPaymentOrderRecord {
+                out_trade_no: "wx_renew_unpaid_order".to_string(),
+                tenant_id: "tenant_acme".to_string(),
+                project_id: Some("proj_core".to_string()),
+                amount_total: 10_000,
+                currency: "CNY".to_string(),
+                channel: "native".to_string(),
+                status: "pending".to_string(),
+                trade_state: Some("NOTPAY".to_string()),
+                code_url: Some("weixin://wxpay/bizpayurl?pr=unpaid".to_string()),
+                prepay_id: Some("prepay_unpaid".to_string()),
+                transaction_id: None,
+                notification_id: None,
+                created_at: now.clone(),
+                updated_at: now,
+                expires_at: crate::expires_at(1_800),
+                paid_at: None,
+                metadata: json!({"purpose":"renewal"}),
+            })
+            .await
+            .unwrap();
+
+        let renewal = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/billing/renewal-intents",
+                Some(&admin_cookie),
+                Some(json!({
+                    "out_trade_no": "wx_renew_unpaid_order",
+                    "grant_id": grant_id,
+                    "renew_expires_at": crate::expires_at(86_400)
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(renewal.status(), StatusCode::OK);
+        let body = response_json(renewal).await;
+        assert_eq!(body["data"]["status"], "renewal_blocked");
+        assert_eq!(body["data"]["reason_code"], "payment_not_paid");
+        assert!(body["data"]["applied_at"].is_null());
+
+        let grants = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/opening-grants",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(grants.status(), StatusCode::OK);
+        let grants_body = response_json(grants).await;
+        let blocked = grants_body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|grant| grant["grant_id"] == grant_id)
+            .unwrap();
+        assert_eq!(blocked["status"], "expired");
+        assert_eq!(blocked["expires_at"], "2000-01-01T00:00:00Z");
+
+        let resolve = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/gateway/api-keys/resolve")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({ "api_key": plaintext }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolve.status(), StatusCode::FORBIDDEN);
+        let body = response_json(resolve).await;
+        assert_eq!(body["code"], "api_key_expired");
+    }
+
+    #[tokio::test]
+    async fn internal_gateway_config_returns_active_snapshot() {
+        let (_state, _admin_cookie, app) = platform_admin_app().await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/internal/gateway/config/current")
+                    .header(AUTHORIZATION, "Bearer test-internal-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+
+        assert_eq!(
+            body["config_snapshot"]["config_snapshot_id"],
+            "cfgsnap_gateway_v1"
+        );
+        assert_eq!(
+            body["route_policy"]["route_policy_id"],
+            "routepol_openai_chat_default"
+        );
+        assert!(!body["provider_resources"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
