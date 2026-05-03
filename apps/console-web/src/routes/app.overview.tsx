@@ -16,6 +16,9 @@ import {
 } from "../features/control-plane/route-state";
 import { getConsoleDataService } from "../features/control-plane/service";
 
+const OVERVIEW_DESCRIPTION =
+  "Monitor the current tenant workspace, active routing state, and control-plane configuration freshness. 争取成为 AI 时代的“粮食库”。";
+
 export const Route = createFileRoute("/app/overview")({
   loader: () => loadRouteData(() => getConsoleDataService().getOverview()),
   pendingComponent: () => <RouteLoadingState label="Loading overview" />,
@@ -30,7 +33,7 @@ function OverviewPage() {
     return (
       <UiStack>
         <PageHeader
-          description="Monitor the current tenant workspace, active routing state, and control-plane configuration freshness."
+          description={OVERVIEW_DESCRIPTION}
           title="Overview"
         />
         <RouteErrorState
@@ -48,7 +51,7 @@ function OverviewPage() {
   return (
     <UiStack>
       <PageHeader
-        description="Monitor the current tenant workspace, active routing state, and control-plane configuration freshness."
+        description={OVERVIEW_DESCRIPTION}
         title="Overview"
       />
       <UiInline grow align="stretch">
