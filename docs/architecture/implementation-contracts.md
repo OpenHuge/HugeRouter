@@ -425,7 +425,56 @@ Unless a task explicitly calls for them, the following should usually be treated
 - turning semantic cache into a de facto general memory platform without a separate ownership, retention, and policy model
 - treating long-running A2A or agent workflow continuation as just another synchronous HTTP retry problem
 
-## 11.4 Preferred Agent Behavior
+## 11.4 Backend MVVM-style Layering Rule
+
+This rule applies to future backend work. It does not require proactive refactoring of historical large files.
+
+Invariant:
+
+- new backend product behavior should follow MVVM-style responsibility separation inside the service or crate that owns the feature
+- new business logic should not be added directly to oversized service root files such as `services/*/src/lib.rs` or monolithic `store.rs` files
+- historical oversized files may remain in place, but a task that must touch related behavior should move only the directly relevant slice into the appropriate module when that can be done safely
+
+Backend mapping:
+
+- **View**: HTTP route and handler code. This layer may authenticate, authorize, parse request inputs, perform cheap syntactic validation, call an application service, and map domain/application errors to HTTP responses.
+- **ViewModel**: request/response DTOs, public projections, query result shapes, and redaction-aware response assembly. This layer should not own persistence or business state transitions.
+- **Model**: domain records, state machines, invariants, and business rules. This layer should not depend on `axum`, HTTP request types, or `sqlx`.
+- **Application**: use case or command service code that coordinates a product flow, owns the transaction boundary, calls repositories, and applies model rules.
+- **Repository**: store traits, Postgres adapters, memory adapters, SQL query helpers, and transaction helpers. This layer should not construct HTTP errors or decide user-facing route behavior.
+
+Required default for new backend features:
+
+- create a feature-owned module before adding substantial new code to service roots
+- keep handler functions thin enough that their behavior can be summarized as request mapping plus one application call
+- keep repository methods focused on data access and persistence invariants
+- keep projections and redaction rules explicit rather than leaking storage payloads into public responses
+- add tests at the layer that owns the behavior, plus at least one request-level test when a public API contract changes
+
+Recommended module names may include:
+
+- `view.rs`
+- `view_model.rs`
+- `model.rs`
+- `service.rs`
+- `repository.rs`
+
+Implementation freedom:
+
+- a small feature does not need all five files on day one
+- a module name may differ if the responsibility is still clear
+- generated protocol-contract code can remain in protocol crates when that is the established source of truth
+- existing legacy functions may be called from new layers when moving them would create unrelated churn
+
+Review triggers:
+
+- a new backend file exceeds 800 lines
+- a new handler writes SQL directly
+- a repository method returns HTTP-specific errors
+- model code imports service-framework or database-driver types
+- new product behavior is added to a service root file without a concrete reason
+
+## 11.5 Preferred Agent Behavior
 
 When the spec leaves room for choice, agents should usually prefer:
 
@@ -435,7 +484,7 @@ When the spec leaves room for choice, agents should usually prefer:
 - producing one vertical slice with tests over scaffolding multiple future subsystems
 - documenting a deferred concern explicitly instead of prematurely implementing it
 
-## 11.5 Preferred Spec-to-Code Review Questions
+## 11.6 Preferred Spec-to-Code Review Questions
 
 Before coding, agents should be able to answer these questions in one or two sentences:
 

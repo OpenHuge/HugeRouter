@@ -66,6 +66,7 @@ cargo test -p protocol-ir --locked checked_in_artifacts_match_generated_contract
 - Preserve typed schemas at service, protocol, and package boundaries.
 - Keep provider-specific behavior visible enough for diagnostics while mapping common behavior into canonical domain types.
 - Add shared abstractions only when they remove real duplication or enforce a boundary already present in the architecture docs.
+- New backend work must follow the backend MVVM-style layering rule in [Implementation Contracts](docs/architecture/implementation-contracts.md#114-backend-mvvm-style-layering-rule); do not add new business logic to oversized service root files.
 
 ## Review Expectations
 
