@@ -15,7 +15,7 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::{
-        HeaderMap, Method,
+        HeaderMap, Method, StatusCode,
         header::{AUTHORIZATION, COOKIE, SET_COOKIE},
     },
     response::{IntoResponse, Response},
@@ -35,10 +35,19 @@ use core_domain::{
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
-    BillingExportRequest, ConfigSnapshotResponse, CreateOpeningGrantRequest,
-    CreateRenewalIntentRequest, OpeningCredential, OpeningGrant, OpeningGrantCreateResponse,
-    OpeningGrantsResponse, PricingCatalogResponse, PricingSimulationRequest,
-    PricingSimulationResponse, ProjectsResponse, ProviderResourcesResponse, RenewalIntentResponse,
+    BillingExportRequest, ConfigSnapshotResponse, CreateDeliveryArtifactRequest,
+    CreateDeliveryDownloadGrantRequest, CreateDeliveryRequest, CreateDeliveryUploadBatchRequest,
+    CreateOpeningGrantRequest, CreateRenewalIntentRequest, DeliveryActivationResponse,
+    DeliveryArtifactResponse, DeliveryArtifactsResponse, DeliveryDownloadGrantIssueResponse,
+    DeliveryDownloadGrantResponse, DeliveryDownloadGrantRevokeRequest,
+    DeliveryLifecycleEventsResponse, DeliveryLifecycleResponse, DeliveryOperationsDetailResponse,
+    DeliveryOperationsExceptionsResponse, DeliveryOperationsOverviewResponse,
+    DeliveryOperationsTimelineResponse, DeliveryPrepareResponse, DeliveryResponse,
+    DeliveryRevokeRequest, DeliveryServiceSegmentsResponse, DeliveryUploadBatchItemsResponse,
+    DeliveryUploadBatchResponse, ExtendDeliveryEntitlementRequest, OpeningCredential, OpeningGrant,
+    OpeningGrantCreateResponse, OpeningGrantsResponse, PricingCatalogResponse,
+    PricingSimulationRequest, PricingSimulationResponse, ProjectsResponse,
+    ProviderResourcesResponse, RedeemDeliveryRequest, RenewalIntentResponse,
     RenewalIntentsResponse, RouteDiagnosticsResponse, RoutePoliciesResponse,
     RouteSimulationRequest, RouteSimulationResponse, SaleReadyPackageResponse, TenantsResponse,
     UsageBreakdownResponse, UsageSummaryResponse,
@@ -48,10 +57,18 @@ use ring::{aead, rand};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::HashSet,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use store::{
     ApiKey, ApiKeysResponse, CodexAuthAccount, CodexAuthAccountRecord, CodexAuthAccountsResponse,
-    ConcurrencyResult, ConfigSnapshotsResponse, EncryptedSecretBlob, IdentityLookup,
+    ConcurrencyResult, ConfigSnapshotsResponse, DeliveryArtifactDraft,
+    DeliveryDownloadConsumeResult, DeliveryDownloadGrantDraft, DeliveryDownloadGrantIssueResult,
+    DeliveryEntitlementExtendDraft, DeliveryLifecycleResult, DeliveryOperationsExceptionFilters,
+    DeliveryOperationsObjectFilters, DeliveryOperationsObjectRef, DeliveryOperationsScope,
+    DeliveryPrepareDraft, DeliveryRedeemResult, DeliveryUploadBatchDraft,
+    DeliveryUploadBatchItemDraft, DeliveryUploadProcessResult, EncryptedSecretBlob, IdentityLookup,
     OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolAccountFeedback, OAuthPoolSelectionRequest,
     OAuthSharingLeaseRecord, OAuthSharingLeasesResponse, OAuthSharingUsageBudget,
     OAuthSharingUsageFilters, OAuthSharingUsageResponse, OpeningGrantDraft,
@@ -76,6 +93,15 @@ const DEFAULT_CODEX_REVERSE_PROXY_ENDPOINT: &str = "https://chatgpt-reverse-prox
 const OPENING_CREDENTIAL_KIND_API_KEY: &str = "api_key";
 const OPENING_SCOPE_ROUTE_CODEX: &str = "route:codex";
 const OPENING_SCOPE_PROVIDER_COMMERCIAL: &str = "provider:hugerouter-commercial";
+const DEFAULT_DELIVERY_SERVICE_KIND: &str = "manual_browser_account";
+const DELIVERY_PROVIDER_CHATGPT: &str = "chatgpt";
+const DELIVERY_CODE_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+const DEFAULT_DELIVERY_ARTIFACT_KIND: &str = store::DELIVERY_ARTIFACT_KIND_BROWSER_ACCOUNT_BUNDLE;
+const DEFAULT_DELIVERY_ARTIFACT_CONTENT_TYPE: &str = "application/octet-stream";
+const DELIVERY_OPERATIONS_DEFAULT_LIMIT: u32 = 50;
+const DELIVERY_OPERATIONS_MAX_LIMIT: u32 = 200;
+const DELIVERY_OPERATIONS_DEFAULT_WINDOW_DAYS: i64 = 30;
+const DELIVERY_UPLOAD_MAX_ITEMS: usize = 500;
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
@@ -336,6 +362,41 @@ struct BalanceProjectionQuery {
 struct BillingExportsQuery {
     pub tenant_id: Option<String>,
     pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DeliveryOperationsQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DeliveryOperationsExceptionsQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub limit: Option<u32>,
+    pub status: Option<String>,
+    pub exception_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DeliveryOperationsObjectQuery {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub limit: Option<u32>,
+    pub delivery_id: Option<String>,
+    pub entitlement_id: Option<String>,
+    pub activation_id: Option<String>,
+    pub artifact_id: Option<String>,
+    pub grant_id: Option<String>,
+    pub segment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -665,6 +726,82 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             "/v1/opening-grants/{grant_id}/revoke",
             post(revoke_opening_grant),
         )
+        .route("/v1/deliveries/prepare", post(prepare_delivery))
+        .route("/v1/deliveries/{delivery_id}", get(get_delivery))
+        .route("/v1/deliveries/{delivery_id}/revoke", post(revoke_delivery))
+        .route(
+            "/v1/deliveries/{delivery_id}/artifacts",
+            get(list_delivery_artifacts).post(create_delivery_artifact),
+        )
+        .route(
+            "/v1/deliveries/{delivery_id}/artifacts/{artifact_id}",
+            get(get_delivery_artifact),
+        )
+        .route("/v1/delivery-uploads", post(create_delivery_upload_batch))
+        .route(
+            "/v1/delivery-uploads/{batch_id}",
+            get(get_delivery_upload_batch),
+        )
+        .route(
+            "/v1/delivery-uploads/{batch_id}/items",
+            get(list_delivery_upload_batch_items),
+        )
+        .route(
+            "/v1/delivery-activations/redeem",
+            post(redeem_delivery_activation),
+        )
+        .route(
+            "/v1/delivery-activations/{activation_id}",
+            get(get_delivery_activation),
+        )
+        .route(
+            "/v1/delivery-download-grants",
+            post(issue_delivery_download_grant),
+        )
+        .route(
+            "/v1/delivery-download-grants/{grant_id}",
+            get(get_delivery_download_grant),
+        )
+        .route(
+            "/v1/delivery-download-grants/{grant_id}/revoke",
+            post(revoke_delivery_download_grant),
+        )
+        .route(
+            "/v1/delivery-downloads/artifact",
+            get(retrieve_delivery_download_artifact),
+        )
+        .route(
+            "/v1/delivery-entitlements/{entitlement_id}/segments",
+            get(list_delivery_service_segments),
+        )
+        .route(
+            "/v1/delivery-entitlements/{entitlement_id}/lifecycle-events",
+            get(list_delivery_lifecycle_events),
+        )
+        .route(
+            "/v1/delivery-entitlements/{entitlement_id}/reconcile",
+            post(reconcile_delivery_lifecycle),
+        )
+        .route(
+            "/v1/delivery-entitlements/{entitlement_id}/extend",
+            post(extend_delivery_entitlement),
+        )
+        .route(
+            "/v1/delivery-operations/overview",
+            get(get_delivery_operations_overview),
+        )
+        .route(
+            "/v1/delivery-operations/timeline",
+            get(get_delivery_operations_timeline),
+        )
+        .route(
+            "/v1/delivery-operations/exceptions",
+            get(list_delivery_operations_exceptions),
+        )
+        .route(
+            "/v1/delivery-operations/detail",
+            get(get_delivery_operations_detail),
+        )
         .route(
             "/v1/config-snapshots",
             get(list_config_snapshots).post(create_config_snapshot),
@@ -735,6 +872,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/gateway/billing-projection",
             get(get_internal_gateway_balance_projection),
+        )
+        .route(
+            "/internal/delivery-uploads/{batch_id}/process",
+            post(process_delivery_upload_batch),
         )
         .route("/v1/usage/summary", get(get_usage_summary))
         .route("/v1/usage/breakdown", get(get_usage_breakdown))
@@ -1954,6 +2095,938 @@ async fn revoke_opening_grant(
             &context,
         )),
     }
+}
+
+async fn prepare_delivery(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDeliveryRequest>,
+) -> Result<Json<DeliveryPrepareResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let provider = validate_delivery_provider(&request.provider, &context)?;
+    validate_delivery_service_days(request.service_days, &context)?;
+    let service_kind = delivery_service_kind(request.service_kind.as_deref(), &context)?;
+    let project = load_project(&state, request.project_id.as_str(), &context).await?;
+    if project.tenant_id != request.tenant_id {
+        return Err(ApiError::bad_request(
+            "delivery_project_tenant_mismatch",
+            "project_id does not belong to tenant_id".to_string(),
+            &context,
+        ));
+    }
+    authz.ensure_manage_tenant(request.tenant_id.as_str(), &context)?;
+    let (starts_at, ends_at, code_expires_at) = delivery_timestamps(&request, &context)?;
+    let redemption_code = generate_delivery_code("red", &context)?;
+    let browser_file_unlock_code = generate_delivery_code("brw", &context)?;
+    let response = state
+        .store
+        .prepare_delivery(
+            DeliveryPrepareDraft {
+                delivery_id: format!("delivery_{}", context.sequence),
+                tenant_id: request.tenant_id,
+                project_id: request.project_id,
+                provider,
+                operator_id: authz.actor_id(),
+                customer_label: request
+                    .customer_label
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                service_kind,
+                service_days: request.service_days,
+                starts_at,
+                ends_at,
+                code_expires_at,
+            },
+            &redemption_code,
+            &browser_file_unlock_code,
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to prepare delivery: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn get_delivery(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(delivery_id): Path<String>,
+) -> Result<Json<DeliveryResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let response = state
+        .store
+        .get_delivery(&delivery_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_not_found",
+                format!("delivery `{delivery_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(response.data.delivery.tenant_id.as_str(), &context)?;
+    Ok(Json(response))
+}
+
+async fn revoke_delivery(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(delivery_id): Path<String>,
+    Json(request): Json<DeliveryRevokeRequest>,
+) -> Result<Json<DeliveryResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let existing = state
+        .store
+        .get_delivery(&delivery_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_not_found",
+                format!("delivery `{delivery_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(existing.data.delivery.tenant_id.as_str(), &context)?;
+    let revoke_reason = request
+        .revoke_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    match state
+        .store
+        .revoke_delivery(
+            &delivery_id,
+            request.expected_version,
+            &authz.actor_id(),
+            revoke_reason,
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to revoke delivery: {error}"),
+                &context,
+            )
+        })? {
+        ConcurrencyResult::Applied(response) => Ok(Json(response)),
+        ConcurrencyResult::NotFound => Err(ApiError::not_found(
+            "delivery_not_found",
+            format!("delivery `{delivery_id}` was not found"),
+            &context,
+        )),
+        ConcurrencyResult::VersionConflict => Err(ApiError::conflict(
+            "delivery_version_conflict",
+            "delivery version conflict".to_string(),
+            &context,
+        )),
+    }
+}
+
+async fn create_delivery_artifact(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(delivery_id): Path<String>,
+    Json(request): Json<CreateDeliveryArtifactRequest>,
+) -> Result<Json<DeliveryArtifactResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_projection(&state, &delivery_id, &context).await?;
+    authz.ensure_manage_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    ensure_delivery_accepts_artifacts(&delivery, &context)?;
+    let payload = decode_artifact_payload(&request.payload_base64, &context)?;
+    validate_artifact_payload_size(payload.len(), &context)?;
+    let artifact_kind = delivery_artifact_kind(request.artifact_kind.as_deref(), &context)?;
+    let file_name = delivery_artifact_file_name(request.file_name.as_deref(), &context)?;
+    let content_type = delivery_artifact_content_type(request.content_type.as_deref(), &context)?;
+    let carrier_valid_until =
+        delivery_artifact_carrier_valid_until(request.carrier_valid_until.as_deref(), &context)?;
+    let response = state
+        .store
+        .create_delivery_artifact(DeliveryArtifactDraft {
+            artifact_id: format!("artifact_{}", context.sequence),
+            delivery_id,
+            tenant_id: delivery.data.delivery.tenant_id,
+            project_id: delivery.data.delivery.project_id,
+            artifact_kind,
+            provider: delivery.data.delivery.provider,
+            file_name,
+            content_type,
+            carrier_valid_until,
+            ciphertext: payload,
+            created_by: authz.actor_id(),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to store delivery artifact: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn list_delivery_artifacts(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(delivery_id): Path<String>,
+) -> Result<Json<DeliveryArtifactsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_projection(&state, &delivery_id, &context).await?;
+    authz.ensure_read_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let response = state
+        .store
+        .list_delivery_artifacts(&delivery_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list delivery artifacts: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn get_delivery_artifact(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path((delivery_id, artifact_id)): Path<(String, String)>,
+) -> Result<Json<DeliveryArtifactResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_projection(&state, &delivery_id, &context).await?;
+    authz.ensure_read_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let response = state
+        .store
+        .get_delivery_artifact(&delivery_id, &artifact_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery artifact: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_artifact_not_found",
+                format!("delivery artifact `{artifact_id}` was not found"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn create_delivery_upload_batch(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDeliveryUploadBatchRequest>,
+) -> Result<(StatusCode, Json<DeliveryUploadBatchResponse>), ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let provider = validate_delivery_provider(&request.provider, &context)?;
+    let project = load_project(&state, request.project_id.as_str(), &context).await?;
+    ensure_project_matches_tenant(&project, request.tenant_id.as_str(), &context)?;
+    authz.ensure_manage_tenant(request.tenant_id.as_str(), &context)?;
+    let source_file_name = delivery_artifact_file_name(Some(&request.source_file_name), &context)?
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "delivery_upload_source_file_name_required",
+                "source_file_name is required".to_string(),
+                &context,
+            )
+        })?;
+    let idempotency_key =
+        delivery_upload_idempotency_key(request.idempotency_key.as_deref(), &context)?;
+    let items = delivery_upload_item_drafts(&request.items, &context)?;
+    let source_file_sha256 = delivery_upload_source_sha256(&source_file_name, &provider, &items);
+    let response = state
+        .store
+        .create_delivery_upload_batch(DeliveryUploadBatchDraft {
+            batch_id: format!("dlvup_{}", context.sequence),
+            tenant_id: request.tenant_id,
+            project_id: request.project_id,
+            provider,
+            source_file_name,
+            source_file_sha256,
+            idempotency_key,
+            items,
+            created_by: authz.actor_id(),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to queue delivery upload batch: {error}"),
+                &context,
+            )
+        })?;
+    Ok((StatusCode::ACCEPTED, Json(response)))
+}
+
+async fn get_delivery_upload_batch(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(batch_id): Path<String>,
+) -> Result<Json<DeliveryUploadBatchResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let response = state
+        .store
+        .get_delivery_upload_batch(&batch_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery upload batch: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_upload_batch_not_found",
+                format!("delivery upload batch `{batch_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(response.data.tenant_id.as_str(), &context)?;
+    Ok(Json(response))
+}
+
+async fn list_delivery_upload_batch_items(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(batch_id): Path<String>,
+) -> Result<Json<DeliveryUploadBatchItemsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let batch = state
+        .store
+        .get_delivery_upload_batch(&batch_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery upload batch: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_upload_batch_not_found",
+                format!("delivery upload batch `{batch_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(batch.data.tenant_id.as_str(), &context)?;
+    let response = state
+        .store
+        .list_delivery_upload_batch_items(&batch_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list delivery upload batch items: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_upload_batch_not_found",
+                format!("delivery upload batch `{batch_id}` was not found"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn process_delivery_upload_batch(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(batch_id): Path<String>,
+) -> Result<Json<DeliveryUploadBatchResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let result = state
+        .store
+        .process_delivery_upload_batch(&batch_id, "delivery-upload-worker")
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to process delivery upload batch: {error}"),
+                &context,
+            )
+        })?;
+    match result {
+        DeliveryUploadProcessResult::Processed(response) => Ok(Json(*response)),
+        DeliveryUploadProcessResult::BatchNotFound => Err(ApiError::not_found(
+            "delivery_upload_batch_not_found",
+            format!("delivery upload batch `{batch_id}` was not found"),
+            &context,
+        )),
+        DeliveryUploadProcessResult::BatchAlreadyProcessing => Err(ApiError::conflict(
+            "delivery_upload_batch_processing",
+            format!("delivery upload batch `{batch_id}` is already processing"),
+            &context,
+        )),
+        DeliveryUploadProcessResult::ScopeBusy => Err(ApiError::conflict(
+            "delivery_upload_scope_busy",
+            "another delivery upload batch is already processing for this tenant/project"
+                .to_string(),
+            &context,
+        )),
+    }
+}
+
+async fn redeem_delivery_activation(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<RedeemDeliveryRequest>,
+) -> Result<Json<DeliveryActivationResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let redemption_code = request.redemption_code.trim();
+    if !delivery_code_format_is_valid(redemption_code, "red") {
+        return Err(ApiError::bad_request(
+            "redemption_code_invalid",
+            "redemption_code must use ku0-red-v1 format".to_string(),
+            &context,
+        ));
+    }
+    let code_hash = hex_sha256(redemption_code.as_bytes());
+    let delivery = state
+        .store
+        .get_delivery_by_redemption_code_hash(&code_hash)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to resolve redemption code: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "redemption_code_invalid",
+                "redemption_code was not found".to_string(),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let result = state
+        .store
+        .redeem_delivery_activation(
+            &code_hash,
+            format!("activation_{}", context.sequence),
+            &authz.actor_id(),
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to redeem delivery activation: {error}"),
+                &context,
+            )
+        })?;
+    redeem_result_to_response(result, &context).map(Json)
+}
+
+async fn get_delivery_activation(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(activation_id): Path<String>,
+) -> Result<Json<DeliveryActivationResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let response = state
+        .store
+        .get_delivery_activation(&activation_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery activation: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_activation_not_found",
+                format!("delivery activation `{activation_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(response.data.tenant_id.as_str(), &context)?;
+    Ok(Json(response))
+}
+
+async fn issue_delivery_download_grant(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDeliveryDownloadGrantRequest>,
+) -> Result<Json<DeliveryDownloadGrantIssueResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let activation_id = request.activation_id.trim();
+    if activation_id.is_empty() {
+        return Err(ApiError::bad_request(
+            "delivery_activation_id_required",
+            "activation_id is required".to_string(),
+            &context,
+        ));
+    }
+    let activation = state
+        .store
+        .get_delivery_activation(activation_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery activation: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_activation_not_found",
+                format!("delivery activation `{activation_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(activation.data.tenant_id.as_str(), &context)?;
+    let token = generate_delivery_download_token(&context)?;
+    let result = state
+        .store
+        .issue_delivery_download_grant(DeliveryDownloadGrantDraft {
+            grant_id: format!("dlgrant_{}", context.sequence),
+            activation_id: activation_id.to_string(),
+            token_plaintext: token,
+            created_by: authz.actor_id(),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to issue delivery download grant: {error}"),
+                &context,
+            )
+        })?;
+    download_grant_issue_result_to_response(result, &context).map(Json)
+}
+
+async fn get_delivery_download_grant(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(grant_id): Path<String>,
+) -> Result<Json<DeliveryDownloadGrantResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let response = state
+        .store
+        .get_delivery_download_grant(&grant_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery download grant: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_download_grant_not_found",
+                format!("delivery download grant `{grant_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_read_tenant(response.data.tenant_id.as_str(), &context)?;
+    Ok(Json(response))
+}
+
+async fn revoke_delivery_download_grant(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(grant_id): Path<String>,
+    Json(request): Json<DeliveryDownloadGrantRevokeRequest>,
+) -> Result<Json<DeliveryDownloadGrantResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let existing = state
+        .store
+        .get_delivery_download_grant(&grant_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery download grant: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_download_grant_not_found",
+                format!("delivery download grant `{grant_id}` was not found"),
+                &context,
+            )
+        })?;
+    authz.ensure_manage_tenant(existing.data.tenant_id.as_str(), &context)?;
+    let revoke_reason = request
+        .revoke_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    match state
+        .store
+        .revoke_delivery_download_grant(
+            &grant_id,
+            request.expected_version,
+            &authz.actor_id(),
+            revoke_reason,
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to revoke delivery download grant: {error}"),
+                &context,
+            )
+        })? {
+        ConcurrencyResult::Applied(response) => Ok(Json(response)),
+        ConcurrencyResult::NotFound => Err(ApiError::not_found(
+            "delivery_download_grant_not_found",
+            format!("delivery download grant `{grant_id}` was not found"),
+            &context,
+        )),
+        ConcurrencyResult::VersionConflict => Err(ApiError::conflict(
+            "delivery_download_grant_version_conflict",
+            "delivery download grant version conflict".to_string(),
+            &context,
+        )),
+    }
+}
+
+async fn retrieve_delivery_download_artifact(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let context = next_request_context();
+    let token = bearer_token_from_headers(&headers, "download_token_required", &context)?;
+    let token_hash = hex_sha256(token.as_bytes());
+    let result = state
+        .store
+        .consume_delivery_download_grant(&token_hash)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to retrieve delivery artifact: {error}"),
+                &context,
+            )
+        })?;
+    let payload = download_consume_result_to_payload(result, &context)?;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, payload.content_type),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                download_content_disposition(&payload.file_name),
+            ),
+            (
+                axum::http::header::CONTENT_LENGTH,
+                payload.size_bytes.to_string(),
+            ),
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+            (
+                axum::http::header::HeaderName::from_static("x-content-type-options"),
+                "nosniff".to_string(),
+            ),
+            (
+                axum::http::header::HeaderName::from_static("x-openhuge-artifact-sha256"),
+                payload.sha256,
+            ),
+            (
+                axum::http::header::HeaderName::from_static("x-openhuge-download-grant-id"),
+                payload.grant.grant_id,
+            ),
+        ],
+        Bytes::from(payload.ciphertext),
+    )
+        .into_response())
+}
+
+async fn list_delivery_service_segments(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(entitlement_id): Path<String>,
+) -> Result<Json<DeliveryServiceSegmentsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_by_entitlement(&state, &entitlement_id, &context).await?;
+    authz.ensure_read_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let response = state
+        .store
+        .list_delivery_service_segments(&entitlement_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list delivery service segments: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn list_delivery_lifecycle_events(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(entitlement_id): Path<String>,
+) -> Result<Json<DeliveryLifecycleEventsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_by_entitlement(&state, &entitlement_id, &context).await?;
+    authz.ensure_read_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let response = state
+        .store
+        .list_delivery_lifecycle_events(&entitlement_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list delivery lifecycle events: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn reconcile_delivery_lifecycle(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(entitlement_id): Path<String>,
+) -> Result<Json<DeliveryLifecycleResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_by_entitlement(&state, &entitlement_id, &context).await?;
+    authz.ensure_manage_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let result = state
+        .store
+        .reconcile_delivery_lifecycle(&entitlement_id, &authz.actor_id())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to reconcile delivery lifecycle: {error}"),
+                &context,
+            )
+        })?;
+    match result {
+        DeliveryLifecycleResult::Applied(response) => Ok(Json(*response)),
+        DeliveryLifecycleResult::EntitlementNotFound => Err(ApiError::not_found(
+            "delivery_entitlement_not_found",
+            format!("delivery entitlement `{entitlement_id}` was not found"),
+            &context,
+        )),
+    }
+}
+
+async fn extend_delivery_entitlement(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(entitlement_id): Path<String>,
+    Json(request): Json<ExtendDeliveryEntitlementRequest>,
+) -> Result<Json<DeliveryLifecycleResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let delivery = load_delivery_by_entitlement(&state, &entitlement_id, &context).await?;
+    authz.ensure_manage_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    validate_delivery_extend_days(request.extend_days, &context)?;
+    match state
+        .store
+        .extend_delivery_entitlement(DeliveryEntitlementExtendDraft {
+            entitlement_id: entitlement_id.clone(),
+            expected_version: request.expected_version,
+            extend_days: request.extend_days,
+            reason: request
+                .reason
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            actor_id: authz.actor_id(),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to extend delivery entitlement: {error}"),
+                &context,
+            )
+        })? {
+        ConcurrencyResult::Applied(response) => Ok(Json(response)),
+        ConcurrencyResult::NotFound => Err(ApiError::not_found(
+            "delivery_entitlement_not_found",
+            format!("delivery entitlement `{entitlement_id}` was not found"),
+            &context,
+        )),
+        ConcurrencyResult::VersionConflict => Err(ApiError::conflict(
+            "delivery_entitlement_version_conflict",
+            "delivery entitlement version conflict".to_string(),
+            &context,
+        )),
+    }
+}
+
+async fn get_delivery_operations_overview(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<DeliveryOperationsQuery>,
+) -> Result<Json<DeliveryOperationsOverviewResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let scope = delivery_operations_scope(&state, &authz, query, &context).await?;
+    let response = state
+        .store
+        .get_delivery_operations_overview(scope)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery operations overview: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn get_delivery_operations_timeline(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<DeliveryOperationsObjectQuery>,
+) -> Result<Json<DeliveryOperationsTimelineResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let filters = delivery_operations_object_filters(&state, &authz, query, &context).await?;
+    let response = state
+        .store
+        .get_delivery_operations_timeline(filters)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery operations timeline: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_operations_target_not_found",
+                "delivery operations target was not found in the requested scope".to_string(),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn list_delivery_operations_exceptions(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<DeliveryOperationsExceptionsQuery>,
+) -> Result<Json<DeliveryOperationsExceptionsResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let scope = delivery_operations_scope(
+        &state,
+        &authz,
+        DeliveryOperationsQuery {
+            tenant_id: query.tenant_id,
+            project_id: query.project_id,
+            window_start: query.window_start,
+            window_end: query.window_end,
+            limit: query.limit,
+        },
+        &context,
+    )
+    .await?;
+    let response = state
+        .store
+        .list_delivery_operations_exceptions(DeliveryOperationsExceptionFilters {
+            scope,
+            status: query
+                .status
+                .as_deref()
+                .and_then(normalize_optional_query_value),
+            exception_type: query
+                .exception_type
+                .as_deref()
+                .and_then(normalize_optional_query_value),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list delivery operations exceptions: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn get_delivery_operations_detail(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Query(query): Query<DeliveryOperationsObjectQuery>,
+) -> Result<Json<DeliveryOperationsDetailResponse>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let filters = delivery_operations_object_filters(&state, &authz, query, &context).await?;
+    let response = state
+        .store
+        .get_delivery_operations_detail(filters)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery operations detail: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_operations_target_not_found",
+                "delivery operations target was not found in the requested scope".to_string(),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
 }
 
 async fn list_codex_auth_accounts(
@@ -4048,6 +5121,953 @@ fn generate_opening_api_key(context: &RequestContext) -> Result<String, ApiError
     ))
 }
 
+fn validate_delivery_provider(
+    provider: &str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let provider = provider.trim();
+    if provider == DELIVERY_PROVIDER_CHATGPT {
+        Ok(provider.to_string())
+    } else {
+        Err(ApiError::bad_request(
+            "delivery_provider_invalid",
+            "provider must be chatgpt for the first-stage delivery carrier".to_string(),
+            context,
+        ))
+    }
+}
+
+fn validate_delivery_service_days(
+    service_days: u32,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    if (1..=3660).contains(&service_days) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "delivery_service_days_invalid",
+            "service_days must be between 1 and 3660".to_string(),
+            context,
+        ))
+    }
+}
+
+fn delivery_service_kind(
+    service_kind: Option<&str>,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let service_kind = service_kind
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_DELIVERY_SERVICE_KIND);
+    if service_kind.len() <= 64
+        && service_kind
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character == '_' || character == '-')
+    {
+        Ok(service_kind.to_string())
+    } else {
+        Err(ApiError::bad_request(
+            "delivery_service_kind_invalid",
+            "service_kind must be lowercase ascii, underscore, or hyphen, max 64 chars".to_string(),
+            context,
+        ))
+    }
+}
+
+fn delivery_timestamps(
+    request: &CreateDeliveryRequest,
+    context: &RequestContext,
+) -> Result<(String, String, String), ApiError> {
+    let starts_at = match request.starts_at.as_deref() {
+        Some(value) => parse_delivery_timestamp("starts_at", value, context)?,
+        None => OffsetDateTime::now_utc(),
+    };
+    let ends_at = starts_at
+        .checked_add(time::Duration::days(i64::from(request.service_days)))
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "delivery_ends_at_invalid",
+                "service_days produces an invalid ends_at timestamp".to_string(),
+                context,
+            )
+        })?;
+    let code_expires_at = match request.code_expires_at.as_deref() {
+        Some(value) => parse_delivery_timestamp("code_expires_at", value, context)?,
+        None => ends_at,
+    };
+    if code_expires_at <= OffsetDateTime::now_utc() {
+        return Err(ApiError::bad_request(
+            "delivery_code_expires_at_invalid",
+            "code_expires_at must be in the future".to_string(),
+            context,
+        ));
+    }
+    if code_expires_at > ends_at {
+        return Err(ApiError::bad_request(
+            "delivery_code_expires_at_invalid",
+            "code_expires_at must not be after ends_at".to_string(),
+            context,
+        ));
+    }
+    Ok((
+        format_delivery_timestamp(starts_at),
+        format_delivery_timestamp(ends_at),
+        format_delivery_timestamp(code_expires_at),
+    ))
+}
+
+fn parse_delivery_timestamp(
+    field: &'static str,
+    value: &str,
+    context: &RequestContext,
+) -> Result<OffsetDateTime, ApiError> {
+    OffsetDateTime::parse(value.trim(), &Rfc3339).map_err(|_| {
+        ApiError::bad_request(
+            "delivery_timestamp_invalid",
+            format!("{field} must be an RFC3339 timestamp"),
+            context,
+        )
+    })
+}
+
+fn format_delivery_timestamp(timestamp: OffsetDateTime) -> String {
+    timestamp
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn generate_delivery_code(
+    kind_segment: &str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let now = OffsetDateTime::now_utc();
+    let date_segment = format!(
+        "{:02}{:02}{:02}",
+        now.year().rem_euclid(100),
+        u8::from(now.month()),
+        now.day()
+    );
+    let short_segment = random_delivery_segment(4, context)?;
+    let random_segment = random_delivery_segment(12, context)?;
+    let checksum =
+        delivery_code_checksum(kind_segment, &date_segment, &short_segment, &random_segment);
+    Ok(format!(
+        "ku0-{kind_segment}-v1-{date_segment}-{short_segment}-{random_segment}-{checksum}"
+    ))
+}
+
+fn random_delivery_segment(len: usize, context: &RequestContext) -> Result<String, ApiError> {
+    let rng = rand::SystemRandom::new();
+    let mut bytes = vec![0_u8; len];
+    rand::SecureRandom::fill(&rng, &mut bytes).map_err(|_| {
+        ApiError::internal(
+            "delivery_code_generation_failed",
+            "failed to generate delivery code".to_string(),
+            context,
+        )
+    })?;
+    Ok(bytes
+        .into_iter()
+        .map(|byte| {
+            let index = usize::from(byte) % DELIVERY_CODE_ALPHABET.len();
+            char::from(DELIVERY_CODE_ALPHABET[index])
+        })
+        .collect())
+}
+
+fn delivery_code_checksum(
+    kind_segment: &str,
+    date_segment: &str,
+    short_segment: &str,
+    random_segment: &str,
+) -> String {
+    let canonical = format!("ku0{kind_segment}v1{date_segment}{short_segment}{random_segment}");
+    hex_sha256(canonical.as_bytes()).chars().take(2).collect()
+}
+
+async fn load_delivery_projection(
+    state: &ControlPlaneState,
+    delivery_id: &str,
+    context: &RequestContext,
+) -> Result<DeliveryResponse, ApiError> {
+    state
+        .store
+        .get_delivery(delivery_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery: {error}"),
+                context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_not_found",
+                format!("delivery `{delivery_id}` was not found"),
+                context,
+            )
+        })
+}
+
+async fn load_delivery_by_entitlement(
+    state: &ControlPlaneState,
+    entitlement_id: &str,
+    context: &RequestContext,
+) -> Result<DeliveryResponse, ApiError> {
+    state
+        .store
+        .get_delivery_by_entitlement_id(entitlement_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to load delivery entitlement: {error}"),
+                context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_entitlement_not_found",
+                format!("delivery entitlement `{entitlement_id}` was not found"),
+                context,
+            )
+        })
+}
+
+fn ensure_delivery_accepts_artifacts(
+    response: &DeliveryResponse,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    if response.data.delivery.status == store::DELIVERY_STATUS_PREPARED {
+        Ok(())
+    } else {
+        Err(ApiError::conflict(
+            "delivery_not_artifact_ready",
+            format!(
+                "delivery `{}` status `{}` cannot accept artifacts",
+                response.data.delivery.delivery_id, response.data.delivery.status
+            ),
+            context,
+        ))
+    }
+}
+
+fn decode_artifact_payload(
+    payload_base64: &str,
+    context: &RequestContext,
+) -> Result<Vec<u8>, ApiError> {
+    BASE64.decode(payload_base64.trim()).map_err(|_| {
+        ApiError::bad_request(
+            "artifact_payload_invalid",
+            "payload_base64 must be valid standard base64".to_string(),
+            context,
+        )
+    })
+}
+
+fn validate_artifact_payload_size(size: usize, context: &RequestContext) -> Result<(), ApiError> {
+    if size == 0 {
+        return Err(ApiError::bad_request(
+            "artifact_payload_empty",
+            "payload_base64 must decode to a non-empty artifact".to_string(),
+            context,
+        ));
+    }
+    if size > store::DELIVERY_ARTIFACT_MAX_BYTES {
+        return Err(ApiError::bad_request(
+            "artifact_payload_too_large",
+            format!(
+                "artifact payload must not exceed {} bytes",
+                store::DELIVERY_ARTIFACT_MAX_BYTES
+            ),
+            context,
+        ));
+    }
+    Ok(())
+}
+
+fn delivery_artifact_kind(
+    artifact_kind: Option<&str>,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let artifact_kind = artifact_kind
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_DELIVERY_ARTIFACT_KIND);
+    if artifact_kind.len() <= 64
+        && artifact_kind
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character == '_' || character == '-')
+    {
+        Ok(artifact_kind.to_string())
+    } else {
+        Err(ApiError::bad_request(
+            "artifact_kind_invalid",
+            "artifact_kind must be lowercase ascii, underscore, or hyphen, max 64 chars"
+                .to_string(),
+            context,
+        ))
+    }
+}
+
+fn delivery_artifact_file_name(
+    file_name: Option<&str>,
+    context: &RequestContext,
+) -> Result<Option<String>, ApiError> {
+    let Some(file_name) = file_name.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if file_name.len() > 255
+        || file_name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+    {
+        Err(ApiError::bad_request(
+            "artifact_file_name_invalid",
+            "file_name must be a metadata-only file name without path separators or control characters"
+                .to_string(),
+            context,
+        ))
+    } else {
+        Ok(Some(file_name.to_string()))
+    }
+}
+
+fn delivery_artifact_content_type(
+    content_type: Option<&str>,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let content_type = content_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_DELIVERY_ARTIFACT_CONTENT_TYPE);
+    if content_type.len() <= 128
+        && content_type
+            .chars()
+            .all(|character| !character.is_control() && !character.is_whitespace())
+    {
+        Ok(content_type.to_string())
+    } else {
+        Err(ApiError::bad_request(
+            "artifact_content_type_invalid",
+            "content_type must be a single MIME token, max 128 chars".to_string(),
+            context,
+        ))
+    }
+}
+
+fn delivery_artifact_carrier_valid_until(
+    carrier_valid_until: Option<&str>,
+    context: &RequestContext,
+) -> Result<Option<String>, ApiError> {
+    let Some(value) = carrier_valid_until
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let timestamp = parse_delivery_timestamp("carrier_valid_until", value, context)?;
+    if timestamp <= OffsetDateTime::now_utc() {
+        return Err(ApiError::bad_request(
+            "artifact_carrier_valid_until_invalid",
+            "carrier_valid_until must be in the future".to_string(),
+            context,
+        ));
+    }
+    Ok(Some(format_delivery_timestamp(timestamp)))
+}
+
+fn delivery_upload_idempotency_key(
+    idempotency_key: Option<&str>,
+    context: &RequestContext,
+) -> Result<Option<String>, ApiError> {
+    let Some(value) = idempotency_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    if value.len() <= 128
+        && value
+            .chars()
+            .all(|character| character.is_ascii_graphic() && !matches!(character, '/' | '\\'))
+    {
+        Ok(Some(value.to_string()))
+    } else {
+        Err(ApiError::bad_request(
+            "delivery_upload_idempotency_key_invalid",
+            "idempotency_key must be printable ASCII without path separators, max 128 chars"
+                .to_string(),
+            context,
+        ))
+    }
+}
+
+fn delivery_upload_item_drafts(
+    items: &[protocol_ir::DeliveryUploadBatchItemInput],
+    context: &RequestContext,
+) -> Result<Vec<DeliveryUploadBatchItemDraft>, ApiError> {
+    if items.is_empty() {
+        return Err(ApiError::bad_request(
+            "delivery_upload_items_required",
+            "items must contain at least one artifact payload".to_string(),
+            context,
+        ));
+    }
+    if items.len() > DELIVERY_UPLOAD_MAX_ITEMS {
+        return Err(ApiError::bad_request(
+            "delivery_upload_items_too_many",
+            format!("items must contain at most {DELIVERY_UPLOAD_MAX_ITEMS} payloads"),
+            context,
+        ));
+    }
+    let mut seen = HashSet::<(String, String)>::new();
+    let mut drafts = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let row_index = item
+            .row_index
+            .unwrap_or_else(|| u32::try_from(index + 1).unwrap_or(u32::MAX));
+        if row_index == 0 {
+            return Err(ApiError::bad_request(
+                "delivery_upload_row_index_invalid",
+                "row_index must be greater than zero".to_string(),
+                context,
+            ));
+        }
+        let delivery_id = item.delivery_id.trim();
+        if delivery_id.is_empty() {
+            return Err(ApiError::bad_request(
+                "delivery_upload_delivery_id_required",
+                "each upload item requires delivery_id".to_string(),
+                context,
+            ));
+        }
+        let payload = decode_artifact_payload(&item.payload_base64, context)?;
+        validate_artifact_payload_size(payload.len(), context)?;
+        let payload_sha256 = format!("sha256:{}", hex_sha256(&payload));
+        if !seen.insert((delivery_id.to_string(), payload_sha256)) {
+            return Err(ApiError::bad_request(
+                "delivery_upload_item_duplicate",
+                "items must not repeat the same delivery_id and payload".to_string(),
+                context,
+            ));
+        }
+        drafts.push(DeliveryUploadBatchItemDraft {
+            item_id: format!("dlvupitem_{}_{}", context.sequence, row_index),
+            row_index,
+            delivery_id: delivery_id.to_string(),
+            artifact_kind: delivery_artifact_kind(item.artifact_kind.as_deref(), context)?,
+            file_name: delivery_artifact_file_name(item.file_name.as_deref(), context)?,
+            content_type: delivery_artifact_content_type(item.content_type.as_deref(), context)?,
+            carrier_valid_until: delivery_artifact_carrier_valid_until(
+                item.carrier_valid_until.as_deref(),
+                context,
+            )?,
+            ciphertext: payload,
+        });
+    }
+    Ok(drafts)
+}
+
+fn delivery_upload_source_sha256(
+    source_file_name: &str,
+    provider: &str,
+    items: &[DeliveryUploadBatchItemDraft],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source_file_name.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(provider.as_bytes());
+    for item in items {
+        hasher.update(b"\n");
+        hasher.update(item.row_index.to_string().as_bytes());
+        hasher.update(b":");
+        hasher.update(item.delivery_id.as_bytes());
+        hasher.update(b":");
+        hasher.update(hex_sha256(&item.ciphertext).as_bytes());
+    }
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn validate_delivery_extend_days(
+    extend_days: u32,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    if (1..=3660).contains(&extend_days) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "delivery_entitlement_extend_days_invalid",
+            "extend_days must be between 1 and 3660".to_string(),
+            context,
+        ))
+    }
+}
+
+async fn delivery_operations_scope(
+    state: &ControlPlaneState,
+    authz: &ControlPlaneAuthorizer,
+    query: DeliveryOperationsQuery,
+    context: &RequestContext,
+) -> Result<DeliveryOperationsScope, ApiError> {
+    let tenant_id = query
+        .tenant_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "tenant_id_required",
+                "tenant_id is required for delivery operations queries".to_string(),
+                context,
+            )
+        })?;
+    authz.ensure_read_tenant(tenant_id, context)?;
+    let tenant_id = core_domain::TenantId::parse(tenant_id).map_err(|error| {
+        ApiError::bad_request(
+            "tenant_id_invalid",
+            format!("invalid tenant_id: {error}"),
+            context,
+        )
+    })?;
+
+    let project_id = if let Some(project_id) = query
+        .project_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let project = load_project(state, project_id, context).await?;
+        ensure_project_matches_tenant(&project, tenant_id.as_str(), context)?;
+        authz.ensure_read_project(&project, context)?;
+        Some(core_domain::ProjectId::parse(project_id).map_err(|error| {
+            ApiError::bad_request(
+                "project_id_invalid",
+                format!("invalid project_id: {error}"),
+                context,
+            )
+        })?)
+    } else {
+        None
+    };
+
+    let (window_start, window_end) = delivery_operations_window(
+        query.window_start.as_deref(),
+        query.window_end.as_deref(),
+        context,
+    )?;
+    Ok(DeliveryOperationsScope {
+        tenant_id,
+        project_id,
+        window_start,
+        window_end,
+        limit: delivery_operations_limit(query.limit, context)?,
+    })
+}
+
+async fn delivery_operations_object_filters(
+    state: &ControlPlaneState,
+    authz: &ControlPlaneAuthorizer,
+    query: DeliveryOperationsObjectQuery,
+    context: &RequestContext,
+) -> Result<DeliveryOperationsObjectFilters, ApiError> {
+    let object_ref = delivery_operations_object_ref(&query, context)?;
+    let scope = delivery_operations_scope(
+        state,
+        authz,
+        DeliveryOperationsQuery {
+            tenant_id: query.tenant_id,
+            project_id: query.project_id,
+            window_start: query.window_start,
+            window_end: query.window_end,
+            limit: query.limit,
+        },
+        context,
+    )
+    .await?;
+    Ok(DeliveryOperationsObjectFilters { scope, object_ref })
+}
+
+fn delivery_operations_object_ref(
+    query: &DeliveryOperationsObjectQuery,
+    context: &RequestContext,
+) -> Result<DeliveryOperationsObjectRef, ApiError> {
+    let mut ids = Vec::<(&'static str, String)>::new();
+    if let Some(value) = normalize_optional_query_value_ref(query.delivery_id.as_deref()) {
+        ids.push(("delivery_id", value));
+    }
+    if let Some(value) = normalize_optional_query_value_ref(query.entitlement_id.as_deref()) {
+        ids.push(("entitlement_id", value));
+    }
+    if let Some(value) = normalize_optional_query_value_ref(query.activation_id.as_deref()) {
+        ids.push(("activation_id", value));
+    }
+    if let Some(value) = normalize_optional_query_value_ref(query.artifact_id.as_deref()) {
+        ids.push(("artifact_id", value));
+    }
+    if let Some(value) = normalize_optional_query_value_ref(query.grant_id.as_deref()) {
+        ids.push(("grant_id", value));
+    }
+    if let Some(value) = normalize_optional_query_value_ref(query.segment_id.as_deref()) {
+        ids.push(("segment_id", value));
+    }
+    if ids.len() != 1 {
+        return Err(ApiError::bad_request(
+            "delivery_operations_object_id_required",
+            "exactly one of delivery_id, entitlement_id, activation_id, artifact_id, grant_id, or segment_id is required".to_string(),
+            context,
+        ));
+    }
+    let (field, value) = ids.pop().expect("one object id should be present");
+    Ok(match field {
+        "delivery_id" => DeliveryOperationsObjectRef::Delivery(value),
+        "entitlement_id" => DeliveryOperationsObjectRef::Entitlement(value),
+        "activation_id" => DeliveryOperationsObjectRef::Activation(value),
+        "artifact_id" => DeliveryOperationsObjectRef::Artifact(value),
+        "grant_id" => DeliveryOperationsObjectRef::DownloadGrant(value),
+        "segment_id" => DeliveryOperationsObjectRef::ServiceSegment(value),
+        _ => unreachable!("validated delivery operations object field"),
+    })
+}
+
+fn delivery_operations_window(
+    window_start: Option<&str>,
+    window_end: Option<&str>,
+    context: &RequestContext,
+) -> Result<(String, String), ApiError> {
+    let end = match window_end {
+        Some(value) if !value.trim().is_empty() => {
+            parse_delivery_timestamp("window_end", value, context)?
+        }
+        _ => OffsetDateTime::now_utc(),
+    };
+    let start = match window_start {
+        Some(value) if !value.trim().is_empty() => {
+            parse_delivery_timestamp("window_start", value, context)?
+        }
+        _ => end
+            .checked_sub(time::Duration::days(
+                DELIVERY_OPERATIONS_DEFAULT_WINDOW_DAYS,
+            ))
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "delivery_operations_window_invalid",
+                    "default delivery operations window is invalid".to_string(),
+                    context,
+                )
+            })?,
+    };
+    if start > end {
+        return Err(ApiError::bad_request(
+            "delivery_operations_window_invalid",
+            "window_start must not be after window_end".to_string(),
+            context,
+        ));
+    }
+    Ok((
+        format_delivery_timestamp(start),
+        format_delivery_timestamp(end),
+    ))
+}
+
+fn delivery_operations_limit(
+    limit: Option<u32>,
+    context: &RequestContext,
+) -> Result<usize, ApiError> {
+    let limit = limit.unwrap_or(DELIVERY_OPERATIONS_DEFAULT_LIMIT);
+    if !(1..=DELIVERY_OPERATIONS_MAX_LIMIT).contains(&limit) {
+        return Err(ApiError::bad_request(
+            "delivery_operations_limit_invalid",
+            format!("limit must be between 1 and {DELIVERY_OPERATIONS_MAX_LIMIT}"),
+            context,
+        ));
+    }
+    usize::try_from(limit).map_err(|_| {
+        ApiError::bad_request(
+            "delivery_operations_limit_invalid",
+            "limit is not supported on this platform".to_string(),
+            context,
+        )
+    })
+}
+
+fn normalize_optional_query_value(value: &str) -> Option<String> {
+    normalize_optional_query_value_ref(Some(value))
+}
+
+fn normalize_optional_query_value_ref(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn redeem_result_to_response(
+    result: DeliveryRedeemResult,
+    context: &RequestContext,
+) -> Result<DeliveryActivationResponse, ApiError> {
+    match result {
+        DeliveryRedeemResult::Activated(response) => Ok(*response),
+        DeliveryRedeemResult::RedemptionCodeNotFound => Err(ApiError::bad_request(
+            "redemption_code_invalid",
+            "redemption_code was not found".to_string(),
+            context,
+        )),
+        DeliveryRedeemResult::RedemptionCodeUsed => Err(ApiError::conflict(
+            "redemption_code_used",
+            "redemption_code has already been used".to_string(),
+            context,
+        )),
+        DeliveryRedeemResult::RedemptionCodeExpired => Err(ApiError::conflict(
+            "redemption_code_expired",
+            "redemption_code is expired".to_string(),
+            context,
+        )),
+        DeliveryRedeemResult::RedemptionCodeRevoked => Err(ApiError::conflict(
+            "redemption_code_revoked",
+            "redemption_code is revoked".to_string(),
+            context,
+        )),
+        DeliveryRedeemResult::RedemptionCodeNotActive(status) => Err(ApiError::conflict(
+            "redemption_code_not_active",
+            format!("redemption_code status `{status}` cannot be redeemed"),
+            context,
+        )),
+        DeliveryRedeemResult::DeliveryNotFound => Err(ApiError::not_found(
+            "delivery_not_found",
+            "delivery for redemption_code was not found".to_string(),
+            context,
+        )),
+        DeliveryRedeemResult::DeliveryNotActive(status) => Err(ApiError::conflict(
+            "delivery_not_activatable",
+            format!("delivery status `{status}` cannot be activated"),
+            context,
+        )),
+        DeliveryRedeemResult::EntitlementNotFound => Err(ApiError::not_found(
+            "delivery_entitlement_not_found",
+            "delivery entitlement for redemption_code was not found".to_string(),
+            context,
+        )),
+        DeliveryRedeemResult::EntitlementNotActive(status) => Err(ApiError::conflict(
+            "delivery_entitlement_not_active",
+            format!("delivery entitlement status `{status}` cannot be activated"),
+            context,
+        )),
+        DeliveryRedeemResult::ArtifactMissing => Err(ApiError::conflict(
+            "delivery_artifact_required",
+            "delivery must have an active artifact before activation".to_string(),
+            context,
+        )),
+    }
+}
+
+fn download_grant_issue_result_to_response(
+    result: DeliveryDownloadGrantIssueResult,
+    context: &RequestContext,
+) -> Result<DeliveryDownloadGrantIssueResponse, ApiError> {
+    match result {
+        DeliveryDownloadGrantIssueResult::Issued(response) => Ok(*response),
+        DeliveryDownloadGrantIssueResult::ActivationNotFound => Err(ApiError::not_found(
+            "delivery_activation_not_found",
+            "delivery activation was not found".to_string(),
+            context,
+        )),
+        DeliveryDownloadGrantIssueResult::ActivationNotActive(status) => Err(ApiError::conflict(
+            "delivery_activation_not_active",
+            format!("delivery activation status `{status}` cannot issue a download grant"),
+            context,
+        )),
+        DeliveryDownloadGrantIssueResult::EntitlementNotFound => Err(ApiError::not_found(
+            "delivery_entitlement_not_found",
+            "delivery entitlement for activation was not found".to_string(),
+            context,
+        )),
+        DeliveryDownloadGrantIssueResult::EntitlementNotActive(status) => Err(ApiError::conflict(
+            "delivery_entitlement_not_active",
+            format!("delivery entitlement status `{status}` cannot issue a download grant"),
+            context,
+        )),
+        DeliveryDownloadGrantIssueResult::ArtifactMissing => Err(ApiError::conflict(
+            "delivery_artifact_required",
+            "delivery activation artifact was not found".to_string(),
+            context,
+        )),
+        DeliveryDownloadGrantIssueResult::ArtifactNotAvailable(status) => Err(ApiError::conflict(
+            "delivery_artifact_not_available",
+            format!("delivery artifact status `{status}` cannot be downloaded"),
+            context,
+        )),
+        DeliveryDownloadGrantIssueResult::SegmentMissing => Err(ApiError::conflict(
+            "delivery_service_segment_required",
+            "delivery entitlement has no active service segment for download".to_string(),
+            context,
+        )),
+    }
+}
+
+fn download_consume_result_to_payload(
+    result: DeliveryDownloadConsumeResult,
+    context: &RequestContext,
+) -> Result<store::DeliveryDownloadArtifactPayload, ApiError> {
+    match result {
+        DeliveryDownloadConsumeResult::Retrieved(payload) => Ok(*payload),
+        DeliveryDownloadConsumeResult::GrantNotFound => Err(ApiError::unauthorized(
+            "download_token_invalid",
+            "download token is invalid".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::GrantUsed => Err(ApiError::forbidden(
+            "download_token_used",
+            "download token has already been used".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::GrantExpired => Err(ApiError::forbidden(
+            "download_token_expired",
+            "download token is expired".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::GrantRevoked => Err(ApiError::forbidden(
+            "download_token_revoked",
+            "download token is revoked".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::GrantNotActive(status) => Err(ApiError::forbidden(
+            "download_token_not_active",
+            format!("download token status `{status}` cannot retrieve an artifact"),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::ActivationNotFound => Err(ApiError::not_found(
+            "delivery_activation_not_found",
+            "delivery activation for download grant was not found".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::ActivationNotActive(status) => Err(ApiError::conflict(
+            "delivery_activation_not_active",
+            format!("delivery activation status `{status}` cannot retrieve an artifact"),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::EntitlementNotFound => Err(ApiError::not_found(
+            "delivery_entitlement_not_found",
+            "delivery entitlement for download grant was not found".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::EntitlementNotActive(status) => Err(ApiError::conflict(
+            "delivery_entitlement_not_active",
+            format!("delivery entitlement status `{status}` cannot retrieve an artifact"),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::ArtifactMissing => Err(ApiError::conflict(
+            "delivery_artifact_required",
+            "delivery download artifact was not found".to_string(),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::ArtifactNotAvailable(status) => Err(ApiError::conflict(
+            "delivery_artifact_not_available",
+            format!("delivery artifact status `{status}` cannot be downloaded"),
+            context,
+        )),
+        DeliveryDownloadConsumeResult::SegmentMissing => Err(ApiError::conflict(
+            "delivery_service_segment_required",
+            "delivery download grant is not backed by an active service segment".to_string(),
+            context,
+        )),
+    }
+}
+
+fn bearer_token_from_headers(
+    headers: &HeaderMap,
+    missing_code: &'static str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let Some(value) = headers.get(AUTHORIZATION) else {
+        return Err(ApiError::unauthorized(
+            missing_code,
+            "missing Authorization bearer token".to_string(),
+            context,
+        ));
+    };
+    let header = value.to_str().map_err(|_| {
+        ApiError::unauthorized(
+            "download_token_invalid",
+            "Authorization header must be valid UTF-8".to_string(),
+            context,
+        )
+    })?;
+    let Some(token) = header.strip_prefix("Bearer ") else {
+        return Err(ApiError::unauthorized(
+            "download_token_invalid",
+            "Authorization header must use Bearer credentials".to_string(),
+            context,
+        ));
+    };
+    let token = token.trim();
+    if token.is_empty() {
+        Err(ApiError::unauthorized(
+            "download_token_invalid",
+            "download token must not be empty".to_string(),
+            context,
+        ))
+    } else {
+        Ok(token.to_string())
+    }
+}
+
+fn generate_delivery_download_token(context: &RequestContext) -> Result<String, ApiError> {
+    let rng = rand::SystemRandom::new();
+    let mut token_bytes = [0_u8; 32];
+    rand::SecureRandom::fill(&rng, &mut token_bytes).map_err(|_| {
+        ApiError::internal(
+            "download_token_generation_failed",
+            "failed to generate delivery download token".to_string(),
+            context,
+        )
+    })?;
+    Ok(format!(
+        "dlt_{}",
+        BASE64_URL_SAFE_NO_PAD.encode(token_bytes)
+    ))
+}
+
+fn download_content_disposition(file_name: &str) -> String {
+    let sanitized = file_name
+        .chars()
+        .map(|character| match character {
+            '"' | '\\' | '\r' | '\n' => '_',
+            other => other,
+        })
+        .collect::<String>();
+    format!("attachment; filename=\"{sanitized}\"")
+}
+
+fn delivery_code_format_is_valid(code: &str, expected_kind_segment: &str) -> bool {
+    let parts = code.split('-').collect::<Vec<_>>();
+    if parts.len() != 7 {
+        return false;
+    }
+    if parts[0] != "ku0" || parts[1] != expected_kind_segment || parts[2] != "v1" {
+        return false;
+    }
+    if parts[3].len() != 6 || parts[4].len() != 4 || parts[5].len() != 12 || parts[6].len() != 2 {
+        return false;
+    }
+    if !parts[3].chars().all(|character| character.is_ascii_digit())
+        || !parts[4]
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        || !parts[5]
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        || !parts[6]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+    {
+        return false;
+    }
+    parts[6] == delivery_code_checksum(parts[1], parts[3], parts[4], parts[5])
+}
+
 fn validate_oauth_pool_provider(provider: &str, context: &RequestContext) -> Result<(), ApiError> {
     if matches!(provider, "codex" | "gemini" | "claude_code") {
         Ok(())
@@ -5518,8 +7538,8 @@ mod tests {
         oauth_authorization_url_from_config, resolve_oidc_membership,
     };
     use crate::store::{
-        IdentityLookup, OAuthSharingUsageFilters, OpeningGrantDraft, SESSION_TTL_SECONDS,
-        UserIdentityKey, UserSeed, WechatPaymentOrderRecord,
+        DeliveryPrepareDraft, IdentityLookup, OAuthSharingUsageFilters, OpeningGrantDraft,
+        SESSION_TTL_SECONDS, UserIdentityKey, UserSeed, WechatPaymentOrderRecord,
     };
     use axum::{
         body::{Body, to_bytes},
@@ -5528,6 +7548,7 @@ mod tests {
             header::{AUTHORIZATION, COOKIE, SET_COOKIE},
         },
     };
+    use base64::Engine as _;
     use core_domain::{
         AdmissionResult, AuthProvider, AuthProviderLink, AuthProviderLinkId, BudgetPolicyId,
         ConfigSnapshotId, ExcludedTarget, FallbackTransition, ProjectId, ProviderResourceId,
@@ -5773,6 +7794,173 @@ mod tests {
 
     async fn response_json(response: axum::response::Response) -> Value {
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    async fn prepare_delivery_for_test(app: axum::Router, admin_cookie: &str) -> Value {
+        let prepare = app
+            .oneshot(request(
+                "POST",
+                "/v1/deliveries/prepare",
+                Some(admin_cookie),
+                Some(json!({
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider": "chatgpt",
+                    "customer_label": "Acme browser handoff",
+                    "service_kind": "manual_browser_account",
+                    "service_days": 30
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(prepare.status(), StatusCode::OK);
+        response_json(prepare).await
+    }
+
+    async fn upload_artifact_for_test(
+        app: axum::Router,
+        admin_cookie: &str,
+        delivery_id: &str,
+        payload: &[u8],
+        file_name: &str,
+    ) -> Value {
+        upload_artifact_with_carrier_for_test(
+            app,
+            admin_cookie,
+            delivery_id,
+            payload,
+            file_name,
+            Some(crate::expires_at(86_400 * 90)),
+        )
+        .await
+    }
+
+    async fn upload_artifact_with_carrier_for_test(
+        app: axum::Router,
+        admin_cookie: &str,
+        delivery_id: &str,
+        payload: &[u8],
+        file_name: &str,
+        carrier_valid_until: Option<String>,
+    ) -> Value {
+        let mut body = json!({
+            "file_name": file_name,
+            "content_type": "application/octet-stream",
+            "payload_base64": super::BASE64.encode(payload)
+        });
+        if let Some(carrier_valid_until) = carrier_valid_until {
+            body["carrier_valid_until"] = json!(carrier_valid_until);
+        }
+        let upload = app
+            .oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                Some(admin_cookie),
+                Some(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(upload.status(), StatusCode::OK);
+        response_json(upload).await
+    }
+
+    async fn queue_delivery_upload_batch_for_test(
+        app: axum::Router,
+        admin_cookie: &str,
+        delivery_id: &str,
+        payload: &[u8],
+        idempotency_key: &str,
+    ) -> Value {
+        let upload = app
+            .oneshot(request(
+                "POST",
+                "/v1/delivery-uploads",
+                Some(admin_cookie),
+                Some(json!({
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider": "chatgpt",
+                    "source_file_name": "ops-upload.jsonl",
+                    "idempotency_key": idempotency_key,
+                    "items": [{
+                        "delivery_id": delivery_id,
+                        "row_index": 1,
+                        "file_name": "async-upload.hcbrowser",
+                        "content_type": "application/octet-stream",
+                        "carrier_valid_until": crate::expires_at(86_400 * 90),
+                        "payload_base64": super::BASE64.encode(payload)
+                    }]
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(upload.status(), StatusCode::ACCEPTED);
+        response_json(upload).await
+    }
+
+    fn process_delivery_upload_batch_request(batch_id: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/internal/delivery-uploads/{batch_id}/process"))
+            .header(AUTHORIZATION, "Bearer test-internal-token")
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    async fn redeem_delivery_for_test(
+        app: axum::Router,
+        cookie: &str,
+        redemption_code: &str,
+    ) -> Value {
+        let redeem = app
+            .oneshot(request(
+                "POST",
+                "/v1/delivery-activations/redeem",
+                Some(cookie),
+                Some(json!({
+                    "redemption_code": redemption_code
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(redeem.status(), StatusCode::OK);
+        response_json(redeem).await
+    }
+
+    async fn issue_download_grant_for_test(
+        app: axum::Router,
+        cookie: &str,
+        activation_id: &str,
+    ) -> Value {
+        let issue = app
+            .oneshot(request(
+                "POST",
+                "/v1/delivery-download-grants",
+                Some(cookie),
+                Some(json!({
+                    "activation_id": activation_id
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(issue.status(), StatusCode::OK);
+        response_json(issue).await
+    }
+
+    fn download_artifact_request(download_token: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("GET")
+            .uri("/v1/delivery-downloads/artifact");
+        if let Some(download_token) = download_token {
+            builder = builder.header(AUTHORIZATION, format!("Bearer {download_token}"));
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    fn assert_artifact_metadata_omits_payload(body: &Value) {
+        assert!(body.get("payload_base64").is_none());
+        assert!(body.get("payload").is_none());
+        assert!(body.get("ciphertext").is_none());
     }
 
     async fn upload_codex_account_for_test(
@@ -8270,6 +10458,2166 @@ mod tests {
                 .iter()
                 .any(|scope| scope == "provider:hugerouter-commercial")
         );
+    }
+
+    #[tokio::test]
+    async fn deliveries_prepare_get_and_revoke_project_backend_fact_source() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+
+        let prepare = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/deliveries/prepare",
+                Some(&admin_cookie),
+                Some(json!({
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider": "chatgpt",
+                    "customer_label": "Acme browser handoff",
+                    "service_kind": "manual_browser_account",
+                    "service_days": 30
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(prepare.status(), StatusCode::OK);
+        let prepared = response_json(prepare).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let browser_file_unlock_code = prepared["one_time_codes"]["browser_file_unlock_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(super::delivery_code_format_is_valid(
+            &redemption_code,
+            "red"
+        ));
+        assert!(super::delivery_code_format_is_valid(
+            &browser_file_unlock_code,
+            "brw"
+        ));
+        assert!(!super::delivery_code_format_is_valid(
+            &format!("{redemption_code}x"),
+            "red"
+        ));
+        assert_eq!(prepared["data"]["delivery"]["status"], "prepared");
+        assert_eq!(prepared["data"]["delivery"]["provider"], "chatgpt");
+        assert_eq!(prepared["data"]["delivery"]["source"], "manual_operator");
+        assert_eq!(prepared["data"]["codes"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            prepared["data"]["entitlement"]["service_kind"],
+            "manual_browser_account"
+        );
+        assert_eq!(prepared["data"]["entitlement"]["service_days"], 30);
+
+        let hashes = state
+            .store
+            .delivery_code_hashes_for_tests(&delivery_id)
+            .await
+            .unwrap();
+        assert_eq!(hashes.len(), 2);
+        assert!(hashes.iter().all(|hash| hash.len() == 64));
+        assert!(!hashes.iter().any(|hash| hash == &redemption_code));
+        assert!(!hashes.iter().any(|hash| hash == &browser_file_unlock_code));
+
+        let get = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(get.status(), StatusCode::OK);
+        let get_body = response_json(get).await;
+        let get_body_string = get_body.to_string();
+        assert!(!get_body_string.contains(&redemption_code));
+        assert!(!get_body_string.contains(&browser_file_unlock_code));
+        assert_eq!(get_body["data"]["delivery"]["delivery_id"], delivery_id);
+        assert_eq!(get_body["data"]["delivery"]["status"], "prepared");
+        assert_eq!(get_body["data"]["codes"].as_array().unwrap().len(), 2);
+        assert!(get_body["data"]["codes"][0].get("code_hash").is_none());
+
+        let revoke = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/revoke"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": 1,
+                    "revoke_reason": "operator rollback"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), StatusCode::OK);
+        let revoked = response_json(revoke).await;
+        assert_eq!(revoked["data"]["delivery"]["status"], "revoked");
+        assert_eq!(revoked["data"]["delivery"]["version"], 2);
+        assert_eq!(revoked["data"]["delivery"]["revoked_by"], "user_ops");
+        assert_eq!(
+            revoked["data"]["delivery"]["revoke_reason"],
+            "operator rollback"
+        );
+        assert!(
+            revoked["data"]["codes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|code| code["status"] == "revoked")
+        );
+        assert_eq!(revoked["data"]["entitlement"]["status"], "revoked");
+
+        assert_error(
+            app.oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/revoke"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": 1
+                })),
+            ))
+            .await
+            .unwrap(),
+            StatusCode::CONFLICT,
+            "delivery_version_conflict",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn deliveries_enforce_tenant_isolation_on_prepare_get_and_revoke() {
+        let state = authz_test_state();
+        let acme_admin_cookie =
+            issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let acme_member_cookie =
+            issue_cookie(&state, "acme-member@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state);
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/deliveries/prepare",
+                    Some(&acme_member_cookie),
+                    Some(json!({
+                        "tenant_id": "tenant_acme",
+                        "project_id": "proj_core",
+                        "provider": "chatgpt",
+                        "service_days": 30
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/deliveries/prepare",
+                    Some(&northstar_cookie),
+                    Some(json!({
+                        "tenant_id": "tenant_acme",
+                        "project_id": "proj_core",
+                        "provider": "chatgpt",
+                        "service_days": 30
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        let prepare = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/deliveries/prepare",
+                Some(&acme_admin_cookie),
+                Some(json!({
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider": "chatgpt",
+                    "service_days": 30
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(prepare.status(), StatusCode::OK);
+        let prepared = response_json(prepare).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("/v1/deliveries/{delivery_id}"),
+                    Some(&northstar_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        assert_error(
+            app.oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/revoke"),
+                Some(&northstar_cookie),
+                Some(json!({
+                    "expected_version": 1
+                })),
+            ))
+            .await
+            .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_artifacts_store_metadata_and_supersede_previous_active_version() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let first_payload = b"encrypted-hcbrowser-v1".to_vec();
+        let first = upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            &first_payload,
+            "acme-v1.hcbrowser",
+        )
+        .await;
+        let first_artifact = &first["data"];
+        let first_artifact_id = first_artifact["artifact_id"].as_str().unwrap().to_string();
+        assert_eq!(first_artifact["delivery_id"], delivery_id);
+        assert_eq!(first_artifact["status"], "active");
+        assert_eq!(first_artifact["version"], 1);
+        assert_eq!(first_artifact["artifact_kind"], "browser_account_bundle");
+        assert_eq!(first_artifact["file_name"], "acme-v1.hcbrowser");
+        assert_eq!(first_artifact["content_type"], "application/octet-stream");
+        assert_eq!(first_artifact["size_bytes"], json!(first_payload.len()));
+        assert_eq!(
+            first_artifact["sha256"],
+            format!("sha256:{}", super::hex_sha256(&first_payload))
+        );
+        assert_artifact_metadata_omits_payload(first_artifact);
+
+        let stored = state
+            .store
+            .delivery_artifact_ciphertext_for_tests(&first_artifact_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored, first_payload);
+
+        let first_list = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(first_list.status(), StatusCode::OK);
+        let first_list_body = response_json(first_list).await;
+        assert_eq!(first_list_body["data"].as_array().unwrap().len(), 1);
+        assert_artifact_metadata_omits_payload(&first_list_body["data"][0]);
+
+        let second_payload = b"encrypted-hcbrowser-v2".to_vec();
+        let second = upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            &second_payload,
+            "acme-v2.hcbrowser",
+        )
+        .await;
+        let second_artifact = &second["data"];
+        let second_artifact_id = second_artifact["artifact_id"].as_str().unwrap().to_string();
+        assert_eq!(second_artifact["status"], "active");
+        assert_eq!(second_artifact["version"], 2);
+
+        let list = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(list.status(), StatusCode::OK);
+        let list_body = response_json(list).await;
+        let artifacts = list_body["data"].as_array().unwrap();
+        assert_eq!(artifacts.len(), 2);
+        let previous = artifacts
+            .iter()
+            .find(|artifact| artifact["artifact_id"] == first_artifact_id)
+            .unwrap();
+        let current = artifacts
+            .iter()
+            .find(|artifact| artifact["artifact_id"] == second_artifact_id)
+            .unwrap();
+        assert_eq!(previous["status"], "superseded");
+        assert_eq!(previous["superseded_by"], second_artifact_id);
+        assert_eq!(current["status"], "active");
+        assert_artifact_metadata_omits_payload(previous);
+        assert_artifact_metadata_omits_payload(current);
+
+        let get_previous = app
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}/artifacts/{first_artifact_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(get_previous.status(), StatusCode::OK);
+        let previous_body = response_json(get_previous).await;
+        assert_eq!(previous_body["data"]["status"], "superseded");
+        assert_artifact_metadata_omits_payload(&previous_body["data"]);
+    }
+
+    #[tokio::test]
+    async fn delivery_artifacts_reject_bad_delivery_empty_invalid_and_too_large_payloads() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let payload_base64 = super::BASE64.encode(b"encrypted-hcbrowser");
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/deliveries/missing_delivery/artifacts",
+                    Some(&admin_cookie),
+                    Some(json!({
+                        "payload_base64": payload_base64
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::NOT_FOUND,
+            "delivery_not_found",
+        )
+        .await;
+
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                    Some(&admin_cookie),
+                    Some(json!({
+                        "payload_base64": "not-valid-base64!"
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+            "artifact_payload_invalid",
+        )
+        .await;
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                    Some(&admin_cookie),
+                    Some(json!({
+                        "payload_base64": ""
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+            "artifact_payload_empty",
+        )
+        .await;
+
+        let context = super::next_request_context();
+        let too_large = super::validate_artifact_payload_size(
+            crate::store::DELIVERY_ARTIFACT_MAX_BYTES + 1,
+            &context,
+        )
+        .unwrap_err();
+        assert_eq!(too_large.status, StatusCode::BAD_REQUEST);
+        assert_eq!(too_large.code, "artifact_payload_too_large");
+
+        let revoke = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/revoke"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": 1,
+                    "revoke_reason": "bad artifact upload test"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), StatusCode::OK);
+
+        assert_error(
+            app.oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "payload_base64": super::BASE64.encode(b"encrypted-hcbrowser")
+                })),
+            ))
+            .await
+            .unwrap(),
+            StatusCode::CONFLICT,
+            "delivery_not_artifact_ready",
+        )
+        .await;
+
+        let artifacts = state
+            .store
+            .list_delivery_artifacts(&delivery_id)
+            .await
+            .unwrap();
+        assert!(artifacts.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delivery_artifacts_enforce_tenant_isolation_on_create_list_and_get() {
+        let state = authz_test_state();
+        let acme_admin_cookie =
+            issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let acme_member_cookie =
+            issue_cookie(&state, "acme-member@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state);
+
+        let prepared = prepare_delivery_for_test(app.clone(), &acme_admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let artifact = upload_artifact_for_test(
+            app.clone(),
+            &acme_admin_cookie,
+            &delivery_id,
+            b"encrypted-hcbrowser",
+            "acme.hcbrowser",
+        )
+        .await;
+        let artifact_id = artifact["data"]["artifact_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                    Some(&acme_member_cookie),
+                    Some(json!({
+                        "payload_base64": super::BASE64.encode(b"member-write")
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                    Some(&northstar_cookie),
+                    Some(json!({
+                        "payload_base64": super::BASE64.encode(b"cross-tenant")
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("/v1/deliveries/{delivery_id}/artifacts"),
+                    Some(&northstar_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        assert_error(
+            app.oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}/artifacts/{artifact_id}"),
+                Some(&northstar_cookie),
+                None,
+            ))
+            .await
+            .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_upload_batches_queue_then_worker_processes_artifacts() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let payload = b"encrypted-async-hcbrowser".to_vec();
+
+        let queued = queue_delivery_upload_batch_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            &payload,
+            "async-upload-idempotency-1",
+        )
+        .await;
+        let batch_id = queued["data"]["batch_id"].as_str().unwrap().to_string();
+        assert_eq!(queued["data"]["status"], "queued");
+        assert_eq!(queued["data"]["total_count"], 1);
+        assert_eq!(queued["data"]["success_count"], 0);
+
+        let duplicate = queue_delivery_upload_batch_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            &payload,
+            "async-upload-idempotency-1",
+        )
+        .await;
+        assert_eq!(duplicate["data"]["batch_id"], batch_id);
+
+        let artifacts_before = state
+            .store
+            .list_delivery_artifacts(&delivery_id)
+            .await
+            .unwrap();
+        assert!(artifacts_before.data.is_empty());
+
+        let items_before = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-uploads/{batch_id}/items"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(items_before.status(), StatusCode::OK);
+        let items_before_body = response_json(items_before).await;
+        assert_eq!(items_before_body["data"][0]["status"], "pending");
+        let pending_text = items_before_body.to_string();
+        assert!(!pending_text.contains("payload_base64"));
+        assert!(!pending_text.contains("ciphertext"));
+
+        let processed = app
+            .clone()
+            .oneshot(process_delivery_upload_batch_request(&batch_id))
+            .await
+            .unwrap();
+        assert_eq!(processed.status(), StatusCode::OK);
+        let processed_body = response_json(processed).await;
+        assert_eq!(processed_body["data"]["status"], "succeeded");
+        assert_eq!(processed_body["data"]["success_count"], 1);
+        assert_eq!(processed_body["data"]["failed_count"], 0);
+
+        let items_after = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-uploads/{batch_id}/items"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(items_after.status(), StatusCode::OK);
+        let items_after_body = response_json(items_after).await;
+        let item = &items_after_body["data"][0];
+        assert_eq!(item["status"], "accepted");
+        let artifact_id = item["artifact_id"].as_str().unwrap().to_string();
+        assert_eq!(
+            item["payload_sha256"],
+            format!("sha256:{}", super::hex_sha256(&payload))
+        );
+        assert!(!items_after_body.to_string().contains("ciphertext"));
+
+        let artifacts_after = state
+            .store
+            .list_delivery_artifacts(&delivery_id)
+            .await
+            .unwrap();
+        assert_eq!(artifacts_after.data.len(), 1);
+        assert_eq!(artifacts_after.data[0].artifact_id, artifact_id);
+        assert_eq!(artifacts_after.data[0].status, "active");
+        assert_eq!(
+            artifacts_after.data[0].file_name.as_deref(),
+            Some("async-upload.hcbrowser")
+        );
+
+        let overview = app
+            .oneshot(request(
+                "GET",
+                "/v1/delivery-operations/overview?tenant_id=tenant_acme&project_id=proj_core&limit=20",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(overview.status(), StatusCode::OK);
+        let overview_body = response_json(overview).await;
+        assert_eq!(overview_body["data"]["totals"]["upload_batches"], 1);
+        assert_eq!(overview_body["data"]["totals"]["upload_items"], 1);
+        assert!(
+            overview_body["data"]["recent_events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| event["event_type"] == "delivery_upload_item_processed")
+        );
+    }
+
+    #[tokio::test]
+    async fn delivery_upload_batches_reject_failed_items_without_blocking_batch_visibility() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let queued = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/v1/delivery-uploads",
+                Some(&admin_cookie),
+                Some(json!({
+                    "tenant_id": "tenant_acme",
+                    "project_id": "proj_core",
+                    "provider": "chatgpt",
+                    "source_file_name": "missing-delivery-upload.jsonl",
+                    "idempotency_key": "missing-delivery-upload-1",
+                    "items": [{
+                        "delivery_id": "delivery_missing",
+                        "row_index": 1,
+                        "payload_base64": super::BASE64.encode(b"encrypted-missing")
+                    }]
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(queued.status(), StatusCode::ACCEPTED);
+        let queued_body = response_json(queued).await;
+        let batch_id = queued_body["data"]["batch_id"].as_str().unwrap();
+
+        let processed = app
+            .clone()
+            .oneshot(process_delivery_upload_batch_request(batch_id))
+            .await
+            .unwrap();
+        assert_eq!(processed.status(), StatusCode::OK);
+        let processed_body = response_json(processed).await;
+        assert_eq!(processed_body["data"]["status"], "failed");
+        assert_eq!(processed_body["data"]["failed_count"], 1);
+        assert_eq!(
+            processed_body["data"]["error_summary"],
+            "delivery `delivery_missing` was not found"
+        );
+
+        let items = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-uploads/{batch_id}/items"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(items.status(), StatusCode::OK);
+        let items_body = response_json(items).await;
+        assert_eq!(items_body["data"][0]["status"], "rejected");
+        assert_eq!(items_body["data"][0]["error_code"], "delivery_not_found");
+
+        let exceptions = app
+            .oneshot(request(
+                "GET",
+                "/v1/delivery-operations/exceptions?tenant_id=tenant_acme&project_id=proj_core&exception_type=delivery_upload_item_rejected&limit=20",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(exceptions.status(), StatusCode::OK);
+        let exceptions_body = response_json(exceptions).await;
+        assert!(
+            exceptions_body["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|exception| exception["upload_batch_id"] == batch_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn delivery_activation_redeems_code_binds_artifact_and_marks_code_used() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let artifact = upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            b"encrypted-hcbrowser",
+            "acme.hcbrowser",
+        )
+        .await;
+        let artifact_id = artifact["data"]["artifact_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let entitlement_id = prepared["data"]["entitlement"]["entitlement_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let activation =
+            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let activation_data = &activation["data"];
+        let activation_id = activation_data["activation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(activation_data["delivery_id"], delivery_id);
+        assert_eq!(activation_data["artifact_id"], artifact_id);
+        assert_eq!(activation_data["entitlement_id"], entitlement_id);
+        assert_eq!(activation_data["status"], "activated");
+        assert_eq!(activation_data["activation_source"], "redemption_code");
+        assert!(
+            activation_data["entitlement_ends_at"].as_str().unwrap()
+                >= prepared["data"]["entitlement"]["ends_at"].as_str().unwrap()
+        );
+        assert_eq!(activation_data["artifact"]["artifact_id"], artifact_id);
+        assert_artifact_metadata_omits_payload(&activation_data["artifact"]);
+        let activation_body = activation.to_string();
+        assert!(!activation_body.contains(&redemption_code));
+        assert!(!activation_body.contains("download_token"));
+        assert!(!activation_body.contains("download_url"));
+        assert!(!activation_body.contains("payload_base64"));
+        assert!(!activation_body.contains("ciphertext"));
+
+        let get_delivery = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(get_delivery.status(), StatusCode::OK);
+        let delivery_body = response_json(get_delivery).await;
+        let redemption_code_projection = delivery_body["data"]["codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|code| code["code_type"] == "redemption_code")
+            .unwrap();
+        assert_eq!(redemption_code_projection["status"], "used");
+        assert!(redemption_code_projection["used_at"].as_str().is_some());
+        assert!(!delivery_body.to_string().contains(&redemption_code));
+
+        let records = state
+            .store
+            .delivery_activation_records_for_tests(&delivery_id)
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].artifact_id, artifact_id);
+        assert_eq!(records[0].entitlement_id, entitlement_id);
+        assert!(records[0].code_id.ends_with("_redemption"));
+        assert!(
+            !serde_json::to_string(&records[0])
+                .unwrap()
+                .contains(&redemption_code)
+        );
+
+        let get_activation = app
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-activations/{activation_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(get_activation.status(), StatusCode::OK);
+        let get_activation_body = response_json(get_activation).await;
+        assert_eq!(get_activation_body["data"]["activation_id"], activation_id);
+        assert!(!get_activation_body.to_string().contains(&redemption_code));
+    }
+
+    #[tokio::test]
+    async fn delivery_activation_rejects_repeated_and_concurrent_redemption() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            b"encrypted-hcbrowser",
+            "repeat.hcbrowser",
+        )
+        .await;
+        redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-activations/redeem",
+                    Some(&admin_cookie),
+                    Some(json!({
+                        "redemption_code": redemption_code
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::CONFLICT,
+            "redemption_code_used",
+        )
+        .await;
+        let records = state
+            .store
+            .delivery_activation_records_for_tests(&delivery_id)
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
+
+        let prepared_concurrent = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let concurrent_delivery_id = prepared_concurrent["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let concurrent_redemption_code = prepared_concurrent["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &concurrent_delivery_id,
+            b"encrypted-hcbrowser-concurrent",
+            "concurrent.hcbrowser",
+        )
+        .await;
+
+        let left = app.clone().oneshot(request(
+            "POST",
+            "/v1/delivery-activations/redeem",
+            Some(&admin_cookie),
+            Some(json!({
+                "redemption_code": concurrent_redemption_code.clone()
+            })),
+        ));
+        let right = app.clone().oneshot(request(
+            "POST",
+            "/v1/delivery-activations/redeem",
+            Some(&admin_cookie),
+            Some(json!({
+                "redemption_code": concurrent_redemption_code.clone()
+            })),
+        ));
+        let (left, right) = tokio::join!(left, right);
+        let responses = vec![left.unwrap(), right.unwrap()];
+        let ok_count = responses
+            .iter()
+            .filter(|response| response.status() == StatusCode::OK)
+            .count();
+        let conflict_count = responses
+            .iter()
+            .filter(|response| response.status() == StatusCode::CONFLICT)
+            .count();
+        assert_eq!(ok_count, 1);
+        assert_eq!(conflict_count, 1);
+        for response in responses {
+            if response.status() == StatusCode::CONFLICT {
+                let body = response_json(response).await;
+                assert_eq!(body["code"], "redemption_code_used");
+            } else {
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = response_json(response).await;
+                assert_eq!(body["data"]["status"], "activated");
+            }
+        }
+        let concurrent_records = state
+            .store
+            .delivery_activation_records_for_tests(&concurrent_delivery_id)
+            .await
+            .unwrap();
+        assert_eq!(concurrent_records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delivery_activation_rejects_missing_artifact_expired_and_revoked_codes() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let missing_artifact_delivery = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let missing_artifact_delivery_id =
+            missing_artifact_delivery["data"]["delivery"]["delivery_id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+        let missing_artifact_code = missing_artifact_delivery["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-activations/redeem",
+                    Some(&admin_cookie),
+                    Some(json!({
+                        "redemption_code": missing_artifact_code
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::CONFLICT,
+            "delivery_artifact_required",
+        )
+        .await;
+        let missing_artifact_records = state
+            .store
+            .delivery_activation_records_for_tests(&missing_artifact_delivery_id)
+            .await
+            .unwrap();
+        assert!(missing_artifact_records.is_empty());
+
+        let expired_code = "ku0-red-v1-260505-a1b2-c3d4e5f6g7h8-7b";
+        let expired_unlock_code = "ku0-brw-v1-260505-j9k0-l1m2n3p4q5r6-76";
+        assert!(super::delivery_code_format_is_valid(expired_code, "red"));
+        state
+            .store
+            .prepare_delivery(
+                DeliveryPrepareDraft {
+                    delivery_id: "delivery_expired_redemption".to_string(),
+                    tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                    project_id: ProjectId::parse("proj_core").unwrap(),
+                    provider: "chatgpt".to_string(),
+                    operator_id: "user_ops".to_string(),
+                    customer_label: Some("Expired code".to_string()),
+                    service_kind: "manual_browser_account".to_string(),
+                    service_days: 30,
+                    starts_at: crate::now_rfc3339(),
+                    ends_at: crate::expires_at(86_400),
+                    code_expires_at: "2000-01-01T00:00:00Z".to_string(),
+                },
+                expired_code,
+                expired_unlock_code,
+            )
+            .await
+            .unwrap();
+        upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            "delivery_expired_redemption",
+            b"encrypted-expired",
+            "expired.hcbrowser",
+        )
+        .await;
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-activations/redeem",
+                    Some(&admin_cookie),
+                    Some(json!({
+                        "redemption_code": expired_code
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::CONFLICT,
+            "redemption_code_expired",
+        )
+        .await;
+        let expired_records = state
+            .store
+            .delivery_activation_records_for_tests("delivery_expired_redemption")
+            .await
+            .unwrap();
+        assert!(expired_records.is_empty());
+
+        let revoked_delivery = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let revoked_delivery_id = revoked_delivery["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let revoked_redemption_code = revoked_delivery["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &revoked_delivery_id,
+            b"encrypted-revoked",
+            "revoked.hcbrowser",
+        )
+        .await;
+        let revoke = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{revoked_delivery_id}/revoke"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": 1,
+                    "revoke_reason": "activation revoked test"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), StatusCode::OK);
+        assert_error(
+            app.oneshot(request(
+                "POST",
+                "/v1/delivery-activations/redeem",
+                Some(&admin_cookie),
+                Some(json!({
+                    "redemption_code": revoked_redemption_code
+                })),
+            ))
+            .await
+            .unwrap(),
+            StatusCode::CONFLICT,
+            "redemption_code_revoked",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_activation_enforces_tenant_before_consuming_code() {
+        let state = authz_test_state();
+        let acme_admin_cookie =
+            issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state.clone());
+        let prepared = prepare_delivery_for_test(app.clone(), &acme_admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &acme_admin_cookie,
+            &delivery_id,
+            b"encrypted-tenant",
+            "tenant.hcbrowser",
+        )
+        .await;
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-activations/redeem",
+                    Some(&northstar_cookie),
+                    Some(json!({
+                        "redemption_code": redemption_code.clone()
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+        let after_forbidden = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}"),
+                Some(&acme_admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(after_forbidden.status(), StatusCode::OK);
+        let after_forbidden_body = response_json(after_forbidden).await;
+        let code_projection = after_forbidden_body["data"]["codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|code| code["code_type"] == "redemption_code")
+            .unwrap();
+        assert_eq!(code_projection["status"], "active");
+
+        let activation =
+            redeem_delivery_for_test(app.clone(), &acme_admin_cookie, &redemption_code).await;
+        assert_eq!(activation["data"]["status"], "activated");
+    }
+
+    #[tokio::test]
+    async fn delivery_download_grant_issues_once_and_retrieves_bound_ciphertext() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let artifact_payload = b"encrypted-hcbrowser-download".to_vec();
+        let artifact = upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            &artifact_payload,
+            "download.hcbrowser",
+        )
+        .await;
+        let artifact_id = artifact["data"]["artifact_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let artifact_sha256 = artifact["data"]["sha256"].as_str().unwrap().to_string();
+        let activation =
+            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let activation_id = activation["data"]["activation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let entitlement_id = activation["data"]["entitlement_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let issue = issue_download_grant_for_test(app.clone(), &admin_cookie, &activation_id).await;
+        let download_token = issue["download_token"].as_str().unwrap().to_string();
+        let grant = &issue["data"];
+        let grant_id = grant["grant_id"].as_str().unwrap().to_string();
+        assert!(download_token.starts_with("dlt_"));
+        assert_eq!(grant["activation_id"], activation_id);
+        assert_eq!(grant["artifact_id"], artifact_id);
+        assert_eq!(grant["entitlement_id"], entitlement_id);
+        assert_eq!(grant["status"], "active");
+        assert_eq!(grant["max_uses"], 1);
+        assert_eq!(grant["use_count"], 0);
+        assert_eq!(grant["artifact"]["artifact_id"], artifact_id);
+        assert_artifact_metadata_omits_payload(&grant["artifact"]);
+        let issue_body = issue.to_string();
+        assert!(!issue_body.contains("token_hash"));
+        assert!(!issue_body.contains("browser_file_unlock_code"));
+        assert!(!issue_body.contains("payload_base64"));
+        assert!(!issue_body.contains("ciphertext"));
+
+        let token_hashes = state
+            .store
+            .delivery_download_token_hashes_for_tests(&grant_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            token_hashes,
+            vec![super::hex_sha256(download_token.as_bytes())]
+        );
+        assert_ne!(token_hashes[0], download_token);
+
+        let get_grant = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-download-grants/{grant_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(get_grant.status(), StatusCode::OK);
+        let get_grant_body = response_json(get_grant).await;
+        assert!(get_grant_body.get("download_token").is_none());
+        assert!(!get_grant_body.to_string().contains(&download_token));
+        assert!(!get_grant_body.to_string().contains("token_hash"));
+
+        let retrieve = app
+            .clone()
+            .oneshot(download_artifact_request(Some(&download_token)))
+            .await
+            .unwrap();
+        assert_eq!(retrieve.status(), StatusCode::OK);
+        let headers = retrieve.headers().clone();
+        let body = to_bytes(retrieve.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), artifact_payload.as_slice());
+        assert_eq!(
+            headers.get("content-type").unwrap().to_str().unwrap(),
+            "application/octet-stream"
+        );
+        assert!(
+            headers
+                .get("content-disposition")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("download.hcbrowser")
+        );
+        assert_eq!(
+            headers.get("content-length").unwrap().to_str().unwrap(),
+            artifact_payload.len().to_string()
+        );
+        assert_eq!(
+            headers
+                .get("x-openhuge-artifact-sha256")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            artifact_sha256
+        );
+        assert_eq!(
+            headers
+                .get("x-openhuge-download-grant-id")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            grant_id
+        );
+
+        let used_grant = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-download-grants/{grant_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(used_grant.status(), StatusCode::OK);
+        let used_grant_body = response_json(used_grant).await;
+        assert_eq!(used_grant_body["data"]["status"], "used");
+        assert_eq!(used_grant_body["data"]["use_count"], 1);
+        assert!(used_grant_body["data"]["used_at"].as_str().is_some());
+
+        assert_error(
+            app.oneshot(download_artifact_request(Some(&download_token)))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "download_token_used",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_download_grant_rejects_missing_invalid_expired_revoked_and_concurrent_tokens()
+    {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let artifact_payload = b"encrypted-hcbrowser-guards".to_vec();
+        upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            &artifact_payload,
+            "guarded.hcbrowser",
+        )
+        .await;
+        let activation =
+            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let activation_id = activation["data"]["activation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let expired_issue =
+            issue_download_grant_for_test(app.clone(), &admin_cookie, &activation_id).await;
+        let expired_token = expired_issue["download_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let expired_grant_id = expired_issue["data"]["grant_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_error(
+            app.clone()
+                .oneshot(download_artifact_request(None))
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "download_token_required",
+        )
+        .await;
+        assert_error(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri(format!(
+                            "/v1/delivery-downloads/artifact?download_token={expired_token}"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "download_token_required",
+        )
+        .await;
+        assert_error(
+            app.clone()
+                .oneshot(download_artifact_request(Some("dlt_invalid")))
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "download_token_invalid",
+        )
+        .await;
+
+        state
+            .store
+            .expire_delivery_download_grant_for_tests(&expired_grant_id)
+            .await
+            .unwrap();
+        assert_error(
+            app.clone()
+                .oneshot(download_artifact_request(Some(&expired_token)))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "download_token_expired",
+        )
+        .await;
+        let expired_grant = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-download-grants/{expired_grant_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(expired_grant.status(), StatusCode::OK);
+        let expired_grant_body = response_json(expired_grant).await;
+        assert_eq!(expired_grant_body["data"]["status"], "expired");
+
+        let revoked_issue =
+            issue_download_grant_for_test(app.clone(), &admin_cookie, &activation_id).await;
+        let revoked_token = revoked_issue["download_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let revoked_grant_id = revoked_issue["data"]["grant_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let revoke = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/delivery-download-grants/{revoked_grant_id}/revoke"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": 1,
+                    "revoke_reason": "operator revoke test"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), StatusCode::OK);
+        let revoke_body = response_json(revoke).await;
+        assert_eq!(revoke_body["data"]["status"], "revoked");
+        assert_error(
+            app.clone()
+                .oneshot(download_artifact_request(Some(&revoked_token)))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "download_token_revoked",
+        )
+        .await;
+
+        let concurrent_issue =
+            issue_download_grant_for_test(app.clone(), &admin_cookie, &activation_id).await;
+        let concurrent_token = concurrent_issue["download_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let concurrent_grant_id = concurrent_issue["data"]["grant_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let left = app
+            .clone()
+            .oneshot(download_artifact_request(Some(&concurrent_token)));
+        let right = app
+            .clone()
+            .oneshot(download_artifact_request(Some(&concurrent_token)));
+        let (left, right) = tokio::join!(left, right);
+        let responses = vec![left.unwrap(), right.unwrap()];
+        let ok_count = responses
+            .iter()
+            .filter(|response| response.status() == StatusCode::OK)
+            .count();
+        let used_count = responses
+            .iter()
+            .filter(|response| response.status() == StatusCode::FORBIDDEN)
+            .count();
+        assert_eq!(ok_count, 1);
+        assert_eq!(used_count, 1);
+        for response in responses {
+            if response.status() == StatusCode::OK {
+                let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                assert_eq!(body.as_ref(), artifact_payload.as_slice());
+            } else {
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                let body = response_json(response).await;
+                assert_eq!(body["code"], "download_token_used");
+            }
+        }
+        let concurrent_grant = app
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-download-grants/{concurrent_grant_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(concurrent_grant.status(), StatusCode::OK);
+        let concurrent_grant_body = response_json(concurrent_grant).await;
+        assert_eq!(concurrent_grant_body["data"]["status"], "used");
+        assert_eq!(concurrent_grant_body["data"]["use_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn delivery_download_grant_rechecks_entitlement_and_tenant_boundaries() {
+        let state = authz_test_state();
+        let acme_admin_cookie =
+            issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state);
+        let prepared = prepare_delivery_for_test(app.clone(), &acme_admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &acme_admin_cookie,
+            &delivery_id,
+            b"encrypted-tenant-download",
+            "tenant-download.hcbrowser",
+        )
+        .await;
+        let activation =
+            redeem_delivery_for_test(app.clone(), &acme_admin_cookie, &redemption_code).await;
+        let activation_id = activation["data"]["activation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let issue =
+            issue_download_grant_for_test(app.clone(), &acme_admin_cookie, &activation_id).await;
+        let download_token = issue["download_token"].as_str().unwrap().to_string();
+        let grant_id = issue["data"]["grant_id"].as_str().unwrap().to_string();
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("/v1/delivery-download-grants/{grant_id}"),
+                    Some(&northstar_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    &format!("/v1/delivery-download-grants/{grant_id}/revoke"),
+                    Some(&northstar_cookie),
+                    Some(json!({
+                        "expected_version": 1
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-download-grants",
+                    Some(&northstar_cookie),
+                    Some(json!({
+                        "activation_id": activation_id
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+
+        let revoke_delivery = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/deliveries/{delivery_id}/revoke"),
+                Some(&acme_admin_cookie),
+                Some(json!({
+                    "expected_version": 1,
+                    "revoke_reason": "entitlement recheck test"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke_delivery.status(), StatusCode::OK);
+
+        assert_error(
+            app.clone()
+                .oneshot(download_artifact_request(Some(&download_token)))
+                .await
+                .unwrap(),
+            StatusCode::CONFLICT,
+            "delivery_entitlement_not_active",
+        )
+        .await;
+        let grant_after_failed_retrieve = app
+            .oneshot(request(
+                "GET",
+                &format!("/v1/delivery-download-grants/{grant_id}"),
+                Some(&acme_admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(grant_after_failed_retrieve.status(), StatusCode::OK);
+        let grant_after_failed_retrieve_body = response_json(grant_after_failed_retrieve).await;
+        assert_eq!(grant_after_failed_retrieve_body["data"]["status"], "active");
+        assert_eq!(grant_after_failed_retrieve_body["data"]["use_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn delivery_operations_queries_return_redacted_timeline_and_detail() {
+        let state = authz_test_state();
+        let acme_admin_cookie =
+            issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
+        let northstar_cookie =
+            issue_cookie(&state, "northstar-member@huge-router.dev", "northstar-labs").await;
+        let app = app_with_state(state);
+        let prepared = prepare_delivery_for_test(app.clone(), &acme_admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let browser_unlock_code = prepared["one_time_codes"]["browser_file_unlock_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &acme_admin_cookie,
+            &delivery_id,
+            b"encrypted-operations-download",
+            "operations.hcbrowser",
+        )
+        .await;
+        let activation =
+            redeem_delivery_for_test(app.clone(), &acme_admin_cookie, &redemption_code).await;
+        let activation_id = activation["data"]["activation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let issue =
+            issue_download_grant_for_test(app.clone(), &acme_admin_cookie, &activation_id).await;
+        let download_token = issue["download_token"].as_str().unwrap().to_string();
+        let grant_id = issue["data"]["grant_id"].as_str().unwrap().to_string();
+        let retrieve = app
+            .clone()
+            .oneshot(download_artifact_request(Some(&download_token)))
+            .await
+            .unwrap();
+        assert_eq!(retrieve.status(), StatusCode::OK);
+
+        let overview = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/delivery-operations/overview?tenant_id=tenant_acme&project_id=proj_core&limit=10",
+                Some(&acme_admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(overview.status(), StatusCode::OK);
+        let overview_body = response_json(overview).await;
+        assert_eq!(overview_body["data"]["totals"]["deliveries"], 1);
+        assert_eq!(overview_body["data"]["totals"]["download_grants"], 1);
+        assert!(
+            overview_body["data"]["recent_events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| event["event_type"] == "delivery_download_grant_used")
+        );
+
+        let timeline = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!(
+                    "/v1/delivery-operations/timeline?tenant_id=tenant_acme&project_id=proj_core&delivery_id={delivery_id}&limit=20"
+                ),
+                Some(&acme_admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(timeline.status(), StatusCode::OK);
+        let timeline_body = response_json(timeline).await;
+        let timeline_events = timeline_body["data"].as_array().unwrap();
+        assert!(
+            timeline_events
+                .iter()
+                .any(|event| event["event_type"] == "delivery_activated")
+        );
+        assert!(timeline_events.windows(2).all(|window| {
+            window[0]["occurred_at"].as_str().unwrap() <= window[1]["occurred_at"].as_str().unwrap()
+        }));
+
+        let detail = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!(
+                    "/v1/delivery-operations/detail?tenant_id=tenant_acme&project_id=proj_core&grant_id={grant_id}&limit=20"
+                ),
+                Some(&acme_admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(detail.status(), StatusCode::OK);
+        let detail_body = response_json(detail).await;
+        assert_eq!(
+            detail_body["data"]["delivery"]["delivery"]["delivery_id"],
+            delivery_id
+        );
+        assert_eq!(
+            detail_body["data"]["download_grants"][0]["grant_id"],
+            grant_id
+        );
+        let detail_text = detail_body.to_string();
+        assert!(!detail_text.contains("download_token"));
+        assert!(!detail_text.contains(&download_token));
+        assert!(!detail_text.contains(&redemption_code));
+        assert!(!detail_text.contains(&browser_unlock_code));
+        assert!(!detail_text.contains("token_hash"));
+        assert!(!detail_text.contains("payload_base64"));
+        assert!(!detail_text.contains("ciphertext"));
+
+        assert_error(
+            app.oneshot(request(
+                "GET",
+                &format!(
+                    "/v1/delivery-operations/detail?tenant_id=tenant_acme&project_id=proj_core&delivery_id={delivery_id}"
+                ),
+                Some(&northstar_cookie),
+                None,
+            ))
+            .await
+            .unwrap(),
+            StatusCode::FORBIDDEN,
+            "tenant_access_denied",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_operations_exception_queue_filters_and_validates_bounds() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let missing_artifact_delivery = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let missing_delivery_id = missing_artifact_delivery["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let manual_supply_delivery = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = manual_supply_delivery["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = manual_supply_delivery["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_with_carrier_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            b"encrypted-no-carrier-window",
+            "manual-supply.hcbrowser",
+            None,
+        )
+        .await;
+        redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+
+        let exceptions = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/delivery-operations/exceptions?tenant_id=tenant_acme&project_id=proj_core&limit=20",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(exceptions.status(), StatusCode::OK);
+        let exceptions_body = response_json(exceptions).await;
+        let exceptions = exceptions_body["data"].as_array().unwrap();
+        assert!(exceptions.iter().any(|exception| {
+            exception["delivery_id"] == missing_delivery_id
+                && exception["exception_type"] == "missing_artifact"
+        }));
+        assert!(exceptions.iter().any(|exception| {
+            exception["delivery_id"] == delivery_id && exception["status"] == "needs_manual_supply"
+        }));
+
+        let filtered = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/v1/delivery-operations/exceptions?tenant_id=tenant_acme&project_id=proj_core&status=needs_manual_supply&limit=20",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(filtered.status(), StatusCode::OK);
+        let filtered_body = response_json(filtered).await;
+        let filtered_items = filtered_body["data"].as_array().unwrap();
+        assert!(!filtered_items.is_empty());
+        assert!(
+            filtered_items
+                .iter()
+                .all(|exception| exception["status"] == "needs_manual_supply")
+        );
+
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/delivery-operations/overview?tenant_id=tenant_acme&project_id=proj_core&limit=999",
+                    Some(&admin_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+            "delivery_operations_limit_invalid",
+        )
+        .await;
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/v1/delivery-operations/timeline?tenant_id=tenant_acme&project_id=proj_core&delivery_id=delivery_a&grant_id=grant_b",
+                    Some(&admin_cookie),
+                    None,
+                ))
+                .await
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+            "delivery_operations_object_id_required",
+        )
+        .await;
+        assert_error(
+            app.oneshot(request(
+                "GET",
+                "/v1/delivery-operations/overview?tenant_id=tenant_acme&project_id=proj_core&window_start=2026-05-31T00:00:00Z&window_end=2026-05-01T00:00:00Z",
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap(),
+            StatusCode::BAD_REQUEST,
+            "delivery_operations_window_invalid",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_lifecycle_creates_segment_and_continuation_without_cutting_customer_service()
+    {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let short_carrier = crate::expires_at(86_400);
+        upload_artifact_with_carrier_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            b"encrypted-short-carrier",
+            "short.hcbrowser",
+            Some(short_carrier.clone()),
+        )
+        .await;
+        let continuation = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let continuation_delivery_id = continuation["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_with_carrier_for_test(
+            app.clone(),
+            &admin_cookie,
+            &continuation_delivery_id,
+            b"encrypted-continuation-carrier",
+            "continuation.hcbrowser",
+            Some(crate::expires_at(86_400 * 90)),
+        )
+        .await;
+
+        let activation =
+            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let entitlement_id = activation["data"]["entitlement_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(activation["data"]["entitlement_ends_at"], short_carrier);
+
+        let reconcile = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/delivery-entitlements/{entitlement_id}/reconcile"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reconcile.status(), StatusCode::OK);
+        let body = response_json(reconcile).await;
+        assert_eq!(body["entitlement"]["status"], "active");
+        let segments = body["segments"].as_array().unwrap();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0]["effective_until"], short_carrier);
+        assert_eq!(
+            segments[1]["effective_until"],
+            body["entitlement"]["service_ends_at"]
+        );
+        assert_eq!(
+            body["entitlement"]["service_ends_at"],
+            activation["data"]["entitlement_ends_at"]
+        );
+
+        let repeat = app
+            .oneshot(request(
+                "POST",
+                &format!("/v1/delivery-entitlements/{entitlement_id}/reconcile"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(repeat.status(), StatusCode::OK);
+        let repeat_body = response_json(repeat).await;
+        assert_eq!(repeat_body["segments"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn delivery_lifecycle_fail_closes_when_continuation_supply_is_missing() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_with_carrier_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            b"encrypted-short-no-supply",
+            "short-no-supply.hcbrowser",
+            Some(crate::expires_at(86_400)),
+        )
+        .await;
+        let activation =
+            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let entitlement_id = activation["data"]["entitlement_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let reconcile = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/delivery-entitlements/{entitlement_id}/reconcile"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reconcile.status(), StatusCode::OK);
+        let body = response_json(reconcile).await;
+        assert_eq!(body["entitlement"]["status"], "needs_manual_supply");
+        assert!(body["events"].as_array().unwrap().iter().any(|event| {
+            event["event_type"] == "needs_manual_supply"
+                && event["reason"] == "continuation_artifact_missing"
+        }));
+
+        assert_error(
+            app.oneshot(request(
+                "POST",
+                "/v1/delivery-download-grants",
+                Some(&admin_cookie),
+                Some(json!({
+                    "activation_id": activation["data"]["activation_id"]
+                })),
+            ))
+            .await
+            .unwrap(),
+            StatusCode::CONFLICT,
+            "delivery_entitlement_not_active",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delivery_lifecycle_extends_same_entitlement_and_expiry_blocks_download() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let delivery_id = prepared["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let redemption_code = prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_for_test(
+            app.clone(),
+            &admin_cookie,
+            &delivery_id,
+            b"encrypted-renewable",
+            "renewable.hcbrowser",
+        )
+        .await;
+        let activation =
+            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let activation_id = activation["data"]["activation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let entitlement_id = activation["data"]["entitlement_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let old_service_ends_at = activation["data"]["entitlement_ends_at"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let continuation = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let continuation_delivery_id = continuation["data"]["delivery"]["delivery_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        upload_artifact_with_carrier_for_test(
+            app.clone(),
+            &admin_cookie,
+            &continuation_delivery_id,
+            b"encrypted-renewal-continuation",
+            "renewal-continuation.hcbrowser",
+            Some(crate::expires_at(86_400 * 120)),
+        )
+        .await;
+
+        let extend = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("/v1/delivery-entitlements/{entitlement_id}/extend"),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": 2,
+                    "extend_days": 30,
+                    "reason": "paid renewal"
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(extend.status(), StatusCode::OK);
+        let extend_body = response_json(extend).await;
+        assert_eq!(extend_body["entitlement"]["entitlement_id"], entitlement_id);
+        assert!(extend_body["entitlement"]["service_ends_at"] != old_service_ends_at);
+        assert!(
+            extend_body["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| {
+                    event["event_type"] == "entitlement_renewed"
+                        && event["payload"]["old_service_ends_at"] == old_service_ends_at
+                })
+        );
+
+        let delivery_after_extend = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/v1/deliveries/{delivery_id}"),
+                Some(&admin_cookie),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(delivery_after_extend.status(), StatusCode::OK);
+        let delivery_after_extend_body = response_json(delivery_after_extend).await;
+        assert_eq!(
+            delivery_after_extend_body["data"]["codes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let issue = issue_download_grant_for_test(app.clone(), &admin_cookie, &activation_id).await;
+        let download_token = issue["download_token"].as_str().unwrap().to_string();
+        state
+            .store
+            .expire_delivery_entitlement_for_tests(&entitlement_id)
+            .await
+            .unwrap();
+        assert_error(
+            app.oneshot(download_artifact_request(Some(&download_token)))
+                .await
+                .unwrap(),
+            StatusCode::CONFLICT,
+            "delivery_entitlement_not_active",
+        )
+        .await;
     }
 
     #[tokio::test]

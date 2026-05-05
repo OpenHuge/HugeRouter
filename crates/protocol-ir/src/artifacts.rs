@@ -36,6 +36,7 @@ pub struct ContractManifest {
     pub example_documents: Vec<String>,
 }
 
+#[allow(clippy::too_many_lines)]
 fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let schemas = vec![
         schema_artifact::<Tenant>("schemas/jsonschema/tenant.v1.schema.json")?,
@@ -109,6 +110,76 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         )?,
         schema_artifact::<BillingExportJobsResponse>(
             "schemas/jsonschema/billing-export-jobs-response.v1.schema.json",
+        )?,
+        schema_artifact::<CreateDeliveryRequest>(
+            "schemas/jsonschema/delivery-prepare-request.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryPrepareResponse>(
+            "schemas/jsonschema/delivery-prepare-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryResponse>("schemas/jsonschema/delivery-response.v1.schema.json")?,
+        schema_artifact::<DeliveryRevokeRequest>(
+            "schemas/jsonschema/delivery-revoke-request.v1.schema.json",
+        )?,
+        schema_artifact::<CreateDeliveryArtifactRequest>(
+            "schemas/jsonschema/delivery-artifact-create-request.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryArtifactResponse>(
+            "schemas/jsonschema/delivery-artifact-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryArtifactsResponse>(
+            "schemas/jsonschema/delivery-artifacts-response.v1.schema.json",
+        )?,
+        schema_artifact::<CreateDeliveryUploadBatchRequest>(
+            "schemas/jsonschema/delivery-upload-batch-request.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryUploadBatchResponse>(
+            "schemas/jsonschema/delivery-upload-batch-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryUploadBatchItemsResponse>(
+            "schemas/jsonschema/delivery-upload-batch-items-response.v1.schema.json",
+        )?,
+        schema_artifact::<RedeemDeliveryRequest>(
+            "schemas/jsonschema/delivery-activation-redeem-request.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryActivationResponse>(
+            "schemas/jsonschema/delivery-activation-response.v1.schema.json",
+        )?,
+        schema_artifact::<CreateDeliveryDownloadGrantRequest>(
+            "schemas/jsonschema/delivery-download-grant-request.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryDownloadGrantIssueResponse>(
+            "schemas/jsonschema/delivery-download-grant-issue-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryDownloadGrantResponse>(
+            "schemas/jsonschema/delivery-download-grant-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryDownloadGrantRevokeRequest>(
+            "schemas/jsonschema/delivery-download-grant-revoke-request.v1.schema.json",
+        )?,
+        schema_artifact::<ExtendDeliveryEntitlementRequest>(
+            "schemas/jsonschema/delivery-entitlement-extend-request.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryServiceSegmentsResponse>(
+            "schemas/jsonschema/delivery-service-segments-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryLifecycleEventsResponse>(
+            "schemas/jsonschema/delivery-lifecycle-events-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryLifecycleResponse>(
+            "schemas/jsonschema/delivery-lifecycle-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryOperationsOverviewResponse>(
+            "schemas/jsonschema/delivery-operations-overview-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryOperationsTimelineResponse>(
+            "schemas/jsonschema/delivery-operations-timeline-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryOperationsExceptionsResponse>(
+            "schemas/jsonschema/delivery-operations-exceptions-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryOperationsDetailResponse>(
+            "schemas/jsonschema/delivery-operations-detail-response.v1.schema.json",
         )?,
         schema_artifact::<CreateRenewalIntentRequest>(
             "schemas/jsonschema/renewal-intent-request.v1.schema.json",
@@ -190,9 +261,32 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let billing_export_jobs = BillingExportJobsResponse {
         data: vec![billing_export_job.data.clone()],
     };
+    let delivery_prepare_request = sample_create_delivery_request();
+    let delivery_prepare_response = sample_delivery_prepare_response();
+    let delivery_response = sample_delivery_response();
+    let delivery_artifact_request = sample_create_delivery_artifact_request();
+    let single_artifact_response = sample_delivery_artifact_response();
+    let artifact_list_response = sample_delivery_artifacts_response();
+    let delivery_upload_batch_request = sample_create_delivery_upload_batch_request();
+    let delivery_upload_batch_response = sample_delivery_upload_batch_response();
+    let delivery_upload_batch_items_response = sample_delivery_upload_batch_items_response();
+    let delivery_activation_request = sample_redeem_delivery_request();
+    let delivery_activation_response = sample_delivery_activation_response();
+    let delivery_download_grant_request = sample_create_delivery_download_grant_request();
+    let delivery_download_grant_issue_response = sample_delivery_download_grant_issue_response();
+    let delivery_download_grant_response = sample_delivery_download_grant_response();
+    let delivery_download_grant_revoke_request = sample_delivery_download_grant_revoke_request();
+    let delivery_entitlement_extend_request = sample_extend_delivery_entitlement_request();
+    let delivery_service_segments_response = sample_delivery_service_segments_response();
+    let delivery_lifecycle_events_response = sample_delivery_lifecycle_events_response();
+    let delivery_lifecycle_response = sample_delivery_lifecycle_response();
+    let delivery_operations_overview_response = sample_delivery_operations_overview_response();
+    let delivery_operations_timeline_response = sample_delivery_operations_timeline_response();
+    let delivery_operations_exceptions_response = sample_delivery_operations_exceptions_response();
+    let delivery_operations_detail_response = sample_delivery_operations_detail_response();
     let renewal_intent_request = sample_create_renewal_intent_request();
     let renewal_intent_response = sample_renewal_intent_response();
-    let renewal_intents_response = RenewalIntentsResponse {
+    let renewal_intents_list_response = RenewalIntentsResponse {
         data: vec![renewal_intent_response.data.clone()],
     };
     let usage_message = sample_usage_event_recorded_message();
@@ -323,6 +417,98 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
             &billing_export_jobs,
         )?,
         example_artifact(
+            "schemas/examples/control-plane/delivery-prepare.request.json",
+            &delivery_prepare_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-prepare.response.json",
+            &delivery_prepare_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery.response.json",
+            &delivery_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-artifact.request.json",
+            &delivery_artifact_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-artifact.response.json",
+            &single_artifact_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-artifacts.response.json",
+            &artifact_list_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-upload-batch.request.json",
+            &delivery_upload_batch_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-upload-batch.response.json",
+            &delivery_upload_batch_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-upload-batch-items.response.json",
+            &delivery_upload_batch_items_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-activation-redeem.request.json",
+            &delivery_activation_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-activation.response.json",
+            &delivery_activation_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-download-grant.request.json",
+            &delivery_download_grant_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-download-grant-issue.response.json",
+            &delivery_download_grant_issue_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-download-grant.response.json",
+            &delivery_download_grant_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-download-grant-revoke.request.json",
+            &delivery_download_grant_revoke_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-entitlement-extend.request.json",
+            &delivery_entitlement_extend_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-service-segments.response.json",
+            &delivery_service_segments_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-lifecycle-events.response.json",
+            &delivery_lifecycle_events_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-lifecycle.response.json",
+            &delivery_lifecycle_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-operations-overview.response.json",
+            &delivery_operations_overview_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-operations-timeline.response.json",
+            &delivery_operations_timeline_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-operations-exceptions.response.json",
+            &delivery_operations_exceptions_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-operations-detail.response.json",
+            &delivery_operations_detail_response,
+        )?,
+        example_artifact(
             "schemas/examples/control-plane/renewal-intent.request.json",
             &renewal_intent_request,
         )?,
@@ -332,7 +518,7 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         )?,
         example_artifact(
             "schemas/examples/control-plane/renewal-intents.response.json",
-            &renewal_intents_response,
+            &renewal_intents_list_response,
         )?,
         example_artifact(
             "schemas/examples/events/usage-event-recorded.message.json",
@@ -384,6 +570,29 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'createBillingExport', method: 'POST', path: '/v1/billing/exports' }},\n\
   {{ id: 'listBillingExports', method: 'GET', path: '/v1/billing/exports' }},\n\
   {{ id: 'getBillingExport', method: 'GET', path: '/v1/billing/exports/{{export_job_id}}' }},\n\
+  {{ id: 'prepareDelivery', method: 'POST', path: '/v1/deliveries/prepare' }},\n\
+  {{ id: 'getDelivery', method: 'GET', path: '/v1/deliveries/{{delivery_id}}' }},\n\
+  {{ id: 'revokeDelivery', method: 'POST', path: '/v1/deliveries/{{delivery_id}}/revoke' }},\n\
+  {{ id: 'createDeliveryArtifact', method: 'POST', path: '/v1/deliveries/{{delivery_id}}/artifacts' }},\n\
+  {{ id: 'listDeliveryArtifacts', method: 'GET', path: '/v1/deliveries/{{delivery_id}}/artifacts' }},\n\
+  {{ id: 'getDeliveryArtifact', method: 'GET', path: '/v1/deliveries/{{delivery_id}}/artifacts/{{artifact_id}}' }},\n\
+  {{ id: 'createDeliveryUploadBatch', method: 'POST', path: '/v1/delivery-uploads' }},\n\
+  {{ id: 'getDeliveryUploadBatch', method: 'GET', path: '/v1/delivery-uploads/{{batch_id}}' }},\n\
+  {{ id: 'listDeliveryUploadBatchItems', method: 'GET', path: '/v1/delivery-uploads/{{batch_id}}/items' }},\n\
+  {{ id: 'redeemDeliveryActivation', method: 'POST', path: '/v1/delivery-activations/redeem' }},\n\
+  {{ id: 'getDeliveryActivation', method: 'GET', path: '/v1/delivery-activations/{{activation_id}}' }},\n\
+  {{ id: 'issueDeliveryDownloadGrant', method: 'POST', path: '/v1/delivery-download-grants' }},\n\
+  {{ id: 'getDeliveryDownloadGrant', method: 'GET', path: '/v1/delivery-download-grants/{{grant_id}}' }},\n\
+  {{ id: 'revokeDeliveryDownloadGrant', method: 'POST', path: '/v1/delivery-download-grants/{{grant_id}}/revoke' }},\n\
+  {{ id: 'retrieveDeliveryDownloadArtifact', method: 'GET', path: '/v1/delivery-downloads/artifact' }},\n\
+  {{ id: 'listDeliveryServiceSegments', method: 'GET', path: '/v1/delivery-entitlements/{{entitlement_id}}/segments' }},\n\
+  {{ id: 'listDeliveryLifecycleEvents', method: 'GET', path: '/v1/delivery-entitlements/{{entitlement_id}}/lifecycle-events' }},\n\
+  {{ id: 'reconcileDeliveryLifecycle', method: 'POST', path: '/v1/delivery-entitlements/{{entitlement_id}}/reconcile' }},\n\
+  {{ id: 'extendDeliveryEntitlement', method: 'POST', path: '/v1/delivery-entitlements/{{entitlement_id}}/extend' }},\n\
+  {{ id: 'getDeliveryOperationsOverview', method: 'GET', path: '/v1/delivery-operations/overview' }},\n\
+  {{ id: 'getDeliveryOperationsTimeline', method: 'GET', path: '/v1/delivery-operations/timeline' }},\n\
+  {{ id: 'listDeliveryOperationsExceptions', method: 'GET', path: '/v1/delivery-operations/exceptions' }},\n\
+  {{ id: 'getDeliveryOperationsDetail', method: 'GET', path: '/v1/delivery-operations/detail' }},\n\
   {{ id: 'createRenewalIntent', method: 'POST', path: '/v1/billing/renewal-intents' }},\n\
   {{ id: 'listRenewalIntents', method: 'GET', path: '/v1/billing/renewal-intents' }},\n\
   {{ id: 'simulateRoute', method: 'POST', path: '/v1/route-simulations' }},\n\
@@ -439,6 +648,14 @@ fn stable_contracts() -> Vec<String> {
         "pricing_simulation".to_string(),
         "billing_export_job".to_string(),
         "billing_export_jobs".to_string(),
+        "delivery_prepare".to_string(),
+        "delivery_projection".to_string(),
+        "delivery_artifact".to_string(),
+        "delivery_upload".to_string(),
+        "delivery_activation".to_string(),
+        "delivery_download_grant".to_string(),
+        "delivery_lifecycle".to_string(),
+        "delivery_operations".to_string(),
         "route_receipt".to_string(),
         "usage_event".to_string(),
         "normalized_error".to_string(),

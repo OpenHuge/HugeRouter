@@ -1,0 +1,7 @@
+{
+  "artifact_kind": "browser_account_bundle",
+  "file_name": "acme-may.hcbrowser",
+  "content_type": "application/octet-stream",
+  "carrier_valid_until": "2026-05-20T10:00:00Z",
+  "payload_base64": "ZW5jcnlwdGVkLWhjYnJvd3Nlci1wYXlsb2Fk"
+}

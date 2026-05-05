@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "segment_id": "dlvseg_dlvent_delivery_10001_1",
+      "entitlement_id": "dlvent_delivery_10001",
+      "activation_id": "activation_10002",
+      "delivery_id": "delivery_10001",
+      "artifact_id": "artifact_10002",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "provider": "chatgpt",
+      "status": "active",
+      "segment_index": 1,
+      "effective_from": "2026-05-05T10:10:00Z",
+      "effective_until": "2026-05-20T10:00:00Z",
+      "carrier_valid_until": "2026-05-20T10:00:00Z",
+      "created_by": "user_ops_admin",
+      "created_at": "2026-05-05T10:10:00Z",
+      "updated_at": "2026-05-05T10:10:00Z",
+      "version": 1
+    }
+  ]
+}

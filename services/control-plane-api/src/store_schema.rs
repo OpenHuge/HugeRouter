@@ -5,6 +5,16 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "route_policies",
     "api_keys",
     "opening_grants",
+    "deliveries",
+    "delivery_codes",
+    "delivery_entitlements",
+    "delivery_artifacts",
+    "delivery_upload_batches",
+    "delivery_upload_batch_items",
+    "delivery_activations",
+    "delivery_download_grants",
+    "delivery_service_segments",
+    "delivery_lifecycle_events",
     "config_snapshots",
     "active_config_pointers",
     "users",
@@ -83,6 +93,180 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )",
+    r"CREATE TABLE IF NOT EXISTS deliveries (
+        delivery_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL,
+        operator_id TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS deliveries_tenant_project_idx
+       ON deliveries (tenant_id, project_id, created_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_codes (
+        code_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL,
+        code_type TEXT NOT NULL,
+        code_hash TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS delivery_codes_delivery_idx
+       ON delivery_codes (delivery_id, code_type)",
+    r"CREATE TABLE IF NOT EXISTS delivery_entitlements (
+        entitlement_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS delivery_artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        version BIGINT NOT NULL,
+        sha256 TEXT NOT NULL,
+        size_bytes BIGINT NOT NULL,
+        storage_backend TEXT NOT NULL,
+        storage_ref TEXT NOT NULL,
+        ciphertext BYTEA NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS delivery_artifacts_delivery_status_idx
+       ON delivery_artifacts (delivery_id, status, version)",
+    r"CREATE INDEX IF NOT EXISTS delivery_artifacts_tenant_project_idx
+       ON delivery_artifacts (tenant_id, project_id, created_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_upload_batches (
+        batch_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL,
+        idempotency_key TEXT NULL,
+        source_file_name TEXT NOT NULL,
+        source_file_sha256 TEXT NOT NULL,
+        total_count BIGINT NOT NULL,
+        success_count BIGINT NOT NULL,
+        failed_count BIGINT NOT NULL,
+        duplicate_count BIGINT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE UNIQUE INDEX IF NOT EXISTS delivery_upload_batches_source_sha_uidx
+       ON delivery_upload_batches (tenant_id, project_id, source_file_sha256)",
+    r"CREATE UNIQUE INDEX IF NOT EXISTS delivery_upload_batches_idempotency_uidx
+       ON delivery_upload_batches (tenant_id, project_id, idempotency_key)
+       WHERE idempotency_key IS NOT NULL",
+    r"CREATE INDEX IF NOT EXISTS delivery_upload_batches_scope_status_idx
+       ON delivery_upload_batches (tenant_id, project_id, status, created_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_upload_batch_items (
+        item_id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        delivery_id TEXT NOT NULL,
+        artifact_id TEXT NULL,
+        status TEXT NOT NULL,
+        row_index BIGINT NOT NULL,
+        payload_sha256 TEXT NOT NULL,
+        size_bytes BIGINT NOT NULL,
+        ciphertext BYTEA NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE UNIQUE INDEX IF NOT EXISTS delivery_upload_batch_items_batch_delivery_payload_uidx
+       ON delivery_upload_batch_items (batch_id, delivery_id, payload_sha256)",
+    r"CREATE INDEX IF NOT EXISTS delivery_upload_batch_items_batch_idx
+       ON delivery_upload_batch_items (batch_id, row_index)",
+    r"CREATE INDEX IF NOT EXISTS delivery_upload_batch_items_scope_status_idx
+       ON delivery_upload_batch_items (tenant_id, project_id, status, created_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_activations (
+        activation_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL,
+        code_id TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
+        entitlement_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        activated_at TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE UNIQUE INDEX IF NOT EXISTS delivery_activations_code_id_uidx
+       ON delivery_activations (code_id)",
+    r"CREATE INDEX IF NOT EXISTS delivery_activations_delivery_idx
+       ON delivery_activations (delivery_id, activated_at)",
+    r"CREATE INDEX IF NOT EXISTS delivery_activations_tenant_project_idx
+       ON delivery_activations (tenant_id, project_id, activated_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_download_grants (
+        grant_id TEXT PRIMARY KEY,
+        activation_id TEXT NOT NULL,
+        delivery_id TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
+        entitlement_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        use_count BIGINT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS delivery_download_grants_activation_idx
+       ON delivery_download_grants (activation_id, created_at)",
+    r"CREATE INDEX IF NOT EXISTS delivery_download_grants_tenant_project_idx
+       ON delivery_download_grants (tenant_id, project_id, created_at)",
+    r"CREATE INDEX IF NOT EXISTS delivery_download_grants_status_expires_idx
+       ON delivery_download_grants (status, expires_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_service_segments (
+        segment_id TEXT PRIMARY KEY,
+        entitlement_id TEXT NOT NULL,
+        activation_id TEXT NOT NULL,
+        delivery_id TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        effective_from TEXT NOT NULL,
+        effective_until TEXT NOT NULL,
+        carrier_valid_until TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS delivery_service_segments_entitlement_idx
+       ON delivery_service_segments (entitlement_id, effective_from)",
+    r"CREATE INDEX IF NOT EXISTS delivery_service_segments_artifact_idx
+       ON delivery_service_segments (artifact_id, status)",
+    r"CREATE TABLE IF NOT EXISTS delivery_lifecycle_events (
+        event_id TEXT PRIMARY KEY,
+        entitlement_id TEXT NOT NULL,
+        segment_id TEXT NULL,
+        event_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL
+    )",
+    r"CREATE INDEX IF NOT EXISTS delivery_lifecycle_events_entitlement_idx
+       ON delivery_lifecycle_events (entitlement_id, created_at)",
     r"CREATE TABLE IF NOT EXISTS config_snapshots (
         config_snapshot_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,

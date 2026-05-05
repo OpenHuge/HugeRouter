@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeliveryServiceSegmentsResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DeliveryServiceSegment"
+      }
+    }
+  },
+  "definitions": {
+    "DeliveryServiceSegment": {
+      "type": "object",
+      "required": [
+        "activation_id",
+        "artifact_id",
+        "carrier_valid_until",
+        "created_at",
+        "created_by",
+        "delivery_id",
+        "effective_from",
+        "effective_until",
+        "entitlement_id",
+        "project_id",
+        "provider",
+        "segment_id",
+        "segment_index",
+        "status",
+        "tenant_id",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "activation_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "carrier_valid_until": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "effective_from": {
+          "type": "string"
+        },
+        "effective_until": {
+          "type": "string"
+        },
+        "entitlement_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "segment_id": {
+          "type": "string"
+        },
+        "segment_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "status": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

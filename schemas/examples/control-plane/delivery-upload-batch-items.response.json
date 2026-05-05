@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "item_id": "dlvupitem_10004_1",
+      "batch_id": "dlvup_10004",
+      "row_index": 1,
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "delivery_id": "delivery_10001",
+      "artifact_id": "artifact_10002",
+      "status": "accepted",
+      "artifact_kind": "browser_account_bundle",
+      "file_name": "acme-may.hcbrowser",
+      "content_type": "application/octet-stream",
+      "carrier_valid_until": "2026-05-20T10:00:00Z",
+      "payload_sha256": "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9",
+      "size_bytes": 27,
+      "created_at": "2026-05-05T10:04:00Z",
+      "updated_at": "2026-05-05T10:05:00Z",
+      "version": 2
+    }
+  ]
+}

@@ -629,6 +629,501 @@ pub fn sample_renewal_intent_response() -> RenewalIntentResponse {
     }
 }
 
+pub fn sample_create_delivery_request() -> CreateDeliveryRequest {
+    CreateDeliveryRequest {
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: ProjectId::parse("proj_core").unwrap(),
+        provider: "chatgpt".to_string(),
+        customer_label: Some("Acme May browser handoff".to_string()),
+        service_kind: Some("manual_browser_account".to_string()),
+        service_days: 30,
+        starts_at: Some("2026-05-05T10:00:00Z".to_string()),
+        code_expires_at: Some("2026-06-04T10:00:00Z".to_string()),
+    }
+}
+
+pub fn sample_delivery_prepare_response() -> DeliveryPrepareResponse {
+    DeliveryPrepareResponse {
+        data: sample_delivery_projection(),
+        one_time_codes: DeliveryOneTimeCodes {
+            redemption_code: "ku0-red-v1-260505-a1b2-c3d4e5f6g7h8-7b".to_string(),
+            browser_file_unlock_code: "ku0-brw-v1-260505-j9k0-l1m2n3p4q5r6-76".to_string(),
+        },
+    }
+}
+
+pub fn sample_delivery_response() -> DeliveryResponse {
+    DeliveryResponse {
+        data: sample_delivery_projection(),
+    }
+}
+
+pub fn sample_create_delivery_artifact_request() -> CreateDeliveryArtifactRequest {
+    CreateDeliveryArtifactRequest {
+        artifact_kind: Some("browser_account_bundle".to_string()),
+        file_name: Some("acme-may.hcbrowser".to_string()),
+        content_type: Some("application/octet-stream".to_string()),
+        carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+        payload_base64: "ZW5jcnlwdGVkLWhjYnJvd3Nlci1wYXlsb2Fk".to_string(),
+    }
+}
+
+pub fn sample_delivery_artifact_response() -> DeliveryArtifactResponse {
+    DeliveryArtifactResponse {
+        data: sample_delivery_artifact(),
+    }
+}
+
+pub fn sample_delivery_artifacts_response() -> DeliveryArtifactsResponse {
+    DeliveryArtifactsResponse {
+        data: vec![sample_delivery_artifact()],
+    }
+}
+
+pub fn sample_redeem_delivery_request() -> RedeemDeliveryRequest {
+    RedeemDeliveryRequest {
+        redemption_code: "ku0-red-v1-260505-a1b2-c3d4e5f6g7h8-7b".to_string(),
+    }
+}
+
+pub fn sample_delivery_activation_response() -> DeliveryActivationResponse {
+    DeliveryActivationResponse {
+        data: DeliveryActivation {
+            activation_id: "activation_10002".to_string(),
+            delivery_id: "delivery_10001".to_string(),
+            artifact_id: "artifact_10002".to_string(),
+            entitlement_id: "dlvent_delivery_10001".to_string(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            provider: "chatgpt".to_string(),
+            status: "activated".to_string(),
+            activation_source: "redemption_code".to_string(),
+            activated_at: "2026-05-05T10:10:00Z".to_string(),
+            entitlement_ends_at: "2026-06-04T10:00:00Z".to_string(),
+            artifact: sample_delivery_artifact(),
+            created_at: "2026-05-05T10:10:00Z".to_string(),
+            updated_at: "2026-05-05T10:10:00Z".to_string(),
+            revoked_at: None,
+            revoked_by: None,
+            revoke_reason: None,
+        },
+    }
+}
+
+pub fn sample_create_delivery_download_grant_request() -> CreateDeliveryDownloadGrantRequest {
+    CreateDeliveryDownloadGrantRequest {
+        activation_id: "activation_10002".to_string(),
+    }
+}
+
+pub fn sample_delivery_download_grant_issue_response() -> DeliveryDownloadGrantIssueResponse {
+    DeliveryDownloadGrantIssueResponse {
+        data: sample_delivery_download_grant(),
+        download_token: "dlt_once_returned_plaintext_token_20260506".to_string(),
+    }
+}
+
+pub fn sample_delivery_download_grant_response() -> DeliveryDownloadGrantResponse {
+    DeliveryDownloadGrantResponse {
+        data: sample_delivery_download_grant(),
+    }
+}
+
+pub fn sample_delivery_download_grant_revoke_request() -> DeliveryDownloadGrantRevokeRequest {
+    DeliveryDownloadGrantRevokeRequest {
+        expected_version: 1,
+        revoke_reason: Some("operator revoked unused download token".to_string()),
+    }
+}
+
+pub fn sample_extend_delivery_entitlement_request() -> ExtendDeliveryEntitlementRequest {
+    ExtendDeliveryEntitlementRequest {
+        expected_version: 1,
+        extend_days: 30,
+        reason: Some("customer renewal applied without new redemption code".to_string()),
+    }
+}
+
+pub fn sample_delivery_lifecycle_response() -> DeliveryLifecycleResponse {
+    let segment = sample_delivery_service_segment();
+    DeliveryLifecycleResponse {
+        entitlement: sample_delivery_projection().entitlement,
+        segments: vec![segment.clone()],
+        events: vec![DeliveryLifecycleEvent {
+            event_id: "dlvevt_dlvent_delivery_10001_1".to_string(),
+            entitlement_id: "dlvent_delivery_10001".to_string(),
+            segment_id: Some(segment.segment_id),
+            event_type: "segment_created".to_string(),
+            status: "active".to_string(),
+            reason: Some("activation_segment".to_string()),
+            created_by: "user_ops_admin".to_string(),
+            created_at: "2026-05-05T10:10:00Z".to_string(),
+            payload: BTreeMap::from([("artifact_id".to_string(), "artifact_10002".to_string())]),
+        }],
+    }
+}
+
+pub fn sample_delivery_service_segments_response() -> DeliveryServiceSegmentsResponse {
+    DeliveryServiceSegmentsResponse {
+        data: vec![sample_delivery_service_segment()],
+    }
+}
+
+pub fn sample_delivery_lifecycle_events_response() -> DeliveryLifecycleEventsResponse {
+    DeliveryLifecycleEventsResponse {
+        data: sample_delivery_lifecycle_response().events,
+    }
+}
+
+pub fn sample_delivery_operations_overview_response() -> DeliveryOperationsOverviewResponse {
+    DeliveryOperationsOverviewResponse {
+        data: DeliveryOperationsOverview {
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            window_start: "2026-05-01T00:00:00Z".to_string(),
+            window_end: "2026-05-31T23:59:59Z".to_string(),
+            totals: DeliveryOperationsTotals {
+                deliveries: 1,
+                artifacts: 1,
+                upload_batches: 1,
+                upload_items: 1,
+                activations: 1,
+                download_grants: 1,
+                entitlements: 1,
+                service_segments: 1,
+                lifecycle_events: 1,
+                exceptions: 1,
+            },
+            status_counts: vec![
+                DeliveryOperationsStatusCount {
+                    domain: "delivery".to_string(),
+                    status: "active".to_string(),
+                    count: 1,
+                },
+                DeliveryOperationsStatusCount {
+                    domain: "download_grant".to_string(),
+                    status: "used".to_string(),
+                    count: 1,
+                },
+            ],
+            recent_events: sample_delivery_operations_timeline_response().data,
+            exceptions: sample_delivery_operations_exceptions_response().data,
+        },
+    }
+}
+
+pub fn sample_delivery_operations_timeline_response() -> DeliveryOperationsTimelineResponse {
+    DeliveryOperationsTimelineResponse {
+        data: vec![
+            DeliveryOperationsTimelineEvent {
+                event_id: "delivery_created:delivery_10001:2026-05-05T10:00:00Z".to_string(),
+                event_type: "delivery_created".to_string(),
+                object_type: "delivery".to_string(),
+                object_id: "delivery_10001".to_string(),
+                tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                project_id: ProjectId::parse("proj_core").unwrap(),
+                delivery_id: Some("delivery_10001".to_string()),
+                entitlement_id: None,
+                activation_id: None,
+                artifact_id: None,
+                grant_id: None,
+                segment_id: None,
+                upload_batch_id: Some("dlvup_10004".to_string()),
+                upload_item_id: None,
+                status: "active".to_string(),
+                occurred_at: "2026-05-05T10:00:00Z".to_string(),
+                summary: "Delivery fact created".to_string(),
+            },
+            DeliveryOperationsTimelineEvent {
+                event_id: "delivery_download_grant_used:dlgrant_10003:2026-05-05T10:11:00Z"
+                    .to_string(),
+                event_type: "delivery_download_grant_used".to_string(),
+                object_type: "delivery_download_grant".to_string(),
+                object_id: "dlgrant_10003".to_string(),
+                tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                project_id: ProjectId::parse("proj_core").unwrap(),
+                delivery_id: Some("delivery_10001".to_string()),
+                entitlement_id: Some("dlvent_delivery_10001".to_string()),
+                activation_id: Some("activation_10002".to_string()),
+                artifact_id: Some("artifact_10002".to_string()),
+                grant_id: Some("dlgrant_10003".to_string()),
+                segment_id: None,
+                upload_batch_id: Some("dlvup_10004".to_string()),
+                upload_item_id: Some("dlvupitem_10004_1".to_string()),
+                status: "used".to_string(),
+                occurred_at: "2026-05-05T10:11:00Z".to_string(),
+                summary: "Download grant consumed".to_string(),
+            },
+        ],
+    }
+}
+
+pub fn sample_delivery_operations_exceptions_response() -> DeliveryOperationsExceptionsResponse {
+    DeliveryOperationsExceptionsResponse {
+        data: vec![DeliveryOperationsException {
+            exception_id:
+                "entitlement_needs_manual_supply:dlvent_delivery_10001:2026-05-05T10:12:00Z"
+                    .to_string(),
+            exception_type: "entitlement_needs_manual_supply".to_string(),
+            severity: "critical".to_string(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            delivery_id: Some("delivery_10001".to_string()),
+            entitlement_id: Some("dlvent_delivery_10001".to_string()),
+            activation_id: None,
+            artifact_id: None,
+            grant_id: None,
+            segment_id: None,
+            upload_batch_id: Some("dlvup_10004".to_string()),
+            upload_item_id: Some("dlvupitem_10004_1".to_string()),
+            status: "needs_manual_supply".to_string(),
+            reason: Some("continuation_artifact_missing".to_string()),
+            occurred_at: "2026-05-05T10:12:00Z".to_string(),
+            summary: "Delivery entitlement requires operator attention".to_string(),
+        }],
+    }
+}
+
+pub fn sample_delivery_operations_detail_response() -> DeliveryOperationsDetailResponse {
+    DeliveryOperationsDetailResponse {
+        data: DeliveryOperationsDetail {
+            delivery: sample_delivery_projection(),
+            artifacts: vec![sample_delivery_artifact()],
+            upload_items: vec![sample_delivery_upload_batch_item()],
+            activations: vec![sample_delivery_activation_response().data],
+            download_grants: vec![sample_delivery_download_grant()],
+            service_segments: vec![sample_delivery_service_segment()],
+            lifecycle_events: sample_delivery_lifecycle_events_response().data,
+            timeline: sample_delivery_operations_timeline_response().data,
+            exceptions: sample_delivery_operations_exceptions_response().data,
+        },
+    }
+}
+
+pub fn sample_create_delivery_upload_batch_request() -> CreateDeliveryUploadBatchRequest {
+    CreateDeliveryUploadBatchRequest {
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: ProjectId::parse("proj_core").unwrap(),
+        provider: "chatgpt".to_string(),
+        source_file_name: "acme-may-upload.jsonl".to_string(),
+        idempotency_key: Some("ops-upload-2026-05-05-acme-001".to_string()),
+        items: vec![DeliveryUploadBatchItemInput {
+            delivery_id: "delivery_10001".to_string(),
+            row_index: Some(1),
+            artifact_kind: Some("browser_account_bundle".to_string()),
+            file_name: Some("acme-may.hcbrowser".to_string()),
+            content_type: Some("application/octet-stream".to_string()),
+            carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+            payload_base64: "ZW5jcnlwdGVkLWhjYnJvd3Nlci1idW5kbGU=".to_string(),
+        }],
+    }
+}
+
+pub fn sample_delivery_upload_batch_response() -> DeliveryUploadBatchResponse {
+    DeliveryUploadBatchResponse {
+        data: DeliveryUploadBatch {
+            batch_id: "dlvup_10004".to_string(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            provider: "chatgpt".to_string(),
+            status: "queued".to_string(),
+            source_file_name: "acme-may-upload.jsonl".to_string(),
+            source_file_sha256:
+                "sha256:1f39e082b7322d0386a855f3de726de051ae2bf80d8e8cf869927722d2a9f03f"
+                    .to_string(),
+            idempotency_key: Some("ops-upload-2026-05-05-acme-001".to_string()),
+            total_count: 1,
+            success_count: 0,
+            failed_count: 0,
+            duplicate_count: 0,
+            created_by: "user_ops_admin".to_string(),
+            created_at: "2026-05-05T10:04:00Z".to_string(),
+            updated_at: "2026-05-05T10:04:00Z".to_string(),
+            started_at: None,
+            finished_at: None,
+            error_summary: None,
+            version: 1,
+        },
+    }
+}
+
+pub fn sample_delivery_upload_batch_items_response() -> DeliveryUploadBatchItemsResponse {
+    DeliveryUploadBatchItemsResponse {
+        data: vec![sample_delivery_upload_batch_item()],
+    }
+}
+
+fn sample_delivery_upload_batch_item() -> DeliveryUploadBatchItem {
+    DeliveryUploadBatchItem {
+        item_id: "dlvupitem_10004_1".to_string(),
+        batch_id: "dlvup_10004".to_string(),
+        row_index: 1,
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: ProjectId::parse("proj_core").unwrap(),
+        delivery_id: "delivery_10001".to_string(),
+        artifact_id: Some("artifact_10002".to_string()),
+        status: "accepted".to_string(),
+        artifact_kind: "browser_account_bundle".to_string(),
+        file_name: Some("acme-may.hcbrowser".to_string()),
+        content_type: "application/octet-stream".to_string(),
+        carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+        payload_sha256: "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9"
+            .to_string(),
+        size_bytes: 27,
+        error_code: None,
+        error_message: None,
+        created_at: "2026-05-05T10:04:00Z".to_string(),
+        updated_at: "2026-05-05T10:05:00Z".to_string(),
+        version: 2,
+    }
+}
+
+fn sample_delivery_download_grant() -> DeliveryDownloadGrant {
+    DeliveryDownloadGrant {
+        grant_id: "dlgrant_10003".to_string(),
+        activation_id: "activation_10002".to_string(),
+        delivery_id: "delivery_10001".to_string(),
+        artifact_id: "artifact_10002".to_string(),
+        entitlement_id: "dlvent_delivery_10001".to_string(),
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: ProjectId::parse("proj_core").unwrap(),
+        provider: "chatgpt".to_string(),
+        status: "active".to_string(),
+        token_prefix: "dlt_once_returned...".to_string(),
+        token_last_four: "0506".to_string(),
+        expires_at: "2026-05-05T10:25:00Z".to_string(),
+        max_uses: 1,
+        use_count: 0,
+        artifact: sample_delivery_artifact(),
+        created_by: "user_ops_admin".to_string(),
+        created_at: "2026-05-05T10:10:00Z".to_string(),
+        updated_at: "2026-05-05T10:10:00Z".to_string(),
+        version: 1,
+        used_at: None,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+    }
+}
+
+fn sample_delivery_service_segment() -> DeliveryServiceSegment {
+    DeliveryServiceSegment {
+        segment_id: "dlvseg_dlvent_delivery_10001_1".to_string(),
+        entitlement_id: "dlvent_delivery_10001".to_string(),
+        activation_id: "activation_10002".to_string(),
+        delivery_id: "delivery_10001".to_string(),
+        artifact_id: "artifact_10002".to_string(),
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: ProjectId::parse("proj_core").unwrap(),
+        provider: "chatgpt".to_string(),
+        status: "active".to_string(),
+        segment_index: 1,
+        effective_from: "2026-05-05T10:10:00Z".to_string(),
+        effective_until: "2026-05-20T10:00:00Z".to_string(),
+        carrier_valid_until: "2026-05-20T10:00:00Z".to_string(),
+        created_by: "user_ops_admin".to_string(),
+        created_at: "2026-05-05T10:10:00Z".to_string(),
+        updated_at: "2026-05-05T10:10:00Z".to_string(),
+        version: 1,
+    }
+}
+
+fn sample_delivery_projection() -> DeliveryProjection {
+    DeliveryProjection {
+        delivery: Delivery {
+            delivery_id: "delivery_10001".to_string(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            provider: "chatgpt".to_string(),
+            status: "prepared".to_string(),
+            operator_id: "user_ops_admin".to_string(),
+            customer_label: Some("Acme May browser handoff".to_string()),
+            source: "manual_operator".to_string(),
+            created_at: "2026-05-05T10:00:00Z".to_string(),
+            updated_at: "2026-05-05T10:00:00Z".to_string(),
+            version: 1,
+            revoked_at: None,
+            revoked_by: None,
+            revoke_reason: None,
+        },
+        codes: vec![
+            DeliveryCode {
+                code_id: "dlvcode_delivery_10001_redemption".to_string(),
+                delivery_id: "delivery_10001".to_string(),
+                code_type: "redemption_code".to_string(),
+                code_prefix: "ku0-red-v1-260505...".to_string(),
+                code_last_four: "8-7b".to_string(),
+                format_version: "ku0-red-v1".to_string(),
+                status: "active".to_string(),
+                expires_at: "2026-06-04T10:00:00Z".to_string(),
+                used_at: None,
+                revoked_at: None,
+                created_at: "2026-05-05T10:00:00Z".to_string(),
+                updated_at: "2026-05-05T10:00:00Z".to_string(),
+                version: 1,
+            },
+            DeliveryCode {
+                code_id: "dlvcode_delivery_10001_browser_unlock".to_string(),
+                delivery_id: "delivery_10001".to_string(),
+                code_type: "browser_file_unlock_code".to_string(),
+                code_prefix: "ku0-brw-v1-260505...".to_string(),
+                code_last_four: "6-76".to_string(),
+                format_version: "ku0-brw-v1".to_string(),
+                status: "active".to_string(),
+                expires_at: "2026-06-04T10:00:00Z".to_string(),
+                used_at: None,
+                revoked_at: None,
+                created_at: "2026-05-05T10:00:00Z".to_string(),
+                updated_at: "2026-05-05T10:00:00Z".to_string(),
+                version: 1,
+            },
+        ],
+        entitlement: DeliveryEntitlement {
+            entitlement_id: "dlvent_delivery_10001".to_string(),
+            delivery_id: "delivery_10001".to_string(),
+            service_kind: "manual_browser_account".to_string(),
+            service_days: 30,
+            starts_at: "2026-05-05T10:00:00Z".to_string(),
+            ends_at: "2026-06-04T10:00:00Z".to_string(),
+            service_starts_at: "2026-05-05T10:00:00Z".to_string(),
+            service_ends_at: "2026-06-04T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            created_at: "2026-05-05T10:00:00Z".to_string(),
+            updated_at: "2026-05-05T10:00:00Z".to_string(),
+            version: 1,
+        },
+    }
+}
+
+fn sample_delivery_artifact() -> DeliveryArtifact {
+    DeliveryArtifact {
+        artifact_id: "artifact_10002".to_string(),
+        delivery_id: "delivery_10001".to_string(),
+        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+        project_id: ProjectId::parse("proj_core").unwrap(),
+        artifact_kind: "browser_account_bundle".to_string(),
+        provider: "chatgpt".to_string(),
+        status: "active".to_string(),
+        version: 1,
+        file_name: Some("acme-may.hcbrowser".to_string()),
+        content_type: "application/octet-stream".to_string(),
+        size_bytes: 27,
+        sha256: "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9"
+            .to_string(),
+        storage_backend: "db_inline".to_string(),
+        storage_ref: "artifact_10002".to_string(),
+        carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+        created_by: "user_ops_admin".to_string(),
+        created_at: "2026-05-05T10:05:00Z".to_string(),
+        updated_at: "2026-05-05T10:05:00Z".to_string(),
+        superseded_at: None,
+        superseded_by: None,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+    }
+}
+
 pub fn sample_normalized_error(message: &str) -> core_domain::NormalizedError {
     core_domain::NormalizedError {
         code: "validation_failed".to_string(),

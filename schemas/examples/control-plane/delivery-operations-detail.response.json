@@ -1,0 +1,269 @@
+{
+  "data": {
+    "delivery": {
+      "delivery": {
+        "delivery_id": "delivery_10001",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "provider": "chatgpt",
+        "status": "prepared",
+        "operator_id": "user_ops_admin",
+        "customer_label": "Acme May browser handoff",
+        "source": "manual_operator",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z",
+        "version": 1
+      },
+      "codes": [
+        {
+          "code_id": "dlvcode_delivery_10001_redemption",
+          "delivery_id": "delivery_10001",
+          "code_type": "redemption_code",
+          "code_prefix": "ku0-red-v1-260505...",
+          "code_last_four": "8-7b",
+          "format_version": "ku0-red-v1",
+          "status": "active",
+          "expires_at": "2026-06-04T10:00:00Z",
+          "created_at": "2026-05-05T10:00:00Z",
+          "updated_at": "2026-05-05T10:00:00Z",
+          "version": 1
+        },
+        {
+          "code_id": "dlvcode_delivery_10001_browser_unlock",
+          "delivery_id": "delivery_10001",
+          "code_type": "browser_file_unlock_code",
+          "code_prefix": "ku0-brw-v1-260505...",
+          "code_last_four": "6-76",
+          "format_version": "ku0-brw-v1",
+          "status": "active",
+          "expires_at": "2026-06-04T10:00:00Z",
+          "created_at": "2026-05-05T10:00:00Z",
+          "updated_at": "2026-05-05T10:00:00Z",
+          "version": 1
+        }
+      ],
+      "entitlement": {
+        "entitlement_id": "dlvent_delivery_10001",
+        "delivery_id": "delivery_10001",
+        "service_kind": "manual_browser_account",
+        "service_days": 30,
+        "starts_at": "2026-05-05T10:00:00Z",
+        "ends_at": "2026-06-04T10:00:00Z",
+        "service_starts_at": "2026-05-05T10:00:00Z",
+        "service_ends_at": "2026-06-04T10:00:00Z",
+        "status": "active",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z",
+        "version": 1
+      }
+    },
+    "artifacts": [
+      {
+        "artifact_id": "artifact_10002",
+        "delivery_id": "delivery_10001",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "artifact_kind": "browser_account_bundle",
+        "provider": "chatgpt",
+        "status": "active",
+        "version": 1,
+        "file_name": "acme-may.hcbrowser",
+        "content_type": "application/octet-stream",
+        "size_bytes": 27,
+        "sha256": "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9",
+        "storage_backend": "db_inline",
+        "storage_ref": "artifact_10002",
+        "carrier_valid_until": "2026-05-20T10:00:00Z",
+        "created_by": "user_ops_admin",
+        "created_at": "2026-05-05T10:05:00Z",
+        "updated_at": "2026-05-05T10:05:00Z"
+      }
+    ],
+    "upload_items": [
+      {
+        "item_id": "dlvupitem_10004_1",
+        "batch_id": "dlvup_10004",
+        "row_index": 1,
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "artifact_id": "artifact_10002",
+        "status": "accepted",
+        "artifact_kind": "browser_account_bundle",
+        "file_name": "acme-may.hcbrowser",
+        "content_type": "application/octet-stream",
+        "carrier_valid_until": "2026-05-20T10:00:00Z",
+        "payload_sha256": "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9",
+        "size_bytes": 27,
+        "created_at": "2026-05-05T10:04:00Z",
+        "updated_at": "2026-05-05T10:05:00Z",
+        "version": 2
+      }
+    ],
+    "activations": [
+      {
+        "activation_id": "activation_10002",
+        "delivery_id": "delivery_10001",
+        "artifact_id": "artifact_10002",
+        "entitlement_id": "dlvent_delivery_10001",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "provider": "chatgpt",
+        "status": "activated",
+        "activation_source": "redemption_code",
+        "activated_at": "2026-05-05T10:10:00Z",
+        "entitlement_ends_at": "2026-06-04T10:00:00Z",
+        "artifact": {
+          "artifact_id": "artifact_10002",
+          "delivery_id": "delivery_10001",
+          "tenant_id": "tenant_acme",
+          "project_id": "proj_core",
+          "artifact_kind": "browser_account_bundle",
+          "provider": "chatgpt",
+          "status": "active",
+          "version": 1,
+          "file_name": "acme-may.hcbrowser",
+          "content_type": "application/octet-stream",
+          "size_bytes": 27,
+          "sha256": "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9",
+          "storage_backend": "db_inline",
+          "storage_ref": "artifact_10002",
+          "carrier_valid_until": "2026-05-20T10:00:00Z",
+          "created_by": "user_ops_admin",
+          "created_at": "2026-05-05T10:05:00Z",
+          "updated_at": "2026-05-05T10:05:00Z"
+        },
+        "created_at": "2026-05-05T10:10:00Z",
+        "updated_at": "2026-05-05T10:10:00Z"
+      }
+    ],
+    "download_grants": [
+      {
+        "grant_id": "dlgrant_10003",
+        "activation_id": "activation_10002",
+        "delivery_id": "delivery_10001",
+        "artifact_id": "artifact_10002",
+        "entitlement_id": "dlvent_delivery_10001",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "provider": "chatgpt",
+        "status": "active",
+        "token_prefix": "dlt_once_returned...",
+        "token_last_four": "0506",
+        "expires_at": "2026-05-05T10:25:00Z",
+        "max_uses": 1,
+        "use_count": 0,
+        "artifact": {
+          "artifact_id": "artifact_10002",
+          "delivery_id": "delivery_10001",
+          "tenant_id": "tenant_acme",
+          "project_id": "proj_core",
+          "artifact_kind": "browser_account_bundle",
+          "provider": "chatgpt",
+          "status": "active",
+          "version": 1,
+          "file_name": "acme-may.hcbrowser",
+          "content_type": "application/octet-stream",
+          "size_bytes": 27,
+          "sha256": "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9",
+          "storage_backend": "db_inline",
+          "storage_ref": "artifact_10002",
+          "carrier_valid_until": "2026-05-20T10:00:00Z",
+          "created_by": "user_ops_admin",
+          "created_at": "2026-05-05T10:05:00Z",
+          "updated_at": "2026-05-05T10:05:00Z"
+        },
+        "created_by": "user_ops_admin",
+        "created_at": "2026-05-05T10:10:00Z",
+        "updated_at": "2026-05-05T10:10:00Z",
+        "version": 1
+      }
+    ],
+    "service_segments": [
+      {
+        "segment_id": "dlvseg_dlvent_delivery_10001_1",
+        "entitlement_id": "dlvent_delivery_10001",
+        "activation_id": "activation_10002",
+        "delivery_id": "delivery_10001",
+        "artifact_id": "artifact_10002",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "provider": "chatgpt",
+        "status": "active",
+        "segment_index": 1,
+        "effective_from": "2026-05-05T10:10:00Z",
+        "effective_until": "2026-05-20T10:00:00Z",
+        "carrier_valid_until": "2026-05-20T10:00:00Z",
+        "created_by": "user_ops_admin",
+        "created_at": "2026-05-05T10:10:00Z",
+        "updated_at": "2026-05-05T10:10:00Z",
+        "version": 1
+      }
+    ],
+    "lifecycle_events": [
+      {
+        "event_id": "dlvevt_dlvent_delivery_10001_1",
+        "entitlement_id": "dlvent_delivery_10001",
+        "segment_id": "dlvseg_dlvent_delivery_10001_1",
+        "event_type": "segment_created",
+        "status": "active",
+        "reason": "activation_segment",
+        "created_by": "user_ops_admin",
+        "created_at": "2026-05-05T10:10:00Z",
+        "payload": {
+          "artifact_id": "artifact_10002"
+        }
+      }
+    ],
+    "timeline": [
+      {
+        "event_id": "delivery_created:delivery_10001:2026-05-05T10:00:00Z",
+        "event_type": "delivery_created",
+        "object_type": "delivery",
+        "object_id": "delivery_10001",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "upload_batch_id": "dlvup_10004",
+        "status": "active",
+        "occurred_at": "2026-05-05T10:00:00Z",
+        "summary": "Delivery fact created"
+      },
+      {
+        "event_id": "delivery_download_grant_used:dlgrant_10003:2026-05-05T10:11:00Z",
+        "event_type": "delivery_download_grant_used",
+        "object_type": "delivery_download_grant",
+        "object_id": "dlgrant_10003",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "entitlement_id": "dlvent_delivery_10001",
+        "activation_id": "activation_10002",
+        "artifact_id": "artifact_10002",
+        "grant_id": "dlgrant_10003",
+        "upload_batch_id": "dlvup_10004",
+        "upload_item_id": "dlvupitem_10004_1",
+        "status": "used",
+        "occurred_at": "2026-05-05T10:11:00Z",
+        "summary": "Download grant consumed"
+      }
+    ],
+    "exceptions": [
+      {
+        "exception_id": "entitlement_needs_manual_supply:dlvent_delivery_10001:2026-05-05T10:12:00Z",
+        "exception_type": "entitlement_needs_manual_supply",
+        "severity": "critical",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "entitlement_id": "dlvent_delivery_10001",
+        "upload_batch_id": "dlvup_10004",
+        "upload_item_id": "dlvupitem_10004_1",
+        "status": "needs_manual_supply",
+        "reason": "continuation_artifact_missing",
+        "occurred_at": "2026-05-05T10:12:00Z",
+        "summary": "Delivery entitlement requires operator attention"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "tenant_id": "tenant_acme",
+  "project_id": "proj_core",
+  "provider": "chatgpt",
+  "source_file_name": "acme-may-upload.jsonl",
+  "idempotency_key": "ops-upload-2026-05-05-acme-001",
+  "items": [
+    {
+      "delivery_id": "delivery_10001",
+      "row_index": 1,
+      "artifact_kind": "browser_account_bundle",
+      "file_name": "acme-may.hcbrowser",
+      "content_type": "application/octet-stream",
+      "carrier_valid_until": "2026-05-20T10:00:00Z",
+      "payload_base64": "ZW5jcnlwdGVkLWhjYnJvd3Nlci1idW5kbGU="
+    }
+  ]
+}

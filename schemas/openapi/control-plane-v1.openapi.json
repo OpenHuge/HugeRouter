@@ -438,6 +438,1652 @@
         }
       }
     },
+    "/v1/deliveries/prepare": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "prepare_delivery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Prepare a backend delivery and return delivery code plaintext once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryPrepareResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deliveries/{delivery_id}": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery",
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "description": "Delivery id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get a delivery projection without code plaintext",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deliveries/{delivery_id}/artifacts": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "list_delivery_artifacts",
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "description": "Delivery id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List delivery artifact metadata without payload bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryArtifactsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "create_delivery_artifact",
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "description": "Delivery id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliveryArtifactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Store an encrypted delivery artifact and return metadata only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryArtifactResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deliveries/{delivery_id}/artifacts/{artifact_id}": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_artifact",
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "description": "Delivery id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "description": "Delivery artifact id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get delivery artifact metadata without payload bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryArtifactResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deliveries/{delivery_id}/revoke": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "revoke_delivery",
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "description": "Delivery id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Revoke a delivery and all first-stage delivery facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-activations/redeem": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "redeem_delivery_activation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Redeem a delivery code into an activation fact without download authorization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryActivationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-activations/{activation_id}": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_activation",
+        "parameters": [
+          {
+            "name": "activation_id",
+            "in": "path",
+            "description": "Delivery activation id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get a delivery activation projection without code plaintext or download token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryActivationResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-download-grants": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "issue_delivery_download_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliveryDownloadGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Issue a one-time 15-minute delivery download grant and return token plaintext once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryDownloadGrantIssueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-download-grants/{grant_id}": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_download_grant",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "description": "Delivery download grant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get delivery download grant metadata without token plaintext or token hash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryDownloadGrantResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-download-grants/{grant_id}/revoke": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "revoke_delivery_download_grant",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "description": "Delivery download grant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryDownloadGrantRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Revoke an unused delivery download grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryDownloadGrantResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-downloads/artifact": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "retrieve_delivery_download_artifact",
+        "responses": {
+          "200": {
+            "description": "Retrieve encrypted .hcbrowser artifact bytes with Authorization Bearer download token"
+          },
+          "401": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-entitlements/{entitlement_id}/extend": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "extend_delivery_entitlement",
+        "parameters": [
+          {
+            "name": "entitlement_id",
+            "in": "path",
+            "description": "Delivery entitlement id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendDeliveryEntitlementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Extend the same delivery entitlement without issuing a new redemption code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryLifecycleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-entitlements/{entitlement_id}/lifecycle-events": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "list_delivery_lifecycle_events",
+        "parameters": [
+          {
+            "name": "entitlement_id",
+            "in": "path",
+            "description": "Delivery entitlement id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List lifecycle audit events for a delivery entitlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryLifecycleEventsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-entitlements/{entitlement_id}/reconcile": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "reconcile_delivery_lifecycle",
+        "parameters": [
+          {
+            "name": "entitlement_id",
+            "in": "path",
+            "description": "Delivery entitlement id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recalculate entitlement and service segment lifecycle state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryLifecycleResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-entitlements/{entitlement_id}/segments": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "list_delivery_service_segments",
+        "parameters": [
+          {
+            "name": "entitlement_id",
+            "in": "path",
+            "description": "Delivery entitlement id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List service segments for a delivery entitlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryServiceSegmentsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-operations/detail": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_operations_detail",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Required tenant id scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project id scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delivery_id",
+            "in": "query",
+            "description": "Delivery id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entitlement_id",
+            "in": "query",
+            "description": "Entitlement id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "activation_id",
+            "in": "query",
+            "description": "Activation id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "query",
+            "description": "Artifact id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "query",
+            "description": "Download grant id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "segment_id",
+            "in": "query",
+            "description": "Service segment id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_start",
+            "in": "query",
+            "description": "Inclusive RFC3339 start timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_end",
+            "in": "query",
+            "description": "Inclusive RFC3339 end timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of timeline events",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted delivery operations object detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryOperationsDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-operations/exceptions": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "list_delivery_operations_exceptions",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Required tenant id scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project id scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Optional exception status filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "exception_type",
+            "in": "query",
+            "description": "Optional exception type filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_start",
+            "in": "query",
+            "description": "Inclusive RFC3339 start timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_end",
+            "in": "query",
+            "description": "Inclusive RFC3339 end timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of exceptions",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted delivery operations exception queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryOperationsExceptionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-operations/overview": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_operations_overview",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Required tenant id scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project id scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_start",
+            "in": "query",
+            "description": "Inclusive RFC3339 start timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_end",
+            "in": "query",
+            "description": "Inclusive RFC3339 end timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of recent events and exceptions",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery operations overview with redacted counts, recent events, and exceptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryOperationsOverviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-operations/timeline": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_operations_timeline",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Required tenant id scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project id scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delivery_id",
+            "in": "query",
+            "description": "Delivery id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entitlement_id",
+            "in": "query",
+            "description": "Entitlement id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "activation_id",
+            "in": "query",
+            "description": "Activation id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "query",
+            "description": "Artifact id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "query",
+            "description": "Download grant id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "segment_id",
+            "in": "query",
+            "description": "Service segment id target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_start",
+            "in": "query",
+            "description": "Inclusive RFC3339 start timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window_end",
+            "in": "query",
+            "description": "Inclusive RFC3339 end timestamp",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of timeline events",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted delivery operations timeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryOperationsTimelineResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-uploads": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "create_delivery_upload_batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliveryUploadBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queue an asynchronous delivery artifact upload batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryUploadBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-uploads/{batch_id}": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "get_delivery_upload_batch",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "description": "Delivery upload batch id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an asynchronous delivery upload batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryUploadBatchResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery-uploads/{batch_id}/items": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "list_delivery_upload_batch_items",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "description": "Delivery upload batch id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List redacted asynchronous upload batch items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryUploadBatchItemsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/opening-grants": {
       "get": {
         "tags": [
@@ -1438,6 +3084,137 @@
           "superseded"
         ]
       },
+      "CreateDeliveryArtifactRequest": {
+        "type": "object",
+        "required": [
+          "payload_base64"
+        ],
+        "properties": {
+          "artifact_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "carrier_valid_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload_base64": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateDeliveryDownloadGrantRequest": {
+        "type": "object",
+        "required": [
+          "activation_id"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateDeliveryRequest": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "project_id",
+          "provider",
+          "service_days"
+        ],
+        "properties": {
+          "code_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "customer_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "service_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "service_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          }
+        }
+      },
+      "CreateDeliveryUploadBatchRequest": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "project_id",
+          "provider",
+          "source_file_name",
+          "items"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryUploadBatchItemInput"
+            }
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "source_file_name": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          }
+        }
+      },
       "CreateOpeningGrantRequest": {
         "type": "object",
         "required": [
@@ -1516,6 +3293,1575 @@
           "partner"
         ]
       },
+      "Delivery": {
+        "type": "object",
+        "required": [
+          "delivery_id",
+          "tenant_id",
+          "project_id",
+          "provider",
+          "status",
+          "operator_id",
+          "source",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "customer_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "operator_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryActivation": {
+        "type": "object",
+        "required": [
+          "activation_id",
+          "delivery_id",
+          "artifact_id",
+          "entitlement_id",
+          "tenant_id",
+          "project_id",
+          "provider",
+          "status",
+          "activation_source",
+          "activated_at",
+          "entitlement_ends_at",
+          "artifact",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "activated_at": {
+            "type": "string"
+          },
+          "activation_id": {
+            "type": "string"
+          },
+          "activation_source": {
+            "type": "string"
+          },
+          "artifact": {
+            "$ref": "#/components/schemas/DeliveryArtifact"
+          },
+          "artifact_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "entitlement_ends_at": {
+            "type": "string"
+          },
+          "entitlement_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryActivationResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryActivation"
+          }
+        }
+      },
+      "DeliveryArtifact": {
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "delivery_id",
+          "tenant_id",
+          "project_id",
+          "artifact_kind",
+          "provider",
+          "status",
+          "version",
+          "content_type",
+          "size_bytes",
+          "sha256",
+          "storage_backend",
+          "storage_ref",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "artifact_kind": {
+            "type": "string"
+          },
+          "carrier_valid_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "storage_backend": {
+            "type": "string"
+          },
+          "storage_ref": {
+            "type": "string"
+          },
+          "superseded_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "superseded_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryArtifactResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryArtifact"
+          }
+        }
+      },
+      "DeliveryArtifactsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryArtifact"
+            }
+          }
+        }
+      },
+      "DeliveryCode": {
+        "type": "object",
+        "required": [
+          "code_id",
+          "delivery_id",
+          "code_type",
+          "code_prefix",
+          "code_last_four",
+          "format_version",
+          "status",
+          "expires_at",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "code_id": {
+            "type": "string"
+          },
+          "code_last_four": {
+            "type": "string"
+          },
+          "code_prefix": {
+            "type": "string"
+          },
+          "code_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "format_version": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryDownloadGrant": {
+        "type": "object",
+        "required": [
+          "grant_id",
+          "activation_id",
+          "delivery_id",
+          "artifact_id",
+          "entitlement_id",
+          "tenant_id",
+          "project_id",
+          "provider",
+          "status",
+          "token_prefix",
+          "token_last_four",
+          "expires_at",
+          "max_uses",
+          "use_count",
+          "artifact",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": "string"
+          },
+          "artifact": {
+            "$ref": "#/components/schemas/DeliveryArtifact"
+          },
+          "artifact_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "entitlement_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          },
+          "max_uses": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "token_last_four": {
+            "type": "string"
+          },
+          "token_prefix": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "use_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryDownloadGrantIssueResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "download_token"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryDownloadGrant"
+          },
+          "download_token": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryDownloadGrantResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryDownloadGrant"
+          }
+        }
+      },
+      "DeliveryDownloadGrantRevokeRequest": {
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeliveryEntitlement": {
+        "type": "object",
+        "required": [
+          "entitlement_id",
+          "delivery_id",
+          "service_kind",
+          "service_days",
+          "starts_at",
+          "ends_at",
+          "service_starts_at",
+          "service_ends_at",
+          "status",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "ends_at": {
+            "type": "string"
+          },
+          "entitlement_id": {
+            "type": "string"
+          },
+          "service_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "service_ends_at": {
+            "type": "string"
+          },
+          "service_kind": {
+            "type": "string"
+          },
+          "service_starts_at": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryLifecycleEvent": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "entitlement_id",
+          "event_type",
+          "status",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "entitlement_id": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "segment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryLifecycleEventsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryLifecycleEvent"
+            }
+          }
+        }
+      },
+      "DeliveryLifecycleResponse": {
+        "type": "object",
+        "required": [
+          "entitlement",
+          "segments",
+          "events"
+        ],
+        "properties": {
+          "entitlement": {
+            "$ref": "#/components/schemas/DeliveryEntitlement"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryLifecycleEvent"
+            }
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryServiceSegment"
+            }
+          }
+        }
+      },
+      "DeliveryOneTimeCodes": {
+        "type": "object",
+        "required": [
+          "redemption_code",
+          "browser_file_unlock_code"
+        ],
+        "properties": {
+          "browser_file_unlock_code": {
+            "type": "string"
+          },
+          "redemption_code": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryOperationsDetail": {
+        "type": "object",
+        "required": [
+          "delivery",
+          "artifacts",
+          "activations",
+          "download_grants",
+          "service_segments",
+          "lifecycle_events",
+          "timeline",
+          "exceptions"
+        ],
+        "properties": {
+          "activations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryActivation"
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryArtifact"
+            }
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryProjection"
+          },
+          "download_grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryDownloadGrant"
+            }
+          },
+          "exceptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsException"
+            }
+          },
+          "lifecycle_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryLifecycleEvent"
+            }
+          },
+          "service_segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryServiceSegment"
+            }
+          },
+          "timeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsTimelineEvent"
+            }
+          },
+          "upload_items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryUploadBatchItem"
+            }
+          }
+        }
+      },
+      "DeliveryOperationsDetailResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryOperationsDetail"
+          }
+        }
+      },
+      "DeliveryOperationsException": {
+        "type": "object",
+        "required": [
+          "exception_id",
+          "exception_type",
+          "severity",
+          "tenant_id",
+          "project_id",
+          "status",
+          "occurred_at",
+          "summary"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entitlement_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exception_id": {
+            "type": "string"
+          },
+          "exception_type": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "segment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "upload_batch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upload_item_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeliveryOperationsExceptionsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsException"
+            }
+          }
+        }
+      },
+      "DeliveryOperationsOverview": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "window_start",
+          "window_end",
+          "totals",
+          "status_counts",
+          "recent_events",
+          "exceptions"
+        ],
+        "properties": {
+          "exceptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsException"
+            }
+          },
+          "project_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectId"
+              }
+            ]
+          },
+          "recent_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsTimelineEvent"
+            }
+          },
+          "status_counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsStatusCount"
+            }
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/DeliveryOperationsTotals"
+          },
+          "window_end": {
+            "type": "string"
+          },
+          "window_start": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryOperationsOverviewResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryOperationsOverview"
+          }
+        }
+      },
+      "DeliveryOperationsStatusCount": {
+        "type": "object",
+        "required": [
+          "domain",
+          "status",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "domain": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryOperationsTimelineEvent": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "event_type",
+          "object_type",
+          "object_id",
+          "tenant_id",
+          "project_id",
+          "status",
+          "occurred_at",
+          "summary"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entitlement_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "object_type": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "segment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "upload_batch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upload_item_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeliveryOperationsTimelineResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryOperationsTimelineEvent"
+            }
+          }
+        }
+      },
+      "DeliveryOperationsTotals": {
+        "type": "object",
+        "required": [
+          "deliveries",
+          "artifacts",
+          "upload_batches",
+          "upload_items",
+          "activations",
+          "download_grants",
+          "entitlements",
+          "service_segments",
+          "lifecycle_events",
+          "exceptions"
+        ],
+        "properties": {
+          "activations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "artifacts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "deliveries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "download_grants": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entitlements": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "exceptions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "lifecycle_events": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "service_segments": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "upload_batches": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "upload_items": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryPrepareResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "one_time_codes"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryProjection"
+          },
+          "one_time_codes": {
+            "$ref": "#/components/schemas/DeliveryOneTimeCodes"
+          }
+        }
+      },
+      "DeliveryProjection": {
+        "type": "object",
+        "required": [
+          "delivery",
+          "codes",
+          "entitlement"
+        ],
+        "properties": {
+          "codes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryCode"
+            }
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/Delivery"
+          },
+          "entitlement": {
+            "$ref": "#/components/schemas/DeliveryEntitlement"
+          }
+        }
+      },
+      "DeliveryResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryProjection"
+          }
+        }
+      },
+      "DeliveryRevokeRequest": {
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeliveryServiceSegment": {
+        "type": "object",
+        "required": [
+          "segment_id",
+          "entitlement_id",
+          "activation_id",
+          "delivery_id",
+          "artifact_id",
+          "tenant_id",
+          "project_id",
+          "provider",
+          "status",
+          "segment_index",
+          "effective_from",
+          "effective_until",
+          "carrier_valid_until",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": "string"
+          },
+          "artifact_id": {
+            "type": "string"
+          },
+          "carrier_valid_until": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "effective_from": {
+            "type": "string"
+          },
+          "effective_until": {
+            "type": "string"
+          },
+          "entitlement_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "segment_id": {
+            "type": "string"
+          },
+          "segment_index": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryServiceSegmentsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryServiceSegment"
+            }
+          }
+        }
+      },
+      "DeliveryUploadBatch": {
+        "type": "object",
+        "required": [
+          "batch_id",
+          "tenant_id",
+          "project_id",
+          "provider",
+          "status",
+          "source_file_name",
+          "source_file_sha256",
+          "total_count",
+          "success_count",
+          "failed_count",
+          "duplicate_count",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "duplicate_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "error_summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failed_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "source_file_name": {
+            "type": "string"
+          },
+          "source_file_sha256": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "success_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "total_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryUploadBatchItem": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "batch_id",
+          "row_index",
+          "tenant_id",
+          "project_id",
+          "delivery_id",
+          "status",
+          "artifact_kind",
+          "content_type",
+          "payload_sha256",
+          "size_bytes",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artifact_kind": {
+            "type": "string"
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "carrier_valid_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "payload_sha256": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "row_index": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryUploadBatchItemInput": {
+        "type": "object",
+        "required": [
+          "delivery_id",
+          "payload_base64"
+        ],
+        "properties": {
+          "artifact_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "carrier_valid_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload_base64": {
+            "type": "string"
+          },
+          "row_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliveryUploadBatchItemsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryUploadBatchItem"
+            }
+          }
+        }
+      },
+      "DeliveryUploadBatchResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryUploadBatch"
+          }
+        }
+      },
       "DeploymentScope": {
         "type": "string",
         "enum": [
@@ -1566,6 +4912,31 @@
           },
           "reason_code": {
             "type": "string"
+          }
+        }
+      },
+      "ExtendDeliveryEntitlementRequest": {
+        "type": "object",
+        "required": [
+          "expected_version",
+          "extend_days"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "extend_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -2256,6 +5627,17 @@
             "items": {
               "$ref": "#/components/schemas/ProviderResource"
             }
+          }
+        }
+      },
+      "RedeemDeliveryRequest": {
+        "type": "object",
+        "required": [
+          "redemption_code"
+        ],
+        "properties": {
+          "redemption_code": {
+            "type": "string"
           }
         }
       },
@@ -3416,6 +6798,10 @@
     {
       "name": "openings",
       "description": "Customer and agent opening grants"
+    },
+    {
+      "name": "deliveries",
+      "description": "Prepared delivery fact sources and one-time codes"
     },
     {
       "name": "snapshots",
