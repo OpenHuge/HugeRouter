@@ -6274,7 +6274,7 @@ impl PostgresStore {
         update_postgres_upload_batch(&mut tx, &batch).await?;
 
         let item_rows = sqlx::query(
-            "SELECT payload
+            "SELECT payload, ciphertext
                FROM delivery_upload_batch_items
               WHERE batch_id = $1
               ORDER BY row_index
@@ -6286,8 +6286,11 @@ impl PostgresStore {
         let mut items = item_rows
             .into_iter()
             .map(|row| {
-                row.get::<Json<DeliveryUploadBatchItemRecord>, _>("payload")
-                    .0
+                hydrate_upload_batch_item_ciphertext(
+                    row.get::<Json<DeliveryUploadBatchItemRecord>, _>("payload")
+                        .0,
+                    row.get::<Vec<u8>, _>("ciphertext"),
+                )
             })
             .collect::<Vec<_>>();
         for item in &mut items {
@@ -15591,6 +15594,37 @@ mod tests {
     }
 
     #[test]
+    fn upload_batch_item_hydration_restores_postgres_ciphertext_column() {
+        let item = super::DeliveryUploadBatchItemRecord {
+            item_id: "dlvupitem_test_1".to_string(),
+            batch_id: "dlvup_test".to_string(),
+            row_index: 1,
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            delivery_id: "delivery_test".to_string(),
+            artifact_id: None,
+            status: super::DELIVERY_UPLOAD_ITEM_STATUS_PENDING.to_string(),
+            artifact_kind: "browser_account_bundle".to_string(),
+            file_name: Some("hugecode-browser-data.hcbrowser".to_string()),
+            content_type: "application/octet-stream".to_string(),
+            carrier_valid_until: None,
+            payload_sha256: "sha256:payload".to_string(),
+            size_bytes: 20,
+            error_code: None,
+            error_message: None,
+            created_at: "2026-05-06T00:00:00Z".to_string(),
+            updated_at: "2026-05-06T00:00:00Z".to_string(),
+            version: 1,
+            ciphertext: Vec::new(),
+        };
+
+        let hydrated =
+            super::hydrate_upload_batch_item_ciphertext(item, b"encrypted-hcbrowser".to_vec());
+
+        assert_eq!(hydrated.ciphertext, b"encrypted-hcbrowser");
+    }
+
+    #[test]
     fn cleanup_runtime_leases_records_expiration_audit() {
         let mut store = super::MemoryStore {
             oauth_pool_runtime_leases: vec![super::OAuthPoolRuntimeLeaseRecord {
@@ -16065,6 +16099,14 @@ fn timestamp_plus_days(value: &str, days: u32) -> Option<String> {
 
 const fn default_record_version() -> u64 {
     1
+}
+
+fn hydrate_upload_batch_item_ciphertext(
+    mut item: DeliveryUploadBatchItemRecord,
+    ciphertext: Vec<u8>,
+) -> DeliveryUploadBatchItemRecord {
+    item.ciphertext = ciphertext;
+    item
 }
 
 async fn postgres_delivery_upload_item_outcome(

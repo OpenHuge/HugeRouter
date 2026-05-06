@@ -102,6 +102,8 @@ const DELIVERY_OPERATIONS_DEFAULT_LIMIT: u32 = 50;
 const DELIVERY_OPERATIONS_MAX_LIMIT: u32 = 200;
 const DELIVERY_OPERATIONS_DEFAULT_WINDOW_DAYS: i64 = 30;
 const DELIVERY_UPLOAD_MAX_ITEMS: usize = 500;
+const CUSTOMER_DELIVERY_REDEEM_ACTOR: &str = "customer_delivery_redeem";
+const CUSTOMER_DELIVERY_DOWNLOAD_GRANT_ACTOR: &str = "customer_delivery_download_grant";
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
@@ -931,6 +933,7 @@ fn app_with_state(state: ControlPlaneState) -> Router {
                 .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
                 .allow_headers([
                     axum::http::header::ACCEPT,
+                    axum::http::header::AUTHORIZATION,
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::COOKIE,
                 ]),
@@ -2511,7 +2514,6 @@ async fn redeem_delivery_activation(
     Json(request): Json<RedeemDeliveryRequest>,
 ) -> Result<Json<DeliveryActivationResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
     let redemption_code = request.redemption_code.trim();
     if !delivery_code_format_is_valid(redemption_code, "red") {
         return Err(ApiError::bad_request(
@@ -2539,13 +2541,20 @@ async fn redeem_delivery_activation(
                 &context,
             )
         })?;
-    authz.ensure_read_tenant(delivery.data.delivery.tenant_id.as_str(), &context)?;
+    let actor_id = optional_session_actor_for_tenant(
+        &state,
+        &headers,
+        delivery.data.delivery.tenant_id.as_str(),
+        &context,
+    )
+    .await?
+    .unwrap_or_else(|| CUSTOMER_DELIVERY_REDEEM_ACTOR.to_string());
     let result = state
         .store
         .redeem_delivery_activation(
             &code_hash,
             format!("activation_{}", context.sequence),
-            &authz.actor_id(),
+            &actor_id,
         )
         .await
         .map_err(|error| {
@@ -2593,7 +2602,6 @@ async fn issue_delivery_download_grant(
     Json(request): Json<CreateDeliveryDownloadGrantRequest>,
 ) -> Result<Json<DeliveryDownloadGrantIssueResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
     let activation_id = request.activation_id.trim();
     if activation_id.is_empty() {
         return Err(ApiError::bad_request(
@@ -2620,7 +2628,9 @@ async fn issue_delivery_download_grant(
                 &context,
             )
         })?;
-    authz.ensure_read_tenant(activation.data.tenant_id.as_str(), &context)?;
+    let created_by =
+        authorize_delivery_download_grant_actor(&state, &headers, &request, &activation, &context)
+            .await?;
     let token = generate_delivery_download_token(&context)?;
     let result = state
         .store
@@ -2628,7 +2638,7 @@ async fn issue_delivery_download_grant(
             grant_id: format!("dlgrant_{}", context.sequence),
             activation_id: activation_id.to_string(),
             token_plaintext: token,
-            created_by: authz.actor_id(),
+            created_by,
         })
         .await
         .map_err(|error| {
@@ -2639,6 +2649,92 @@ async fn issue_delivery_download_grant(
             )
         })?;
     download_grant_issue_result_to_response(result, &context).map(Json)
+}
+
+async fn optional_session_actor_for_tenant(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    tenant_id: &str,
+    context: &RequestContext,
+) -> Result<Option<String>, ApiError> {
+    let Some(session) = resolve_session(state, headers).await? else {
+        return Ok(None);
+    };
+    let authz = ControlPlaneAuthorizer::new(session);
+    if authz.ensure_read_tenant(tenant_id, context).is_ok() {
+        Ok(Some(authz.actor_id()))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn authorize_delivery_download_grant_actor(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    request: &CreateDeliveryDownloadGrantRequest,
+    activation: &DeliveryActivationResponse,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    if let Some(redemption_code) = request
+        .redemption_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+    {
+        ensure_redemption_code_matches_activation(state, redemption_code, activation, context)
+            .await?;
+        return Ok(CUSTOMER_DELIVERY_DOWNLOAD_GRANT_ACTOR.to_string());
+    }
+
+    let authz = authorize_v1_request(state, headers, context).await?;
+    authz.ensure_read_tenant(activation.data.tenant_id.as_str(), context)?;
+    Ok(authz.actor_id())
+}
+
+async fn ensure_redemption_code_matches_activation(
+    state: &ControlPlaneState,
+    redemption_code: &str,
+    activation: &DeliveryActivationResponse,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    if !delivery_code_format_is_valid(redemption_code, "red") {
+        return Err(ApiError::bad_request(
+            "redemption_code_invalid",
+            "redemption_code must use ku0-red-v1 format".to_string(),
+            context,
+        ));
+    }
+    let code_hash = hex_sha256(redemption_code.as_bytes());
+    let delivery = state
+        .store
+        .get_delivery_by_redemption_code_hash(&code_hash)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to resolve redemption code proof: {error}"),
+                context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "redemption_code_invalid",
+                "redemption_code was not found".to_string(),
+                context,
+            )
+        })?;
+
+    if delivery.data.delivery.delivery_id != activation.data.delivery_id
+        || delivery.data.delivery.tenant_id.as_str() != activation.data.tenant_id.as_str()
+    {
+        return Err(ApiError::forbidden(
+            "delivery_activation_proof_mismatch",
+            "redemption_code does not match the requested activation".to_string(),
+            context,
+        ));
+    }
+
+    Ok(())
 }
 
 async fn get_delivery_download_grant(
@@ -7912,11 +8008,23 @@ mod tests {
         cookie: &str,
         redemption_code: &str,
     ) -> Value {
+        redeem_delivery_request_for_test(app, Some(cookie), redemption_code).await
+    }
+
+    async fn redeem_delivery_public_for_test(app: axum::Router, redemption_code: &str) -> Value {
+        redeem_delivery_request_for_test(app, None, redemption_code).await
+    }
+
+    async fn redeem_delivery_request_for_test(
+        app: axum::Router,
+        cookie: Option<&str>,
+        redemption_code: &str,
+    ) -> Value {
         let redeem = app
             .oneshot(request(
                 "POST",
                 "/v1/delivery-activations/redeem",
-                Some(cookie),
+                cookie,
                 Some(json!({
                     "redemption_code": redemption_code
                 })),
@@ -7932,14 +8040,35 @@ mod tests {
         cookie: &str,
         activation_id: &str,
     ) -> Value {
+        issue_download_grant_request_for_test(app, Some(cookie), activation_id, None).await
+    }
+
+    async fn issue_download_grant_public_for_test(
+        app: axum::Router,
+        activation_id: &str,
+        redemption_code: &str,
+    ) -> Value {
+        issue_download_grant_request_for_test(app, None, activation_id, Some(redemption_code)).await
+    }
+
+    async fn issue_download_grant_request_for_test(
+        app: axum::Router,
+        cookie: Option<&str>,
+        activation_id: &str,
+        redemption_code: Option<&str>,
+    ) -> Value {
+        let mut body = json!({
+            "activation_id": activation_id
+        });
+        if let Some(redemption_code) = redemption_code {
+            body["redemption_code"] = json!(redemption_code);
+        }
         let issue = app
             .oneshot(request(
                 "POST",
                 "/v1/delivery-download-grants",
-                Some(cookie),
-                Some(json!({
-                    "activation_id": activation_id
-                })),
+                cookie,
+                Some(body),
             ))
             .await
             .unwrap();
@@ -8132,6 +8261,32 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_allows_authorization_header_for_delivery_downloads() {
+        let response = app_with_state(ControlPlaneState::memory())
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/v1/delivery-downloads/artifact")
+                    .header("origin", super::FRONTEND_BASE_URL)
+                    .header("access-control-request-method", "GET")
+                    .header("access-control-request-headers", "authorization")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let allow_headers = response
+            .headers()
+            .get("access-control-allow-headers")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(allow_headers.contains("authorization"));
     }
 
     #[tokio::test]
@@ -11246,8 +11401,7 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let activation =
-            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let activation = redeem_delivery_public_for_test(app.clone(), &redemption_code).await;
         let activation_data = &activation["data"];
         let activation_id = activation_data["activation_id"]
             .as_str()
@@ -11572,7 +11726,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delivery_activation_enforces_tenant_before_consuming_code() {
+    async fn delivery_activation_accepts_code_possession_without_tenant_session() {
         let state = authz_test_state();
         let acme_admin_cookie =
             issue_cookie(&state, "acme-admin@huge-router.dev", "acme-retail").await;
@@ -11597,23 +11751,15 @@ mod tests {
         )
         .await;
 
-        assert_error(
-            app.clone()
-                .oneshot(request(
-                    "POST",
-                    "/v1/delivery-activations/redeem",
-                    Some(&northstar_cookie),
-                    Some(json!({
-                        "redemption_code": redemption_code.clone()
-                    })),
-                ))
-                .await
-                .unwrap(),
-            StatusCode::FORBIDDEN,
-            "tenant_access_denied",
+        let activation = redeem_delivery_request_for_test(
+            app.clone(),
+            Some(&northstar_cookie),
+            &redemption_code,
         )
         .await;
-        let after_forbidden = app
+        assert_eq!(activation["data"]["status"], "activated");
+
+        let after_activation = app
             .clone()
             .oneshot(request(
                 "GET",
@@ -11623,19 +11769,22 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(after_forbidden.status(), StatusCode::OK);
-        let after_forbidden_body = response_json(after_forbidden).await;
-        let code_projection = after_forbidden_body["data"]["codes"]
+        assert_eq!(after_activation.status(), StatusCode::OK);
+        let after_activation_body = response_json(after_activation).await;
+        let code_projection = after_activation_body["data"]["codes"]
             .as_array()
             .unwrap()
             .iter()
             .find(|code| code["code_type"] == "redemption_code")
             .unwrap();
-        assert_eq!(code_projection["status"], "active");
+        assert_eq!(code_projection["status"], "used");
 
-        let activation =
-            redeem_delivery_for_test(app.clone(), &acme_admin_cookie, &redemption_code).await;
-        assert_eq!(activation["data"]["status"], "activated");
+        let records = state
+            .store
+            .delivery_activation_records_for_tests(&delivery_id)
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
     }
 
     #[tokio::test]
@@ -11664,8 +11813,7 @@ mod tests {
             .unwrap()
             .to_string();
         let artifact_sha256 = artifact["data"]["sha256"].as_str().unwrap().to_string();
-        let activation =
-            redeem_delivery_for_test(app.clone(), &admin_cookie, &redemption_code).await;
+        let activation = redeem_delivery_public_for_test(app.clone(), &redemption_code).await;
         let activation_id = activation["data"]["activation_id"]
             .as_str()
             .unwrap()
@@ -11675,7 +11823,48 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let issue = issue_download_grant_for_test(app.clone(), &admin_cookie, &activation_id).await;
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-download-grants",
+                    None,
+                    Some(json!({
+                        "activation_id": activation_id.clone()
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+            "auth_invalid",
+        )
+        .await;
+        let other_prepared = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+        let other_redemption_code = other_prepared["one_time_codes"]["redemption_code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_error(
+            app.clone()
+                .oneshot(request(
+                    "POST",
+                    "/v1/delivery-download-grants",
+                    None,
+                    Some(json!({
+                        "activation_id": activation_id.clone(),
+                        "redemption_code": other_redemption_code
+                    })),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+            "delivery_activation_proof_mismatch",
+        )
+        .await;
+
+        let issue =
+            issue_download_grant_public_for_test(app.clone(), &activation_id, &redemption_code)
+                .await;
         let download_token = issue["download_token"].as_str().unwrap().to_string();
         let grant = &issue["data"];
         let grant_id = grant["grant_id"].as_str().unwrap().to_string();

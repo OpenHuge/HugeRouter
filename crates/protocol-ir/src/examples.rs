@@ -713,6 +713,7 @@ pub fn sample_delivery_activation_response() -> DeliveryActivationResponse {
 pub fn sample_create_delivery_download_grant_request() -> CreateDeliveryDownloadGrantRequest {
     CreateDeliveryDownloadGrantRequest {
         activation_id: "activation_10002".to_string(),
+        redemption_code: None,
     }
 }
 

@@ -1110,6 +1110,8 @@ pub struct DeliveryActivationResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct CreateDeliveryDownloadGrantRequest {
     pub activation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redemption_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
