@@ -4,11 +4,11 @@ use ring::rand;
 
 use crate::{ApiError, RequestContext};
 
-pub(crate) const OPENING_CREDENTIAL_KIND_API_KEY: &str = "api_key";
+pub const OPENING_CREDENTIAL_KIND_API_KEY: &str = "api_key";
 const OPENING_SCOPE_ROUTE_CODEX: &str = "route:codex";
 const OPENING_SCOPE_PROVIDER_COMMERCIAL: &str = "provider:hugerouter-commercial";
 
-pub(crate) fn validate_opening_grantee(
+pub fn validate_opening_grantee(
     request: &CreateOpeningGrantRequest,
     context: &RequestContext,
 ) -> Result<(), ApiError> {
@@ -30,7 +30,7 @@ pub(crate) fn validate_opening_grantee(
     Ok(())
 }
 
-pub(crate) fn validate_opening_owner_account_id(
+pub fn validate_opening_owner_account_id(
     owner_account_id: &str,
     context: &RequestContext,
 ) -> Result<String, ApiError> {
@@ -51,7 +51,7 @@ pub(crate) fn validate_opening_owner_account_id(
     Ok(owner_account_id.to_string())
 }
 
-pub(crate) fn opening_scopes(
+pub fn opening_scopes(
     requested_scopes: &[String],
     package: &SaleReadyPackageResponse,
     context: &RequestContext,
@@ -95,7 +95,7 @@ pub(crate) fn opening_scopes(
     Ok(scopes)
 }
 
-pub(crate) fn generate_opening_api_key(context: &RequestContext) -> Result<String, ApiError> {
+pub fn generate_opening_api_key(context: &RequestContext) -> Result<String, ApiError> {
     let rng = rand::SystemRandom::new();
     let mut token_bytes = [0_u8; 24];
     rand::SecureRandom::fill(&rng, &mut token_bytes).map_err(|_| {

@@ -1,0 +1,546 @@
+{
+  "data": {
+    "batch_id": "dlvbatch_10000",
+    "owner_account_id": "acct_acme_owner",
+    "unit_count": 8,
+    "capacity": 8,
+    "units": [
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_1",
+        "index": 1,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10001",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10001_redemption",
+              "delivery_id": "delivery_10001",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "1-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10001_browser_unlock",
+              "delivery_id": "delivery_10001",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "1-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10001",
+            "delivery_id": "delivery_10001",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h1-1b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r1-16"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_2",
+        "index": 2,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10002",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10002_redemption",
+              "delivery_id": "delivery_10002",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "2-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10002_browser_unlock",
+              "delivery_id": "delivery_10002",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "2-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10002",
+            "delivery_id": "delivery_10002",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h2-2b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r2-26"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_3",
+        "index": 3,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10003",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10003_redemption",
+              "delivery_id": "delivery_10003",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "3-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10003_browser_unlock",
+              "delivery_id": "delivery_10003",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "3-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10003",
+            "delivery_id": "delivery_10003",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h3-3b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r3-36"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_4",
+        "index": 4,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10004",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10004_redemption",
+              "delivery_id": "delivery_10004",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "4-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10004_browser_unlock",
+              "delivery_id": "delivery_10004",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "4-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10004",
+            "delivery_id": "delivery_10004",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h4-4b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r4-46"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_5",
+        "index": 5,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10005",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10005_redemption",
+              "delivery_id": "delivery_10005",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "5-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10005_browser_unlock",
+              "delivery_id": "delivery_10005",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "5-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10005",
+            "delivery_id": "delivery_10005",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h5-5b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r5-56"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_6",
+        "index": 6,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10006",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10006_redemption",
+              "delivery_id": "delivery_10006",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "6-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10006_browser_unlock",
+              "delivery_id": "delivery_10006",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "6-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10006",
+            "delivery_id": "delivery_10006",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h6-6b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r6-66"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_7",
+        "index": 7,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10007",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10007_redemption",
+              "delivery_id": "delivery_10007",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "7-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10007_browser_unlock",
+              "delivery_id": "delivery_10007",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "7-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10007",
+            "delivery_id": "delivery_10007",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h7-7b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r7-76"
+        }
+      },
+      {
+        "unit_id": "dlvunit_dlvbatch_10000_8",
+        "index": 8,
+        "delivery": {
+          "delivery": {
+            "delivery_id": "delivery_10008",
+            "tenant_id": "tenant_acme",
+            "project_id": "proj_core",
+            "owner_account_id": "acct_acme_owner",
+            "redemption_batch_id": "dlvbatch_10000",
+            "provider": "chatgpt",
+            "status": "prepared",
+            "operator_id": "user_ops_admin",
+            "customer_label": "Acme May browser handoff",
+            "source": "manual_operator",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          },
+          "codes": [
+            {
+              "code_id": "dlvcode_delivery_10008_redemption",
+              "delivery_id": "delivery_10008",
+              "code_type": "redemption_code",
+              "code_prefix": "ku0-red-v2-260505...",
+              "code_last_four": "8-7b",
+              "format_version": "ku0-red-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            },
+            {
+              "code_id": "dlvcode_delivery_10008_browser_unlock",
+              "delivery_id": "delivery_10008",
+              "code_type": "browser_file_unlock_code",
+              "code_prefix": "ku0-brw-v2-260505...",
+              "code_last_four": "8-76",
+              "format_version": "ku0-brw-v2",
+              "status": "active",
+              "expires_at": "2026-06-04T10:00:00Z",
+              "created_at": "2026-05-05T10:00:00Z",
+              "updated_at": "2026-05-05T10:00:00Z",
+              "version": 1
+            }
+          ],
+          "entitlement": {
+            "entitlement_id": "dlvent_delivery_10008",
+            "delivery_id": "delivery_10008",
+            "service_kind": "manual_browser_account",
+            "service_days": 30,
+            "starts_at": "2026-05-05T10:00:00Z",
+            "ends_at": "2026-06-04T10:00:00Z",
+            "service_starts_at": "2026-05-05T10:00:00Z",
+            "service_ends_at": "2026-06-04T10:00:00Z",
+            "status": "active",
+            "created_at": "2026-05-05T10:00:00Z",
+            "updated_at": "2026-05-05T10:00:00Z",
+            "version": 1
+          }
+        },
+        "one_time_codes": {
+          "redemption_code": "ku0-red-v2-260505-a1b2-c3d4e5f6g7h8-8b",
+          "browser_file_unlock_code": "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r8-86"
+        }
+      }
+    ]
+  }
+}

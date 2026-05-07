@@ -12,6 +12,9 @@
       "file_name": "acme-may.hcbrowser",
       "content_type": "application/octet-stream",
       "carrier_valid_until": "2026-05-20T10:00:00Z",
+      "encryption_protocol": "delivery_account_bundle_v2",
+      "encryption_version": "2",
+      "secret_kind": "browser_file_unlock_code",
       "payload_base64": "ZW5jcnlwdGVkLWhjYnJvd3Nlci1idW5kbGU="
     }
   ]

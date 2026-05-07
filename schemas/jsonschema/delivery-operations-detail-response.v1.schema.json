@@ -17,6 +17,7 @@
         "created_at",
         "delivery_id",
         "operator_id",
+        "owner_account_id",
         "project_id",
         "provider",
         "source",
@@ -41,11 +42,20 @@
         "operator_id": {
           "type": "string"
         },
+        "owner_account_id": {
+          "type": "string"
+        },
         "project_id": {
           "$ref": "#/definitions/ProjectId"
         },
         "provider": {
           "type": "string"
+        },
+        "redemption_batch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "revoke_reason": {
           "type": [
@@ -941,10 +951,13 @@
         "content_type",
         "created_at",
         "delivery_id",
+        "encryption_protocol",
+        "encryption_version",
         "item_id",
         "payload_sha256",
         "project_id",
         "row_index",
+        "secret_kind",
         "size_bytes",
         "status",
         "tenant_id",
@@ -979,6 +992,12 @@
         "delivery_id": {
           "type": "string"
         },
+        "encryption_protocol": {
+          "type": "string"
+        },
+        "encryption_version": {
+          "type": "string"
+        },
         "error_code": {
           "type": [
             "string",
@@ -1010,6 +1029,9 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
+        },
+        "secret_kind": {
+          "type": "string"
         },
         "size_bytes": {
           "type": "integer",

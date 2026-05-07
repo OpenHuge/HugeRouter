@@ -64,6 +64,18 @@
         "delivery_id": {
           "type": "string"
         },
+        "encryption_protocol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "encryption_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "file_name": {
           "type": [
             "string",
@@ -80,6 +92,12 @@
           ],
           "format": "uint32",
           "minimum": 0.0
+        },
+        "secret_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

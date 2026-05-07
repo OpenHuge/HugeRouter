@@ -17,6 +17,7 @@
         "created_at",
         "delivery_id",
         "operator_id",
+        "owner_account_id",
         "project_id",
         "provider",
         "source",
@@ -41,11 +42,20 @@
         "operator_id": {
           "type": "string"
         },
+        "owner_account_id": {
+          "type": "string"
+        },
         "project_id": {
           "$ref": "#/definitions/ProjectId"
         },
         "provider": {
           "type": "string"
+        },
+        "redemption_batch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "revoke_reason": {
           "type": [

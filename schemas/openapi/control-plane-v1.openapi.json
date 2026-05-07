@@ -507,6 +507,76 @@
         }
       }
     },
+    "/v1/deliveries/redemption-units/prepare": {
+      "post": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "prepare_delivery_redemption_units",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareDeliveryRedemptionUnitsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Prepare eight owner-scoped v2 delivery redemption units and return plaintext once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrepareDeliveryRedemptionUnitsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/deliveries/{delivery_id}": {
       "get": {
         "tags": [
@@ -1931,6 +2001,85 @@
         }
       }
     },
+    "/v1/delivery-redemption-inventory": {
+      "get": {
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "list_delivery_redemption_inventory",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "description": "Tenant id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TenantId"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProjectId"
+            }
+          },
+          {
+            "name": "owner_account_id",
+            "in": "query",
+            "description": "Owner account id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List owner-scoped delivery redemption code inventory without plaintext secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryRedemptionInventoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Normalized error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/delivery-uploads": {
       "post": {
         "tags": [
@@ -3218,6 +3367,12 @@
               "null"
             ]
           },
+          "owner_account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "project_id": {
             "$ref": "#/components/schemas/ProjectId"
           },
@@ -3370,6 +3525,7 @@
           "delivery_id",
           "tenant_id",
           "project_id",
+          "owner_account_id",
           "provider",
           "status",
           "operator_id",
@@ -3394,11 +3550,20 @@
           "operator_id": {
             "type": "string"
           },
+          "owner_account_id": {
+            "type": "string"
+          },
           "project_id": {
             "$ref": "#/components/schemas/ProjectId"
           },
           "provider": {
             "type": "string"
+          },
+          "redemption_batch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "revoke_reason": {
             "type": [
@@ -4588,6 +4753,201 @@
           }
         }
       },
+      "DeliveryRedemptionInventory": {
+        "type": "object",
+        "required": [
+          "owners",
+          "units"
+        ],
+        "properties": {
+          "owners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryRedemptionInventoryOwner"
+            }
+          },
+          "units": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryRedemptionInventoryUnit"
+            }
+          }
+        }
+      },
+      "DeliveryRedemptionInventoryOwner": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "project_id",
+          "owner_account_id",
+          "active_count",
+          "capacity",
+          "status"
+        ],
+        "properties": {
+          "active_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "owner_account_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          }
+        }
+      },
+      "DeliveryRedemptionInventoryResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryRedemptionInventory"
+          }
+        }
+      },
+      "DeliveryRedemptionInventoryUnit": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "project_id",
+          "owner_account_id",
+          "delivery_id",
+          "code_id",
+          "code_prefix",
+          "code_last_four",
+          "status",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "code_id": {
+            "type": "string"
+          },
+          "code_last_four": {
+            "type": "string"
+          },
+          "code_prefix": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "owner_account_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "redemption_batch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeliveryRedemptionUnit": {
+        "type": "object",
+        "required": [
+          "unit_id",
+          "index",
+          "delivery",
+          "one_time_codes"
+        ],
+        "properties": {
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryProjection"
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "one_time_codes": {
+            "$ref": "#/components/schemas/DeliveryOneTimeCodes"
+          },
+          "unit_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryRedemptionUnitsBatch": {
+        "type": "object",
+        "required": [
+          "batch_id",
+          "owner_account_id",
+          "unit_count",
+          "capacity",
+          "units"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "owner_account_id": {
+            "type": "string"
+          },
+          "unit_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "units": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryRedemptionUnit"
+            }
+          }
+        }
+      },
       "DeliveryResponse": {
         "type": "object",
         "required": [
@@ -4824,6 +5184,9 @@
           "status",
           "artifact_kind",
           "content_type",
+          "encryption_protocol",
+          "encryption_version",
+          "secret_kind",
           "payload_sha256",
           "size_bytes",
           "created_at",
@@ -4858,6 +5221,12 @@
           "delivery_id": {
             "type": "string"
           },
+          "encryption_protocol": {
+            "type": "string"
+          },
+          "encryption_version": {
+            "type": "string"
+          },
           "error_code": {
             "type": [
               "string",
@@ -4889,6 +5258,9 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "secret_kind": {
+            "type": "string"
           },
           "size_bytes": {
             "type": "integer",
@@ -4939,6 +5311,18 @@
           "delivery_id": {
             "type": "string"
           },
+          "encryption_protocol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "encryption_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "file_name": {
             "type": [
               "string",
@@ -4955,6 +5339,12 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "secret_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5342,6 +5732,70 @@
             "items": {
               "$ref": "#/components/schemas/OpeningGrant"
             }
+          }
+        }
+      },
+      "PrepareDeliveryRedemptionUnitsRequest": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "project_id",
+          "provider",
+          "owner_account_id",
+          "service_days"
+        ],
+        "properties": {
+          "code_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "customer_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_account_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/ProjectId"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "service_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "service_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/TenantId"
+          }
+        }
+      },
+      "PrepareDeliveryRedemptionUnitsResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryRedemptionUnitsBatch"
           }
         }
       },

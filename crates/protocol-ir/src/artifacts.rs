@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use utoipa::OpenApi;
 
 use super::*;
+use crate::delivery_redemption_examples::*;
 use crate::examples::*;
 use crate::gateway_examples::*;
 
@@ -129,6 +130,15 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         )?,
         schema_artifact::<DeliveryPrepareResponse>(
             "schemas/jsonschema/delivery-prepare-response.v1.schema.json",
+        )?,
+        schema_artifact::<PrepareDeliveryRedemptionUnitsRequest>(
+            "schemas/jsonschema/delivery-redemption-units-prepare-request.v1.schema.json",
+        )?,
+        schema_artifact::<PrepareDeliveryRedemptionUnitsResponse>(
+            "schemas/jsonschema/delivery-redemption-units-prepare-response.v1.schema.json",
+        )?,
+        schema_artifact::<DeliveryRedemptionInventoryResponse>(
+            "schemas/jsonschema/delivery-redemption-inventory-response.v1.schema.json",
         )?,
         schema_artifact::<DeliveryResponse>("schemas/jsonschema/delivery-response.v1.schema.json")?,
         schema_artifact::<DeliveryRevokeRequest>(
@@ -280,6 +290,11 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let delivery_prepare_request = sample_create_delivery_request();
     let delivery_prepare_response = sample_delivery_prepare_response();
     let delivery_response = sample_delivery_response();
+    let delivery_redemption_units_prepare_request =
+        sample_prepare_delivery_redemption_units_request();
+    let delivery_redemption_units_prepare_response =
+        sample_prepare_delivery_redemption_units_response();
+    let delivery_redemption_inventory_response = sample_delivery_redemption_inventory_response();
     let delivery_artifact_request = sample_create_delivery_artifact_request();
     let single_artifact_response = sample_delivery_artifact_response();
     let artifact_list_response = sample_delivery_artifacts_response();
@@ -446,6 +461,18 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
             &delivery_response,
         )?,
         example_artifact(
+            "schemas/examples/control-plane/delivery-redemption-units-prepare.request.json",
+            &delivery_redemption_units_prepare_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-redemption-units-prepare.response.json",
+            &delivery_redemption_units_prepare_response,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-redemption-inventory.response.json",
+            &delivery_redemption_inventory_response,
+        )?,
+        example_artifact(
             "schemas/examples/control-plane/delivery-artifact.request.json",
             &delivery_artifact_request,
         )?,
@@ -595,6 +622,8 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'createOpeningGrant', method: 'POST', path: '/v1/opening-grants' }},\n\
   {{ id: 'revokeOpeningGrant', method: 'POST', path: '/v1/opening-grants/{{grant_id}}/revoke' }},\n\
   {{ id: 'prepareDelivery', method: 'POST', path: '/v1/deliveries/prepare' }},\n\
+  {{ id: 'prepareDeliveryRedemptionUnits', method: 'POST', path: '/v1/deliveries/redemption-units/prepare' }},\n\
+  {{ id: 'listDeliveryRedemptionInventory', method: 'GET', path: '/v1/delivery-redemption-inventory' }},\n\
   {{ id: 'getDelivery', method: 'GET', path: '/v1/deliveries/{{delivery_id}}' }},\n\
   {{ id: 'revokeDelivery', method: 'POST', path: '/v1/deliveries/{{delivery_id}}/revoke' }},\n\
   {{ id: 'createDeliveryArtifact', method: 'POST', path: '/v1/deliveries/{{delivery_id}}/artifacts' }},\n\

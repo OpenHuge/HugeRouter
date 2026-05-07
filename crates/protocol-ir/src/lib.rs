@@ -1,6 +1,10 @@
 #![allow(clippy::needless_for_each)]
 
 mod artifacts;
+mod delivery_redemption;
+pub(crate) mod delivery_redemption_examples;
+pub(crate) mod delivery_redemption_openapi;
+mod delivery_upload;
 pub(crate) mod examples;
 pub(crate) mod gateway_examples;
 mod openapi_docs;
@@ -9,6 +13,8 @@ pub use artifacts::{
     ArtifactFile, ContractManifest, collect_contract_artifacts, workspace_root,
     write_contract_artifacts,
 };
+pub use delivery_redemption::*;
+pub use delivery_upload::*;
 pub use openapi_docs::{ControlPlaneApiDoc, GatewayApiDoc};
 
 use core_domain::{
@@ -829,6 +835,8 @@ pub struct CreateDeliveryRequest {
     pub tenant_id: TenantId,
     pub project_id: ProjectId,
     pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -852,6 +860,9 @@ pub struct Delivery {
     pub delivery_id: String,
     pub tenant_id: TenantId,
     pub project_id: ProjectId,
+    pub owner_account_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redemption_batch_id: Option<String>,
     pub provider: String,
     pub status: String,
     pub operator_id: String,
@@ -1006,98 +1017,6 @@ pub struct DeliveryActivationRestoreInfo {
 pub struct DeliveryActivationRedeemResponse {
     pub data: DeliveryActivation,
     pub restore: DeliveryActivationRestoreInfo,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct CreateDeliveryUploadBatchRequest {
-    pub tenant_id: TenantId,
-    pub project_id: ProjectId,
-    pub provider: String,
-    pub source_file_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<String>,
-    pub items: Vec<DeliveryUploadBatchItemInput>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct DeliveryUploadBatchItemInput {
-    pub delivery_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub row_index: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub carrier_valid_until: Option<String>,
-    pub payload_base64: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct DeliveryUploadBatch {
-    pub batch_id: String,
-    pub tenant_id: TenantId,
-    pub project_id: ProjectId,
-    pub provider: String,
-    pub status: String,
-    pub source_file_name: String,
-    pub source_file_sha256: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<String>,
-    pub total_count: u32,
-    pub success_count: u32,
-    pub failed_count: u32,
-    pub duplicate_count: u32,
-    pub created_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finished_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_summary: Option<String>,
-    pub version: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct DeliveryUploadBatchItem {
-    pub item_id: String,
-    pub batch_id: String,
-    pub row_index: u32,
-    pub tenant_id: TenantId,
-    pub project_id: ProjectId,
-    pub delivery_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_id: Option<String>,
-    pub status: String,
-    pub artifact_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_name: Option<String>,
-    pub content_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub carrier_valid_until: Option<String>,
-    pub payload_sha256: String,
-    pub size_bytes: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_message: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub version: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct DeliveryUploadBatchResponse {
-    pub data: DeliveryUploadBatch,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct DeliveryUploadBatchItemsResponse {
-    pub data: Vec<DeliveryUploadBatchItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

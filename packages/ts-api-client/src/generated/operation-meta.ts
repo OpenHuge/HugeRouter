@@ -1,5 +1,5 @@
 export const CONTRACT_VERSION = "v1" as const;
-export const CONTRACT_DIGEST = "fe0fd1cb8d18a2d27a5d87c81c63d57a2f2ab80ddc14e4f3c22bdff49d84388f" as const;
+export const CONTRACT_DIGEST = "7700ed0dc5df2e7fa2ea212cfba17d90aa1f14893b6543b9fe29237a9dd627ae" as const;
 export const CONTROL_PLANE_OPERATIONS = [
 { id: 'listTenants', method: 'GET', path: '/v1/tenants' },
 { id: 'listProjects', method: 'GET', path: '/v1/projects' },
@@ -20,6 +20,8 @@ export const CONTROL_PLANE_OPERATIONS = [
 { id: 'createOpeningGrant', method: 'POST', path: '/v1/opening-grants' },
 { id: 'revokeOpeningGrant', method: 'POST', path: '/v1/opening-grants/{grant_id}/revoke' },
 { id: 'prepareDelivery', method: 'POST', path: '/v1/deliveries/prepare' },
+{ id: 'prepareDeliveryRedemptionUnits', method: 'POST', path: '/v1/deliveries/redemption-units/prepare' },
+{ id: 'listDeliveryRedemptionInventory', method: 'GET', path: '/v1/delivery-redemption-inventory' },
 { id: 'getDelivery', method: 'GET', path: '/v1/deliveries/{delivery_id}' },
 { id: 'revokeDelivery', method: 'POST', path: '/v1/deliveries/{delivery_id}/revoke' },
 { id: 'createDeliveryArtifact', method: 'POST', path: '/v1/deliveries/{delivery_id}/artifacts' },

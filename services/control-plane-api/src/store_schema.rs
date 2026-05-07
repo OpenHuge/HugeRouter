@@ -6,6 +6,7 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "api_keys",
     "opening_grants",
     "opening_grant_owner_locks",
+    "delivery_redemption_owner_locks",
     "deliveries",
     "delivery_codes",
     "delivery_secret_plaintexts",
@@ -116,6 +117,8 @@ pub const MIGRATIONS: &[&str] = &[
         delivery_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         project_id TEXT NOT NULL,
+        owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
+        redemption_batch_id TEXT NULL,
         provider TEXT NOT NULL,
         status TEXT NOT NULL,
         operator_id TEXT NOT NULL,
@@ -123,8 +126,20 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )",
+    r"ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default'",
+    r"ALTER TABLE deliveries ALTER COLUMN owner_account_id SET DEFAULT 'tenant_project_default'",
+    r"ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS redemption_batch_id TEXT NULL",
     r"CREATE INDEX IF NOT EXISTS deliveries_tenant_project_idx
        ON deliveries (tenant_id, project_id, created_at)",
+    r"CREATE INDEX IF NOT EXISTS deliveries_owner_idx
+       ON deliveries (tenant_id, project_id, owner_account_id, created_at)",
+    r"CREATE TABLE IF NOT EXISTS delivery_redemption_owner_locks (
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        owner_account_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, project_id, owner_account_id)
+    )",
     r"CREATE TABLE IF NOT EXISTS delivery_codes (
         code_id TEXT PRIMARY KEY,
         delivery_id TEXT NOT NULL,

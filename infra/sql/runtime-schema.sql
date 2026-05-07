@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     delivery_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
+    redemption_batch_id TEXT NULL,
     provider TEXT NOT NULL,
     status TEXT NOT NULL,
     operator_id TEXT NOT NULL,
@@ -85,6 +87,17 @@ CREATE TABLE IF NOT EXISTS deliveries (
 
 CREATE INDEX IF NOT EXISTS deliveries_tenant_project_idx
     ON deliveries (tenant_id, project_id, created_at);
+
+CREATE INDEX IF NOT EXISTS deliveries_owner_idx
+    ON deliveries (tenant_id, project_id, owner_account_id, created_at);
+
+CREATE TABLE IF NOT EXISTS delivery_redemption_owner_locks (
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, project_id, owner_account_id)
+);
 
 CREATE TABLE IF NOT EXISTS delivery_codes (
     code_id TEXT PRIMARY KEY,

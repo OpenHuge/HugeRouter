@@ -1,6 +1,9 @@
 #![allow(clippy::too_many_lines, clippy::uninlined_format_args)]
 
+mod delivery_redemption_api;
+mod delivery_redemption_policy;
 mod merchant_api;
+mod merchant_checkout_api;
 mod merchant_replay;
 mod merchant_store;
 mod opening_grant_api;
@@ -9,6 +12,7 @@ mod route_receipts;
 mod store;
 mod store_schema;
 mod wechat_pay;
+mod wechat_pay_api;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -34,6 +38,11 @@ use core_domain::{
     ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId, Tenant,
     TenantMembership, TenantMembershipRole, TenantMembershipStatus, UnlinkAuthProviderResponse,
     UserId,
+};
+use delivery_redemption_policy::{
+    BROWSER_FILE_UNLOCK_CODE_KIND, DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2,
+    DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2, DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
+    REDEMPTION_CODE_KIND,
 };
 use opening_grant_api::{
     OPENING_CREDENTIAL_KIND_API_KEY, generate_opening_api_key, opening_scopes,
@@ -73,26 +82,18 @@ use store::{
     DeliveryDownloadConsumeResult, DeliveryDownloadGrantDraft, DeliveryDownloadGrantIssueResult,
     DeliveryEntitlementExtendDraft, DeliveryLifecycleResult, DeliveryOperationsExceptionFilters,
     DeliveryOperationsObjectFilters, DeliveryOperationsObjectRef, DeliveryOperationsScope,
-    DeliveryPrepareDraft, DeliveryRedeemResult, DeliveryUploadBatchDraft,
+    DeliveryPrepareDraft, DeliveryPrepareResult, DeliveryRedeemResult, DeliveryUploadBatchDraft,
     DeliveryUploadBatchItemDraft, DeliveryUploadProcessResult, EncryptedSecretBlob, IdentityLookup,
-    MerchantProductFulfillmentDraft, MerchantProductFulfillmentResult,
-    MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductPrepayDraft,
     OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolAccountFeedback, OAuthPoolSelectionRequest,
     OAuthSharingLeaseRecord, OAuthSharingLeasesResponse, OAuthSharingUsageBudget,
     OAuthSharingUsageFilters, OAuthSharingUsageResponse, OpeningGrantCreateResult,
     OpeningGrantDraft, ProviderResourceFilters, RenewalIntentCreateResult, RenewalIntentDraft,
-    RenewalIntentFilters, SESSION_TTL_SECONDS, StoreMode, WechatPaymentOrderRecord,
-    WechatPaymentOrderResponse, auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339,
-    oauth_provider_slug,
+    RenewalIntentFilters, SESSION_TTL_SECONDS, StoreMode, auth_provider_enabled, expires_at,
+    mock_auth_enabled, now_rfc3339, oauth_provider_slug,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
-use wechat_pay::{
-    WechatPayClient, WechatPayHeaders, WechatPayPrepayRequest, WechatPayPrepayResponse,
-    new_out_trade_no,
-};
-
 const CONTROL_PLANE_SERVICE_NAME: &str = "control-plane-api";
 const FRONTEND_BASE_URL: &str = "http://127.0.0.1:3000";
 const PLATFORM_ADMIN_TENANT_SLUG: &str = "platform-admin";
@@ -111,7 +112,7 @@ const DELIVERY_UPLOAD_MAX_ITEMS: usize = 500;
 const STABLE_ID_RANDOM_LEN: usize = 16;
 const CUSTOMER_DELIVERY_REDEEM_ACTOR: &str = "customer_delivery_redeem";
 const CUSTOMER_DELIVERY_DOWNLOAD_GRANT_ACTOR: &str = "customer_delivery_download_grant";
-const INTERNAL_DELIVERY_OPERATOR_ACTOR: &str = "internal_delivery_operator";
+pub(crate) const INTERNAL_DELIVERY_OPERATOR_ACTOR: &str = "internal_delivery_operator";
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
@@ -425,22 +426,6 @@ struct RenewalIntentsQuery {
     pub out_trade_no: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct WechatPaymentOrderQuery {
-    #[serde(default)]
-    pub refresh: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CreateMerchantProductOrderRequest {
-    pub card_product_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct MerchantProductPrepayRequest {
-    pub channel: wechat_pay::WechatPayChannel,
-}
-
 #[derive(Debug, Clone)]
 struct OidcIdentity {
     pub subject: String,
@@ -616,15 +601,15 @@ impl ControlPlaneAuthorizer {
             })
     }
 
-    fn actor_id(&self) -> String {
+    pub(crate) fn actor_id(&self) -> String {
         self.session.session.user.user_id.as_str().to_string()
     }
 
-    fn user_id(&self) -> &UserId {
+    const fn user_id(&self) -> &UserId {
         &self.session.session.user.user_id
     }
 
-    fn authenticated_by(&self) -> AuthProvider {
+    const fn authenticated_by(&self) -> AuthProvider {
         self.session.session.authenticated_by
     }
 }
@@ -699,20 +684,26 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         )
         .route("/v1/tenants", get(list_tenants))
         .route("/v1/projects", get(list_projects))
-        .route("/v1/shops/{slug}", get(get_public_shop))
+        .route(
+            "/v1/shops/{slug}",
+            get(merchant_checkout_api::get_public_shop),
+        )
         .route(
             "/v1/merchant-product-orders",
-            post(create_merchant_product_order),
+            post(merchant_checkout_api::create_merchant_product_order),
         )
         .route(
             "/v1/merchant-product-orders/{order_id}",
-            get(get_merchant_product_order),
+            get(merchant_checkout_api::get_merchant_product_order),
         )
         .route(
             "/v1/merchant-product-orders/{order_id}/wechat-pay/prepay",
-            post(create_merchant_product_order_wechat_prepay),
+            post(merchant_checkout_api::create_merchant_product_order_wechat_prepay),
         )
-        .route("/v1/pickups/{pickup_token}", get(get_merchant_pickup))
+        .route(
+            "/v1/pickups/{pickup_token}",
+            get(merchant_checkout_api::get_merchant_pickup),
+        )
         .route(
             "/v1/merchant/workspace",
             get(merchant_api::get_merchant_workspace),
@@ -778,6 +769,14 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             post(revoke_opening_grant),
         )
         .route("/v1/deliveries/prepare", post(prepare_delivery))
+        .route(
+            "/v1/deliveries/redemption-units/prepare",
+            post(delivery_redemption_api::prepare_delivery_redemption_units),
+        )
+        .route(
+            "/v1/delivery-redemption-inventory",
+            get(delivery_redemption_api::list_delivery_redemption_inventory),
+        )
         .route("/v1/deliveries/{delivery_id}", get(get_delivery))
         .route("/v1/deliveries/{delivery_id}/revoke", post(revoke_delivery))
         .route(
@@ -933,6 +932,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             post(prepare_delivery_internal),
         )
         .route(
+            "/internal/deliveries/redemption-units/prepare",
+            post(delivery_redemption_api::prepare_delivery_redemption_units_internal),
+        )
+        .route(
             "/internal/delivery-uploads",
             post(create_delivery_upload_batch_internal),
         )
@@ -963,15 +966,15 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         )
         .route(
             "/v1/billing/wechat-pay/prepay",
-            post(create_wechat_pay_prepay),
+            post(wechat_pay_api::create_wechat_pay_prepay),
         )
         .route(
             "/v1/billing/wechat-pay/notify",
-            post(accept_wechat_pay_notification),
+            post(wechat_pay_api::accept_wechat_pay_notification),
         )
         .route(
             "/v1/billing/wechat-pay/orders/{out_trade_no}",
-            get(get_wechat_payment_order),
+            get(wechat_pay_api::get_wechat_payment_order),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
         .route("/v1/route-receipts", get(route_receipts::list))
@@ -1376,20 +1379,20 @@ async fn complete_oauth_login(
                     &context,
                 )
             })?;
-        if provider == core_domain::OAuthProvider::Wechat {
-            if let Some(openid) = identity.wechat_openid.as_deref() {
-                state
-                    .store
-                    .upsert_wechat_user_openid(&oauth_user.user_id, openid)
-                    .await
-                    .map_err(|error| {
-                        ApiError::internal(
-                            "storage_unavailable",
-                            format!("failed to store WeChat openid: {error}"),
-                            &context,
-                        )
-                    })?;
-            }
+        if provider == core_domain::OAuthProvider::Wechat
+            && let Some(openid) = identity.wechat_openid.as_deref()
+        {
+            state
+                .store
+                .upsert_wechat_user_openid(&oauth_user.user_id, openid)
+                .await
+                .map_err(|error| {
+                    ApiError::internal(
+                        "storage_unavailable",
+                        format!("failed to store WeChat openid: {error}"),
+                        &context,
+                    )
+                })?;
         }
 
         (identity.subject, pending.workspace_slug.clone())
@@ -1524,319 +1527,6 @@ async fn list_projects(
     })?;
     response.data = authz.filter_projects(response.data);
     Ok(Json(response))
-}
-
-async fn get_public_shop(
-    State(state): State<ControlPlaneState>,
-    Path(slug): Path<String>,
-) -> Result<Json<store::MerchantPublicShopResponse>, ApiError> {
-    let context = next_request_context();
-    state
-        .store
-        .get_public_shop_by_slug(&slug)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "merchant_shop_unavailable",
-                format!("failed to load public shop: {error}"),
-                &context,
-            )
-        })?
-        .map(Json)
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "merchant_shop_not_found",
-                format!("shop `{slug}` was not found"),
-                &context,
-            )
-        })
-}
-
-async fn create_merchant_product_order(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Json(request): Json<CreateMerchantProductOrderRequest>,
-) -> Result<Json<store::MerchantProductOrderResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    ensure_wechat_buyer(&authz, &context)?;
-    let card_product_id = request.card_product_id.trim();
-    if card_product_id.is_empty() {
-        return Err(ApiError::bad_request(
-            "card_product_id_required",
-            "card_product_id is required".to_string(),
-            &context,
-        ));
-    }
-    match state
-        .store
-        .create_merchant_product_order(MerchantProductOrderDraft {
-            order_id: generate_stable_id("morder", &context)?,
-            card_product_id: card_product_id.to_string(),
-            buyer_user_id: authz.user_id().clone(),
-        })
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "merchant_order_create_failed",
-                format!("failed to create merchant product order: {error}"),
-                &context,
-            )
-        })? {
-        MerchantProductOrderCreateResult::Created(response) => Ok(Json(response)),
-        MerchantProductOrderCreateResult::ProductNotFound => Err(ApiError::not_found(
-            "card_product_not_found",
-            format!("card product `{card_product_id}` was not found"),
-            &context,
-        )),
-        MerchantProductOrderCreateResult::ProductNotSaleable => Err(ApiError::conflict(
-            "card_product_not_saleable",
-            "card product is not available for WeChat Pay checkout".to_string(),
-            &context,
-        )),
-        MerchantProductOrderCreateResult::InventoryUnavailable => Err(ApiError::conflict(
-            "card_product_inventory_unavailable",
-            "card product has no available delivery inventory".to_string(),
-            &context,
-        )),
-    }
-}
-
-async fn get_merchant_product_order(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Path(order_id): Path<String>,
-) -> Result<Json<store::MerchantProductOrderResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let response = load_merchant_order_for_buyer(&state, &authz, &order_id, &context).await?;
-    Ok(Json(response))
-}
-
-async fn create_merchant_product_order_wechat_prepay(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Path(order_id): Path<String>,
-    Json(request): Json<MerchantProductPrepayRequest>,
-) -> Result<Json<WechatPayPrepayResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    ensure_wechat_buyer(&authz, &context)?;
-    let order = load_merchant_order_for_buyer(&state, &authz, &order_id, &context).await?;
-    if order.data.status == store::MERCHANT_ORDER_STATUS_FULFILLED {
-        return Err(ApiError::conflict(
-            "merchant_order_already_fulfilled",
-            "merchant product order has already been fulfilled".to_string(),
-            &context,
-        ));
-    }
-    let payer_openid = if matches!(request.channel, wechat_pay::WechatPayChannel::Jsapi) {
-        Some(
-            state
-                .store
-                .get_wechat_user_openid(authz.user_id())
-                .await
-                .map_err(|error| {
-                    ApiError::internal(
-                        "wechat_openid_unavailable",
-                        format!("failed to load WeChat openid: {error}"),
-                        &context,
-                    )
-                })?
-                .ok_or_else(|| {
-                    ApiError::conflict(
-                        "wechat_openid_required",
-                        "JSAPI checkout requires a WeChat login with openid; sign in with WeChat again".to_string(),
-                        &context,
-                    )
-                })?,
-        )
-    } else {
-        None
-    };
-    let client = WechatPayClient::from_env().map_err(|error| {
-        ApiError::internal(
-            "wechat_pay_not_configured",
-            format!("WeChat Pay is not configured: {error}"),
-            &context,
-        )
-    })?;
-    let out_trade_no = new_out_trade_no(
-        order.data.tenant_id.as_str(),
-        Some(order.data.project_id.as_str()),
-    );
-    let now = now_rfc3339();
-    let mut payment_order = WechatPaymentOrderRecord {
-        out_trade_no: out_trade_no.clone(),
-        tenant_id: order.data.tenant_id.as_str().to_string(),
-        project_id: Some(order.data.project_id.as_str().to_string()),
-        amount_total: order.data.amount_total,
-        currency: "CNY".to_string(),
-        channel: wechat_pay_channel_slug(&request.channel).to_string(),
-        status: "creating".to_string(),
-        trade_state: None,
-        code_url: None,
-        prepay_id: None,
-        transaction_id: None,
-        notification_id: None,
-        created_at: now.clone(),
-        updated_at: now,
-        expires_at: expires_at(30 * 60),
-        paid_at: None,
-        metadata: serde_json::json!({
-            "merchant_product_order_id": order.data.order_id,
-            "card_product_id": order.data.card_product_id,
-            "description": "Card product checkout",
-        }),
-    };
-    state
-        .store
-        .create_wechat_payment_order(payment_order.clone())
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_persist_failed",
-                format!("failed to persist WeChat Pay order: {error}"),
-                &context,
-            )
-        })?;
-    let prepay_request = WechatPayPrepayRequest {
-        tenant_id: order.data.tenant_id.as_str().to_string(),
-        project_id: Some(order.data.project_id.as_str().to_string()),
-        amount_total: order.data.amount_total,
-        currency: "CNY".to_string(),
-        description: format!("Card product {}", order.data.card_product_id.as_str()),
-        channel: request.channel,
-        payer_openid,
-        attach: Some(order.data.order_id.clone()),
-    };
-    let response = match client.create_prepay(prepay_request, &out_trade_no).await {
-        Ok(response) => response,
-        Err(error) => {
-            payment_order.status = "failed".to_string();
-            payment_order.updated_at = now_rfc3339();
-            let _ = state.store.update_wechat_payment_order(payment_order).await;
-            return Err(ApiError::bad_request(
-                "wechat_pay_prepay_failed",
-                format!("WeChat Pay prepay request failed: {error}"),
-                &context,
-            ));
-        }
-    };
-    payment_order.status = "pending".to_string();
-    payment_order.code_url.clone_from(&response.code_url);
-    payment_order.prepay_id.clone_from(&response.prepay_id);
-    payment_order.updated_at = now_rfc3339();
-    state
-        .store
-        .update_wechat_payment_order(payment_order)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_persist_failed",
-                format!("failed to update WeChat Pay order: {error}"),
-                &context,
-            )
-        })?;
-    state
-        .store
-        .attach_merchant_order_prepay(MerchantProductPrepayDraft {
-            order_id: order.data.order_id,
-            out_trade_no,
-            channel: wechat_pay_channel_slug(&response.channel).to_string(),
-        })
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "merchant_order_prepay_attach_failed",
-                format!("failed to attach WeChat prepay to merchant order: {error}"),
-                &context,
-            )
-        })?;
-    Ok(Json(response))
-}
-
-async fn get_merchant_pickup(
-    State(state): State<ControlPlaneState>,
-    Path(pickup_token): Path<String>,
-) -> Result<Json<store::MerchantPickupResponse>, ApiError> {
-    let context = next_request_context();
-    let pickup_token = pickup_token.trim();
-    if pickup_token.is_empty() {
-        return Err(ApiError::bad_request(
-            "pickup_token_required",
-            "pickup_token is required".to_string(),
-            &context,
-        ));
-    }
-    state
-        .store
-        .get_pickup_by_token_hash(&sha256_hex(pickup_token))
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "pickup_unavailable",
-                format!("failed to load pickup: {error}"),
-                &context,
-            )
-        })?
-        .map(Json)
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "pickup_not_found",
-                "pickup token was not found or the order is not fulfilled".to_string(),
-                &context,
-            )
-        })
-}
-
-fn ensure_wechat_buyer(
-    authz: &ControlPlaneAuthorizer,
-    context: &RequestContext,
-) -> Result<(), ApiError> {
-    if authz.authenticated_by() == AuthProvider::Wechat {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden(
-            "wechat_login_required",
-            "merchant product checkout requires WeChat login".to_string(),
-            context,
-        ))
-    }
-}
-
-async fn load_merchant_order_for_buyer(
-    state: &ControlPlaneState,
-    authz: &ControlPlaneAuthorizer,
-    order_id: &str,
-    context: &RequestContext,
-) -> Result<store::MerchantProductOrderResponse, ApiError> {
-    let response = state
-        .store
-        .get_merchant_product_order(order_id)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "merchant_order_unavailable",
-                format!("failed to load merchant product order: {error}"),
-                context,
-            )
-        })?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "merchant_order_not_found",
-                format!("merchant product order `{order_id}` was not found"),
-                context,
-            )
-        })?;
-    if response.data.buyer_user_id != *authz.user_id() {
-        return Err(ApiError::forbidden(
-            "merchant_order_forbidden",
-            "merchant product order belongs to another buyer".to_string(),
-            context,
-        ));
-    }
-    Ok(response)
 }
 
 async fn list_provider_resources(
@@ -2566,15 +2256,23 @@ async fn prepare_delivery_with_actor(
         ));
     }
     let (starts_at, ends_at, code_expires_at) = delivery_timestamps(&request, context)?;
-    let redemption_code = generate_delivery_code("red", context)?;
-    let browser_file_unlock_code = generate_delivery_code("brw", context)?;
-    state
+    let redemption_code = generate_delivery_code(REDEMPTION_CODE_KIND, context)?;
+    let browser_file_unlock_code = generate_delivery_code(BROWSER_FILE_UNLOCK_CODE_KIND, context)?;
+    let enforce_owner_redemption_capacity = request.owner_account_id.is_some();
+    let result = state
         .store
         .prepare_delivery(
             DeliveryPrepareDraft {
                 delivery_id: generate_stable_id("delivery", context)?,
                 tenant_id: request.tenant_id,
                 project_id: request.project_id,
+                owner_account_id: request
+                    .owner_account_id
+                    .as_deref()
+                    .map(|value| validate_opening_owner_account_id(value, context))
+                    .transpose()?
+                    .unwrap_or_else(|| core_domain::DEFAULT_OWNER_ACCOUNT_ID.to_string()),
+                redemption_batch_id: None,
                 provider,
                 operator_id: actor_id,
                 customer_label: request
@@ -2588,6 +2286,7 @@ async fn prepare_delivery_with_actor(
                 starts_at,
                 ends_at,
                 code_expires_at,
+                enforce_owner_redemption_capacity,
             },
             &redemption_code,
             &browser_file_unlock_code,
@@ -2599,7 +2298,20 @@ async fn prepare_delivery_with_actor(
                 format!("failed to prepare delivery: {error}"),
                 context,
             )
-        })
+        })?;
+    match result {
+        DeliveryPrepareResult::Prepared(response) => Ok(*response),
+        DeliveryPrepareResult::OwnerAlreadyIssued {
+            active_count,
+            capacity,
+        } => Err(ApiError::conflict(
+            "delivery_redemption_units_already_issued",
+            format!(
+                "owner_account_id has {active_count} active delivery redemption units; capacity is {capacity}"
+            ),
+            context,
+        )),
+    }
 }
 
 async fn get_delivery(
@@ -2850,7 +2562,7 @@ async fn create_delivery_upload_batch_with_actor(
     let response = state
         .store
         .create_delivery_upload_batch(DeliveryUploadBatchDraft {
-            batch_id: generate_stable_id("dlvup", &context)?,
+            batch_id: generate_stable_id("dlvup", context)?,
             tenant_id: request.tenant_id,
             project_id: request.project_id,
             provider,
@@ -3021,14 +2733,14 @@ async fn redeem_delivery_activation(
 ) -> Result<Json<DeliveryActivationRedeemResponse>, ApiError> {
     let context = next_request_context();
     let redemption_code = request.redemption_code.trim();
-    if delivery_code_format_version_is_valid(redemption_code, "red", "v1") {
+    if delivery_code_format_version_is_valid(redemption_code, REDEMPTION_CODE_KIND, "v1") {
         return Err(ApiError::conflict(
             "delivery_protocol_legacy_unsupported",
             "legacy ku0-red-v1 delivery codes cannot restore remote browser account bundles; generate a new v2 delivery code".to_string(),
             &context,
         ));
     }
-    if !delivery_code_format_is_valid(redemption_code, "red") {
+    if !delivery_code_format_is_valid(redemption_code, REDEMPTION_CODE_KIND) {
         return Err(ApiError::bad_request(
             "redemption_code_invalid",
             "redemption_code must use ku0-red-v2 format".to_string(),
@@ -3079,9 +2791,9 @@ async fn redeem_delivery_activation(
         })?;
     let activation = redeem_result_to_response(result, &context)?;
     let artifact = &activation.data.artifact;
-    if artifact.encryption_protocol != store::DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2
-        || artifact.encryption_version != store::DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2
-        || artifact.secret_kind != store::DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK
+    if artifact.encryption_protocol != DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2
+        || artifact.encryption_version != DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2
+        || artifact.secret_kind != DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK
     {
         return Err(ApiError::conflict(
             "delivery_protocol_legacy_unsupported",
@@ -3094,7 +2806,7 @@ async fn redeem_delivery_activation(
         .store
         .get_delivery_secret_plaintext(
             activation.data.delivery_id.as_str(),
-            store::DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
+            DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
         )
         .await
         .map_err(|error| {
@@ -3253,14 +2965,14 @@ async fn ensure_redemption_code_matches_activation(
     activation: &DeliveryActivationResponse,
     context: &RequestContext,
 ) -> Result<(), ApiError> {
-    if delivery_code_format_version_is_valid(redemption_code, "red", "v1") {
+    if delivery_code_format_version_is_valid(redemption_code, REDEMPTION_CODE_KIND, "v1") {
         return Err(ApiError::conflict(
             "delivery_protocol_legacy_unsupported",
             "legacy ku0-red-v1 delivery codes cannot restore remote browser account bundles; generate a new v2 delivery code".to_string(),
             context,
         ));
     }
-    if !delivery_code_format_is_valid(redemption_code, "red") {
+    if !delivery_code_format_is_valid(redemption_code, REDEMPTION_CODE_KIND) {
         return Err(ApiError::bad_request(
             "redemption_code_invalid",
             "redemption_code must use ku0-red-v2 format".to_string(),
@@ -5106,317 +4818,6 @@ async fn list_renewal_intents(
     Ok(Json(response))
 }
 
-async fn create_wechat_pay_prepay(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Json(request): Json<WechatPayPrepayRequest>,
-) -> Result<Json<WechatPayPrepayResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    validate_wechat_payment_request(&request, &context)?;
-    authz.ensure_manage_tenant(&request.tenant_id, &context)?;
-    if let Some(project_id) = request.project_id.as_deref() {
-        let project = load_project(&state, project_id, &context).await?;
-        ensure_project_matches_tenant(&project, &request.tenant_id, &context)?;
-        authz.ensure_manage_project(&project, &context)?;
-    }
-
-    let client = WechatPayClient::from_env().map_err(|error| {
-        ApiError::internal(
-            "wechat_pay_not_configured",
-            format!("WeChat Pay is not configured: {error}"),
-            &context,
-        )
-    })?;
-    let out_trade_no = new_out_trade_no(&request.tenant_id, request.project_id.as_deref());
-    let now = now_rfc3339();
-    let mut order = WechatPaymentOrderRecord {
-        out_trade_no: out_trade_no.clone(),
-        tenant_id: request.tenant_id.clone(),
-        project_id: request.project_id.clone(),
-        amount_total: request.amount_total,
-        currency: request.currency.clone(),
-        channel: wechat_pay_channel_slug(&request.channel).to_string(),
-        status: "creating".to_string(),
-        trade_state: None,
-        code_url: None,
-        prepay_id: None,
-        transaction_id: None,
-        notification_id: None,
-        created_at: now.clone(),
-        updated_at: now,
-        expires_at: expires_at(30 * 60),
-        paid_at: None,
-        metadata: serde_json::json!({
-            "description": request.description,
-            "attach": request.attach,
-        }),
-    };
-    state
-        .store
-        .create_wechat_payment_order(order.clone())
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_persist_failed",
-                format!("failed to persist WeChat Pay order: {error}"),
-                &context,
-            )
-        })?;
-
-    let response = match client.create_prepay(request, &out_trade_no).await {
-        Ok(response) => response,
-        Err(error) => {
-            order.status = "failed".to_string();
-            order.updated_at = now_rfc3339();
-            order.metadata = serde_json::json!({
-                "failure_stage": "wechat_prepay",
-                "failure_message": error.to_string(),
-            });
-            let _ = state.store.update_wechat_payment_order(order).await;
-            return Err(ApiError::bad_request(
-                "wechat_pay_prepay_failed",
-                format!("WeChat Pay prepay request failed: {error}"),
-                &context,
-            ));
-        }
-    };
-    order.status = "pending".to_string();
-    order.code_url.clone_from(&response.code_url);
-    order.prepay_id.clone_from(&response.prepay_id);
-    order.updated_at = now_rfc3339();
-    state
-        .store
-        .update_wechat_payment_order(order)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_persist_failed",
-                format!("failed to update WeChat Pay order: {error}"),
-                &context,
-            )
-        })?;
-
-    Ok(Json(response))
-}
-
-async fn accept_wechat_pay_notification(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<Value>, ApiError> {
-    let context = next_request_context();
-    let client = WechatPayClient::from_env().map_err(|error| {
-        ApiError::internal(
-            "wechat_pay_not_configured",
-            format!("WeChat Pay is not configured: {error}"),
-            &context,
-        )
-    })?;
-    let wechat_headers = WechatPayHeaders {
-        timestamp: required_header(&headers, "Wechatpay-Timestamp", &context)?,
-        nonce: required_header(&headers, "Wechatpay-Nonce", &context)?,
-        signature: required_header(&headers, "Wechatpay-Signature", &context)?,
-        serial: required_header(&headers, "Wechatpay-Serial", &context)?,
-    };
-    let notification = client
-        .decode_notification(&wechat_headers, &body)
-        .map_err(|error| {
-            ApiError::bad_request(
-                "wechat_pay_notification_invalid",
-                format!("invalid WeChat Pay notification: {error}"),
-                &context,
-            )
-        })?;
-    let out_trade_no = transaction_out_trade_no(&notification.transaction, &context)?;
-    let Some(existing) = state
-        .store
-        .get_wechat_payment_order(&out_trade_no)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_unavailable",
-                format!("failed to load WeChat Pay order: {error}"),
-                &context,
-            )
-        })?
-    else {
-        return Err(ApiError::bad_request(
-            "wechat_pay_order_unknown",
-            format!("WeChat Pay order `{out_trade_no}` is not known"),
-            &context,
-        ));
-    };
-    let updated = apply_wechat_transaction_to_order(
-        existing.data,
-        &notification.transaction,
-        Some(notification.id.clone()),
-        client.app_id(),
-        client.mchid(),
-        &context,
-    )?;
-    let updated_status = updated.status.clone();
-    state
-        .store
-        .update_wechat_payment_order(updated)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_persist_failed",
-                format!("failed to update WeChat Pay order: {error}"),
-                &context,
-            )
-        })?;
-    if updated_status == "paid" {
-        settle_merchant_product_order_for_payment(&state, &out_trade_no, &context).await?;
-    }
-
-    info!(
-        event_type = notification.event_type,
-        notification_id = notification.id,
-        resource_type = notification.resource_type,
-        "accepted WeChat Pay notification"
-    );
-
-    Ok(Json(serde_json::json!({
-        "code": "SUCCESS",
-        "message": "success"
-    })))
-}
-
-async fn get_wechat_payment_order(
-    State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
-    Path(out_trade_no): Path<String>,
-    Query(query): Query<WechatPaymentOrderQuery>,
-) -> Result<Json<WechatPaymentOrderResponse>, ApiError> {
-    let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let order = state
-        .store
-        .get_wechat_payment_order(&out_trade_no)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_order_unavailable",
-                format!("failed to load WeChat Pay order: {error}"),
-                &context,
-            )
-        })?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "wechat_pay_order_not_found",
-                format!("WeChat Pay order `{out_trade_no}` was not found"),
-                &context,
-            )
-        })?;
-    authz.ensure_read_tenant(&order.data.tenant_id, &context)?;
-
-    if query.refresh && !wechat_order_status_is_terminal(&order.data.status) {
-        let client = WechatPayClient::from_env().map_err(|error| {
-            ApiError::internal(
-                "wechat_pay_not_configured",
-                format!("WeChat Pay is not configured: {error}"),
-                &context,
-            )
-        })?;
-        let queried = client.query_order(&out_trade_no).await.map_err(|error| {
-            ApiError::bad_request(
-                "wechat_pay_order_query_failed",
-                format!("WeChat Pay order query failed: {error}"),
-                &context,
-            )
-        })?;
-        let updated = apply_wechat_transaction_to_order(
-            order.data,
-            &queried.transaction,
-            None,
-            client.app_id(),
-            client.mchid(),
-            &context,
-        )?;
-        let updated_status = updated.status.clone();
-        let response = state
-            .store
-            .update_wechat_payment_order(updated)
-            .await
-            .map_err(|error| {
-                ApiError::internal(
-                    "wechat_pay_order_persist_failed",
-                    format!("failed to update WeChat Pay order: {error}"),
-                    &context,
-                )
-            })?;
-        if updated_status == "paid" {
-            settle_merchant_product_order_for_payment(&state, &out_trade_no, &context).await?;
-        }
-        return Ok(Json(response));
-    }
-
-    Ok(Json(order))
-}
-
-async fn settle_merchant_product_order_for_payment(
-    state: &ControlPlaneState,
-    out_trade_no: &str,
-    context: &RequestContext,
-) -> Result<(), ApiError> {
-    let Some(order) = state
-        .store
-        .get_merchant_product_order_by_out_trade_no(out_trade_no)
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "merchant_order_unavailable",
-                format!("failed to load merchant product order for payment: {error}"),
-                context,
-            )
-        })?
-    else {
-        return Ok(());
-    };
-    match state
-        .store
-        .fulfill_merchant_product_order(MerchantProductFulfillmentDraft {
-            order_id: order.data.order_id,
-            activation_id: generate_stable_id("activation", context)?,
-            download_grant_id: generate_stable_id("dlgrant", context)?,
-            download_token: generate_delivery_download_token(context)?,
-            pickup_token: generate_pickup_token(context)?,
-            fulfilled_by: "merchant_product_wechat_pay".to_string(),
-        })
-        .await
-        .map_err(|error| {
-            ApiError::internal(
-                "merchant_order_fulfillment_failed",
-                format!("failed to fulfill merchant product order: {error}"),
-                context,
-            )
-        })? {
-        MerchantProductFulfillmentResult::Fulfilled(response)
-        | MerchantProductFulfillmentResult::AlreadyFulfilled(response) => {
-            let _settled_order_id = response.data.order_id;
-            Ok(())
-        }
-        MerchantProductFulfillmentResult::OrderNotFound => Err(ApiError::not_found(
-            "merchant_order_not_found",
-            "merchant product order was not found during settlement".to_string(),
-            context,
-        )),
-        MerchantProductFulfillmentResult::InventoryNotFound => Err(ApiError::conflict(
-            "merchant_inventory_not_found",
-            "merchant product inventory was not found during settlement".to_string(),
-            context,
-        )),
-        MerchantProductFulfillmentResult::DeliveryActivation(result) => {
-            redeem_result_to_response(result, context).map(|_| ())
-        }
-        MerchantProductFulfillmentResult::DownloadGrant(result) => {
-            download_grant_issue_result_to_response(result, context).map(|_| ())
-        }
-    }
-}
-
 async fn create_route_simulation(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -5530,7 +4931,7 @@ async fn require_session(
 }
 
 #[allow(clippy::result_large_err)]
-fn require_internal_gateway_auth(
+pub(crate) fn require_internal_gateway_auth(
     state: &ControlPlaneState,
     headers: &HeaderMap,
     context: &RequestContext,
@@ -5769,7 +5170,7 @@ fn validate_renewal_expires_at(
     Ok(())
 }
 
-fn validate_delivery_provider(
+pub(crate) fn validate_delivery_provider(
     provider: &str,
     context: &RequestContext,
 ) -> Result<String, ApiError> {
@@ -5785,7 +5186,7 @@ fn validate_delivery_provider(
     }
 }
 
-fn validate_delivery_service_days(
+pub(crate) fn validate_delivery_service_days(
     service_days: u32,
     context: &RequestContext,
 ) -> Result<(), ApiError> {
@@ -5800,7 +5201,7 @@ fn validate_delivery_service_days(
     }
 }
 
-fn delivery_service_kind(
+pub(crate) fn delivery_service_kind(
     service_kind: Option<&str>,
     context: &RequestContext,
 ) -> Result<String, ApiError> {
@@ -5823,7 +5224,7 @@ fn delivery_service_kind(
     }
 }
 
-fn delivery_timestamps(
+pub(crate) fn delivery_timestamps(
     request: &CreateDeliveryRequest,
     context: &RequestContext,
 ) -> Result<(String, String, String), ApiError> {
@@ -5885,7 +5286,10 @@ fn format_delivery_timestamp(timestamp: OffsetDateTime) -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn generate_stable_id(prefix: &str, context: &RequestContext) -> Result<String, ApiError> {
+pub(crate) fn generate_stable_id(
+    prefix: &str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
     let random_segment = random_id_segment(
         STABLE_ID_RANDOM_LEN,
         "id_generation_failed",
@@ -5895,7 +5299,7 @@ fn generate_stable_id(prefix: &str, context: &RequestContext) -> Result<String, 
     Ok(format!("{prefix}_{random_segment}"))
 }
 
-fn generate_delivery_code(
+pub(crate) fn generate_delivery_code(
     kind_segment: &str,
     context: &RequestContext,
 ) -> Result<String, ApiError> {
@@ -6288,6 +5692,11 @@ fn delivery_upload_item_drafts(
         }
         let payload = decode_artifact_payload(&item.payload_base64, context)?;
         validate_artifact_payload_size(payload.len(), context)?;
+        let encryption_protocol =
+            delivery_artifact_encryption_protocol(item.encryption_protocol.as_deref(), context)?;
+        let encryption_version =
+            delivery_artifact_encryption_version(item.encryption_version.as_deref(), context)?;
+        let secret_kind = delivery_artifact_secret_kind(item.secret_kind.as_deref(), context)?;
         let payload_sha256 = format!("sha256:{}", hex_sha256(&payload));
         if !seen.insert((delivery_id.to_string(), payload_sha256)) {
             return Err(ApiError::bad_request(
@@ -6307,6 +5716,9 @@ fn delivery_upload_item_drafts(
                 item.carrier_valid_until.as_deref(),
                 context,
             )?,
+            encryption_protocol,
+            encryption_version,
+            secret_kind,
             ciphertext: payload,
         });
     }
@@ -6327,6 +5739,12 @@ fn delivery_upload_source_sha256(
         hasher.update(item.row_index.to_string().as_bytes());
         hasher.update(b":");
         hasher.update(item.delivery_id.as_bytes());
+        hasher.update(b":");
+        hasher.update(item.encryption_protocol.as_bytes());
+        hasher.update(b":");
+        hasher.update(item.encryption_version.as_bytes());
+        hasher.update(b":");
+        hasher.update(item.secret_kind.as_bytes());
         hasher.update(b":");
         hasher.update(hex_sha256(&item.ciphertext).as_bytes());
     }
@@ -6772,22 +6190,6 @@ fn generate_delivery_download_token(context: &RequestContext) -> Result<String, 
     ))
 }
 
-fn generate_pickup_token(context: &RequestContext) -> Result<String, ApiError> {
-    let rng = rand::SystemRandom::new();
-    let mut token_bytes = [0_u8; 32];
-    rand::SecureRandom::fill(&rng, &mut token_bytes).map_err(|_| {
-        ApiError::internal(
-            "pickup_token_generation_failed",
-            "failed to generate merchant pickup token".to_string(),
-            context,
-        )
-    })?;
-    Ok(format!(
-        "pickup_{}",
-        BASE64_URL_SAFE_NO_PAD.encode(token_bytes)
-    ))
-}
-
 fn download_content_disposition(file_name: &str) -> String {
     let sanitized = file_name
         .chars()
@@ -7072,7 +6474,7 @@ fn slug_fragment(value: &str) -> String {
     }
 }
 
-async fn load_project(
+pub(crate) async fn load_project(
     state: &ControlPlaneState,
     project_id: &str,
     context: &RequestContext,
@@ -7909,153 +7311,6 @@ fn required_header(
         })
 }
 
-fn validate_wechat_payment_request(
-    request: &WechatPayPrepayRequest,
-    context: &RequestContext,
-) -> Result<(), ApiError> {
-    let min_amount = std::env::var("WECHAT_PAY_MIN_AMOUNT_TOTAL")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(1);
-    let max_amount = std::env::var("WECHAT_PAY_MAX_AMOUNT_TOTAL")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(1_000_000);
-
-    if request.amount_total < min_amount || request.amount_total > max_amount {
-        return Err(ApiError::bad_request(
-            "wechat_pay_amount_invalid",
-            format!("amount_total must be between {min_amount} and {max_amount} cents"),
-            context,
-        ));
-    }
-    if request.description.trim().is_empty() || request.description.chars().count() > 127 {
-        return Err(ApiError::bad_request(
-            "wechat_pay_description_invalid",
-            "description must be present and at most 127 characters".to_string(),
-            context,
-        ));
-    }
-
-    Ok(())
-}
-
-const fn wechat_pay_channel_slug(channel: &wechat_pay::WechatPayChannel) -> &'static str {
-    match channel {
-        wechat_pay::WechatPayChannel::Native => "native",
-        wechat_pay::WechatPayChannel::Jsapi => "jsapi",
-    }
-}
-
-fn wechat_order_status_is_terminal(status: &str) -> bool {
-    matches!(status, "paid" | "closed" | "failed" | "refunded")
-}
-
-fn transaction_out_trade_no(
-    transaction: &Value,
-    context: &RequestContext,
-) -> Result<String, ApiError> {
-    transaction
-        .get("out_trade_no")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "wechat_pay_transaction_invalid",
-                "WeChat Pay transaction is missing out_trade_no".to_string(),
-                context,
-            )
-        })
-}
-
-fn transaction_string(transaction: &Value, key: &str) -> Option<String> {
-    transaction
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-}
-
-fn transaction_amount_total(transaction: &Value) -> Option<u32> {
-    transaction
-        .get("amount")
-        .and_then(|amount| amount.get("total"))
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-}
-
-fn apply_wechat_transaction_to_order(
-    mut order: WechatPaymentOrderRecord,
-    transaction: &Value,
-    notification_id: Option<String>,
-    expected_app_id: &str,
-    expected_mchid: &str,
-    context: &RequestContext,
-) -> Result<WechatPaymentOrderRecord, ApiError> {
-    let out_trade_no = transaction_out_trade_no(transaction, context)?;
-    if out_trade_no != order.out_trade_no {
-        return Err(ApiError::bad_request(
-            "wechat_pay_transaction_mismatch",
-            "WeChat Pay transaction does not match the stored order".to_string(),
-            context,
-        ));
-    }
-
-    if transaction_string(transaction, "appid").as_deref() != Some(expected_app_id)
-        || transaction_string(transaction, "mchid").as_deref() != Some(expected_mchid)
-    {
-        return Err(ApiError::bad_request(
-            "wechat_pay_merchant_mismatch",
-            "WeChat Pay transaction appid or mchid does not match configuration".to_string(),
-            context,
-        ));
-    }
-
-    if transaction_amount_total(transaction) != Some(order.amount_total) {
-        return Err(ApiError::bad_request(
-            "wechat_pay_amount_mismatch",
-            "WeChat Pay transaction amount does not match the stored order".to_string(),
-            context,
-        ));
-    }
-
-    let trade_state =
-        transaction_string(transaction, "trade_state").unwrap_or_else(|| "UNKNOWN".to_string());
-    order.trade_state = Some(trade_state.clone());
-    order.transaction_id = transaction_string(transaction, "transaction_id");
-    if notification_id.is_some() {
-        order.notification_id = notification_id;
-    }
-    order.updated_at = now_rfc3339();
-    order.metadata = serde_json::json!({
-        "trade_state_desc": transaction_string(transaction, "trade_state_desc"),
-        "bank_type": transaction_string(transaction, "bank_type"),
-        "success_time": transaction_string(transaction, "success_time"),
-        "payer_openid_sha256": transaction
-            .get("payer")
-            .and_then(|payer| payer.get("openid"))
-            .and_then(Value::as_str)
-            .map(sha256_hex),
-    });
-
-    match trade_state.as_str() {
-        "SUCCESS" => {
-            order.status = "paid".to_string();
-            order.paid_at =
-                transaction_string(transaction, "success_time").or_else(|| Some(now_rfc3339()));
-        }
-        "CLOSED" | "REVOKED" | "PAYERROR" => {
-            order.status = "failed".to_string();
-        }
-        _ => {
-            order.status = "pending".to_string();
-        }
-    }
-
-    Ok(order)
-}
-
 fn sha256_hex(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
@@ -8304,6 +7559,8 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
+    mod delivery_redemption_tests;
+
     use super::{
         ControlPlaneState, OAuthProviderConfig, RequestContext, app_with_state,
         ensure_oauth_payload_ok, generate_stable_id, oauth_authorization_url_from_config,
@@ -8706,6 +7963,9 @@ mod tests {
                         "file_name": "async-upload.hcbrowser",
                         "content_type": "application/octet-stream",
                         "carrier_valid_until": crate::expires_at(86_400 * 90),
+                        "encryption_protocol": "delivery_account_bundle_v2",
+                        "encryption_version": "2",
+                        "secret_kind": "browser_file_unlock_code",
                         "payload_base64": super::BASE64.encode(payload)
                     }]
                 })),
@@ -12210,6 +11470,9 @@ mod tests {
                     "items": [{
                         "delivery_id": "delivery_missing",
                         "row_index": 1,
+                        "encryption_protocol": "delivery_account_bundle_v2",
+                        "encryption_version": "2",
+                        "secret_kind": "browser_file_unlock_code",
                         "payload_base64": super::BASE64.encode(b"encrypted-missing")
                     }]
                 })),
@@ -12568,6 +11831,8 @@ mod tests {
                     delivery_id: "delivery_expired_redemption".to_string(),
                     tenant_id: TenantId::parse("tenant_acme").unwrap(),
                     project_id: ProjectId::parse("proj_core").unwrap(),
+                    owner_account_id: core_domain::DEFAULT_OWNER_ACCOUNT_ID.to_string(),
+                    redemption_batch_id: None,
                     provider: "chatgpt".to_string(),
                     operator_id: "user_ops".to_string(),
                     customer_label: Some("Expired code".to_string()),
@@ -12576,6 +11841,7 @@ mod tests {
                     starts_at: crate::now_rfc3339(),
                     ends_at: crate::expires_at(86_400),
                     code_expires_at: "2000-01-01T00:00:00Z".to_string(),
+                    enforce_owner_redemption_capacity: false,
                 },
                 expired_code,
                 expired_unlock_code,

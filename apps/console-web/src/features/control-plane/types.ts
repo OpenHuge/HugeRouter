@@ -352,7 +352,7 @@ export type MerchantProductOrderView = {
   outTradeNo?: string;
   amountTotal: number;
   currency: "CNY";
-  channel?: "native" | "jsapi" | string;
+  channel?: string;
   status: string;
   pickupToken?: string;
   activationId?: string;

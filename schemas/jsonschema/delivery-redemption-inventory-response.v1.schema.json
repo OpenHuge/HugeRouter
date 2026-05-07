@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeliveryRedemptionInventoryResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "$ref": "#/definitions/DeliveryRedemptionInventory"
+    }
+  },
+  "definitions": {
+    "DeliveryRedemptionInventory": {
+      "type": "object",
+      "required": [
+        "owners",
+        "units"
+      ],
+      "properties": {
+        "owners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeliveryRedemptionInventoryOwner"
+          }
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeliveryRedemptionInventoryUnit"
+          }
+        }
+      }
+    },
+    "DeliveryRedemptionInventoryOwner": {
+      "type": "object",
+      "required": [
+        "active_count",
+        "capacity",
+        "owner_account_id",
+        "project_id",
+        "status",
+        "tenant_id"
+      ],
+      "properties": {
+        "active_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "capacity": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "owner_account_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        }
+      }
+    },
+    "DeliveryRedemptionInventoryUnit": {
+      "type": "object",
+      "required": [
+        "code_id",
+        "code_last_four",
+        "code_prefix",
+        "created_at",
+        "delivery_id",
+        "expires_at",
+        "owner_account_id",
+        "project_id",
+        "status",
+        "tenant_id",
+        "updated_at"
+      ],
+      "properties": {
+        "code_id": {
+          "type": "string"
+        },
+        "code_last_four": {
+          "type": "string"
+        },
+        "code_prefix": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "owner_account_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "redemption_batch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revoked_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "used_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

@@ -4,6 +4,7 @@
       "delivery_id": "delivery_10001",
       "tenant_id": "tenant_acme",
       "project_id": "proj_core",
+      "owner_account_id": "acct_acme_owner",
       "provider": "chatgpt",
       "status": "prepared",
       "operator_id": "user_ops_admin",

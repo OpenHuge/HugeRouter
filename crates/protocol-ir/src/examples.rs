@@ -637,6 +637,7 @@ pub fn sample_create_delivery_request() -> CreateDeliveryRequest {
         tenant_id: TenantId::parse("tenant_acme").unwrap(),
         project_id: ProjectId::parse("proj_core").unwrap(),
         provider: "chatgpt".to_string(),
+        owner_account_id: Some("acct_acme_owner".to_string()),
         customer_label: Some("Acme May browser handoff".to_string()),
         service_kind: Some("manual_browser_account".to_string()),
         service_days: 30,
@@ -933,6 +934,9 @@ pub fn sample_create_delivery_upload_batch_request() -> CreateDeliveryUploadBatc
             file_name: Some("acme-may.hcbrowser".to_string()),
             content_type: Some("application/octet-stream".to_string()),
             carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+            encryption_protocol: Some("delivery_account_bundle_v2".to_string()),
+            encryption_version: Some("2".to_string()),
+            secret_kind: Some("browser_file_unlock_code".to_string()),
             payload_base64: "ZW5jcnlwdGVkLWhjYnJvd3Nlci1idW5kbGU=".to_string(),
         }],
     }
@@ -986,6 +990,9 @@ fn sample_delivery_upload_batch_item() -> DeliveryUploadBatchItem {
         file_name: Some("acme-may.hcbrowser".to_string()),
         content_type: "application/octet-stream".to_string(),
         carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+        encryption_protocol: "delivery_account_bundle_v2".to_string(),
+        encryption_version: "2".to_string(),
+        secret_kind: "browser_file_unlock_code".to_string(),
         payload_sha256: "sha256:8f1b8a0ad5d63d57d8a0cce1e0a6a4d6f4af0c9d61678f2f48a88e3dd2dbe4f9"
             .to_string(),
         size_bytes: 27,
@@ -1047,12 +1054,14 @@ fn sample_delivery_service_segment() -> DeliveryServiceSegment {
     }
 }
 
-fn sample_delivery_projection() -> DeliveryProjection {
+pub fn sample_delivery_projection() -> DeliveryProjection {
     DeliveryProjection {
         delivery: Delivery {
             delivery_id: "delivery_10001".to_string(),
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: ProjectId::parse("proj_core").unwrap(),
+            owner_account_id: "acct_acme_owner".to_string(),
+            redemption_batch_id: None,
             provider: "chatgpt".to_string(),
             status: "prepared".to_string(),
             operator_id: "user_ops_admin".to_string(),

@@ -1,0 +1,128 @@
+{
+  "data": {
+    "owners": [
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "active_count": 8,
+        "capacity": 8,
+        "status": "full"
+      }
+    ],
+    "units": [
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10001",
+        "code_id": "dlvcode_delivery_10001_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "1-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10002",
+        "code_id": "dlvcode_delivery_10002_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "2-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10003",
+        "code_id": "dlvcode_delivery_10003_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "3-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10004",
+        "code_id": "dlvcode_delivery_10004_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "4-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10005",
+        "code_id": "dlvcode_delivery_10005_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "5-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10006",
+        "code_id": "dlvcode_delivery_10006_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "6-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10007",
+        "code_id": "dlvcode_delivery_10007_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "7-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      },
+      {
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "owner_account_id": "acct_acme_owner",
+        "redemption_batch_id": "dlvbatch_10000",
+        "delivery_id": "delivery_10008",
+        "code_id": "dlvcode_delivery_10008_redemption",
+        "code_prefix": "ku0-red-v2-260505...",
+        "code_last_four": "8-7b",
+        "status": "active",
+        "expires_at": "2026-06-04T10:00:00Z",
+        "created_at": "2026-05-05T10:00:00Z",
+        "updated_at": "2026-05-05T10:00:00Z"
+      }
+    ]
+  }
+}

@@ -22,10 +22,13 @@
         "content_type",
         "created_at",
         "delivery_id",
+        "encryption_protocol",
+        "encryption_version",
         "item_id",
         "payload_sha256",
         "project_id",
         "row_index",
+        "secret_kind",
         "size_bytes",
         "status",
         "tenant_id",
@@ -60,6 +63,12 @@
         "delivery_id": {
           "type": "string"
         },
+        "encryption_protocol": {
+          "type": "string"
+        },
+        "encryption_version": {
+          "type": "string"
+        },
         "error_code": {
           "type": [
             "string",
@@ -91,6 +100,9 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
+        },
+        "secret_kind": {
+          "type": "string"
         },
         "size_bytes": {
           "type": "integer",

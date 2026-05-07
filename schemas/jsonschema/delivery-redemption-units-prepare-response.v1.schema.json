@@ -1,17 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "DeliveryPrepareResponse",
+  "title": "PrepareDeliveryRedemptionUnitsResponse",
   "type": "object",
   "required": [
-    "data",
-    "one_time_codes"
+    "data"
   ],
   "properties": {
     "data": {
-      "$ref": "#/definitions/DeliveryProjection"
-    },
-    "one_time_codes": {
-      "$ref": "#/definitions/DeliveryOneTimeCodes"
+      "$ref": "#/definitions/DeliveryRedemptionUnitsBatch"
     }
   },
   "definitions": {
@@ -256,6 +252,65 @@
         },
         "entitlement": {
           "$ref": "#/definitions/DeliveryEntitlement"
+        }
+      }
+    },
+    "DeliveryRedemptionUnit": {
+      "type": "object",
+      "required": [
+        "delivery",
+        "index",
+        "one_time_codes",
+        "unit_id"
+      ],
+      "properties": {
+        "delivery": {
+          "$ref": "#/definitions/DeliveryProjection"
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "one_time_codes": {
+          "$ref": "#/definitions/DeliveryOneTimeCodes"
+        },
+        "unit_id": {
+          "type": "string"
+        }
+      }
+    },
+    "DeliveryRedemptionUnitsBatch": {
+      "type": "object",
+      "required": [
+        "batch_id",
+        "capacity",
+        "owner_account_id",
+        "unit_count",
+        "units"
+      ],
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "capacity": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "owner_account_id": {
+          "type": "string"
+        },
+        "unit_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeliveryRedemptionUnit"
+          }
         }
       }
     },

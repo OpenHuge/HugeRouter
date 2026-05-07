@@ -10,7 +10,7 @@ import {
   UiText,
 } from "@huge-router/ui-kit";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ensureAuthenticatedSession } from "../features/auth/auth-routing";
 import { getConsoleDataService } from "../features/control-plane/service";
 import type {
@@ -63,19 +63,7 @@ function CheckoutRoute() {
     }
   }, [navigate, order.pickupToken, order.status]);
 
-  useEffect(() => {
-    if (!prepay?.outTradeNo && !order.outTradeNo) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void refreshOrder(true);
-    }, 3000);
-
-    return () => window.clearInterval(timer);
-  }, [order.outTradeNo, prepay?.outTradeNo]);
-
-  async function refreshOrder(refreshPayment: boolean) {
+  const refreshOrder = useCallback(async (refreshPayment: boolean) => {
     try {
       const outTradeNo = prepay?.outTradeNo ?? order.outTradeNo;
       if (refreshPayment && outTradeNo) {
@@ -92,7 +80,19 @@ function CheckoutRoute() {
           : "Unable to refresh payment status.",
       );
     }
-  }
+  }, [order.orderId, order.outTradeNo, prepay?.outTradeNo]);
+
+  useEffect(() => {
+    if (!prepay?.outTradeNo && !order.outTradeNo) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshOrder(true);
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [order.outTradeNo, prepay?.outTradeNo, refreshOrder]);
 
   async function createPrepay() {
     setIsCreatingPrepay(true);
