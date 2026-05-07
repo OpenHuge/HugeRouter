@@ -79,7 +79,9 @@ use utoipa::OpenApi;
             CreateRenewalIntentRequest,
             Delivery,
             DeliveryActivation,
+            DeliveryActivationRedeemResponse,
             DeliveryActivationResponse,
+            DeliveryActivationRestoreInfo,
             DeliveryArtifact,
             DeliveryArtifactResponse,
             DeliveryArtifactsResponse,
@@ -520,7 +522,7 @@ const fn list_delivery_upload_batch_items() {}
     tag = "deliveries",
     request_body = RedeemDeliveryRequest,
     responses(
-        (status = 200, description = "Redeem a delivery code into an activation fact without download authorization", body = DeliveryActivationResponse),
+        (status = 200, description = "Redeem a delivery code into an activation fact with one-time restore secret", body = DeliveryActivationRedeemResponse),
         (status = 400, description = "Normalized error", body = ErrorEnvelope),
         (status = 403, description = "Normalized error", body = ErrorEnvelope),
         (status = 404, description = "Normalized error", body = ErrorEnvelope),

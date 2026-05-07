@@ -30,6 +30,9 @@
       "storage_backend": "db_inline",
       "storage_ref": "artifact_10002",
       "carrier_valid_until": "2026-05-20T10:00:00Z",
+      "encryption_protocol": "delivery_account_bundle_v2",
+      "encryption_version": "2",
+      "secret_kind": "browser_file_unlock_code",
       "created_by": "user_ops_admin",
       "created_at": "2026-05-05T10:05:00Z",
       "updated_at": "2026-05-05T10:05:00Z"

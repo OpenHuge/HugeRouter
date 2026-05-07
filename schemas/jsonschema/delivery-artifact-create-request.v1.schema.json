@@ -24,6 +24,18 @@
         "null"
       ]
     },
+    "encryption_protocol": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "encryption_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "file_name": {
       "type": [
         "string",
@@ -32,6 +44,12 @@
     },
     "payload_base64": {
       "type": "string"
+    },
+    "secret_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   }
 }

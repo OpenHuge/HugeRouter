@@ -649,8 +649,8 @@ pub fn sample_delivery_prepare_response() -> DeliveryPrepareResponse {
     DeliveryPrepareResponse {
         data: sample_delivery_projection(),
         one_time_codes: DeliveryOneTimeCodes {
-            redemption_code: "ku0-red-v1-260505-a1b2-c3d4e5f6g7h8-7b".to_string(),
-            browser_file_unlock_code: "ku0-brw-v1-260505-j9k0-l1m2n3p4q5r6-76".to_string(),
+            redemption_code: "ku0-red-v2-260505-a1b2-c3d4e5f6g7h8-7b".to_string(),
+            browser_file_unlock_code: "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r6-76".to_string(),
         },
     }
 }
@@ -667,6 +667,9 @@ pub fn sample_create_delivery_artifact_request() -> CreateDeliveryArtifactReques
         file_name: Some("acme-may.hcbrowser".to_string()),
         content_type: Some("application/octet-stream".to_string()),
         carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+        encryption_protocol: Some("delivery_account_bundle_v2".to_string()),
+        encryption_version: Some("2".to_string()),
+        secret_kind: Some("browser_file_unlock_code".to_string()),
         payload_base64: "ZW5jcnlwdGVkLWhjYnJvd3Nlci1wYXlsb2Fk".to_string(),
     }
 }
@@ -685,7 +688,7 @@ pub fn sample_delivery_artifacts_response() -> DeliveryArtifactsResponse {
 
 pub fn sample_redeem_delivery_request() -> RedeemDeliveryRequest {
     RedeemDeliveryRequest {
-        redemption_code: "ku0-red-v1-260505-a1b2-c3d4e5f6g7h8-7b".to_string(),
+        redemption_code: "ku0-red-v2-260505-a1b2-c3d4e5f6g7h8-7b".to_string(),
     }
 }
 
@@ -709,6 +712,18 @@ pub fn sample_delivery_activation_response() -> DeliveryActivationResponse {
             revoked_at: None,
             revoked_by: None,
             revoke_reason: None,
+        },
+    }
+}
+
+pub fn sample_delivery_activation_redeem_response() -> DeliveryActivationRedeemResponse {
+    DeliveryActivationRedeemResponse {
+        data: sample_delivery_activation_response().data,
+        restore: DeliveryActivationRestoreInfo {
+            artifact_import_secret: "ku0-brw-v2-260505-j9k0-l1m2n3p4q5r6-76".to_string(),
+            secret_kind: "browser_file_unlock_code".to_string(),
+            encryption_protocol: "delivery_account_bundle_v2".to_string(),
+            encryption_version: "2".to_string(),
         },
     }
 }
@@ -1055,9 +1070,9 @@ fn sample_delivery_projection() -> DeliveryProjection {
                 code_id: "dlvcode_delivery_10001_redemption".to_string(),
                 delivery_id: "delivery_10001".to_string(),
                 code_type: "redemption_code".to_string(),
-                code_prefix: "ku0-red-v1-260505...".to_string(),
+                code_prefix: "ku0-red-v2-260505...".to_string(),
                 code_last_four: "8-7b".to_string(),
-                format_version: "ku0-red-v1".to_string(),
+                format_version: "ku0-red-v2".to_string(),
                 status: "active".to_string(),
                 expires_at: "2026-06-04T10:00:00Z".to_string(),
                 used_at: None,
@@ -1070,9 +1085,9 @@ fn sample_delivery_projection() -> DeliveryProjection {
                 code_id: "dlvcode_delivery_10001_browser_unlock".to_string(),
                 delivery_id: "delivery_10001".to_string(),
                 code_type: "browser_file_unlock_code".to_string(),
-                code_prefix: "ku0-brw-v1-260505...".to_string(),
+                code_prefix: "ku0-brw-v2-260505...".to_string(),
                 code_last_four: "6-76".to_string(),
-                format_version: "ku0-brw-v1".to_string(),
+                format_version: "ku0-brw-v2".to_string(),
                 status: "active".to_string(),
                 expires_at: "2026-06-04T10:00:00Z".to_string(),
                 used_at: None,
@@ -1117,6 +1132,9 @@ fn sample_delivery_artifact() -> DeliveryArtifact {
         storage_backend: "db_inline".to_string(),
         storage_ref: "artifact_10002".to_string(),
         carrier_valid_until: Some("2026-05-20T10:00:00Z".to_string()),
+        encryption_protocol: "delivery_account_bundle_v2".to_string(),
+        encryption_version: "2".to_string(),
+        secret_kind: "browser_file_unlock_code".to_string(),
         created_by: "user_ops_admin".to_string(),
         created_at: "2026-05-05T10:05:00Z".to_string(),
         updated_at: "2026-05-05T10:05:00Z".to_string(),

@@ -29,12 +29,18 @@ pub struct CreateMerchantShopRequest {
 pub struct CreateCardProductRequest {
     pub card_product_id: String,
     pub merchant_shop_id: String,
+    pub project_id: Option<String>,
     pub title: String,
     pub description: String,
     pub inventory_count: u32,
     pub face_value_usd: String,
     pub retail_price_usd: String,
+    pub retail_price_cny_total: Option<u32>,
     pub supports_trial: bool,
+    #[serde(default)]
+    pub sale_enabled: bool,
+    #[serde(default)]
+    pub delivery_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,18 +162,34 @@ pub async fn create_card_product(
             )
         })?;
 
+    let project_id = request
+        .project_id
+        .as_deref()
+        .map(core_domain::ProjectId::parse)
+        .transpose()
+        .map_err(|error| {
+            bad_request_error(
+                "validation_failed",
+                format!("invalid project_id: {error}"),
+                &context,
+            )
+        })?;
+
     let product = CardProduct {
         card_product_id,
         tenant_id,
         merchant_shop_id,
+        project_id,
         title: request.title,
         description: request.description,
         status: CardProductStatus::Active,
         inventory_count: request.inventory_count,
         face_value_usd: request.face_value_usd,
         retail_price_usd: request.retail_price_usd,
+        retail_price_cny_total: request.retail_price_cny_total,
         delivery_kind: CardDeliveryKind::DirectSecret,
         supports_trial: request.supports_trial,
+        sale_enabled: request.sale_enabled,
         version: 1,
         created_at: now_rfc3339(),
         updated_at: now_rfc3339(),
@@ -178,6 +200,13 @@ pub async fn create_card_product(
         .create_card_product(product)
         .await
         .map_err(|error| merchant_mutation_error(&error, &context))?;
+    if !request.delivery_ids.is_empty() {
+        state
+            .store
+            .bind_card_product_deliveries(created.card_product_id.as_str(), request.delivery_ids)
+            .await
+            .map_err(|error| merchant_mutation_error(&error, &context))?;
+    }
 
     Ok(Json(created))
 }

@@ -174,8 +174,11 @@
         "created_at",
         "created_by",
         "delivery_id",
+        "encryption_protocol",
+        "encryption_version",
         "project_id",
         "provider",
+        "secret_kind",
         "sha256",
         "size_bytes",
         "status",
@@ -210,6 +213,12 @@
         "delivery_id": {
           "type": "string"
         },
+        "encryption_protocol": {
+          "type": "string"
+        },
+        "encryption_version": {
+          "type": "string"
+        },
         "file_name": {
           "type": [
             "string",
@@ -239,6 +248,9 @@
             "string",
             "null"
           ]
+        },
+        "secret_kind": {
+          "type": "string"
         },
         "sha256": {
           "type": "string"

@@ -155,6 +155,9 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         schema_artifact::<RedeemDeliveryRequest>(
             "schemas/jsonschema/delivery-activation-redeem-request.v1.schema.json",
         )?,
+        schema_artifact::<DeliveryActivationRedeemResponse>(
+            "schemas/jsonschema/delivery-activation-redeem-response.v1.schema.json",
+        )?,
         schema_artifact::<DeliveryActivationResponse>(
             "schemas/jsonschema/delivery-activation-response.v1.schema.json",
         )?,
@@ -284,6 +287,7 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
     let delivery_upload_batch_response = sample_delivery_upload_batch_response();
     let delivery_upload_batch_items_response = sample_delivery_upload_batch_items_response();
     let delivery_activation_request = sample_redeem_delivery_request();
+    let delivery_activation_redeem_response = sample_delivery_activation_redeem_response();
     let delivery_activation_response = sample_delivery_activation_response();
     let delivery_download_grant_request = sample_create_delivery_download_grant_request();
     let delivery_download_grant_issue_response = sample_delivery_download_grant_issue_response();
@@ -468,6 +472,10 @@ fn example_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         example_artifact(
             "schemas/examples/control-plane/delivery-activation-redeem.request.json",
             &delivery_activation_request,
+        )?,
+        example_artifact(
+            "schemas/examples/control-plane/delivery-activation-redeem.response.json",
+            &delivery_activation_redeem_response,
         )?,
         example_artifact(
             "schemas/examples/control-plane/delivery-activation.response.json",

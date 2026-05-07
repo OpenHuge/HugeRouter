@@ -101,6 +101,15 @@ CREATE TABLE IF NOT EXISTS delivery_codes (
 CREATE INDEX IF NOT EXISTS delivery_codes_delivery_idx
     ON delivery_codes (delivery_id, code_type);
 
+CREATE TABLE IF NOT EXISTS delivery_secret_plaintexts (
+    delivery_id TEXT NOT NULL,
+    code_type TEXT NOT NULL,
+    secret_plaintext TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    used_at TEXT NULL,
+    PRIMARY KEY (delivery_id, code_type)
+);
+
 CREATE TABLE IF NOT EXISTS delivery_entitlements (
     entitlement_id TEXT PRIMARY KEY,
     delivery_id TEXT NOT NULL UNIQUE,
@@ -346,6 +355,55 @@ CREATE TABLE IF NOT EXISTS card_products (
     tenant_id TEXT NOT NULL,
     merchant_shop_id TEXT NOT NULL,
     payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS merchant_product_inventory (
+    inventory_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    merchant_shop_id TEXT NOT NULL,
+    card_product_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    reserved_order_id TEXT NULL,
+    sold_order_id TEXT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS merchant_product_inventory_product_status_idx
+    ON merchant_product_inventory (card_product_id, status, updated_at);
+
+CREATE TABLE IF NOT EXISTS merchant_product_orders (
+    order_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    merchant_shop_id TEXT NOT NULL,
+    card_product_id TEXT NOT NULL,
+    inventory_id TEXT NOT NULL,
+    inventory_delivery_id TEXT NOT NULL,
+    buyer_user_id TEXT NOT NULL,
+    out_trade_no TEXT NULL UNIQUE,
+    amount_total BIGINT NOT NULL,
+    currency TEXT NOT NULL,
+    channel TEXT NULL,
+    status TEXT NOT NULL,
+    pickup_token_hash TEXT NULL UNIQUE,
+    activation_id TEXT NULL,
+    download_grant_id TEXT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS merchant_product_orders_buyer_idx
+    ON merchant_product_orders (buyer_user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS wechat_user_openids (
+    user_id TEXT PRIMARY KEY,
+    openid TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS trial_connections (

@@ -12,7 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ShopsSlugRouteImport } from './routes/shops.$slug'
+import { Route as PickupPickupTokenRouteImport } from './routes/pickup.$pickupToken'
 import { Route as LoginCallbackRouteImport } from './routes/login.callback'
+import { Route as CheckoutOrderIdRouteImport } from './routes/checkout.$orderId'
 import { Route as AppUsageRouteImport } from './routes/app.usage'
 import { Route as AppSnapshotsRouteImport } from './routes/app.snapshots'
 import { Route as AppRoutesRouteImport } from './routes/app.routes'
@@ -41,10 +44,25 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShopsSlugRoute = ShopsSlugRouteImport.update({
+  id: '/shops/$slug',
+  path: '/shops/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PickupPickupTokenRoute = PickupPickupTokenRouteImport.update({
+  id: '/pickup/$pickupToken',
+  path: '/pickup/$pickupToken',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginCallbackRoute = LoginCallbackRouteImport.update({
   id: '/callback',
   path: '/callback',
   getParentRoute: () => LoginRoute,
+} as any)
+const CheckoutOrderIdRoute = CheckoutOrderIdRouteImport.update({
+  id: '/checkout/$orderId',
+  path: '/checkout/$orderId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppUsageRoute = AppUsageRouteImport.update({
   id: '/usage',
@@ -122,7 +140,10 @@ export interface FileRoutesByFullPath {
   '/app/routes': typeof AppRoutesRoute
   '/app/snapshots': typeof AppSnapshotsRoute
   '/app/usage': typeof AppUsageRoute
+  '/checkout/$orderId': typeof CheckoutOrderIdRoute
   '/login/callback': typeof LoginCallbackRoute
+  '/pickup/$pickupToken': typeof PickupPickupTokenRoute
+  '/shops/$slug': typeof ShopsSlugRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
@@ -140,7 +161,10 @@ export interface FileRoutesByTo {
   '/app/routes': typeof AppRoutesRoute
   '/app/snapshots': typeof AppSnapshotsRoute
   '/app/usage': typeof AppUsageRoute
+  '/checkout/$orderId': typeof CheckoutOrderIdRoute
   '/login/callback': typeof LoginCallbackRoute
+  '/pickup/$pickupToken': typeof PickupPickupTokenRoute
+  '/shops/$slug': typeof ShopsSlugRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
@@ -159,7 +183,10 @@ export interface FileRoutesById {
   '/app/routes': typeof AppRoutesRoute
   '/app/snapshots': typeof AppSnapshotsRoute
   '/app/usage': typeof AppUsageRoute
+  '/checkout/$orderId': typeof CheckoutOrderIdRoute
   '/login/callback': typeof LoginCallbackRoute
+  '/pickup/$pickupToken': typeof PickupPickupTokenRoute
+  '/shops/$slug': typeof ShopsSlugRoute
   '/admin/tenants/$tenantId': typeof AdminTenantsTenantIdRoute
   '/app/route-diagnostics/$routePolicyId': typeof AppRouteDiagnosticsRoutePolicyIdRoute
 }
@@ -179,7 +206,10 @@ export interface FileRouteTypes {
     | '/app/routes'
     | '/app/snapshots'
     | '/app/usage'
+    | '/checkout/$orderId'
     | '/login/callback'
+    | '/pickup/$pickupToken'
+    | '/shops/$slug'
     | '/admin/tenants/$tenantId'
     | '/app/route-diagnostics/$routePolicyId'
   fileRoutesByTo: FileRoutesByTo
@@ -197,7 +227,10 @@ export interface FileRouteTypes {
     | '/app/routes'
     | '/app/snapshots'
     | '/app/usage'
+    | '/checkout/$orderId'
     | '/login/callback'
+    | '/pickup/$pickupToken'
+    | '/shops/$slug'
     | '/admin/tenants/$tenantId'
     | '/app/route-diagnostics/$routePolicyId'
   id:
@@ -215,7 +248,10 @@ export interface FileRouteTypes {
     | '/app/routes'
     | '/app/snapshots'
     | '/app/usage'
+    | '/checkout/$orderId'
     | '/login/callback'
+    | '/pickup/$pickupToken'
+    | '/shops/$slug'
     | '/admin/tenants/$tenantId'
     | '/app/route-diagnostics/$routePolicyId'
   fileRoutesById: FileRoutesById
@@ -224,6 +260,9 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRouteWithChildren
+  CheckoutOrderIdRoute: typeof CheckoutOrderIdRoute
+  PickupPickupTokenRoute: typeof PickupPickupTokenRoute
+  ShopsSlugRoute: typeof ShopsSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -249,12 +288,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/shops/$slug': {
+      id: '/shops/$slug'
+      path: '/shops/$slug'
+      fullPath: '/shops/$slug'
+      preLoaderRoute: typeof ShopsSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pickup/$pickupToken': {
+      id: '/pickup/$pickupToken'
+      path: '/pickup/$pickupToken'
+      fullPath: '/pickup/$pickupToken'
+      preLoaderRoute: typeof PickupPickupTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login/callback': {
       id: '/login/callback'
       path: '/callback'
       fullPath: '/login/callback'
       preLoaderRoute: typeof LoginCallbackRouteImport
       parentRoute: typeof LoginRoute
+    }
+    '/checkout/$orderId': {
+      id: '/checkout/$orderId'
+      path: '/checkout/$orderId'
+      fullPath: '/checkout/$orderId'
+      preLoaderRoute: typeof CheckoutOrderIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/app/usage': {
       id: '/app/usage'
@@ -407,6 +467,9 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRouteWithChildren,
+  CheckoutOrderIdRoute: CheckoutOrderIdRoute,
+  PickupPickupTokenRoute: PickupPickupTokenRoute,
+  ShopsSlugRoute: ShopsSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

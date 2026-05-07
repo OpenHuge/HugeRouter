@@ -938,6 +938,12 @@ pub struct CreateDeliveryArtifactRequest {
     pub content_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carrier_valid_until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_kind: Option<String>,
     pub payload_base64: String,
 }
 
@@ -960,6 +966,9 @@ pub struct DeliveryArtifact {
     pub storage_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carrier_valid_until: Option<String>,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+    pub secret_kind: String,
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
@@ -983,6 +992,20 @@ pub struct DeliveryArtifactResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct DeliveryArtifactsResponse {
     pub data: Vec<DeliveryArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryActivationRestoreInfo {
+    pub artifact_import_secret: String,
+    pub secret_kind: String,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryActivationRedeemResponse {
+    pub data: DeliveryActivation,
+    pub restore: DeliveryActivationRestoreInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

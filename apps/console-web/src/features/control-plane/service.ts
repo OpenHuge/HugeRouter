@@ -26,6 +26,10 @@ import type {
   BillingDashboardData,
   CardProductView,
   ConfigSnapshotView,
+  MerchantPickupView,
+  MerchantProductOrderView,
+  MerchantProductPrepayResult,
+  MerchantPublicShopView,
   MerchantShopView,
   MerchantWorkspaceData,
   OpeningGrantCreateResult,
@@ -82,6 +86,18 @@ export type ConsoleDataService = {
   ) => Promise<WechatPaymentOrderView>;
   getRouteDiagnostics: (routePolicyId: string) => Promise<RouteDiagnosticsView>;
   getMerchantWorkspace: () => Promise<MerchantWorkspaceData>;
+  getPublicShop: (slug: string) => Promise<MerchantPublicShopView>;
+  createMerchantProductOrder: (
+    cardProductId: string,
+  ) => Promise<MerchantProductOrderView>;
+  getMerchantProductOrder: (
+    orderId: string,
+  ) => Promise<MerchantProductOrderView>;
+  createMerchantProductOrderWechatPrepay: (
+    orderId: string,
+    channel: "native" | "jsapi",
+  ) => Promise<MerchantProductPrepayResult>;
+  getMerchantPickup: (pickupToken: string) => Promise<MerchantPickupView>;
   getReplayCapsule: (replayCapsuleId: string) => Promise<ReplayCapsuleView>;
   getTenantDetail: (tenantId: string) => Promise<TenantDetail>;
   listProviderResources: () => Promise<ProviderResource[]>;
@@ -154,11 +170,15 @@ export type ConsoleDataService = {
   createCardProduct: (input: {
     cardProductId: string;
     merchantShopId: string;
+    projectId?: string;
     title: string;
     description: string;
     inventoryCount: number;
     faceValueUsd: string;
     retailPriceUsd: string;
+    retailPriceCnyTotal?: number;
+    saleEnabled?: boolean;
+    deliveryIds?: string[];
     supportsTrial: boolean;
   }) => Promise<CardProductView>;
   createTrialConnection: (input: {
@@ -357,7 +377,7 @@ function booleanOrUndefined(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function toControlPlaneUrl(path: string) {
+export function toControlPlaneUrl(path: string) {
   if (!CONTROL_PLANE_BASE_URL) {
     return path;
   }
@@ -2139,6 +2159,29 @@ const defaultConsoleDataService: ConsoleDataService = {
 
   async getMerchantWorkspace() {
     return merchantService.getMerchantWorkspace();
+  },
+
+  async getPublicShop(slug) {
+    return merchantService.getPublicShop(slug);
+  },
+
+  async createMerchantProductOrder(cardProductId) {
+    return merchantService.createMerchantProductOrder(cardProductId);
+  },
+
+  async getMerchantProductOrder(orderId) {
+    return merchantService.getMerchantProductOrder(orderId);
+  },
+
+  async createMerchantProductOrderWechatPrepay(orderId, channel) {
+    return merchantService.createMerchantProductOrderWechatPrepay(
+      orderId,
+      channel,
+    );
+  },
+
+  async getMerchantPickup(pickupToken) {
+    return merchantService.getMerchantPickup(pickupToken);
   },
 
   async getReplayCapsule(replayCapsuleId) {

@@ -405,6 +405,81 @@ describe("console data service", () => {
           recentEvaluations: [],
         });
       },
+      getPublicShop() {
+        return Promise.resolve({
+          products: [],
+          shop: {
+            createdAt: "2026-04-22T00:00:00Z",
+            displayName: "Override Shop",
+            fulfillmentMode: "auto_card_secret",
+            merchantShopId: "mshop_override",
+            slug: "override-shop",
+            status: "active",
+            updatedAt: "2026-04-22T00:00:00Z",
+            version: 1,
+          },
+        });
+      },
+      createMerchantProductOrder() {
+        return Promise.resolve({
+          amountTotal: 100,
+          buyerUserId: "user_override",
+          cardProductId: "cardprod_override",
+          createdAt: "2026-04-22T00:00:00Z",
+          currency: "CNY",
+          inventoryDeliveryId: "delivery_override",
+          merchantShopId: "mshop_override",
+          orderId: "morder_override",
+          projectId: "proj_core",
+          status: "created",
+          tenantId: "tenant_override",
+          updatedAt: "2026-04-22T00:00:00Z",
+        });
+      },
+      getMerchantProductOrder() {
+        return Promise.resolve({
+          amountTotal: 100,
+          buyerUserId: "user_override",
+          cardProductId: "cardprod_override",
+          createdAt: "2026-04-22T00:00:00Z",
+          currency: "CNY",
+          inventoryDeliveryId: "delivery_override",
+          merchantShopId: "mshop_override",
+          orderId: "morder_override",
+          projectId: "proj_core",
+          status: "created",
+          tenantId: "tenant_override",
+          updatedAt: "2026-04-22T00:00:00Z",
+        });
+      },
+      createMerchantProductOrderWechatPrepay() {
+        return Promise.resolve({
+          appId: "wx_app_override",
+          channel: "native",
+          codeUrl: "weixin://wxpay/bizpayurl?pr=override",
+          mchid: "1900000001",
+          outTradeNo: "hr_override",
+        });
+      },
+      getMerchantPickup() {
+        return Promise.resolve({
+          downloadToken: "dlt_override",
+          order: {
+            amountTotal: 100,
+            buyerUserId: "user_override",
+            cardProductId: "cardprod_override",
+            createdAt: "2026-04-22T00:00:00Z",
+            currency: "CNY",
+            inventoryDeliveryId: "delivery_override",
+            merchantShopId: "mshop_override",
+            orderId: "morder_override",
+            projectId: "proj_core",
+            status: "fulfilled",
+            tenantId: "tenant_override",
+            updatedAt: "2026-04-22T00:00:00Z",
+          },
+        });
+      },
       getReplayCapsule() {
         return Promise.resolve({
           replayCapsuleId: "replay_override",

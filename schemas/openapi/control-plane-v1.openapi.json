@@ -837,11 +837,11 @@
         },
         "responses": {
           "200": {
-            "description": "Redeem a delivery code into an activation fact without download authorization",
+            "description": "Redeem a delivery code into an activation fact with one-time restore secret",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeliveryActivationResponse"
+                  "$ref": "#/components/schemas/DeliveryActivationRedeemResponse"
                 }
               }
             }
@@ -3151,6 +3151,18 @@
               "null"
             ]
           },
+          "encryption_protocol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "encryption_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "file_name": {
             "type": [
               "string",
@@ -3159,6 +3171,12 @@
           },
           "payload_base64": {
             "type": "string"
+          },
+          "secret_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -3500,6 +3518,21 @@
           }
         }
       },
+      "DeliveryActivationRedeemResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "restore"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryActivation"
+          },
+          "restore": {
+            "$ref": "#/components/schemas/DeliveryActivationRestoreInfo"
+          }
+        }
+      },
       "DeliveryActivationResponse": {
         "type": "object",
         "required": [
@@ -3508,6 +3541,29 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DeliveryActivation"
+          }
+        }
+      },
+      "DeliveryActivationRestoreInfo": {
+        "type": "object",
+        "required": [
+          "artifact_import_secret",
+          "secret_kind",
+          "encryption_protocol",
+          "encryption_version"
+        ],
+        "properties": {
+          "artifact_import_secret": {
+            "type": "string"
+          },
+          "encryption_protocol": {
+            "type": "string"
+          },
+          "encryption_version": {
+            "type": "string"
+          },
+          "secret_kind": {
+            "type": "string"
           }
         }
       },
@@ -3527,6 +3583,9 @@
           "sha256",
           "storage_backend",
           "storage_ref",
+          "encryption_protocol",
+          "encryption_version",
+          "secret_kind",
           "created_by",
           "created_at",
           "updated_at"
@@ -3554,6 +3613,12 @@
             "type": "string"
           },
           "delivery_id": {
+            "type": "string"
+          },
+          "encryption_protocol": {
+            "type": "string"
+          },
+          "encryption_version": {
             "type": "string"
           },
           "file_name": {
@@ -3585,6 +3650,9 @@
               "string",
               "null"
             ]
+          },
+          "secret_kind": {
+            "type": "string"
           },
           "sha256": {
             "type": "string"

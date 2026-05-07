@@ -1,13 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "DeliveryActivationResponse",
+  "title": "DeliveryActivationRedeemResponse",
   "type": "object",
   "required": [
-    "data"
+    "data",
+    "restore"
   ],
   "properties": {
     "data": {
       "$ref": "#/definitions/DeliveryActivation"
+    },
+    "restore": {
+      "$ref": "#/definitions/DeliveryActivationRestoreInfo"
     }
   },
   "definitions": {
@@ -88,6 +92,29 @@
           "$ref": "#/definitions/TenantId"
         },
         "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "DeliveryActivationRestoreInfo": {
+      "type": "object",
+      "required": [
+        "artifact_import_secret",
+        "encryption_protocol",
+        "encryption_version",
+        "secret_kind"
+      ],
+      "properties": {
+        "artifact_import_secret": {
+          "type": "string"
+        },
+        "encryption_protocol": {
+          "type": "string"
+        },
+        "encryption_version": {
+          "type": "string"
+        },
+        "secret_kind": {
           "type": "string"
         }
       }

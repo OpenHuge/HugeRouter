@@ -109,8 +109,8 @@ pub const DELIVERY_CODE_TYPE_REDEMPTION: &str = "redemption_code";
 pub const DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK: &str = "browser_file_unlock_code";
 pub const DELIVERY_CODE_STATUS_ACTIVE: &str = "active";
 pub const DELIVERY_CODE_STATUS_USED: &str = "used";
-pub const DELIVERY_CODE_FORMAT_REDEMPTION_V1: &str = "ku0-red-v1";
-pub const DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V1: &str = "ku0-brw-v1";
+pub const DELIVERY_CODE_FORMAT_REDEMPTION_V2: &str = "ku0-red-v2";
+pub const DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V2: &str = "ku0-brw-v2";
 pub const DELIVERY_ENTITLEMENT_STATUS_ACTIVE: &str = "active";
 pub const DELIVERY_ENTITLEMENT_STATUS_PENDING_ACTIVATION: &str = "pending_activation";
 pub const DELIVERY_ENTITLEMENT_STATUS_REVOKED: &str = "revoked";
@@ -122,6 +122,8 @@ pub const DELIVERY_ARTIFACT_STATUS_SUPERSEDED: &str = "superseded";
 pub const DELIVERY_ARTIFACT_STATUS_REVOKED: &str = "revoked";
 pub const DELIVERY_ARTIFACT_STORAGE_BACKEND_DB_INLINE: &str = "db_inline";
 pub const DELIVERY_ARTIFACT_MAX_BYTES: usize = 16 * 1024 * 1024;
+pub const DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2: &str = "delivery_account_bundle_v2";
+pub const DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2: &str = "2";
 pub const DELIVERY_ACTIVATION_STATUS_ACTIVATED: &str = "activated";
 pub const DELIVERY_ACTIVATION_SOURCE_REDEMPTION_CODE: &str = "redemption_code";
 pub const DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE: &str = "active";
@@ -148,6 +150,12 @@ pub const DELIVERY_UPLOAD_ITEM_STATUS_ACCEPTED: &str = "accepted";
 pub const DELIVERY_UPLOAD_ITEM_STATUS_DUPLICATE: &str = "duplicate";
 pub const DELIVERY_UPLOAD_ITEM_STATUS_REJECTED: &str = "rejected";
 pub const DELIVERY_UPLOAD_ITEM_STATUS_FAILED: &str = "failed";
+pub const MERCHANT_INVENTORY_STATUS_AVAILABLE: &str = "available";
+pub const MERCHANT_INVENTORY_STATUS_RESERVED: &str = "reserved";
+pub const MERCHANT_INVENTORY_STATUS_SOLD: &str = "sold";
+pub const MERCHANT_ORDER_STATUS_CREATED: &str = "created";
+pub const MERCHANT_ORDER_STATUS_PAYMENT_PENDING: &str = "payment_pending";
+pub const MERCHANT_ORDER_STATUS_FULFILLED: &str = "fulfilled";
 const PROVIDER_CATALOG: &[(AuthProvider, &str, &str)] = &[
     (
         AuthProvider::Email,
@@ -197,6 +205,9 @@ pub struct MemoryStore {
     config_snapshots: Vec<ConfigSnapshot>,
     merchant_shops: Vec<MerchantShop>,
     card_products: Vec<CardProduct>,
+    merchant_product_inventory: Vec<MerchantProductInventoryRecord>,
+    merchant_product_orders: Vec<MerchantProductOrderRecord>,
+    wechat_user_openids: HashMap<String, String>,
     trial_connections: Vec<TrialConnection>,
     relay_evaluations: Vec<RelayEvaluation>,
     replay_capsules: HashMap<String, ReplayCapsule>,
@@ -217,6 +228,7 @@ pub struct MemoryStore {
     opening_grants: Vec<OpeningGrantRecord>,
     deliveries: Vec<DeliveryRecord>,
     delivery_codes: Vec<DeliveryCodeRecord>,
+    delivery_secret_plaintexts: HashMap<String, String>,
     delivery_entitlements: Vec<DeliveryEntitlementRecord>,
     delivery_artifacts: Vec<DeliveryArtifactRecord>,
     delivery_activations: Vec<DeliveryActivationRecord>,
@@ -331,6 +343,9 @@ pub struct DeliveryArtifactDraft {
     pub file_name: Option<String>,
     pub content_type: String,
     pub carrier_valid_until: Option<String>,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+    pub secret_kind: String,
     pub ciphertext: Vec<u8>,
     pub created_by: String,
 }
@@ -354,6 +369,12 @@ pub struct DeliveryArtifactRecord {
     pub storage_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carrier_valid_until: Option<String>,
+    #[serde(default = "default_delivery_account_bundle_encryption_protocol")]
+    pub encryption_protocol: String,
+    #[serde(default = "default_delivery_account_bundle_encryption_version")]
+    pub encryption_version: String,
+    #[serde(default = "default_delivery_artifact_secret_kind")]
+    pub secret_kind: String,
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
@@ -671,6 +692,155 @@ pub struct WechatPaymentOrderRecord {
 #[derive(Debug, Clone, Serialize)]
 pub struct WechatPaymentOrderResponse {
     pub data: WechatPaymentOrderRecord,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MerchantProductInventoryRecord {
+    pub inventory_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub merchant_shop_id: MerchantShopId,
+    pub card_product_id: CardProductId,
+    pub delivery_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reserved_order_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sold_order_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MerchantProductOrderRecord {
+    pub order_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub merchant_shop_id: MerchantShopId,
+    pub card_product_id: CardProductId,
+    pub inventory_id: String,
+    pub inventory_delivery_id: String,
+    pub buyer_user_id: UserId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_trade_no: Option<String>,
+    pub amount_total: u32,
+    pub currency: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pickup_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pickup_token_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_grant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_token: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantProductOrderResponse {
+    pub data: MerchantProductOrderPublicView,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantProductOrderPublicView {
+    pub order_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub merchant_shop_id: MerchantShopId,
+    pub card_product_id: CardProductId,
+    pub inventory_delivery_id: String,
+    pub buyer_user_id: UserId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_trade_no: Option<String>,
+    pub amount_total: u32,
+    pub currency: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pickup_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_grant_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantPublicShopResponse {
+    pub data: MerchantPublicShop,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantPublicShop {
+    pub shop: MerchantShop,
+    pub products: Vec<MerchantPublicProduct>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantPublicProduct {
+    pub product: CardProduct,
+    pub available_inventory_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantPickupResponse {
+    pub data: MerchantPickupPayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantPickupPayload {
+    pub order: MerchantProductOrderPublicView,
+    pub download_token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MerchantProductOrderDraft {
+    pub order_id: String,
+    pub card_product_id: String,
+    pub buyer_user_id: UserId,
+}
+
+#[derive(Debug, Clone)]
+pub struct MerchantProductPrepayDraft {
+    pub order_id: String,
+    pub out_trade_no: String,
+    pub channel: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MerchantProductFulfillmentDraft {
+    pub order_id: String,
+    pub activation_id: String,
+    pub download_grant_id: String,
+    pub download_token: String,
+    pub pickup_token: String,
+    pub fulfilled_by: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum MerchantProductOrderCreateResult {
+    Created(MerchantProductOrderResponse),
+    ProductNotFound,
+    ProductNotSaleable,
+    InventoryUnavailable,
+}
+
+#[derive(Debug, Clone)]
+pub enum MerchantProductFulfillmentResult {
+    Fulfilled(MerchantProductOrderResponse),
+    AlreadyFulfilled(MerchantProductOrderResponse),
+    OrderNotFound,
+    InventoryNotFound,
+    DeliveryActivation(DeliveryRedeemResult),
+    DownloadGrant(DeliveryDownloadGrantIssueResult),
 }
 
 #[derive(Debug, Clone)]
@@ -1266,6 +1436,9 @@ impl DeliveryArtifactRecord {
             storage_backend: self.storage_backend.clone(),
             storage_ref: self.storage_ref.clone(),
             carrier_valid_until: self.carrier_valid_until.clone(),
+            encryption_protocol: self.encryption_protocol.clone(),
+            encryption_version: self.encryption_version.clone(),
+            secret_kind: self.secret_kind.clone(),
             created_by: self.created_by.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
@@ -1930,6 +2103,7 @@ impl SeedData {
             card_product_id: CardProductId::parse("cardprod_acme_trial").unwrap(),
             tenant_id: tenant_acme.tenant_id.clone(),
             merchant_shop_id: merchant_shop.merchant_shop_id.clone(),
+            project_id: Some(proj_core.project_id.clone()),
             title: "Claude Trial Pack".to_string(),
             description: "Starter batch for relay verification and low-risk onboarding."
                 .to_string(),
@@ -1937,8 +2111,10 @@ impl SeedData {
             inventory_count: 32,
             face_value_usd: "1.00".to_string(),
             retail_price_usd: "1.99".to_string(),
+            retail_price_cny_total: Some(199),
             delivery_kind: CardDeliveryKind::DirectSecret,
             supports_trial: true,
+            sale_enabled: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -2164,6 +2340,8 @@ impl MemoryStore {
             config_snapshots: seed.config_snapshots,
             merchant_shops: seed.merchant_shops,
             card_products: seed.card_products,
+            merchant_product_inventory: Vec::new(),
+            merchant_product_orders: Vec::new(),
             trial_connections: seed.trial_connections,
             relay_evaluations: seed.relay_evaluations,
             replay_capsules: seed
@@ -2179,6 +2357,7 @@ impl MemoryStore {
             provider_subject_to_user_id,
             sessions: HashMap::new(),
             login_flows: HashMap::new(),
+            wechat_user_openids: HashMap::new(),
             route_receipts: seed
                 .route_receipts
                 .into_iter()
@@ -2192,6 +2371,7 @@ impl MemoryStore {
             opening_grants: Vec::new(),
             deliveries: Vec::new(),
             delivery_codes: Vec::new(),
+            delivery_secret_plaintexts: HashMap::new(),
             delivery_entitlements: Vec::new(),
             delivery_artifacts: Vec::new(),
             delivery_activations: Vec::new(),
@@ -2663,6 +2843,157 @@ impl StoreMode {
                 Ok(product)
             }
             Self::Postgres(store) => store.create_card_product(&product).await,
+        }
+    }
+
+    pub async fn bind_card_product_deliveries(
+        &self,
+        card_product_id: &str,
+        delivery_ids: Vec<String>,
+    ) -> Result<Vec<MerchantProductInventoryRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                bind_memory_card_product_deliveries(&mut store, card_product_id, delivery_ids)
+            }
+            Self::Postgres(store) => {
+                store
+                    .bind_card_product_deliveries(card_product_id, delivery_ids)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_public_shop_by_slug(
+        &self,
+        slug: &str,
+    ) -> Result<Option<MerchantPublicShopResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(public_shop_from_memory(&store, slug))
+            }
+            Self::Postgres(store) => store.get_public_shop_by_slug(slug).await,
+        }
+    }
+
+    pub async fn create_merchant_product_order(
+        &self,
+        draft: MerchantProductOrderDraft,
+    ) -> Result<MerchantProductOrderCreateResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(create_memory_merchant_product_order(&mut store, draft))
+            }
+            Self::Postgres(store) => store.create_merchant_product_order(draft).await,
+        }
+    }
+
+    pub async fn get_merchant_product_order(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<MerchantProductOrderResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .merchant_product_orders
+                    .iter()
+                    .find(|order| order.order_id == order_id)
+                    .map(merchant_product_order_response))
+            }
+            Self::Postgres(store) => store.get_merchant_product_order(order_id).await,
+        }
+    }
+
+    pub async fn get_merchant_product_order_by_out_trade_no(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<MerchantProductOrderResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .merchant_product_orders
+                    .iter()
+                    .find(|order| order.out_trade_no.as_deref() == Some(out_trade_no))
+                    .map(merchant_product_order_response))
+            }
+            Self::Postgres(store) => {
+                store
+                    .get_merchant_product_order_by_out_trade_no(out_trade_no)
+                    .await
+            }
+        }
+    }
+
+    pub async fn attach_merchant_order_prepay(
+        &self,
+        draft: MerchantProductPrepayDraft,
+    ) -> Result<Option<MerchantProductOrderResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(attach_memory_merchant_order_prepay(&mut store, draft))
+            }
+            Self::Postgres(store) => store.attach_merchant_order_prepay(draft).await,
+        }
+    }
+
+    pub async fn fulfill_merchant_product_order(
+        &self,
+        draft: MerchantProductFulfillmentDraft,
+    ) -> Result<MerchantProductFulfillmentResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(fulfill_memory_merchant_product_order(&mut store, draft))
+            }
+            Self::Postgres(store) => store.fulfill_merchant_product_order(draft).await,
+        }
+    }
+
+    pub async fn get_pickup_by_token_hash(
+        &self,
+        pickup_token_hash: &str,
+    ) -> Result<Option<MerchantPickupResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .merchant_product_orders
+                    .iter()
+                    .find(|order| order.pickup_token_hash.as_deref() == Some(pickup_token_hash))
+                    .and_then(merchant_pickup_response))
+            }
+            Self::Postgres(store) => store.get_pickup_by_token_hash(pickup_token_hash).await,
+        }
+    }
+
+    pub async fn upsert_wechat_user_openid(&self, user_id: &UserId, openid: &str) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                store
+                    .write()
+                    .expect("memory store write lock")
+                    .wechat_user_openids
+                    .insert(user_id.as_str().to_string(), openid.to_string());
+                Ok(())
+            }
+            Self::Postgres(store) => store.upsert_wechat_user_openid(user_id, openid).await,
+        }
+    }
+
+    pub async fn get_wechat_user_openid(&self, user_id: &UserId) -> Result<Option<String>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .wechat_user_openids
+                .get(user_id.as_str())
+                .cloned()),
+            Self::Postgres(store) => store.get_wechat_user_openid(user_id).await,
         }
     }
 
@@ -3160,6 +3491,13 @@ impl StoreMode {
                 let mut store = store.write().expect("memory store write lock");
                 store.deliveries.push(prepared.delivery.clone());
                 store.delivery_codes.extend(prepared.codes.clone());
+                store.delivery_secret_plaintexts.insert(
+                    delivery_secret_key(
+                        &prepared.delivery.delivery_id,
+                        DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
+                    ),
+                    browser_file_unlock_code.to_string(),
+                );
                 store
                     .delivery_entitlements
                     .push(prepared.entitlement.clone());
@@ -3191,6 +3529,27 @@ impl StoreMode {
                     .map(|data| DeliveryResponse { data }))
             }
             Self::Postgres(store) => store.get_delivery(delivery_id).await,
+        }
+    }
+
+    pub async fn get_delivery_secret_plaintext(
+        &self,
+        delivery_id: &str,
+        code_type: &str,
+    ) -> Result<Option<String>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_secret_plaintexts
+                    .get(&delivery_secret_key(delivery_id, code_type))
+                    .cloned())
+            }
+            Self::Postgres(store) => {
+                store
+                    .get_delivery_secret_plaintext(delivery_id, code_type)
+                    .await
+            }
         }
     }
 
@@ -5788,6 +6147,22 @@ impl PostgresStore {
         }
 
         sqlx::query(
+            "INSERT INTO delivery_secret_plaintexts
+                (delivery_id, code_type, secret_plaintext, created_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (delivery_id, code_type) DO UPDATE
+                SET secret_plaintext = EXCLUDED.secret_plaintext,
+                    created_at = EXCLUDED.created_at,
+                    used_at = NULL",
+        )
+        .bind(&prepared.delivery.delivery_id)
+        .bind(DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK)
+        .bind(browser_file_unlock_code)
+        .bind(&prepared.delivery.created_at)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
             "INSERT INTO delivery_entitlements
                 (entitlement_id, delivery_id, status, ends_at, payload, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
@@ -5849,6 +6224,23 @@ impl PostgresStore {
         Ok(Some(DeliveryResponse {
             data: delivery_projection(&delivery, &codes, &entitlement),
         }))
+    }
+
+    async fn get_delivery_secret_plaintext(
+        &self,
+        delivery_id: &str,
+        code_type: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query(
+            "SELECT secret_plaintext
+               FROM delivery_secret_plaintexts
+              WHERE delivery_id = $1 AND code_type = $2",
+        )
+        .bind(delivery_id)
+        .bind(code_type)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get("secret_plaintext")))
     }
 
     async fn revoke_delivery(
@@ -9129,6 +9521,581 @@ impl PostgresStore {
         .await?;
         Ok(row.map(|row| row.get::<Json<ConfigSnapshot>, _>("payload").0))
     }
+
+    async fn bind_card_product_deliveries(
+        &self,
+        card_product_id: &str,
+        delivery_ids: Vec<String>,
+    ) -> Result<Vec<MerchantProductInventoryRecord>> {
+        let product = sqlx::query("SELECT payload FROM card_products WHERE card_product_id = $1")
+            .bind(card_product_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| anyhow!("card_product_not_found"))?
+            .get::<Json<CardProduct>, _>("payload")
+            .0;
+        let mut records = Vec::new();
+        for delivery_id in delivery_ids {
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM merchant_product_inventory WHERE delivery_id = $1",
+            )
+            .bind(&delivery_id)
+            .fetch_one(&self.pool)
+            .await?;
+            if exists > 0 {
+                continue;
+            }
+            let delivery = sqlx::query("SELECT payload FROM deliveries WHERE delivery_id = $1")
+                .bind(&delivery_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| anyhow!("delivery_not_found"))?
+                .get::<Json<DeliveryRecord>, _>("payload")
+                .0;
+            if delivery.tenant_id != product.tenant_id
+                || product
+                    .project_id
+                    .as_ref()
+                    .is_some_and(|project_id| project_id != &delivery.project_id)
+            {
+                return Err(anyhow!("delivery_scope_mismatch"));
+            }
+            let entitlement =
+                sqlx::query("SELECT payload FROM delivery_entitlements WHERE delivery_id = $1")
+                    .bind(&delivery_id)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .ok_or_else(|| anyhow!("delivery_entitlement_not_found"))?
+                    .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+                    .0;
+            if delivery.effective_status(&entitlement) != DELIVERY_STATUS_PREPARED {
+                return Err(anyhow!("delivery_not_sale_ready"));
+            }
+            let artifact_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM delivery_artifacts WHERE delivery_id = $1 AND status = $2",
+            )
+            .bind(&delivery_id)
+            .bind(DELIVERY_ARTIFACT_STATUS_ACTIVE)
+            .fetch_one(&self.pool)
+            .await?;
+            if artifact_count == 0 {
+                return Err(anyhow!("delivery_artifact_missing"));
+            }
+            let now = now_rfc3339();
+            let record = MerchantProductInventoryRecord {
+                inventory_id: format!("minv_{}", next_id_suffix()),
+                tenant_id: product.tenant_id.clone(),
+                project_id: delivery.project_id.clone(),
+                merchant_shop_id: product.merchant_shop_id.clone(),
+                card_product_id: product.card_product_id.clone(),
+                delivery_id: delivery_id.clone(),
+                status: MERCHANT_INVENTORY_STATUS_AVAILABLE.to_string(),
+                reserved_order_id: None,
+                sold_order_id: None,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            sqlx::query(
+                "INSERT INTO merchant_product_inventory
+                    (inventory_id, tenant_id, project_id, merchant_shop_id, card_product_id, delivery_id, status, reserved_order_id, sold_order_id, payload, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            )
+            .bind(&record.inventory_id)
+            .bind(record.tenant_id.as_str())
+            .bind(record.project_id.as_str())
+            .bind(record.merchant_shop_id.as_str())
+            .bind(record.card_product_id.as_str())
+            .bind(&record.delivery_id)
+            .bind(&record.status)
+            .bind(record.reserved_order_id.as_deref())
+            .bind(record.sold_order_id.as_deref())
+            .bind(Json(&record))
+            .bind(&record.created_at)
+            .bind(&record.updated_at)
+            .execute(&self.pool)
+            .await?;
+            records.push(record);
+        }
+        Ok(records)
+    }
+
+    async fn get_public_shop_by_slug(
+        &self,
+        slug: &str,
+    ) -> Result<Option<MerchantPublicShopResponse>> {
+        let Some(shop_row) =
+            sqlx::query("SELECT payload FROM merchant_shops WHERE slug = $1 LIMIT 1")
+                .bind(slug)
+                .fetch_optional(&self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+        let shop = shop_row.get::<Json<MerchantShop>, _>("payload").0;
+        if shop.status != MerchantShopStatus::Active {
+            return Ok(None);
+        }
+        let product_rows = sqlx::query(
+            "SELECT payload FROM card_products WHERE tenant_id = $1 AND merchant_shop_id = $2",
+        )
+        .bind(shop.tenant_id.as_str())
+        .bind(shop.merchant_shop_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        let mut products = Vec::new();
+        for row in product_rows {
+            let product = row.get::<Json<CardProduct>, _>("payload").0;
+            if product.status != CardProductStatus::Active
+                || !product.sale_enabled
+                || product.retail_price_cny_total.unwrap_or_default() == 0
+            {
+                continue;
+            }
+            let available_inventory_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM merchant_product_inventory WHERE card_product_id = $1 AND status = $2",
+            )
+            .bind(product.card_product_id.as_str())
+            .bind(MERCHANT_INVENTORY_STATUS_AVAILABLE)
+            .fetch_one(&self.pool)
+            .await?;
+            products.push(MerchantPublicProduct {
+                product,
+                available_inventory_count: usize::try_from(available_inventory_count).unwrap_or(0),
+            });
+        }
+        Ok(Some(MerchantPublicShopResponse {
+            data: MerchantPublicShop { shop, products },
+        }))
+    }
+
+    async fn create_merchant_product_order(
+        &self,
+        draft: MerchantProductOrderDraft,
+    ) -> Result<MerchantProductOrderCreateResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(product_row) =
+            sqlx::query("SELECT payload FROM card_products WHERE card_product_id = $1 FOR UPDATE")
+                .bind(&draft.card_product_id)
+                .fetch_optional(&mut *tx)
+                .await?
+        else {
+            tx.commit().await?;
+            return Ok(MerchantProductOrderCreateResult::ProductNotFound);
+        };
+        let product = product_row.get::<Json<CardProduct>, _>("payload").0;
+        let Some(amount_total) = product.retail_price_cny_total else {
+            tx.commit().await?;
+            return Ok(MerchantProductOrderCreateResult::ProductNotSaleable);
+        };
+        if !product.sale_enabled || product.status != CardProductStatus::Active || amount_total == 0
+        {
+            tx.commit().await?;
+            return Ok(MerchantProductOrderCreateResult::ProductNotSaleable);
+        }
+        let Some(inventory_row) = sqlx::query(
+            "SELECT payload FROM merchant_product_inventory
+              WHERE card_product_id = $1 AND status = $2
+              ORDER BY created_at
+              LIMIT 1
+              FOR UPDATE SKIP LOCKED",
+        )
+        .bind(product.card_product_id.as_str())
+        .bind(MERCHANT_INVENTORY_STATUS_AVAILABLE)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(MerchantProductOrderCreateResult::InventoryUnavailable);
+        };
+        let mut inventory = inventory_row
+            .get::<Json<MerchantProductInventoryRecord>, _>("payload")
+            .0;
+        let now = now_rfc3339();
+        let order = MerchantProductOrderRecord {
+            order_id: draft.order_id,
+            tenant_id: inventory.tenant_id.clone(),
+            project_id: inventory.project_id.clone(),
+            merchant_shop_id: inventory.merchant_shop_id.clone(),
+            card_product_id: inventory.card_product_id.clone(),
+            inventory_id: inventory.inventory_id.clone(),
+            inventory_delivery_id: inventory.delivery_id.clone(),
+            buyer_user_id: draft.buyer_user_id,
+            out_trade_no: None,
+            amount_total,
+            currency: "CNY".to_string(),
+            channel: None,
+            status: MERCHANT_ORDER_STATUS_CREATED.to_string(),
+            pickup_token: None,
+            pickup_token_hash: None,
+            activation_id: None,
+            download_grant_id: None,
+            download_token: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        inventory.status = MERCHANT_INVENTORY_STATUS_RESERVED.to_string();
+        inventory.reserved_order_id = Some(order.order_id.clone());
+        inventory.updated_at = now;
+        sqlx::query(
+            "UPDATE merchant_product_inventory
+                SET status = $2, reserved_order_id = $3, payload = $4, updated_at = $5
+              WHERE inventory_id = $1",
+        )
+        .bind(&inventory.inventory_id)
+        .bind(&inventory.status)
+        .bind(inventory.reserved_order_id.as_deref())
+        .bind(Json(&inventory))
+        .bind(&inventory.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO merchant_product_orders
+                (order_id, tenant_id, project_id, merchant_shop_id, card_product_id, inventory_id, inventory_delivery_id, buyer_user_id, out_trade_no, amount_total, currency, channel, status, pickup_token_hash, activation_id, download_grant_id, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)",
+        )
+        .bind(&order.order_id)
+        .bind(order.tenant_id.as_str())
+        .bind(order.project_id.as_str())
+        .bind(order.merchant_shop_id.as_str())
+        .bind(order.card_product_id.as_str())
+        .bind(&order.inventory_id)
+        .bind(&order.inventory_delivery_id)
+        .bind(order.buyer_user_id.as_str())
+        .bind(order.out_trade_no.as_deref())
+        .bind(i64::from(order.amount_total))
+        .bind(&order.currency)
+        .bind(order.channel.as_deref())
+        .bind(&order.status)
+        .bind(order.pickup_token_hash.as_deref())
+        .bind(order.activation_id.as_deref())
+        .bind(order.download_grant_id.as_deref())
+        .bind(Json(&order))
+        .bind(&order.created_at)
+        .bind(&order.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(MerchantProductOrderCreateResult::Created(
+            merchant_product_order_response(&order),
+        ))
+    }
+
+    async fn get_merchant_product_order(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<MerchantProductOrderResponse>> {
+        let row = sqlx::query("SELECT payload FROM merchant_product_orders WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| {
+            merchant_product_order_response(
+                &row.get::<Json<MerchantProductOrderRecord>, _>("payload").0,
+            )
+        }))
+    }
+
+    async fn get_merchant_product_order_by_out_trade_no(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<MerchantProductOrderResponse>> {
+        let row =
+            sqlx::query("SELECT payload FROM merchant_product_orders WHERE out_trade_no = $1")
+                .bind(out_trade_no)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|row| {
+            merchant_product_order_response(
+                &row.get::<Json<MerchantProductOrderRecord>, _>("payload").0,
+            )
+        }))
+    }
+
+    async fn attach_merchant_order_prepay(
+        &self,
+        draft: MerchantProductPrepayDraft,
+    ) -> Result<Option<MerchantProductOrderResponse>> {
+        let Some(row) =
+            sqlx::query("SELECT payload FROM merchant_product_orders WHERE order_id = $1")
+                .bind(&draft.order_id)
+                .fetch_optional(&self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+        let mut order = row.get::<Json<MerchantProductOrderRecord>, _>("payload").0;
+        order.out_trade_no = Some(draft.out_trade_no);
+        order.channel = Some(draft.channel);
+        order.status = MERCHANT_ORDER_STATUS_PAYMENT_PENDING.to_string();
+        order.updated_at = now_rfc3339();
+        self.update_merchant_product_order(&order).await?;
+        Ok(Some(merchant_product_order_response(&order)))
+    }
+
+    async fn fulfill_merchant_product_order(
+        &self,
+        draft: MerchantProductFulfillmentDraft,
+    ) -> Result<MerchantProductFulfillmentResult> {
+        let Some(row) =
+            sqlx::query("SELECT payload FROM merchant_product_orders WHERE order_id = $1")
+                .bind(&draft.order_id)
+                .fetch_optional(&self.pool)
+                .await?
+        else {
+            return Ok(MerchantProductFulfillmentResult::OrderNotFound);
+        };
+        let mut order = row.get::<Json<MerchantProductOrderRecord>, _>("payload").0;
+        if order.status == MERCHANT_ORDER_STATUS_FULFILLED {
+            return Ok(MerchantProductFulfillmentResult::AlreadyFulfilled(
+                merchant_product_order_response(&order),
+            ));
+        }
+        let activation = match self
+            .activate_delivery_for_merchant_order(
+                &order.inventory_delivery_id,
+                draft.activation_id.clone(),
+                &draft.fulfilled_by,
+            )
+            .await?
+        {
+            DeliveryRedeemResult::Activated(response) => response.data,
+            other => return Ok(MerchantProductFulfillmentResult::DeliveryActivation(other)),
+        };
+        let grant = match self
+            .issue_delivery_download_grant(DeliveryDownloadGrantDraft {
+                grant_id: draft.download_grant_id.clone(),
+                activation_id: activation.activation_id.clone(),
+                token_plaintext: draft.download_token.clone(),
+                created_by: draft.fulfilled_by.clone(),
+            })
+            .await?
+        {
+            DeliveryDownloadGrantIssueResult::Issued(response) => response,
+            other => return Ok(MerchantProductFulfillmentResult::DownloadGrant(other)),
+        };
+        let mut inventory =
+            sqlx::query("SELECT payload FROM merchant_product_inventory WHERE inventory_id = $1")
+                .bind(&order.inventory_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| anyhow!("inventory_not_found"))?
+                .get::<Json<MerchantProductInventoryRecord>, _>("payload")
+                .0;
+        let now = now_rfc3339();
+        inventory.status = MERCHANT_INVENTORY_STATUS_SOLD.to_string();
+        inventory.sold_order_id = Some(order.order_id.clone());
+        inventory.updated_at = now.clone();
+        sqlx::query(
+            "UPDATE merchant_product_inventory
+                SET status = $2, sold_order_id = $3, payload = $4, updated_at = $5
+              WHERE inventory_id = $1",
+        )
+        .bind(&inventory.inventory_id)
+        .bind(&inventory.status)
+        .bind(inventory.sold_order_id.as_deref())
+        .bind(Json(&inventory))
+        .bind(&inventory.updated_at)
+        .execute(&self.pool)
+        .await?;
+        order.status = MERCHANT_ORDER_STATUS_FULFILLED.to_string();
+        order.pickup_token = Some(draft.pickup_token.clone());
+        order.pickup_token_hash = Some(hash_api_key(&draft.pickup_token));
+        order.activation_id = Some(activation.activation_id);
+        order.download_grant_id = Some(grant.data.grant_id);
+        order.download_token = Some(draft.download_token);
+        order.updated_at = now;
+        self.update_merchant_product_order(&order).await?;
+        Ok(MerchantProductFulfillmentResult::Fulfilled(
+            merchant_product_order_response(&order),
+        ))
+    }
+
+    async fn get_pickup_by_token_hash(
+        &self,
+        pickup_token_hash: &str,
+    ) -> Result<Option<MerchantPickupResponse>> {
+        let row =
+            sqlx::query("SELECT payload FROM merchant_product_orders WHERE pickup_token_hash = $1")
+                .bind(pickup_token_hash)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|row| {
+            merchant_pickup_response(&row.get::<Json<MerchantProductOrderRecord>, _>("payload").0)
+        }))
+    }
+
+    async fn upsert_wechat_user_openid(&self, user_id: &UserId, openid: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO wechat_user_openids (user_id, openid, updated_at)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id) DO UPDATE SET openid = EXCLUDED.openid, updated_at = EXCLUDED.updated_at",
+        )
+        .bind(user_id.as_str())
+        .bind(openid)
+        .bind(now_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_wechat_user_openid(&self, user_id: &UserId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT openid FROM wechat_user_openids WHERE user_id = $1")
+            .bind(user_id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<String, _>("openid")))
+    }
+
+    async fn update_merchant_product_order(
+        &self,
+        order: &MerchantProductOrderRecord,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE merchant_product_orders
+                SET out_trade_no = $2, channel = $3, status = $4, pickup_token_hash = $5,
+                    activation_id = $6, download_grant_id = $7, payload = $8, updated_at = $9
+              WHERE order_id = $1",
+        )
+        .bind(&order.order_id)
+        .bind(order.out_trade_no.as_deref())
+        .bind(order.channel.as_deref())
+        .bind(&order.status)
+        .bind(order.pickup_token_hash.as_deref())
+        .bind(order.activation_id.as_deref())
+        .bind(order.download_grant_id.as_deref())
+        .bind(Json(order))
+        .bind(&order.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn activate_delivery_for_merchant_order(
+        &self,
+        delivery_id: &str,
+        activation_id: String,
+        activated_by: &str,
+    ) -> Result<DeliveryRedeemResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(code_row) = sqlx::query(
+            "SELECT payload FROM delivery_codes WHERE delivery_id = $1 AND code_type = $2 FOR UPDATE",
+        )
+        .bind(delivery_id)
+        .bind(DELIVERY_CODE_TYPE_REDEMPTION)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::RedemptionCodeNotFound);
+        };
+        let mut code = code_row.get::<Json<DeliveryCodeRecord>, _>("payload").0;
+        if let Some(result) = blocked_redemption_code_result(&code) {
+            return Ok(result);
+        }
+        let Some(delivery_row) =
+            sqlx::query("SELECT payload FROM deliveries WHERE delivery_id = $1 FOR UPDATE")
+                .bind(delivery_id)
+                .fetch_optional(&mut *tx)
+                .await?
+        else {
+            return Ok(DeliveryRedeemResult::DeliveryNotFound);
+        };
+        let delivery = delivery_row.get::<Json<DeliveryRecord>, _>("payload").0;
+        let Some(entitlement_row) = sqlx::query(
+            "SELECT payload FROM delivery_entitlements WHERE delivery_id = $1 FOR UPDATE",
+        )
+        .bind(delivery_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::EntitlementNotFound);
+        };
+        let mut entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_delivery_activation_result(&delivery, &entitlement) {
+            return Ok(result);
+        }
+        let Some(artifact_row) = sqlx::query(
+            "SELECT payload FROM delivery_artifacts WHERE delivery_id = $1 AND status = $2 ORDER BY version DESC LIMIT 1 FOR UPDATE",
+        )
+        .bind(delivery_id)
+        .bind(DELIVERY_ARTIFACT_STATUS_ACTIVE)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::ArtifactMissing);
+        };
+        let artifact = artifact_row
+            .get::<Json<DeliveryArtifactRecord>, _>("payload")
+            .0;
+        activate_delivery_entitlement(&mut entitlement, None);
+        let activation = build_delivery_activation_record(
+            &activation_id,
+            &delivery,
+            &mut code,
+            &entitlement,
+            &artifact,
+        );
+        let mut new_segments = Vec::<DeliveryServiceSegmentRecord>::new();
+        let mut new_events = Vec::<DeliveryLifecycleEventRecord>::new();
+        if let Some(segment) = build_postgres_service_segment_record(
+            &[],
+            &[],
+            &entitlement,
+            &activation,
+            &artifact,
+            activation.activated_at.clone(),
+            activated_by,
+        ) {
+            new_events.push(postgres_lifecycle_event_record(
+                &entitlement.entitlement_id,
+                Some(segment.segment_id.clone()),
+                DELIVERY_LIFECYCLE_EVENT_SEGMENT_CREATED,
+                DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE,
+                Some("merchant_product_payment".to_string()),
+                activated_by,
+                BTreeMap::from([("artifact_id".to_string(), artifact.artifact_id.clone())]),
+            ));
+            new_segments.push(segment);
+        }
+        sqlx::query(
+            "UPDATE delivery_codes SET status = $2, payload = $3, updated_at = $4 WHERE code_id = $1",
+        )
+        .bind(&code.code_id)
+        .bind(&code.status)
+        .bind(Json(&code))
+        .bind(&code.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        update_postgres_entitlement(&mut tx, &entitlement).await?;
+        sqlx::query(
+            "INSERT INTO delivery_activations
+                (activation_id, delivery_id, code_id, artifact_id, entitlement_id, tenant_id, project_id, status, activated_at, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(&activation.activation_id)
+        .bind(&activation.delivery_id)
+        .bind(&activation.code_id)
+        .bind(&activation.artifact_id)
+        .bind(&activation.entitlement_id)
+        .bind(activation.tenant_id.as_str())
+        .bind(activation.project_id.as_str())
+        .bind(&activation.status)
+        .bind(&activation.activated_at)
+        .bind(Json(&activation))
+        .bind(&activation.created_at)
+        .bind(&activation.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        insert_postgres_service_segments(&mut tx, &new_segments).await?;
+        insert_postgres_lifecycle_events(&mut tx, &new_events).await?;
+        tx.commit().await?;
+        Ok(DeliveryRedeemResult::Activated(Box::new(
+            DeliveryActivationResponse {
+                data: activation.public_view(),
+            },
+        )))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -9703,7 +10670,7 @@ fn prepare_delivery_records(
             code_hash: hash_api_key(redemption_code),
             code_prefix: delivery_code_prefix(redemption_code),
             code_last_four: credential_last_four(redemption_code),
-            format_version: DELIVERY_CODE_FORMAT_REDEMPTION_V1.to_string(),
+            format_version: DELIVERY_CODE_FORMAT_REDEMPTION_V2.to_string(),
             status: "active".to_string(),
             expires_at: draft.code_expires_at.clone(),
             used_at: None,
@@ -9719,7 +10686,7 @@ fn prepare_delivery_records(
             code_hash: hash_api_key(browser_file_unlock_code),
             code_prefix: delivery_code_prefix(browser_file_unlock_code),
             code_last_four: credential_last_four(browser_file_unlock_code),
-            format_version: DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V1.to_string(),
+            format_version: DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V2.to_string(),
             status: "active".to_string(),
             expires_at: draft.code_expires_at,
             used_at: None,
@@ -11250,6 +12217,10 @@ fn delivery_code_prefix(code: &str) -> String {
     }
 }
 
+fn delivery_secret_key(delivery_id: &str, code_type: &str) -> String {
+    format!("{delivery_id}:{code_type}")
+}
+
 fn insert_memory_delivery_artifact(
     store: &mut MemoryStore,
     draft: DeliveryArtifactDraft,
@@ -11302,6 +12273,9 @@ fn build_delivery_artifact_record(
         storage_backend: DELIVERY_ARTIFACT_STORAGE_BACKEND_DB_INLINE.to_string(),
         storage_ref: draft.artifact_id.clone(),
         carrier_valid_until: draft.carrier_valid_until.clone(),
+        encryption_protocol: draft.encryption_protocol.clone(),
+        encryption_version: draft.encryption_version.clone(),
+        secret_kind: draft.secret_kind.clone(),
         created_by: draft.created_by.clone(),
         created_at: now.clone(),
         updated_at: now,
@@ -11581,6 +12555,9 @@ fn delivery_upload_item_artifact_draft(
         file_name: item.file_name.clone(),
         content_type: item.content_type.clone(),
         carrier_valid_until: item.carrier_valid_until.clone(),
+        encryption_protocol: DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2.to_string(),
+        encryption_version: DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2.to_string(),
+        secret_kind: DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK.to_string(),
         ciphertext: item.ciphertext.clone(),
         created_by: actor_id.to_string(),
     }
@@ -13935,6 +14912,351 @@ fn hash_api_key(api_key: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn merchant_product_order_response(
+    order: &MerchantProductOrderRecord,
+) -> MerchantProductOrderResponse {
+    MerchantProductOrderResponse {
+        data: MerchantProductOrderPublicView {
+            order_id: order.order_id.clone(),
+            tenant_id: order.tenant_id.clone(),
+            project_id: order.project_id.clone(),
+            merchant_shop_id: order.merchant_shop_id.clone(),
+            card_product_id: order.card_product_id.clone(),
+            inventory_delivery_id: order.inventory_delivery_id.clone(),
+            buyer_user_id: order.buyer_user_id.clone(),
+            out_trade_no: order.out_trade_no.clone(),
+            amount_total: order.amount_total,
+            currency: order.currency.clone(),
+            channel: order.channel.clone(),
+            status: order.status.clone(),
+            pickup_token: order.pickup_token.clone(),
+            activation_id: order.activation_id.clone(),
+            download_grant_id: order.download_grant_id.clone(),
+            created_at: order.created_at.clone(),
+            updated_at: order.updated_at.clone(),
+        },
+    }
+}
+
+fn merchant_pickup_response(order: &MerchantProductOrderRecord) -> Option<MerchantPickupResponse> {
+    if order.status != MERCHANT_ORDER_STATUS_FULFILLED {
+        return None;
+    }
+    let download_token = order.download_token.clone()?;
+    Some(MerchantPickupResponse {
+        data: MerchantPickupPayload {
+            order: merchant_product_order_response(order).data,
+            download_token,
+        },
+    })
+}
+
+fn public_shop_from_memory(store: &MemoryStore, slug: &str) -> Option<MerchantPublicShopResponse> {
+    let shop = store
+        .merchant_shops
+        .iter()
+        .find(|shop| shop.slug == slug && shop.status == MerchantShopStatus::Active)?
+        .clone();
+    let products = store
+        .card_products
+        .iter()
+        .filter(|product| {
+            product.merchant_shop_id == shop.merchant_shop_id
+                && product.status == CardProductStatus::Active
+                && product.sale_enabled
+                && product.retail_price_cny_total.unwrap_or_default() > 0
+        })
+        .map(|product| MerchantPublicProduct {
+            product: product.clone(),
+            available_inventory_count: store
+                .merchant_product_inventory
+                .iter()
+                .filter(|inventory| {
+                    inventory.card_product_id == product.card_product_id
+                        && inventory.status == MERCHANT_INVENTORY_STATUS_AVAILABLE
+                })
+                .count(),
+        })
+        .collect();
+    Some(MerchantPublicShopResponse {
+        data: MerchantPublicShop { shop, products },
+    })
+}
+
+fn bind_memory_card_product_deliveries(
+    store: &mut MemoryStore,
+    card_product_id: &str,
+    delivery_ids: Vec<String>,
+) -> Result<Vec<MerchantProductInventoryRecord>> {
+    let product = store
+        .card_products
+        .iter()
+        .find(|product| product.card_product_id.as_str() == card_product_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("card_product_not_found"))?;
+    let mut records = Vec::new();
+    for delivery_id in delivery_ids {
+        if store
+            .merchant_product_inventory
+            .iter()
+            .any(|inventory| inventory.delivery_id == delivery_id)
+        {
+            continue;
+        }
+        let delivery = store
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_id == delivery_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("delivery_not_found"))?;
+        if delivery.tenant_id != product.tenant_id
+            || product
+                .project_id
+                .as_ref()
+                .is_some_and(|project_id| project_id != &delivery.project_id)
+        {
+            return Err(anyhow!("delivery_scope_mismatch"));
+        }
+        let entitlement = store
+            .delivery_entitlements
+            .iter()
+            .find(|entitlement| entitlement.delivery_id == delivery_id)
+            .ok_or_else(|| anyhow!("delivery_entitlement_not_found"))?;
+        if delivery.effective_status(entitlement) != DELIVERY_STATUS_PREPARED {
+            return Err(anyhow!("delivery_not_sale_ready"));
+        }
+        if !store.delivery_artifacts.iter().any(|artifact| {
+            artifact.delivery_id == delivery_id
+                && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+        }) {
+            return Err(anyhow!("delivery_artifact_missing"));
+        }
+        let now = now_rfc3339();
+        let record = MerchantProductInventoryRecord {
+            inventory_id: format!("minv_{}", next_id_suffix()),
+            tenant_id: product.tenant_id.clone(),
+            project_id: delivery.project_id.clone(),
+            merchant_shop_id: product.merchant_shop_id.clone(),
+            card_product_id: product.card_product_id.clone(),
+            delivery_id,
+            status: MERCHANT_INVENTORY_STATUS_AVAILABLE.to_string(),
+            reserved_order_id: None,
+            sold_order_id: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        store.merchant_product_inventory.push(record.clone());
+        records.push(record);
+    }
+    Ok(records)
+}
+
+fn create_memory_merchant_product_order(
+    store: &mut MemoryStore,
+    draft: MerchantProductOrderDraft,
+) -> MerchantProductOrderCreateResult {
+    let Some(product) = store
+        .card_products
+        .iter()
+        .find(|product| product.card_product_id.as_str() == draft.card_product_id)
+        .cloned()
+    else {
+        return MerchantProductOrderCreateResult::ProductNotFound;
+    };
+    let Some(amount_total) = product.retail_price_cny_total else {
+        return MerchantProductOrderCreateResult::ProductNotSaleable;
+    };
+    if !product.sale_enabled || product.status != CardProductStatus::Active || amount_total == 0 {
+        return MerchantProductOrderCreateResult::ProductNotSaleable;
+    }
+    let Some(inventory_index) = store
+        .merchant_product_inventory
+        .iter()
+        .position(|inventory| {
+            inventory.card_product_id == product.card_product_id
+                && inventory.status == MERCHANT_INVENTORY_STATUS_AVAILABLE
+        })
+    else {
+        return MerchantProductOrderCreateResult::InventoryUnavailable;
+    };
+    let now = now_rfc3339();
+    let inventory = store.merchant_product_inventory[inventory_index].clone();
+    let order = MerchantProductOrderRecord {
+        order_id: draft.order_id,
+        tenant_id: inventory.tenant_id.clone(),
+        project_id: inventory.project_id.clone(),
+        merchant_shop_id: inventory.merchant_shop_id.clone(),
+        card_product_id: inventory.card_product_id.clone(),
+        inventory_id: inventory.inventory_id.clone(),
+        inventory_delivery_id: inventory.delivery_id.clone(),
+        buyer_user_id: draft.buyer_user_id,
+        out_trade_no: None,
+        amount_total,
+        currency: "CNY".to_string(),
+        channel: None,
+        status: MERCHANT_ORDER_STATUS_CREATED.to_string(),
+        pickup_token_hash: None,
+        pickup_token: None,
+        activation_id: None,
+        download_grant_id: None,
+        download_token: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    let inventory = &mut store.merchant_product_inventory[inventory_index];
+    inventory.status = MERCHANT_INVENTORY_STATUS_RESERVED.to_string();
+    inventory.reserved_order_id = Some(order.order_id.clone());
+    inventory.updated_at = now;
+    store.merchant_product_orders.push(order.clone());
+    MerchantProductOrderCreateResult::Created(merchant_product_order_response(&order))
+}
+
+fn attach_memory_merchant_order_prepay(
+    store: &mut MemoryStore,
+    draft: MerchantProductPrepayDraft,
+) -> Option<MerchantProductOrderResponse> {
+    let order = store
+        .merchant_product_orders
+        .iter_mut()
+        .find(|order| order.order_id == draft.order_id)?;
+    order.out_trade_no = Some(draft.out_trade_no);
+    order.channel = Some(draft.channel);
+    order.status = MERCHANT_ORDER_STATUS_PAYMENT_PENDING.to_string();
+    order.updated_at = now_rfc3339();
+    Some(merchant_product_order_response(order))
+}
+
+fn activate_memory_delivery_for_merchant_order(
+    store: &mut MemoryStore,
+    delivery_id: &str,
+    activation_id: String,
+    activated_by: &str,
+) -> DeliveryRedeemResult {
+    let Some(code_index) = store.delivery_codes.iter().position(|code| {
+        code.code_type == DELIVERY_CODE_TYPE_REDEMPTION && code.delivery_id == delivery_id
+    }) else {
+        return DeliveryRedeemResult::RedemptionCodeNotFound;
+    };
+    let mut code = store.delivery_codes[code_index].clone();
+    if let Some(result) = blocked_redemption_code_result(&code) {
+        return result;
+    }
+    let Some(delivery) = store
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.delivery_id == delivery_id)
+        .cloned()
+    else {
+        return DeliveryRedeemResult::DeliveryNotFound;
+    };
+    let Some(entitlement_index) = store
+        .delivery_entitlements
+        .iter()
+        .position(|entitlement| entitlement.delivery_id == delivery_id)
+    else {
+        return DeliveryRedeemResult::EntitlementNotFound;
+    };
+    let mut entitlement = store.delivery_entitlements[entitlement_index].clone();
+    if let Some(result) = blocked_delivery_activation_result(&delivery, &entitlement) {
+        return result;
+    }
+    let Some(artifact) = store
+        .delivery_artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.delivery_id == delivery_id
+                && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+        })
+        .max_by(|left, right| left.version.cmp(&right.version))
+        .cloned()
+    else {
+        return DeliveryRedeemResult::ArtifactMissing;
+    };
+    activate_delivery_entitlement(&mut entitlement, None);
+    let activation = build_delivery_activation_record(
+        &activation_id,
+        &delivery,
+        &mut code,
+        &entitlement,
+        &artifact,
+    );
+    apply_segment_for_artifact(
+        store,
+        &mut entitlement,
+        &activation,
+        &artifact,
+        activated_by,
+        "merchant_product_payment",
+    );
+    store.delivery_codes[code_index] = code;
+    store.delivery_entitlements[entitlement_index] = entitlement;
+    store.delivery_activations.push(activation.clone());
+    DeliveryRedeemResult::Activated(Box::new(DeliveryActivationResponse {
+        data: activation.public_view(),
+    }))
+}
+
+fn fulfill_memory_merchant_product_order(
+    store: &mut MemoryStore,
+    draft: MerchantProductFulfillmentDraft,
+) -> MerchantProductFulfillmentResult {
+    let Some(order_index) = store
+        .merchant_product_orders
+        .iter()
+        .position(|order| order.order_id == draft.order_id)
+    else {
+        return MerchantProductFulfillmentResult::OrderNotFound;
+    };
+    let existing = store.merchant_product_orders[order_index].clone();
+    if existing.status == MERCHANT_ORDER_STATUS_FULFILLED {
+        return MerchantProductFulfillmentResult::AlreadyFulfilled(
+            merchant_product_order_response(&existing),
+        );
+    }
+    let Some(inventory_index) = store
+        .merchant_product_inventory
+        .iter()
+        .position(|inventory| inventory.inventory_id == existing.inventory_id)
+    else {
+        return MerchantProductFulfillmentResult::InventoryNotFound;
+    };
+    let activation = match activate_memory_delivery_for_merchant_order(
+        store,
+        &existing.inventory_delivery_id,
+        draft.activation_id.clone(),
+        &draft.fulfilled_by,
+    ) {
+        DeliveryRedeemResult::Activated(response) => response.data,
+        other => return MerchantProductFulfillmentResult::DeliveryActivation(other),
+    };
+    let grant = match issue_memory_delivery_download_grant(
+        store,
+        DeliveryDownloadGrantDraft {
+            grant_id: draft.download_grant_id.clone(),
+            activation_id: activation.activation_id.clone(),
+            token_plaintext: draft.download_token.clone(),
+            created_by: draft.fulfilled_by.clone(),
+        },
+    ) {
+        DeliveryDownloadGrantIssueResult::Issued(response) => response,
+        other => return MerchantProductFulfillmentResult::DownloadGrant(other),
+    };
+    let now = now_rfc3339();
+    let inventory = &mut store.merchant_product_inventory[inventory_index];
+    inventory.status = MERCHANT_INVENTORY_STATUS_SOLD.to_string();
+    inventory.sold_order_id = Some(existing.order_id.clone());
+    inventory.updated_at = now.clone();
+    let order = &mut store.merchant_product_orders[order_index];
+    order.status = MERCHANT_ORDER_STATUS_FULFILLED.to_string();
+    order.pickup_token = Some(draft.pickup_token.clone());
+    order.pickup_token_hash = Some(hash_api_key(&draft.pickup_token));
+    order.activation_id = Some(activation.activation_id);
+    order.download_grant_id = Some(grant.data.grant_id.clone());
+    order.download_token = Some(draft.download_token);
+    order.updated_at = now;
+    MerchantProductFulfillmentResult::Fulfilled(merchant_product_order_response(order))
+}
+
 fn activate_memory_config_snapshot(
     store: &mut MemoryStore,
     config_snapshot_id: &str,
@@ -16101,6 +17423,18 @@ fn timestamp_plus_days(value: &str, days: u32) -> Option<String> {
 
 const fn default_record_version() -> u64 {
     1
+}
+
+fn default_delivery_account_bundle_encryption_protocol() -> String {
+    DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2.to_string()
+}
+
+fn default_delivery_account_bundle_encryption_version() -> String {
+    DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2.to_string()
+}
+
+fn default_delivery_artifact_secret_kind() -> String {
+    DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK.to_string()
 }
 
 fn hydrate_upload_batch_item_ciphertext(

@@ -28,6 +28,7 @@ const endpointBaseUrlSchema = z.url().refine(
 )
 
 const tenantIdSchema = prefixedId('tenant_')
+const projectIdSchema = prefixedId('proj_')
 const configSnapshotIdSchema = prefixedId('cfgsnap_')
 const routeReceiptIdSchema = prefixedId('routercpt_')
 export const merchantShopIdSchema = prefixedId('mshop_')
@@ -61,14 +62,17 @@ export const cardProductSchema = z.object({
   card_product_id: cardProductIdSchema,
   tenant_id: tenantIdSchema,
   merchant_shop_id: merchantShopIdSchema,
+  project_id: projectIdSchema.optional(),
   title: z.string().min(1),
   description: z.string().min(1),
   status: cardProductStatusSchema,
   inventory_count: z.number().int().nonnegative(),
   face_value_usd: z.string().regex(/^\d+(\.\d+)?$/),
   retail_price_usd: z.string().regex(/^\d+(\.\d+)?$/),
+  retail_price_cny_total: z.number().int().nonnegative().optional(),
   delivery_kind: cardDeliveryKindSchema,
   supports_trial: z.boolean(),
+  sale_enabled: z.boolean().optional(),
   version: z.number().int().nonnegative(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema
