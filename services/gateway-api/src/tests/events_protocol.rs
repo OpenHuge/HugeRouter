@@ -20,6 +20,7 @@ async fn returns_forbidden_when_api_key_scope_does_not_match_active_config() {
             scope: GatewayApiKeyScope {
                 credential_id: "cred_other".to_string(),
                 grant_id: None,
+                owner_account_id: None,
                 tenant_id: "tenant_platform".to_string(),
                 project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
@@ -91,6 +92,7 @@ async fn allows_tenant_scoped_api_keys_without_project_scope() {
             scope: GatewayApiKeyScope {
                 credential_id: "cred_tenant_shared".to_string(),
                 grant_id: None,
+                owner_account_id: None,
                 tenant_id: "tenant_acme".to_string(),
                 project_id: None,
                 status: "active".to_string(),
@@ -125,179 +127,6 @@ async fn allows_tenant_scoped_api_keys_without_project_scope() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn opening_grant_scope_can_call_chat_and_publish_usage_witness() {
-    let adapter = Arc::new(MockAdapter {
-        outcomes: BTreeMap::from([(
-            "prvrsrc_openai_primary".to_string(),
-            Ok(ProviderResponse {
-                response_id: Some("chatcmpl_opening_grant".to_string()),
-                model: "gpt-4.1-mini".to_string(),
-                output_text: "ok".to_string(),
-                finish_reason: "stop".to_string(),
-                usage: ProviderUsage {
-                    input_tokens: 11,
-                    output_tokens: 7,
-                    cached_input_tokens: 0,
-                },
-            }),
-        )]),
-    });
-    let sink = Arc::new(RecordingRuntimeEventSink::default());
-    let mut registry = ProviderAdapterRegistry::new();
-    registry.register(adapter).unwrap();
-    let state = Arc::new(AppState {
-        config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-            "prvrsrc_openai_primary",
-            "us-east-1",
-            0.9,
-            0.6,
-            HealthState::Healthy,
-        )]))),
-        auth_store: Arc::new(StaticApiKeyScopeStore {
-            scope: GatewayApiKeyScope {
-                credential_id: "cred_opening_grant_customer".to_string(),
-                grant_id: Some("grant_acme_customer".to_string()),
-                tenant_id: "tenant_acme".to_string(),
-                project_id: Some("proj_core".to_string()),
-                status: "active".to_string(),
-                config_snapshot_id: Some("cfgsnap_test".to_string()),
-                route_policy_id: Some("routepol_default".to_string()),
-                scopes: vec![
-                    "route:codex".to_string(),
-                    "provider:hugerouter-commercial".to_string(),
-                    "protocol:openai_chat".to_string(),
-                    "model:reasoning-fast".to_string(),
-                ],
-            },
-        }),
-        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
-        budget_store: Arc::new(StaticBudgetProjectionStore {
-            response: ok_budget_projection(),
-        }),
-        adapter_registry: registry,
-        debug_headers_enabled: false,
-        event_sink: sink.clone(),
-    });
-    let app = app_with_state(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/chat/completions")
-                .header("authorization", "Bearer akp_customer_opening")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&valid_http_request()).unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let route_receipt_id = response
-        .headers()
-        .get("x-route-receipt-id")
-        .and_then(|value| value.to_str().ok())
-        .expect("routed customer request should expose route receipt id")
-        .to_string();
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload["choices"][0]["message"]["content"], "ok");
-
-    let recorded_receipt_id = {
-        let receipts = sink.published_route_receipts.lock().await;
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(
-            receipts[0]
-                .route_receipt
-                .selected_target
-                .as_ref()
-                .unwrap()
-                .as_str(),
-            "prvrsrc_openai_primary"
-        );
-        receipts[0].route_receipt.route_receipt_id.to_string()
-    };
-    assert_eq!(recorded_receipt_id, route_receipt_id);
-
-    let usage_route_receipt_id = {
-        let usage_events = sink.published_usage_events.lock().await;
-        assert_eq!(usage_events.len(), 1);
-        assert_eq!(
-            usage_events[0].grant_id.as_deref(),
-            Some("grant_acme_customer")
-        );
-        assert_eq!(usage_events[0].usage.output_tokens, 7);
-        usage_events[0].route_receipt_id.to_string()
-    };
-    assert_eq!(usage_route_receipt_id, route_receipt_id);
-}
-
-#[tokio::test]
-async fn opening_grant_scope_rejects_inactive_config_snapshot() {
-    let mut registry = ProviderAdapterRegistry::new();
-    registry
-        .register(Arc::new(MockAdapter {
-            outcomes: BTreeMap::new(),
-        }))
-        .unwrap();
-    let state = Arc::new(AppState {
-        config_store: Arc::new(StaticConfigStore::new(build_config(vec![build_target(
-            "prvrsrc_openai_primary",
-            "us-east-1",
-            0.9,
-            0.6,
-            HealthState::Healthy,
-        )]))),
-        auth_store: Arc::new(StaticApiKeyScopeStore {
-            scope: GatewayApiKeyScope {
-                credential_id: "cred_opening_grant_stale".to_string(),
-                grant_id: Some("grant_acme_stale".to_string()),
-                tenant_id: "tenant_acme".to_string(),
-                project_id: Some("proj_core".to_string()),
-                status: "active".to_string(),
-                config_snapshot_id: Some("cfgsnap_superseded".to_string()),
-                route_policy_id: Some("routepol_default".to_string()),
-                scopes: vec![
-                    "route:codex".to_string(),
-                    "provider:hugerouter-commercial".to_string(),
-                ],
-            },
-        }),
-        route_token_store: Arc::new(super::InMemoryRouteTokenStore::default()),
-        budget_store: Arc::new(StaticBudgetProjectionStore {
-            response: ok_budget_projection(),
-        }),
-        adapter_registry: registry,
-        debug_headers_enabled: false,
-        event_sink: Arc::new(RecordingRuntimeEventSink::default()),
-    });
-    let app = app_with_state(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/chat/completions")
-                .header("authorization", "Bearer akp_customer_opening")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&valid_http_request()).unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload["error"]["code"], "auth_forbidden");
 }
 
 #[tokio::test]

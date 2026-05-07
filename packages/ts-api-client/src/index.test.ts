@@ -166,6 +166,114 @@ void test('control-plane client resolves the documented endpoints and parses res
   ])
 })
 
+void test('control-plane client maps opening grants and owner-scoped projection query', async () => {
+  const balanceProjectionResponse = readJson(
+    '../../../schemas/examples/control-plane/balance-projection.response.json'
+  )
+  const grant = {
+    grant_id: 'opengrant_acme_customer_1',
+    tenant_id: 'tenant_acme',
+    project_id: 'proj_core',
+    owner_account_id: 'acct_acme_owner',
+    grantee_kind: 'user',
+    grantee_id: 'user_store_001',
+    grantee_label: 'Store operator 001',
+    config_snapshot_id: 'cfgsnap_gateway_v1',
+    route_policy_id: 'routepol_openai_chat_default',
+    budget_policy_id: 'budgetpol_default',
+    provider_resource_ids: ['prvrsrc_openai_primary'],
+    credential_kind: 'api_key',
+    credential_id: 'cred_opening_acme_customer_1',
+    credential_key_prefix: 'akp-child',
+    credential_last_four: 'c001',
+    scopes: ['route:codex', 'provider:hugerouter-commercial'],
+    expires_at: '2026-05-22T00:00:00Z',
+    status: 'active',
+    created_by: 'user_admin',
+    created_at: '2026-04-22T00:00:00Z',
+    updated_at: '2026-04-22T00:00:00Z',
+    version: 1
+  }
+  const calls: Array<{ body?: BodyInit | null; method?: string; url: string }> = []
+  const fetchImpl = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = resolveRequestUrl(input)
+    calls.push({ body: init?.body, method: init?.method, url })
+
+    if (url.endsWith('/v1/opening-grants') && init?.method === 'GET') {
+      return Promise.resolve(jsonResponse(200, { data: [grant] }))
+    }
+
+    if (url.endsWith('/v1/opening-grants') && init?.method === 'POST') {
+      return Promise.resolve(
+        jsonResponse(200, {
+          grant,
+          credential: {
+            credential_kind: 'api_key',
+            credential_id: grant.credential_id,
+            key_prefix: grant.credential_key_prefix,
+            last_four: grant.credential_last_four,
+            plaintext: 'akp_test_child_once'
+          }
+        })
+      )
+    }
+
+    if (
+      url.endsWith('/v1/opening-grants/opengrant_acme_customer_1/revoke') &&
+      init?.method === 'POST'
+    ) {
+      return Promise.resolve(
+        jsonResponse(200, {
+          ...grant,
+          status: 'revoked',
+          version: 2
+        })
+      )
+    }
+
+    if (url.includes('/v1/billing/projection?')) {
+      return Promise.resolve(jsonResponse(200, balanceProjectionResponse))
+    }
+
+    return Promise.resolve(
+      jsonResponse(404, readJson('../../../schemas/examples/gateway/error.response.json'))
+    )
+  }
+
+  const client = createControlPlaneClient({
+    baseUrl: 'https://api.example.test',
+    fetch: fetchImpl
+  })
+
+  const grants = await client.listOpeningGrants()
+  const created = await client.createOpeningGrant({
+    config_snapshot_id: 'cfgsnap_gateway_v1',
+    owner_account_id: 'acct_acme_owner',
+    grantee_kind: 'user',
+    grantee_id: 'user_store_001',
+    grantee_label: 'Store operator 001',
+    expires_at: '2026-05-22T00:00:00Z',
+    scopes: ['route:codex', 'provider:hugerouter-commercial'],
+    credential_kind: 'api_key'
+  })
+  const revoked = await client.revokeOpeningGrant('opengrant_acme_customer_1', 1)
+  const projection = await client.getBalanceProjection({
+    tenant_id: 'tenant_acme',
+    project_id: 'proj_core',
+    owner_account_id: 'acct_acme_owner'
+  })
+
+  assert.equal(grants[0]?.owner_account_id, 'acct_acme_owner')
+  assert.equal(created.credential.plaintext, 'akp_test_child_once')
+  assert.equal(revoked.status, 'revoked')
+  assert.equal(projection.data.owner_account_id, 'acct_acme_owner')
+  assert.equal(
+    calls[3]?.url,
+    'https://api.example.test/v1/billing/projection?tenant_id=tenant_acme&project_id=proj_core&owner_account_id=acct_acme_owner'
+  )
+  assert.equal(calls[2]?.body, JSON.stringify({ expected_version: 1 }))
+})
+
 void test('gateway client validates requests and normalizes contract errors', async () => {
   const gatewayRequest = readJson('../../../schemas/examples/gateway/chat.request.json')
   const gatewayResponse = readJson('../../../schemas/examples/gateway/chat.response.json')

@@ -46,7 +46,7 @@ use core_domain::{
     TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary,
     UsageMetrics, UserId, UserIdentity,
 };
-use metering::{PricingCatalog, default_budget_micros};
+use metering::{PricingCatalog, default_budget_micros_for_scope};
 use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
     BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, Delivery,
@@ -83,6 +83,14 @@ use std::{
     sync::{Arc, RwLock},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+
+mod opening_grants;
+
+use opening_grants::{
+    OPENING_GRANT_OWNER_LOCK_INSERT_SQL, OPENING_GRANT_OWNER_LOCK_SELECT_SQL,
+    opening_grant_create_blocker,
+};
+pub use opening_grants::{OpeningGrantCreateResult, OpeningGrantDraft, OpeningGrantRecord};
 
 pub const SESSION_TTL_SECONDS: u64 = 60 * 60 * 8;
 pub const ACTIVE_CONFIG_ALIAS: &str = "active";
@@ -140,7 +148,6 @@ pub const DELIVERY_UPLOAD_ITEM_STATUS_ACCEPTED: &str = "accepted";
 pub const DELIVERY_UPLOAD_ITEM_STATUS_DUPLICATE: &str = "duplicate";
 pub const DELIVERY_UPLOAD_ITEM_STATUS_REJECTED: &str = "rejected";
 pub const DELIVERY_UPLOAD_ITEM_STATUS_FAILED: &str = "failed";
-
 const PROVIDER_CATALOG: &[(AuthProvider, &str, &str)] = &[
     (
         AuthProvider::Email,
@@ -237,55 +244,6 @@ pub struct ApiKeyRecord {
     pub created_at: String,
     pub updated_at: String,
     pub version: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct OpeningGrantDraft {
-    pub grant_id: String,
-    pub tenant_id: TenantId,
-    pub project_id: ProjectId,
-    pub grantee_kind: String,
-    pub grantee_id: String,
-    pub grantee_label: Option<String>,
-    pub config_snapshot_id: ConfigSnapshotId,
-    pub route_policy_id: RoutePolicyId,
-    pub budget_policy_id: BudgetPolicyId,
-    pub provider_resource_ids: Vec<ProviderResourceId>,
-    pub credential_kind: String,
-    pub scopes: Vec<String>,
-    pub expires_at: String,
-    pub created_by: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpeningGrantRecord {
-    pub grant_id: String,
-    pub tenant_id: TenantId,
-    pub project_id: ProjectId,
-    pub grantee_kind: String,
-    pub grantee_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grantee_label: Option<String>,
-    pub config_snapshot_id: ConfigSnapshotId,
-    pub route_policy_id: RoutePolicyId,
-    pub budget_policy_id: BudgetPolicyId,
-    pub provider_resource_ids: Vec<ProviderResourceId>,
-    pub credential_kind: String,
-    pub credential_id: String,
-    pub credential_key_prefix: String,
-    pub credential_last_four: String,
-    pub credential_hash: String,
-    pub scopes: Vec<String>,
-    pub expires_at: String,
-    pub status: String,
-    pub created_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub version: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revoked_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revoked_by: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1114,6 +1072,7 @@ pub enum UsageBreakdownGroupBy {
 pub struct ResolvedApiKey {
     pub api_key_id: String,
     pub grant_id: Option<String>,
+    pub owner_account_id: Option<String>,
     pub tenant_id: TenantId,
     pub project_id: Option<ProjectId>,
     pub is_active: bool,
@@ -1180,6 +1139,7 @@ impl ApiKeyRecord {
         Some(ResolvedApiKey {
             api_key_id: self.api_key_id.clone(),
             grant_id: None,
+            owner_account_id: None,
             tenant_id: provider_resource.tenant_id.clone(),
             project_id: provider_resource.project_id.clone(),
             is_active: true,
@@ -1189,60 +1149,6 @@ impl ApiKeyRecord {
             scopes: Vec::new(),
             expires_at: None,
         })
-    }
-}
-
-impl OpeningGrantRecord {
-    fn effective_status(&self) -> String {
-        if self.status == "active" && timestamp_is_expired(&self.expires_at) {
-            "expired".to_string()
-        } else {
-            self.status.clone()
-        }
-    }
-
-    fn public_view(&self) -> OpeningGrant {
-        OpeningGrant {
-            grant_id: self.grant_id.clone(),
-            tenant_id: self.tenant_id.clone(),
-            project_id: self.project_id.clone(),
-            grantee_kind: self.grantee_kind.clone(),
-            grantee_id: self.grantee_id.clone(),
-            grantee_label: self.grantee_label.clone(),
-            config_snapshot_id: self.config_snapshot_id.clone(),
-            route_policy_id: self.route_policy_id.clone(),
-            budget_policy_id: self.budget_policy_id.clone(),
-            provider_resource_ids: self.provider_resource_ids.clone(),
-            credential_kind: self.credential_kind.clone(),
-            credential_id: self.credential_id.clone(),
-            credential_key_prefix: self.credential_key_prefix.clone(),
-            credential_last_four: self.credential_last_four.clone(),
-            scopes: self.scopes.clone(),
-            expires_at: self.expires_at.clone(),
-            status: self.effective_status(),
-            created_by: self.created_by.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            version: self.version,
-            revoked_at: self.revoked_at.clone(),
-            revoked_by: self.revoked_by.clone(),
-        }
-    }
-
-    fn to_resolved(&self) -> ResolvedApiKey {
-        let status = self.effective_status();
-        ResolvedApiKey {
-            api_key_id: self.credential_id.clone(),
-            grant_id: Some(self.grant_id.clone()),
-            tenant_id: self.tenant_id.clone(),
-            project_id: Some(self.project_id.clone()),
-            is_active: status == "active",
-            status,
-            config_snapshot_id: Some(self.config_snapshot_id.clone()),
-            route_policy_id: Some(self.route_policy_id.clone()),
-            scopes: self.scopes.clone(),
-            expires_at: Some(self.expires_at.clone()),
-        }
     }
 }
 
@@ -3180,13 +3086,14 @@ impl StoreMode {
         &self,
         draft: OpeningGrantDraft,
         credential_plaintext: &str,
-    ) -> Result<OpeningGrant> {
+    ) -> Result<OpeningGrantCreateResult> {
         let now = now_rfc3339();
         let credential_hash = hash_api_key(credential_plaintext);
         let record = OpeningGrantRecord {
             grant_id: draft.grant_id,
             tenant_id: draft.tenant_id,
             project_id: draft.project_id,
+            owner_account_id: draft.owner_account_id,
             grantee_kind: draft.grantee_kind,
             grantee_id: draft.grantee_id,
             grantee_label: draft.grantee_label,
@@ -3211,12 +3118,15 @@ impl StoreMode {
         };
         match self {
             Self::Memory(store) => {
-                store
-                    .write()
-                    .expect("memory store write lock")
-                    .opening_grants
-                    .push(record.clone());
-                Ok(record.public_view())
+                let mut store = store.write().expect("memory store write lock");
+                if let Some(blocker) = opening_grant_create_blocker(&store.opening_grants, &record)
+                {
+                    return Ok(blocker);
+                }
+                store.opening_grants.push(record.clone());
+                Ok(OpeningGrantCreateResult::Created(Box::new(
+                    record.public_view(),
+                )))
             }
             Self::Postgres(store) => store.create_opening_grant(&record).await,
         }
@@ -4381,6 +4291,7 @@ impl StoreMode {
             self.get_balance_projection(
                 snapshot.tenant_id.as_str(),
                 Some(snapshot.project_id.to_string()),
+                None,
             )
             .await?
             .data,
@@ -4496,6 +4407,7 @@ impl StoreMode {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
     ) -> Result<UsageSummaryResponse> {
@@ -4503,12 +4415,19 @@ impl StoreMode {
             Self::Memory(_) => Ok(sample_usage_summary_response(
                 tenant_id,
                 project_id.as_deref(),
+                owner_account_id.as_deref(),
                 window_start.as_deref(),
                 window_end.as_deref(),
             )),
             Self::Postgres(store) => {
                 store
-                    .get_usage_summary(tenant_id, project_id, window_start, window_end)
+                    .get_usage_summary(
+                        tenant_id,
+                        project_id,
+                        owner_account_id,
+                        window_start,
+                        window_end,
+                    )
                     .await
             }
         }
@@ -4518,6 +4437,7 @@ impl StoreMode {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
         group_by: UsageBreakdownGroupBy,
@@ -4528,6 +4448,7 @@ impl StoreMode {
             Self::Memory(_) => Ok(sample_usage_breakdown_response(
                 tenant_id,
                 project_id.as_deref(),
+                owner_account_id.as_deref(),
                 group_by,
                 cursor,
                 limit,
@@ -4537,6 +4458,7 @@ impl StoreMode {
                     .get_usage_breakdown(
                         tenant_id,
                         project_id,
+                        owner_account_id,
                         window_start,
                         window_end,
                         group_by,
@@ -4552,13 +4474,19 @@ impl StoreMode {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
     ) -> Result<BalanceProjectionResponse> {
         match self {
             Self::Memory(_) => Ok(sample_balance_projection_response(
                 tenant_id,
                 project_id.as_deref(),
+                owner_account_id.as_deref(),
             )),
-            Self::Postgres(store) => store.get_balance_projection(tenant_id, project_id).await,
+            Self::Postgres(store) => {
+                store
+                    .get_balance_projection(tenant_id, project_id, owner_account_id)
+                    .await
+            }
         }
     }
 
@@ -5736,26 +5664,68 @@ impl PostgresStore {
         })
     }
 
-    async fn create_opening_grant(&self, record: &OpeningGrantRecord) -> Result<OpeningGrant> {
+    async fn create_opening_grant(
+        &self,
+        record: &OpeningGrantRecord,
+    ) -> Result<OpeningGrantCreateResult> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(OPENING_GRANT_OWNER_LOCK_INSERT_SQL)
+            .bind(record.tenant_id.as_str())
+            .bind(record.project_id.as_str())
+            .bind(&record.owner_account_id)
+            .bind(&record.created_at)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(OPENING_GRANT_OWNER_LOCK_SELECT_SQL)
+            .bind(record.tenant_id.as_str())
+            .bind(record.project_id.as_str())
+            .bind(&record.owner_account_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let existing_rows = sqlx::query(
+            "SELECT payload FROM opening_grants
+              WHERE tenant_id = $1 AND project_id = $2 AND owner_account_id = $3
+              FOR UPDATE",
+        )
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_str())
+        .bind(&record.owner_account_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let existing = existing_rows
+            .into_iter()
+            .map(|row| row.get::<Json<OpeningGrantRecord>, _>("payload").0)
+            .collect::<Vec<_>>();
+        if let Some(blocker) = opening_grant_create_blocker(&existing, record) {
+            tx.rollback().await?;
+            return Ok(blocker);
+        }
+
         sqlx::query(
             "INSERT INTO opening_grants
-                (grant_id, tenant_id, project_id, config_snapshot_id, grantee_kind, grantee_id, status, credential_hash, payload, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                (grant_id, tenant_id, project_id, owner_account_id, config_snapshot_id, grantee_kind, grantee_id, status, credential_hash, expires_at, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(&record.grant_id)
         .bind(record.tenant_id.as_str())
         .bind(record.project_id.as_str())
+        .bind(&record.owner_account_id)
         .bind(record.config_snapshot_id.as_str())
         .bind(&record.grantee_kind)
         .bind(&record.grantee_id)
         .bind(&record.status)
         .bind(&record.credential_hash)
+        .bind(&record.expires_at)
         .bind(Json(record))
         .bind(&record.created_at)
         .bind(&record.updated_at)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
-        Ok(record.public_view())
+        tx.commit().await?;
+        Ok(OpeningGrantCreateResult::Created(Box::new(
+            record.public_view(),
+        )))
     }
 
     async fn list_opening_grants(&self) -> Result<OpeningGrantsResponse> {
@@ -8070,6 +8040,7 @@ impl PostgresStore {
         Ok(Some(ResolvedApiKey {
             api_key_id: row.get::<String, _>("api_key_id"),
             grant_id: None,
+            owner_account_id: None,
             tenant_id: TenantId::parse(row.get::<String, _>("tenant_id"))
                 .context("invalid tenant id for api key")?,
             project_id: row
@@ -8338,6 +8309,7 @@ impl PostgresStore {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
     ) -> Result<UsageSummaryResponse> {
@@ -8356,12 +8328,14 @@ impl PostgresStore {
             FROM usage_daily_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
-              AND usage_date >= DATE($3::timestamptz)
-              AND usage_date <= DATE($4::timestamptz)
+              AND ($3::text IS NULL OR owner_account_id = $3)
+              AND usage_date >= DATE($4::timestamptz)
+              AND usage_date <= DATE($5::timestamptz)
             "#,
         )
         .bind(tenant_id)
         .bind(project_id.as_deref())
+        .bind(owner_account_id.as_deref())
         .bind(&window_start_value)
         .bind(&window_end_value)
         .fetch_one(&self.pool)
@@ -8372,6 +8346,7 @@ impl PostgresStore {
             data: UsageSummary {
                 tenant_id: TenantId::parse(tenant_id.to_string())?,
                 project_id: project_id.map(ProjectId::parse).transpose()?,
+                owner_account_id,
                 window_start: window_start_value,
                 window_end: window_end_value,
                 currency: currency.clone(),
@@ -8397,6 +8372,7 @@ impl PostgresStore {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
         group_by: UsageBreakdownGroupBy,
@@ -8442,16 +8418,18 @@ impl PostgresStore {
             FROM usage_daily_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
-              AND usage_date >= DATE($3::timestamptz)
-              AND usage_date <= DATE($4::timestamptz)
+              AND ($3::text IS NULL OR owner_account_id = $3)
+              AND usage_date >= DATE($4::timestamptz)
+              AND usage_date <= DATE($5::timestamptz)
             GROUP BY {group_expr}
             ORDER BY {group_expr}
-            OFFSET $5 LIMIT $6
+            OFFSET $6 LIMIT $7
             "#
         );
         let rows = sqlx::query(&sql)
             .bind(tenant_id)
             .bind(project_id.as_deref())
+            .bind(owner_account_id.as_deref())
             .bind(&window_start_value)
             .bind(&window_end_value)
             .bind(i64::try_from(offset).unwrap_or(i64::MAX))
@@ -8514,29 +8492,37 @@ impl PostgresStore {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
     ) -> Result<BalanceProjectionResponse> {
         let row = sqlx::query(
             r#"
             SELECT
                 currency,
-                provider_cost_micros,
-                billable_cost_micros,
-                configured_budget_micros,
-                remaining_budget_micros,
-                threshold_status,
+                COALESCE(SUM(provider_cost_micros), 0)::BIGINT AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0)::BIGINT AS billable_cost_micros,
+                COALESCE(SUM(configured_budget_micros), 0)::BIGINT AS configured_budget_micros,
+                COALESCE(SUM(remaining_budget_micros), 0)::BIGINT AS remaining_budget_micros,
+                CASE
+                    WHEN BOOL_OR(threshold_status = 'exceeded') THEN 'exceeded'
+                    WHEN BOOL_OR(threshold_status = 'warning') THEN 'warning'
+                    ELSE 'ok'
+                END AS threshold_status,
                 to_char(
-                    last_projected_at AT TIME ZONE 'UTC',
+                    MAX(last_projected_at) AT TIME ZONE 'UTC',
                     'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
                 ) AS last_projected_at
             FROM balance_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
-            ORDER BY last_projected_at DESC
+              AND ($3::text IS NULL OR owner_account_id = $3)
+            GROUP BY currency
+            ORDER BY MAX(last_projected_at) DESC
             LIMIT 1
             "#,
         )
         .bind(tenant_id)
         .bind(project_id.as_deref())
+        .bind(owner_account_id.as_deref())
         .fetch_optional(&self.pool)
         .await?;
 
@@ -8548,6 +8534,7 @@ impl PostgresStore {
                 data: BalanceProjection {
                     tenant_id: TenantId::parse(tenant_id.to_string())?,
                     project_id: project_id.map(ProjectId::parse).transpose()?,
+                    owner_account_id,
                     currency: currency.clone(),
                     provider_cost_total: format_monetary_amount(
                         &currency,
@@ -8572,12 +8559,16 @@ impl PostgresStore {
             })
         } else {
             let currency = "USD".to_string();
-            let configured_budget_micros =
-                default_budget_micros(tenant_id, project_id.as_deref().unwrap_or("project"));
+            let configured_budget_micros = default_budget_micros_for_scope(
+                tenant_id,
+                project_id.as_deref().unwrap_or("project"),
+                owner_account_id.as_deref(),
+            );
             Ok(BalanceProjectionResponse {
                 data: BalanceProjection {
                     tenant_id: TenantId::parse(tenant_id.to_string())?,
                     project_id: project_id.map(ProjectId::parse).transpose()?,
+                    owner_account_id,
                     currency: currency.clone(),
                     provider_cost_total: format_monetary_amount(&currency, 0),
                     billable_total: format_monetary_amount(&currency, 0),
@@ -8897,11 +8888,12 @@ impl PostgresStore {
         if intent.status == "renewed" {
             sqlx::query(
                 "UPDATE opening_grants
-                    SET status = $2, payload = $3, updated_at = $4
+                    SET status = $2, expires_at = $3, payload = $4, updated_at = $5
                   WHERE grant_id = $1",
             )
             .bind(&grant.grant_id)
             .bind(&grant.status)
+            .bind(&grant.expires_at)
             .bind(Json(&grant))
             .bind(&grant.updated_at)
             .execute(&mut *tx)
@@ -14041,6 +14033,7 @@ fn parse_cursor_offset(cursor: Option<&str>) -> usize {
 fn sample_usage_summary_response(
     tenant_id: &str,
     project_id: Option<&str>,
+    owner_account_id: Option<&str>,
     window_start: Option<&str>,
     window_end: Option<&str>,
 ) -> UsageSummaryResponse {
@@ -14048,6 +14041,7 @@ fn sample_usage_summary_response(
         data: UsageSummary {
             tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
             project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+            owner_account_id: owner_account_id.map(str::to_string),
             window_start: window_start.unwrap_or("2026-04-01T00:00:00Z").to_string(),
             window_end: window_end.unwrap_or("2026-04-30T23:59:59Z").to_string(),
             currency: "USD".to_string(),
@@ -14064,6 +14058,7 @@ fn sample_usage_summary_response(
 fn sample_usage_breakdown_response(
     _tenant_id: &str,
     _project_id: Option<&str>,
+    _owner_account_id: Option<&str>,
     group_by: UsageBreakdownGroupBy,
     cursor: Option<String>,
     limit: Option<u32>,
@@ -14145,13 +14140,19 @@ fn sample_usage_breakdown_response(
 fn sample_balance_projection_response(
     tenant_id: &str,
     project_id: Option<&str>,
+    owner_account_id: Option<&str>,
 ) -> BalanceProjectionResponse {
-    let configured_budget = default_budget_micros(tenant_id, project_id.unwrap_or("project"));
+    let configured_budget = default_budget_micros_for_scope(
+        tenant_id,
+        project_id.unwrap_or("project"),
+        owner_account_id,
+    );
     let billable_total = 1_540_000;
     BalanceProjectionResponse {
         data: BalanceProjection {
             tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
             project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+            owner_account_id: owner_account_id.map(str::to_string),
             currency: "USD".to_string(),
             provider_cost_total: format_monetary_amount("USD", 1_244_000),
             billable_total: format_monetary_amount("USD", billable_total),
@@ -14361,6 +14362,7 @@ async fn render_billing_export_csv(
         .get_usage_breakdown(
             tenant_id.unwrap_or("tenant_acme"),
             project_id.map(str::to_string),
+            None,
             Some(window_start.to_string()),
             Some(window_end.to_string()),
             UsageBreakdownGroupBy::Day,

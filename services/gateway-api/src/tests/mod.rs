@@ -1,6 +1,7 @@
 use super::{
-    ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, ChatCompletionRequest,
-    ChatMessage, ControlPlaneApiKeyStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
+    ActiveConfigStore, ActiveGatewayConfig, ApiKeyScopeStore, AppState, BudgetProjectionScope,
+    BudgetProjectionStore, ChatCompletionRequest, ChatMessage, ControlPlaneApiKeyStore,
+    ControlPlaneBudgetStore, ControlPlaneConfigStore, GatewayApiKeyResolveRequest,
     GatewayApiKeyResolveResponse, GatewayApiKeyScope, GatewayState, ImageGenerationRequest,
     InMemoryRouteTokenStore, InternalGatewayConfigResponse, ProviderTargetRuntime, RequestContext,
     ResponsesApiInputContent, ResponsesApiInputMessage, ResponsesApiRequest, RuntimeEventSink,
@@ -11,15 +12,16 @@ use axum::{
     Json, Router,
     body::{Body, to_bytes},
     extract::Json as ExtractJson,
+    extract::Query,
     extract::State,
     http::{Request, StatusCode},
     routing::{get, post},
 };
 use core_domain::{
     AuthKind, BudgetPolicyId, ConfigSnapshot, ConfigSnapshotId, ConfigSnapshotStatus,
-    CredentialOwnerType, DeploymentScope, HealthState, MonetaryAmount, ProjectId, ProvenanceClass,
-    ProviderResource, ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId,
-    RouteReceipt, TenantId, UsageEvent,
+    CredentialOwnerType, DEFAULT_OWNER_ACCOUNT_ID, DeploymentScope, HealthState, MonetaryAmount,
+    ProjectId, ProvenanceClass, ProviderResource, ProviderResourceId, ProviderResourceStatus,
+    RoutePolicy, RoutePolicyId, RouteReceipt, TenantId, UsageEvent,
 };
 use protocol_ir::{BalanceProjectionResponse, RouteReceiptRecorded};
 use provider_gateway::{
@@ -89,11 +91,28 @@ fn request_context() -> super::RequestContext {
     }
 }
 
+#[test]
+fn generated_request_context_is_instance_scoped() {
+    let first = super::next_request_context();
+    let second = super::next_request_context();
+    let first_request_suffix = first.request_id.strip_prefix("req_").unwrap();
+    let first_trace_suffix = first.trace_id.strip_prefix("trace_").unwrap();
+
+    assert_ne!(first.sequence, second.sequence);
+    assert_ne!(first.request_id, second.request_id);
+    assert!(first.request_id.starts_with("req_"));
+    assert!(first.trace_id.starts_with("trace_"));
+    assert_eq!(first_request_suffix, first_trace_suffix);
+    assert_ne!(first.request_id, format!("req_{}", first.sequence));
+    assert!(first.request_id.len() > "req_1000".len());
+}
+
 fn ok_budget_projection() -> BalanceProjectionResponse {
     BalanceProjectionResponse {
         data: protocol_ir::BalanceProjection {
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            owner_account_id: None,
             currency: "USD".to_string(),
             provider_cost_total: MonetaryAmount {
                 currency: "USD".to_string(),
@@ -283,6 +302,7 @@ impl StaticApiKeyScopeStore {
             scope: GatewayApiKeyScope {
                 credential_id: "cred_gateway_test".to_string(),
                 grant_id: None,
+                owner_account_id: None,
                 tenant_id: "tenant_acme".to_string(),
                 project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
@@ -298,6 +318,23 @@ impl StaticApiKeyScopeStore {
 impl ApiKeyScopeStore for StaticApiKeyScopeStore {
     async fn resolve(&self, _api_key: &str) -> Result<GatewayApiKeyScope, String> {
         Ok(self.scope.clone())
+    }
+}
+
+#[derive(Debug)]
+struct RecordingBudgetProjectionStore {
+    response: BalanceProjectionResponse,
+    scopes: Arc<Mutex<Vec<BudgetProjectionScope>>>,
+}
+
+#[async_trait::async_trait]
+impl BudgetProjectionStore for RecordingBudgetProjectionStore {
+    async fn load_budget(
+        &self,
+        scope: &BudgetProjectionScope,
+    ) -> Result<BalanceProjectionResponse, String> {
+        self.scopes.lock().await.push(scope.clone());
+        Ok(self.response.clone())
     }
 }
 
@@ -441,6 +478,7 @@ struct FixtureState {
     fail: bool,
     fixture: ControlPlaneFixture,
     request_count: Arc<AtomicUsize>,
+    budget_queries: Arc<Mutex<Vec<BTreeMap<String, String>>>>,
 }
 
 async fn control_plane_api_key_resolution(
@@ -454,6 +492,7 @@ async fn control_plane_api_key_resolution(
     Ok(Json(GatewayApiKeyResolveResponse {
         credential_id: "cred_gateway_test".to_string(),
         grant_id: None,
+        owner_account_id: Some("acct_acme_owner".to_string()),
         tenant_id: "tenant_acme".to_string(),
         project_id: Some("proj_core".to_string()),
         status: "active".to_string(),
@@ -461,6 +500,17 @@ async fn control_plane_api_key_resolution(
         route_policy_id: None,
         scopes: Vec::new(),
     }))
+}
+
+async fn control_plane_budget_projection(
+    State(state): State<FixtureState>,
+    Query(query): Query<BTreeMap<String, String>>,
+) -> Result<Json<BalanceProjectionResponse>, StatusCode> {
+    state.budget_queries.lock().await.push(query);
+    if state.fail {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    Ok(Json(ok_budget_projection()))
 }
 
 #[async_trait::async_trait]
@@ -614,8 +664,14 @@ async fn control_plane_active_config(
 
 async fn spawn_control_plane_server(
     fail: bool,
-) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+) -> (
+    String,
+    Arc<AtomicUsize>,
+    Arc<Mutex<Vec<BTreeMap<String, String>>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let request_count = Arc::new(AtomicUsize::new(0));
+    let budget_queries = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .route(
             "/internal/gateway/config/current",
@@ -625,10 +681,15 @@ async fn spawn_control_plane_server(
             "/internal/gateway/api-keys/resolve",
             post(control_plane_api_key_resolution),
         )
+        .route(
+            "/internal/gateway/billing-projection",
+            get(control_plane_budget_projection),
+        )
         .with_state(FixtureState {
             fail,
             fixture: control_plane_fixture(),
             request_count: request_count.clone(),
+            budget_queries: budget_queries.clone(),
         });
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -637,10 +698,16 @@ async fn spawn_control_plane_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    (format!("http://{address}"), request_count, handle)
+    (
+        format!("http://{address}"),
+        request_count,
+        budget_queries,
+        handle,
+    )
 }
 
 mod control_plane;
 mod events_protocol;
 mod http_basic;
+mod opening_grants;
 mod routing;

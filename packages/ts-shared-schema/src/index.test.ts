@@ -5,9 +5,11 @@ import {
   authProviderLinkSchema,
   authSessionSchema,
   authSessionResponseSchema,
+  balanceProjectionResponseSchema,
   merchantWorkspaceResponseSchema,
   configSnapshotResponseSchema,
   contractDigest,
+  createOpeningGrantRequestSchema,
   emailLoginCompleteRequestSchema,
   emailLoginStartRequestSchema,
   gatewayAnthropicMessagesErrorSchema,
@@ -22,6 +24,9 @@ import {
   oauthCallbackRequestSchema,
   oauthLoginStartResponseSchema,
   oauthProviderSchema,
+  openingGrantCreateResponseSchema,
+  openingGrantRevokeRequestSchema,
+  openingGrantsResponseSchema,
   projectsResponseSchema,
   providerResourcesResponseSchema,
   replayCapsuleResponseSchema,
@@ -29,7 +34,8 @@ import {
   routeSimulationRequestSchema,
   routeSimulationResponseSchema,
   tenantsResponseSchema,
-  usageEventRecordedMessageSchema
+  usageEventRecordedMessageSchema,
+  usageSummaryResponseSchema
 } from './index.ts'
 
 const readJson = (relativePath: string) =>
@@ -51,6 +57,12 @@ void test('control-plane examples conform to shared zod schemas', () => {
   )
   const routePolicies = readJson(
     '../../../schemas/examples/control-plane/route-policies.response.json'
+  )
+  const usageSummary = readJson(
+    '../../../schemas/examples/control-plane/usage-summary.response.json'
+  )
+  const balanceProjection = readJson(
+    '../../../schemas/examples/control-plane/balance-projection.response.json'
   )
   const snapshot = readJson(
     '../../../schemas/examples/control-plane/config-snapshot.response.json'
@@ -89,6 +101,14 @@ void test('control-plane examples conform to shared zod schemas', () => {
     authSessionResponseSchema.parse(sessionResponse).session?.sessionId,
     'sess_123'
   )
+  assert.equal(
+    usageSummaryResponseSchema.parse(usageSummary).data.owner_account_id,
+    'acct_acme_owner'
+  )
+  assert.equal(
+    balanceProjectionResponseSchema.parse(balanceProjection).data.owner_account_id,
+    'acct_acme_owner'
+  )
 })
 
 void test('gateway and event examples conform to shared zod schemas', () => {
@@ -126,8 +146,20 @@ void test('gateway and event examples conform to shared zod schemas', () => {
     'final'
   )
   assert.equal(
+    gatewayChatResponseSchema.parse(gatewayResponse).usage_event.owner_account_id,
+    'acct_acme_owner'
+  )
+  assert.equal(
+    gatewayChatResponseSchema.parse(gatewayResponse).usage_event.grant_id,
+    'grant_acme_customer'
+  )
+  assert.equal(
     usageEventRecordedMessageSchema.parse(usageMessage).message_type,
     'usage_event.recorded'
+  )
+  assert.equal(
+    usageEventRecordedMessageSchema.parse(usageMessage).payload.usage_event.owner_account_id,
+    'acct_acme_owner'
   )
   assert.equal(
     gatewayAnthropicMessagesRequestSchema.parse(anthropicRequest).messages[0]?.role,
@@ -157,6 +189,62 @@ void test('gateway and event examples conform to shared zod schemas', () => {
     routeReceiptDiagnosticsResponseSchema.parse(routeReceiptDiagnostics).route_receipt.route_receipt_id,
     'routercpt_123'
   )
+})
+
+void test('opening grant schemas preserve owner account and one-time credential fields', () => {
+  const request = createOpeningGrantRequestSchema.parse({
+    config_snapshot_id: 'cfgsnap_gateway_v1',
+    owner_account_id: 'acct_acme_owner',
+    grantee_kind: 'user',
+    grantee_id: 'user_store_001',
+    grantee_label: 'Store operator 001',
+    expires_at: '2026-05-22T00:00:00Z',
+    scopes: ['route:codex', 'provider:hugerouter-commercial'],
+    credential_kind: 'api_key'
+  })
+  const grant = {
+    grant_id: 'opengrant_acme_customer_1',
+    tenant_id: 'tenant_acme',
+    project_id: 'proj_core',
+    owner_account_id: request.owner_account_id,
+    grantee_kind: request.grantee_kind,
+    grantee_id: request.grantee_id,
+    grantee_label: request.grantee_label,
+    config_snapshot_id: request.config_snapshot_id,
+    route_policy_id: 'routepol_openai_chat_default',
+    budget_policy_id: 'budgetpol_default',
+    provider_resource_ids: ['prvrsrc_openai_primary'],
+    credential_kind: 'api_key',
+    credential_id: 'cred_opening_acme_customer_1',
+    credential_key_prefix: 'akp-child',
+    credential_last_four: 'c001',
+    scopes: request.scopes,
+    expires_at: request.expires_at,
+    status: 'active',
+    created_by: 'user_admin',
+    created_at: '2026-04-22T00:00:00Z',
+    updated_at: '2026-04-22T00:00:00Z',
+    version: 1
+  }
+  const createResponse = openingGrantCreateResponseSchema.parse({
+    grant,
+    credential: {
+      credential_kind: 'api_key',
+      credential_id: 'cred_opening_acme_customer_1',
+      key_prefix: 'akp-child',
+      last_four: 'c001',
+      plaintext: 'akp_test_child_once'
+    }
+  })
+  const listResponse = openingGrantsResponseSchema.parse({ data: [grant] })
+  const revokeRequest = openingGrantRevokeRequestSchema.parse({
+    expected_version: 1
+  })
+
+  assert.equal(createResponse.grant.owner_account_id, 'acct_acme_owner')
+  assert.equal(createResponse.credential.plaintext, 'akp_test_child_once')
+  assert.equal(listResponse.data[0]?.grantee_id, 'user_store_001')
+  assert.equal(revokeRequest.expected_version, 1)
 })
 
 void test('oauth providers exclude email', () => {

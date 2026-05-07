@@ -2,6 +2,7 @@
   "data": {
     "tenant_id": "tenant_acme",
     "project_id": "proj_core",
+    "owner_account_id": "acct_acme_owner",
     "currency": "USD",
     "provider_cost_total": {
       "currency": "USD",

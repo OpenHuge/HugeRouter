@@ -176,6 +176,40 @@ export type ApiKeyCreateResult = {
   version: number;
 };
 
+export type OpeningGrantView = {
+  budgetPolicyId: string;
+  canRevoke: boolean;
+  configSnapshotId: string;
+  createdAt: string;
+  credentialId: string;
+  credentialKeyPrefix: string;
+  credentialKind: string;
+  credentialLastFour: string;
+  expiresAt: string;
+  grantId: string;
+  granteeId: string;
+  granteeKind: string;
+  granteeLabel?: string;
+  isActive: boolean;
+  ownerAccountId: string;
+  projectId: string;
+  providerResourceIds: string[];
+  routePolicyId: string;
+  scopes: string[];
+  status: string;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+};
+
+export type OpeningGrantCreateResult = {
+  credentialId: string;
+  keyPrefix: string;
+  lastFour: string;
+  plaintext?: string;
+  grant: OpeningGrantView;
+};
+
 export type UsageBreakdownView = {
   billablePriceUsd: string;
   bucket: string;

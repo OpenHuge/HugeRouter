@@ -532,6 +532,8 @@ pub struct UsageSummary {
     pub tenant_id: TenantId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub window_start: String,
     pub window_end: String,
     pub currency: String,
@@ -574,6 +576,8 @@ pub struct BalanceProjection {
     pub tenant_id: TenantId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub currency: String,
     pub provider_cost_total: MonetaryAmount,
     pub billable_total: MonetaryAmount,
@@ -1355,6 +1359,7 @@ pub struct DeliveryOperationsDetailResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct CreateOpeningGrantRequest {
     pub config_snapshot_id: ConfigSnapshotId,
+    pub owner_account_id: String,
     pub grantee_kind: String,
     pub grantee_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1367,10 +1372,16 @@ pub struct CreateOpeningGrantRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrantRevokeRequest {
+    pub expected_version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct OpeningGrant {
     pub grant_id: String,
     pub tenant_id: TenantId,
     pub project_id: ProjectId,
+    pub owner_account_id: String,
     pub grantee_kind: String,
     pub grantee_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -3,6 +3,7 @@
 mod merchant_api;
 mod merchant_replay;
 mod merchant_store;
+mod opening_grant_api;
 mod pricing_catalog;
 mod route_receipts;
 mod store;
@@ -32,6 +33,10 @@ use core_domain::{
     OAuthLoginStartResponse, Project, ProvenanceClass, ProviderCapabilities, ProviderResource,
     ProviderResourceId, ProviderResourceStatus, RoutePolicy, RoutePolicyId, Tenant,
     TenantMembership, TenantMembershipRole, TenantMembershipStatus, UnlinkAuthProviderResponse,
+};
+use opening_grant_api::{
+    OPENING_CREDENTIAL_KIND_API_KEY, generate_opening_api_key, opening_scopes,
+    validate_opening_grantee, validate_opening_owner_account_id,
 };
 use protocol_ir::{
     BalanceProjectionResponse, BillingExportJobResponse, BillingExportJobsResponse,
@@ -71,10 +76,11 @@ use store::{
     DeliveryUploadBatchItemDraft, DeliveryUploadProcessResult, EncryptedSecretBlob, IdentityLookup,
     OAuthCarpoolRecord, OAuthCarpoolsResponse, OAuthPoolAccountFeedback, OAuthPoolSelectionRequest,
     OAuthSharingLeaseRecord, OAuthSharingLeasesResponse, OAuthSharingUsageBudget,
-    OAuthSharingUsageFilters, OAuthSharingUsageResponse, OpeningGrantDraft,
-    ProviderResourceFilters, RenewalIntentCreateResult, RenewalIntentDraft, RenewalIntentFilters,
-    SESSION_TTL_SECONDS, StoreMode, WechatPaymentOrderRecord, WechatPaymentOrderResponse,
-    auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339, oauth_provider_slug,
+    OAuthSharingUsageFilters, OAuthSharingUsageResponse, OpeningGrantCreateResult,
+    OpeningGrantDraft, ProviderResourceFilters, RenewalIntentCreateResult, RenewalIntentDraft,
+    RenewalIntentFilters, SESSION_TTL_SECONDS, StoreMode, WechatPaymentOrderRecord,
+    WechatPaymentOrderResponse, auth_provider_enabled, expires_at, mock_auth_enabled, now_rfc3339,
+    oauth_provider_slug,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -90,9 +96,6 @@ const PLATFORM_ADMIN_TENANT_SLUG: &str = "platform-admin";
 const SESSION_COOKIE_NAME: &str = "huge_router_session";
 const CODEX_AUTH_ENCRYPTION_ALGORITHM: &str = "AES-256-GCM";
 const DEFAULT_CODEX_REVERSE_PROXY_ENDPOINT: &str = "https://chatgpt-reverse-proxy.local/v1";
-const OPENING_CREDENTIAL_KIND_API_KEY: &str = "api_key";
-const OPENING_SCOPE_ROUTE_CODEX: &str = "route:codex";
-const OPENING_SCOPE_PROVIDER_COMMERCIAL: &str = "provider:hugerouter-commercial";
 const DEFAULT_DELIVERY_SERVICE_KIND: &str = "manual_browser_account";
 const DELIVERY_PROVIDER_CHATGPT: &str = "chatgpt";
 const DELIVERY_CODE_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
@@ -102,8 +105,10 @@ const DELIVERY_OPERATIONS_DEFAULT_LIMIT: u32 = 50;
 const DELIVERY_OPERATIONS_MAX_LIMIT: u32 = 200;
 const DELIVERY_OPERATIONS_DEFAULT_WINDOW_DAYS: i64 = 30;
 const DELIVERY_UPLOAD_MAX_ITEMS: usize = 500;
+const STABLE_ID_RANDOM_LEN: usize = 16;
 const CUSTOMER_DELIVERY_REDEEM_ACTOR: &str = "customer_delivery_redeem";
 const CUSTOMER_DELIVERY_DOWNLOAD_GRANT_ACTOR: &str = "customer_delivery_download_grant";
+const INTERNAL_DELIVERY_OPERATOR_ACTOR: &str = "internal_delivery_operator";
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
@@ -181,6 +186,8 @@ struct GatewayApiKeyResolveResponse {
     pub credential_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub tenant_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
@@ -339,6 +346,7 @@ struct InternalGatewayConfigResponse {
 struct UsageQuery {
     pub tenant_id: Option<String>,
     pub project_id: Option<String>,
+    pub owner_account_id: Option<String>,
     pub window_start: Option<String>,
     pub window_end: Option<String>,
 }
@@ -347,6 +355,7 @@ struct UsageQuery {
 struct UsageBreakdownQuery {
     pub tenant_id: Option<String>,
     pub project_id: Option<String>,
+    pub owner_account_id: Option<String>,
     pub window_start: Option<String>,
     pub window_end: Option<String>,
     pub group_by: Option<String>,
@@ -356,8 +365,12 @@ struct UsageBreakdownQuery {
 
 #[derive(Debug, Clone, Deserialize)]
 struct BalanceProjectionQuery {
-    pub tenant_id: Option<String>,
-    pub project_id: Option<String>,
+    #[serde(rename = "tenant_id")]
+    pub tenant: Option<String>,
+    #[serde(rename = "project_id")]
+    pub project: Option<String>,
+    #[serde(rename = "owner_account_id")]
+    pub owner_account: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -879,6 +892,18 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             "/internal/delivery-uploads/{batch_id}/process",
             post(process_delivery_upload_batch),
         )
+        .route(
+            "/internal/deliveries/prepare",
+            post(prepare_delivery_internal),
+        )
+        .route(
+            "/internal/delivery-uploads",
+            post(create_delivery_upload_batch_internal),
+        )
+        .route(
+            "/internal/delivery-uploads/{batch_id}/items",
+            get(list_delivery_upload_batch_items_internal),
+        )
         .route("/v1/usage/summary", get(get_usage_summary))
         .route("/v1/usage/breakdown", get(get_usage_breakdown))
         .route("/v1/billing/projection", get(get_balance_projection))
@@ -1008,7 +1033,7 @@ async fn start_email_login(
         ));
     }
 
-    let flow_id = format!("authflow_{}", context.sequence);
+    let flow_id = generate_stable_id("authflow", &context)?;
     let verification_code = issue_email_verification_code(context.sequence);
     state
         .store
@@ -1068,10 +1093,11 @@ async fn complete_email_login(
         ));
     }
 
+    let session_id = generate_stable_id("sess", &context)?;
     let login_result = state
         .store
         .issue_session(
-            &format!("sess_{}", context.sequence),
+            &session_id,
             AuthProvider::Email,
             &IdentityLookup::Email(pending.email.unwrap_or_default()),
             &pending.workspace_slug,
@@ -1134,7 +1160,7 @@ async fn start_oauth_login(
         ));
     }
 
-    let state_token = format!("oauth_state_{}", context.sequence);
+    let state_token = generate_stable_id("oauth_state", &context)?;
     state
         .store
         .create_oauth_flow(
@@ -1315,10 +1341,11 @@ async fn complete_oauth_login(
 
         (identity.subject, pending.workspace_slug.clone())
     };
+    let session_id = generate_stable_id("sess", &context)?;
     let mut login_result = state
         .store
         .issue_session(
-            &format!("sess_{}", context.sequence),
+            &session_id,
             AuthProvider::from(provider),
             &IdentityLookup::ProviderSubject(AuthProvider::from(provider), subject),
             &workspace_slug,
@@ -1986,6 +2013,7 @@ async fn create_opening_grant(
     }
 
     validate_opening_grantee(&request, &context)?;
+    let owner_account_id = validate_opening_owner_account_id(&request.owner_account_id, &context)?;
     validate_opening_expires_at(&request.expires_at, &context)?;
     let credential_kind = request
         .credential_kind
@@ -2003,9 +2031,10 @@ async fn create_opening_grant(
     let scopes = opening_scopes(&request.scopes, &package, &context)?;
     let plaintext = generate_opening_api_key(&context)?;
     let draft = OpeningGrantDraft {
-        grant_id: format!("opengrant_{}", context.sequence),
+        grant_id: generate_stable_id("opengrant", &context)?,
         tenant_id: package.handoff.tenant_id.clone(),
         project_id: package.handoff.project_id.clone(),
+        owner_account_id,
         grantee_kind: request.grantee_kind.trim().to_string(),
         grantee_id: request.grantee_id.trim().to_string(),
         grantee_label: request
@@ -2023,7 +2052,7 @@ async fn create_opening_grant(
         expires_at: request.expires_at.trim().to_string(),
         created_by: authz.actor_id(),
     };
-    let grant = state
+    let create_result = state
         .store
         .create_opening_grant(draft, &plaintext)
         .await
@@ -2034,6 +2063,30 @@ async fn create_opening_grant(
                 &context,
             )
         })?;
+    let grant = match create_result {
+        OpeningGrantCreateResult::Created(grant) => *grant,
+        OpeningGrantCreateResult::OwnerLimitReached {
+            active_count,
+            limit,
+        } => {
+            return Err(ApiError::conflict(
+                "opening_grant_limit_reached",
+                format!(
+                    "owner_account_id has {active_count} active opening grants; limit is {limit}"
+                ),
+                &context,
+            ));
+        }
+        OpeningGrantCreateResult::ActiveGranteeExists { grant_id } => {
+            return Err(ApiError::conflict(
+                "opening_grant_grantee_active",
+                format!(
+                    "grantee already has active opening grant `{grant_id}` for owner_account_id"
+                ),
+                &context,
+            ));
+        }
+    };
     let credential = OpeningCredential {
         credential_kind: grant.credential_kind.clone(),
         credential_id: grant.credential_id.clone(),
@@ -2107,30 +2160,57 @@ async fn prepare_delivery(
 ) -> Result<Json<DeliveryPrepareResponse>, ApiError> {
     let context = next_request_context();
     let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let provider = validate_delivery_provider(&request.provider, &context)?;
-    validate_delivery_service_days(request.service_days, &context)?;
-    let service_kind = delivery_service_kind(request.service_kind.as_deref(), &context)?;
-    let project = load_project(&state, request.project_id.as_str(), &context).await?;
+    authz.ensure_manage_tenant(request.tenant_id.as_str(), &context)?;
+    let response = prepare_delivery_with_actor(&state, request, authz.actor_id(), &context).await?;
+    Ok(Json(response))
+}
+
+async fn prepare_delivery_internal(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDeliveryRequest>,
+) -> Result<Json<DeliveryPrepareResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let response = prepare_delivery_with_actor(
+        &state,
+        request,
+        INTERNAL_DELIVERY_OPERATOR_ACTOR.to_string(),
+        &context,
+    )
+    .await?;
+    Ok(Json(response))
+}
+
+async fn prepare_delivery_with_actor(
+    state: &ControlPlaneState,
+    request: CreateDeliveryRequest,
+    actor_id: String,
+    context: &RequestContext,
+) -> Result<DeliveryPrepareResponse, ApiError> {
+    let provider = validate_delivery_provider(&request.provider, context)?;
+    validate_delivery_service_days(request.service_days, context)?;
+    let service_kind = delivery_service_kind(request.service_kind.as_deref(), context)?;
+    let project = load_project(state, request.project_id.as_str(), context).await?;
     if project.tenant_id != request.tenant_id {
         return Err(ApiError::bad_request(
             "delivery_project_tenant_mismatch",
             "project_id does not belong to tenant_id".to_string(),
-            &context,
+            context,
         ));
     }
-    authz.ensure_manage_tenant(request.tenant_id.as_str(), &context)?;
-    let (starts_at, ends_at, code_expires_at) = delivery_timestamps(&request, &context)?;
-    let redemption_code = generate_delivery_code("red", &context)?;
-    let browser_file_unlock_code = generate_delivery_code("brw", &context)?;
-    let response = state
+    let (starts_at, ends_at, code_expires_at) = delivery_timestamps(&request, context)?;
+    let redemption_code = generate_delivery_code("red", context)?;
+    let browser_file_unlock_code = generate_delivery_code("brw", context)?;
+    state
         .store
         .prepare_delivery(
             DeliveryPrepareDraft {
-                delivery_id: format!("delivery_{}", context.sequence),
+                delivery_id: generate_stable_id("delivery", context)?,
                 tenant_id: request.tenant_id,
                 project_id: request.project_id,
                 provider,
-                operator_id: authz.actor_id(),
+                operator_id: actor_id,
                 customer_label: request
                     .customer_label
                     .as_deref()
@@ -2151,10 +2231,9 @@ async fn prepare_delivery(
             ApiError::internal(
                 "storage_unavailable",
                 format!("failed to prepare delivery: {error}"),
-                &context,
+                context,
             )
-        })?;
-    Ok(Json(response))
+        })
 }
 
 async fn get_delivery(
@@ -2270,7 +2349,7 @@ async fn create_delivery_artifact(
     let response = state
         .store
         .create_delivery_artifact(DeliveryArtifactDraft {
-            artifact_id: format!("artifact_{}", context.sequence),
+            artifact_id: generate_stable_id("artifact", &context)?,
             delivery_id,
             tenant_id: delivery.data.delivery.tenant_id,
             project_id: delivery.data.delivery.project_id,
@@ -2353,26 +2432,51 @@ async fn create_delivery_upload_batch(
 ) -> Result<(StatusCode, Json<DeliveryUploadBatchResponse>), ApiError> {
     let context = next_request_context();
     let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let provider = validate_delivery_provider(&request.provider, &context)?;
-    let project = load_project(&state, request.project_id.as_str(), &context).await?;
-    ensure_project_matches_tenant(&project, request.tenant_id.as_str(), &context)?;
     authz.ensure_manage_tenant(request.tenant_id.as_str(), &context)?;
-    let source_file_name = delivery_artifact_file_name(Some(&request.source_file_name), &context)?
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "delivery_upload_source_file_name_required",
-                "source_file_name is required".to_string(),
-                &context,
-            )
-        })?;
+    create_delivery_upload_batch_with_actor(&state, request, authz.actor_id(), &context).await
+}
+
+async fn create_delivery_upload_batch_internal(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDeliveryUploadBatchRequest>,
+) -> Result<(StatusCode, Json<DeliveryUploadBatchResponse>), ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    create_delivery_upload_batch_with_actor(
+        &state,
+        request,
+        INTERNAL_DELIVERY_OPERATOR_ACTOR.to_string(),
+        &context,
+    )
+    .await
+}
+
+async fn create_delivery_upload_batch_with_actor(
+    state: &ControlPlaneState,
+    request: CreateDeliveryUploadBatchRequest,
+    created_by: String,
+    context: &RequestContext,
+) -> Result<(StatusCode, Json<DeliveryUploadBatchResponse>), ApiError> {
+    let provider = validate_delivery_provider(&request.provider, context)?;
+    let project = load_project(state, request.project_id.as_str(), context).await?;
+    ensure_project_matches_tenant(&project, request.tenant_id.as_str(), context)?;
+    let source_file_name = delivery_artifact_file_name(Some(&request.source_file_name), context)?;
+    let Some(source_file_name) = source_file_name else {
+        return Err(ApiError::bad_request(
+            "delivery_upload_source_file_name_required",
+            "source_file_name is required".to_string(),
+            context,
+        ));
+    };
     let idempotency_key =
-        delivery_upload_idempotency_key(request.idempotency_key.as_deref(), &context)?;
-    let items = delivery_upload_item_drafts(&request.items, &context)?;
+        delivery_upload_idempotency_key(request.idempotency_key.as_deref(), context)?;
+    let items = delivery_upload_item_drafts(&request.items, context)?;
     let source_file_sha256 = delivery_upload_source_sha256(&source_file_name, &provider, &items);
     let response = state
         .store
         .create_delivery_upload_batch(DeliveryUploadBatchDraft {
-            batch_id: format!("dlvup_{}", context.sequence),
+            batch_id: generate_stable_id("dlvup", &context)?,
             tenant_id: request.tenant_id,
             project_id: request.project_id,
             provider,
@@ -2380,14 +2484,14 @@ async fn create_delivery_upload_batch(
             source_file_sha256,
             idempotency_key,
             items,
-            created_by: authz.actor_id(),
+            created_by,
         })
         .await
         .map_err(|error| {
             ApiError::internal(
                 "storage_unavailable",
                 format!("failed to queue delivery upload batch: {error}"),
-                &context,
+                context,
             )
         })?;
     Ok((StatusCode::ACCEPTED, Json(response)))
@@ -2448,6 +2552,34 @@ async fn list_delivery_upload_batch_items(
             )
         })?;
     authz.ensure_read_tenant(batch.data.tenant_id.as_str(), &context)?;
+    let response = state
+        .store
+        .list_delivery_upload_batch_items(&batch_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "storage_unavailable",
+                format!("failed to list delivery upload batch items: {error}"),
+                &context,
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "delivery_upload_batch_not_found",
+                format!("delivery upload batch `{batch_id}` was not found"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn list_delivery_upload_batch_items_internal(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Path(batch_id): Path<String>,
+) -> Result<Json<DeliveryUploadBatchItemsResponse>, ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
     let response = state
         .store
         .list_delivery_upload_batch_items(&batch_id)
@@ -2553,7 +2685,7 @@ async fn redeem_delivery_activation(
         .store
         .redeem_delivery_activation(
             &code_hash,
-            format!("activation_{}", context.sequence),
+            generate_stable_id("activation", &context)?,
             &actor_id,
         )
         .await
@@ -2635,7 +2767,7 @@ async fn issue_delivery_download_grant(
     let result = state
         .store
         .issue_delivery_download_grant(DeliveryDownloadGrantDraft {
-            grant_id: format!("dlgrant_{}", context.sequence),
+            grant_id: generate_stable_id("dlgrant", &context)?,
             activation_id: activation_id.to_string(),
             token_plaintext: token,
             created_by,
@@ -3221,7 +3353,7 @@ async fn upload_codex_auth_account(
     let auth_json_sha256 = hex_sha256(&serialized_auth_json);
     let encrypted_auth_json = encrypt_codex_auth_json(&serialized_auth_json, &context)?;
     let account = CodexAuthAccountRecord {
-        codex_account_id: format!("codexacct_{}", context.sequence),
+        codex_account_id: generate_stable_id("codexacct", &context)?,
         provider: "codex".to_string(),
         tenant_id,
         project_id,
@@ -3656,6 +3788,7 @@ async fn resolve_api_key_for_gateway(
     Ok(Json(GatewayApiKeyResolveResponse {
         credential_id: resolved.api_key_id,
         grant_id: resolved.grant_id,
+        owner_account_id: resolved.owner_account_id,
         tenant_id: resolved.tenant_id.to_string(),
         project_id: resolved.project_id.map(|project_id| project_id.to_string()),
         status: resolved.status,
@@ -3938,7 +4071,7 @@ async fn get_internal_gateway_balance_projection(
 ) -> Result<Json<BalanceProjectionResponse>, ApiError> {
     let context = next_request_context();
     require_internal_gateway_auth(&state, &headers, &context)?;
-    let tenant_id = query.tenant_id.ok_or_else(|| {
+    let tenant_id = query.tenant.ok_or_else(|| {
         ApiError::bad_request(
             "tenant_id_required",
             "tenant_id is required for internal balance projection queries".to_string(),
@@ -3948,7 +4081,7 @@ async fn get_internal_gateway_balance_projection(
 
     let response = state
         .store
-        .get_balance_projection(&tenant_id, query.project_id)
+        .get_balance_projection(&tenant_id, query.project, query.owner_account)
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -4075,6 +4208,7 @@ async fn get_usage_summary(
         .get_usage_summary(
             &tenant_id,
             query.project_id,
+            query.owner_account_id,
             query.window_start,
             query.window_end,
         )
@@ -4117,6 +4251,7 @@ async fn get_usage_breakdown(
         .get_usage_breakdown(
             &tenant_id,
             query.project_id,
+            query.owner_account_id,
             query.window_start,
             query.window_end,
             group_by,
@@ -4142,7 +4277,7 @@ async fn get_balance_projection(
 ) -> Result<Json<BalanceProjectionResponse>, ApiError> {
     let context = next_request_context();
     let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let tenant_id = query.tenant_id.ok_or_else(|| {
+    let tenant_id = query.tenant.ok_or_else(|| {
         ApiError::bad_request(
             "tenant_id_required",
             "tenant_id is required for balance projection queries".to_string(),
@@ -4150,7 +4285,7 @@ async fn get_balance_projection(
         )
     })?;
     authz.ensure_read_tenant(&tenant_id, &context)?;
-    if let Some(project_id) = query.project_id.as_deref() {
+    if let Some(project_id) = query.project.as_deref() {
         let project = load_project(&state, project_id, &context).await?;
         ensure_project_matches_tenant(&project, &tenant_id, &context)?;
         authz.ensure_read_project(&project, &context)?;
@@ -4158,7 +4293,7 @@ async fn get_balance_projection(
 
     let response = state
         .store
-        .get_balance_projection(&tenant_id, query.project_id)
+        .get_balance_projection(&tenant_id, query.project, query.owner_account)
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -4471,7 +4606,7 @@ async fn create_renewal_intent(
     }
 
     let draft = RenewalIntentDraft {
-        renewal_intent_id: format!("renewal_{}", context.sequence),
+        renewal_intent_id: generate_stable_id("renewal", &context)?,
         out_trade_no: out_trade_no.to_string(),
         grant_id: grant_id.to_string(),
         renew_expires_at: request.renew_expires_at.trim().to_string(),
@@ -4962,11 +5097,10 @@ async fn ensure_codex_provider_resource(
             )
         })?
     } else {
-        ProviderResourceId::parse(format!(
-            "prvrsrc_codex_{}_{}",
-            slug_fragment(display_name),
-            context.sequence
-        ))
+        ProviderResourceId::parse(generate_stable_id(
+            &format!("prvrsrc_codex_{}", slug_fragment(display_name)),
+            context,
+        )?)
         .expect("generated provider_resource_id should be valid")
     };
 
@@ -5094,28 +5228,6 @@ fn tenant_visible_to_authorizer(authz: &ControlPlaneAuthorizer, tenant_id: Optio
     tenant_id.is_some_and(|tenant_id| authz.membership(tenant_id).is_some())
 }
 
-fn validate_opening_grantee(
-    request: &CreateOpeningGrantRequest,
-    context: &RequestContext,
-) -> Result<(), ApiError> {
-    let grantee_kind = request.grantee_kind.trim();
-    if !matches!(grantee_kind, "customer" | "agent" | "internal_test") {
-        return Err(ApiError::bad_request(
-            "opening_grantee_kind_invalid",
-            "grantee_kind must be customer, agent, or internal_test".to_string(),
-            context,
-        ));
-    }
-    if request.grantee_id.trim().is_empty() {
-        return Err(ApiError::bad_request(
-            "opening_grantee_required",
-            "grantee_id is required".to_string(),
-            context,
-        ));
-    }
-    Ok(())
-}
-
 fn validate_opening_expires_at(expires_at: &str, context: &RequestContext) -> Result<(), ApiError> {
     let expires_at = expires_at.trim();
     let timestamp = OffsetDateTime::parse(expires_at, &Rfc3339).map_err(|error| {
@@ -5155,66 +5267,6 @@ fn validate_renewal_expires_at(
         ));
     }
     Ok(())
-}
-
-fn opening_scopes(
-    requested_scopes: &[String],
-    package: &SaleReadyPackageResponse,
-    context: &RequestContext,
-) -> Result<Vec<String>, ApiError> {
-    let mut scopes = if requested_scopes.is_empty() {
-        let mut scopes = vec![
-            OPENING_SCOPE_ROUTE_CODEX.to_string(),
-            OPENING_SCOPE_PROVIDER_COMMERCIAL.to_string(),
-        ];
-        if let Some(route_policy) = &package.route_policy {
-            scopes.push(format!("protocol:{}", route_policy.protocol_family));
-            scopes.push(format!("model:{}", route_policy.model_alias));
-        }
-        scopes
-    } else {
-        requested_scopes
-            .iter()
-            .map(|scope| scope.trim())
-            .filter(|scope| !scope.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-    scopes.sort();
-    scopes.dedup();
-
-    let has_route_scope = scopes
-        .iter()
-        .any(|scope| scope == OPENING_SCOPE_ROUTE_CODEX);
-    let has_provider_scope = scopes
-        .iter()
-        .any(|scope| scope == OPENING_SCOPE_PROVIDER_COMMERCIAL);
-    if !has_route_scope || !has_provider_scope {
-        return Err(ApiError::bad_request(
-            "opening_scope_invalid",
-            format!(
-                "scopes must include `{OPENING_SCOPE_ROUTE_CODEX}` and `{OPENING_SCOPE_PROVIDER_COMMERCIAL}`"
-            ),
-            context,
-        ));
-    }
-    Ok(scopes)
-}
-
-fn generate_opening_api_key(context: &RequestContext) -> Result<String, ApiError> {
-    let rng = rand::SystemRandom::new();
-    let mut token_bytes = [0_u8; 24];
-    rand::SecureRandom::fill(&rng, &mut token_bytes).map_err(|_| {
-        ApiError::internal(
-            "credential_generation_failed",
-            "failed to generate opening credential".to_string(),
-            context,
-        )
-    })?;
-    Ok(format!(
-        "akp_{}",
-        BASE64_URL_SAFE_NO_PAD.encode(token_bytes)
-    ))
 }
 
 fn validate_delivery_provider(
@@ -5333,6 +5385,16 @@ fn format_delivery_timestamp(timestamp: OffsetDateTime) -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
+fn generate_stable_id(prefix: &str, context: &RequestContext) -> Result<String, ApiError> {
+    let random_segment = random_id_segment(
+        STABLE_ID_RANDOM_LEN,
+        "id_generation_failed",
+        "failed to generate stable id",
+        context,
+    )?;
+    Ok(format!("{prefix}_{random_segment}"))
+}
+
 fn generate_delivery_code(
     kind_segment: &str,
     context: &RequestContext,
@@ -5354,15 +5416,24 @@ fn generate_delivery_code(
 }
 
 fn random_delivery_segment(len: usize, context: &RequestContext) -> Result<String, ApiError> {
+    random_id_segment(
+        len,
+        "delivery_code_generation_failed",
+        "failed to generate delivery code",
+        context,
+    )
+}
+
+fn random_id_segment(
+    len: usize,
+    error_code: &'static str,
+    error_message: &'static str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
     let rng = rand::SystemRandom::new();
     let mut bytes = vec![0_u8; len];
-    rand::SecureRandom::fill(&rng, &mut bytes).map_err(|_| {
-        ApiError::internal(
-            "delivery_code_generation_failed",
-            "failed to generate delivery code".to_string(),
-            context,
-        )
-    })?;
+    rand::SecureRandom::fill(&rng, &mut bytes)
+        .map_err(|_| ApiError::internal(error_code, error_message.to_string(), context))?;
     Ok(bytes
         .into_iter()
         .map(|byte| {
@@ -5651,7 +5722,7 @@ fn delivery_upload_item_drafts(
             ));
         }
         drafts.push(DeliveryUploadBatchItemDraft {
-            item_id: format!("dlvupitem_{}_{}", context.sequence, row_index),
+            item_id: generate_stable_id("dlvupitem", context)?,
             row_index,
             delivery_id: delivery_id.to_string(),
             artifact_kind: delivery_artifact_kind(item.artifact_kind.as_deref(), context)?,
@@ -7630,8 +7701,9 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ControlPlaneState, OAuthProviderConfig, app_with_state, ensure_oauth_payload_ok,
-        oauth_authorization_url_from_config, resolve_oidc_membership,
+        ControlPlaneState, OAuthProviderConfig, RequestContext, app_with_state,
+        ensure_oauth_payload_ok, generate_stable_id, oauth_authorization_url_from_config,
+        resolve_oidc_membership,
     };
     use crate::store::{
         DeliveryPrepareDraft, IdentityLookup, OAuthSharingUsageFilters, OpeningGrantDraft,
@@ -7657,6 +7729,23 @@ mod tests {
 
     fn fresh_session_window() -> (String, String) {
         (crate::now_rfc3339(), crate::expires_at(SESSION_TTL_SECONDS))
+    }
+
+    #[test]
+    fn stable_id_generation_does_not_reuse_request_sequence() {
+        let context = RequestContext {
+            request_id: "req_10000".to_string(),
+            trace_id: "trace_10000".to_string(),
+            sequence: 10_000,
+        };
+
+        let first = generate_stable_id("delivery", &context).unwrap();
+        let second = generate_stable_id("delivery", &context).unwrap();
+
+        assert!(first.starts_with("delivery_"));
+        assert!(second.starts_with("delivery_"));
+        assert_ne!(first, "delivery_10000");
+        assert_ne!(first, second);
     }
 
     async fn platform_admin_cookie(state: &ControlPlaneState) -> String {
@@ -7890,6 +7979,32 @@ mod tests {
 
     async fn response_json(response: axum::response::Response) -> Value {
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    fn opening_grant_create_body(owner_account_id: &str, grantee_id: &str) -> Value {
+        json!({
+            "config_snapshot_id": "cfgsnap_gateway_v1",
+            "owner_account_id": owner_account_id,
+            "grantee_kind": "customer",
+            "grantee_id": grantee_id,
+            "expires_at": crate::expires_at(3600)
+        })
+    }
+
+    async fn create_opening_grant_for_test(
+        app: axum::Router,
+        admin_cookie: &str,
+        owner_account_id: &str,
+        grantee_id: &str,
+    ) -> axum::response::Response {
+        app.oneshot(request(
+            "POST",
+            "/v1/opening-grants",
+            Some(admin_cookie),
+            Some(opening_grant_create_body(owner_account_id, grantee_id)),
+        ))
+        .await
+        .unwrap()
     }
 
     async fn prepare_delivery_for_test(app: axum::Router, admin_cookie: &str) -> Value {
@@ -10534,6 +10649,7 @@ mod tests {
                 Some(&admin_cookie),
                 Some(json!({
                     "config_snapshot_id":"cfgsnap_gateway_v1",
+                    "owner_account_id":"acct_acme_owner",
                     "grantee_kind":"customer",
                     "grantee_id":"cust_acme_launch",
                     "grantee_label":"Acme Launch Customer",
@@ -10604,6 +10720,7 @@ mod tests {
         assert_eq!(resolve.status(), StatusCode::OK);
         let resolved = response_json(resolve).await;
         assert_eq!(resolved["grant_id"], grant_id);
+        assert_eq!(resolved["owner_account_id"], "acct_acme_owner");
         assert_eq!(resolved["config_snapshot_id"], "cfgsnap_gateway_v1");
         assert_eq!(resolved["route_policy_id"], "routepol_openai_chat_default");
         assert!(
@@ -10613,6 +10730,154 @@ mod tests {
                 .iter()
                 .any(|scope| scope == "provider:hugerouter-commercial")
         );
+    }
+
+    #[tokio::test]
+    async fn opening_grants_enforce_owner_active_limit() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let owner_account_id = "acct_limit_owner";
+
+        for index in 0..8 {
+            let grantee_id = format!("cust_limit_{index}");
+            let response = create_opening_grant_for_test(
+                app.clone(),
+                &admin_cookie,
+                owner_account_id,
+                &grantee_id,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response_json(response).await;
+            assert_eq!(body["grant"]["owner_account_id"], owner_account_id);
+            assert_eq!(body["grant"]["grantee_id"], grantee_id);
+        }
+
+        assert_error(
+            create_opening_grant_for_test(
+                app,
+                &admin_cookie,
+                owner_account_id,
+                "cust_limit_overflow",
+            )
+            .await,
+            StatusCode::CONFLICT,
+            "opening_grant_limit_reached",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn opening_grants_reject_duplicate_active_grantee_for_owner() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let owner_account_id = "acct_duplicate_owner";
+        let grantee_id = "cust_duplicate";
+
+        let first =
+            create_opening_grant_for_test(app.clone(), &admin_cookie, owner_account_id, grantee_id)
+                .await;
+        assert_eq!(first.status(), StatusCode::OK);
+
+        assert_error(
+            create_opening_grant_for_test(app, &admin_cookie, owner_account_id, grantee_id).await,
+            StatusCode::CONFLICT,
+            "opening_grant_grantee_active",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn opening_grants_revoked_grant_releases_owner_slot() {
+        let (_state, admin_cookie, app) = platform_admin_app().await;
+        let owner_account_id = "acct_revoke_release_owner";
+        let mut first_grant_id = String::new();
+        let mut first_version = 0;
+
+        for index in 0..8 {
+            let grantee_id = format!("cust_revoke_release_{index}");
+            let response = create_opening_grant_for_test(
+                app.clone(),
+                &admin_cookie,
+                owner_account_id,
+                &grantee_id,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response_json(response).await;
+            if index == 0 {
+                first_grant_id = body["grant"]["grant_id"].as_str().unwrap().to_string();
+                first_version = body["grant"]["version"].as_u64().unwrap();
+            }
+        }
+
+        let revoke = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                format!("/v1/opening-grants/{first_grant_id}/revoke").as_str(),
+                Some(&admin_cookie),
+                Some(json!({
+                    "expected_version": first_version
+                })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), StatusCode::OK);
+
+        let replacement = create_opening_grant_for_test(
+            app,
+            &admin_cookie,
+            owner_account_id,
+            "cust_revoke_release_replacement",
+        )
+        .await;
+        assert_eq!(replacement.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn opening_grants_expired_grants_do_not_consume_owner_slots() {
+        let (state, admin_cookie, app) = platform_admin_app().await;
+        let owner_account_id = "acct_expired_release_owner";
+
+        for index in 0..8 {
+            state
+                .store
+                .create_opening_grant(
+                    OpeningGrantDraft {
+                        grant_id: format!("grant_expired_release_{index}"),
+                        tenant_id: TenantId::parse("tenant_acme").unwrap(),
+                        project_id: ProjectId::parse("proj_core").unwrap(),
+                        owner_account_id: owner_account_id.to_string(),
+                        grantee_kind: "customer".to_string(),
+                        grantee_id: format!("cust_expired_release_{index}"),
+                        grantee_label: None,
+                        config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_gateway_v1").unwrap(),
+                        route_policy_id: RoutePolicyId::parse("routepol_openai_chat_default")
+                            .unwrap(),
+                        budget_policy_id: BudgetPolicyId::parse("budgetpol_default").unwrap(),
+                        provider_resource_ids: vec![
+                            ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
+                        ],
+                        credential_kind: "api_key".to_string(),
+                        scopes: vec!["route:codex".to_string()],
+                        expires_at: "2000-01-01T00:00:00Z".to_string(),
+                        created_by: "test".to_string(),
+                    },
+                    &format!("akp_expired_release_{index}"),
+                )
+                .await
+                .unwrap();
+        }
+
+        let response = create_opening_grant_for_test(
+            app,
+            &admin_cookie,
+            owner_account_id,
+            "cust_expired_release_new",
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["grant"]["owner_account_id"], owner_account_id);
     }
 
     #[tokio::test]
@@ -12842,6 +13107,7 @@ mod tests {
                 Some(&admin_cookie),
                 Some(json!({
                     "config_snapshot_id":"cfgsnap_opening_blocked",
+                    "owner_account_id":"acct_acme_owner",
                     "grantee_kind":"agent",
                     "grantee_id":"agent_blocked",
                     "expires_at": crate::expires_at(3600)
@@ -12866,6 +13132,7 @@ mod tests {
                 Some(&admin_cookie),
                 Some(json!({
                     "config_snapshot_id":"cfgsnap_gateway_v1",
+                    "owner_account_id":"acct_acme_owner",
                     "grantee_kind":"customer",
                     "grantee_id":"cust_revoke",
                     "expires_at": crate::expires_at(3600)
@@ -12931,6 +13198,7 @@ mod tests {
                     grant_id: "grant_expired_customer".to_string(),
                     tenant_id: TenantId::parse("tenant_acme").unwrap(),
                     project_id: ProjectId::parse("proj_core").unwrap(),
+                    owner_account_id: "acct_acme_owner".to_string(),
                     grantee_kind: "customer".to_string(),
                     grantee_id: "cust_expired".to_string(),
                     grantee_label: Some("Expired customer".to_string()),
@@ -12984,6 +13252,7 @@ mod tests {
                     grant_id: grant_id.to_string(),
                     tenant_id: TenantId::parse("tenant_acme").unwrap(),
                     project_id: ProjectId::parse("proj_core").unwrap(),
+                    owner_account_id: "acct_acme_owner".to_string(),
                     grantee_kind: "customer".to_string(),
                     grantee_id: "cust_renew_paid".to_string(),
                     grantee_label: Some("Renew paid customer".to_string()),
@@ -13120,6 +13389,7 @@ mod tests {
                     grant_id: grant_id.to_string(),
                     tenant_id: TenantId::parse("tenant_acme").unwrap(),
                     project_id: ProjectId::parse("proj_core").unwrap(),
+                    owner_account_id: "acct_acme_owner".to_string(),
                     grantee_kind: "customer".to_string(),
                     grantee_id: "cust_renew_unpaid".to_string(),
                     grantee_label: Some("Renew unpaid customer".to_string()),

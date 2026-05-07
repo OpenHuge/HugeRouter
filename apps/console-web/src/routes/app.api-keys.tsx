@@ -24,15 +24,22 @@ import {
   getConsoleDataService,
   getControlPlaneActionErrorMessage,
 } from "../features/control-plane/service";
-import type { ApiKeyView } from "../features/control-plane/types";
+import type {
+  ApiKeyView,
+  ConfigSnapshotView,
+  OpeningGrantView,
+} from "../features/control-plane/types";
 import {
   ActionStatusNotice,
   FieldErrorText,
 } from "../features/control-plane/workflow-ui";
+import { OpeningGrantsPanel } from "../features/control-plane/opening-grants-panel";
 
 type ApiKeysPageData = {
   apiKeys: ApiKeyView[];
+  openingGrants: OpeningGrantView[];
   providers: ProviderResource[];
+  snapshots: ConfigSnapshotView[];
 };
 
 type ApiKeyFormState = {
@@ -79,14 +86,18 @@ function validateApiKeyForm(form: ApiKeyFormState) {
 export const Route = createFileRoute("/app/api-keys")({
   loader: () =>
     loadRouteData(async () => {
-      const [apiKeys, providers] = await Promise.all([
+      const [apiKeys, openingGrants, providers, snapshots] = await Promise.all([
         getConsoleDataService().listApiKeys(),
+        getConsoleDataService().listOpeningGrants(),
         getConsoleDataService().listProviderResources(),
+        getConsoleDataService().listConfigSnapshots(),
       ]);
 
       return {
         apiKeys,
+        openingGrants,
         providers,
+        snapshots,
       } satisfies ApiKeysPageData;
     }),
   pendingComponent: () => <RouteLoadingState label="Loading API keys" />,
@@ -96,6 +107,9 @@ export const Route = createFileRoute("/app/api-keys")({
 
 function ApiKeysPage() {
   const result = Route.useLoaderData();
+  const pageData = result?.state === "success" ? result.data : null;
+  const providers = pageData?.providers ?? [];
+  const snapshots = pageData?.snapshots ?? [];
   const [formErrors, setFormErrors] = useState<ApiKeyFormErrors>({});
   const [formOpen, setFormOpen] = useState(false);
   const [formState, setFormState] = useState<ApiKeyFormState>(
@@ -108,6 +122,17 @@ function ApiKeysPage() {
   );
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
+  const [apiKeys, setApiKeys] = useState<ApiKeyView[]>(
+    () => pageData?.apiKeys ?? [],
+  );
+
+  useEffect(() => {
+    if (!pageData) {
+      return;
+    }
+
+    setApiKeys(pageData.apiKeys);
+  }, [pageData]);
 
   if (!result || result.state === "error") {
     return (
@@ -125,13 +150,6 @@ function ApiKeysPage() {
       </UiStack>
     );
   }
-
-  const { apiKeys: loadedApiKeys, providers } = result.data;
-  const [apiKeys, setApiKeys] = useState<ApiKeyView[]>(loadedApiKeys);
-
-  useEffect(() => {
-    setApiKeys(loadedApiKeys);
-  }, [loadedApiKeys]);
 
   function openCreateForm() {
     setFormErrors({});
@@ -325,6 +343,12 @@ function ApiKeysPage() {
           </UiText>
         )}
       </UiSurface>
+      <OpeningGrantsPanel
+        initialOpeningGrants={pageData?.openingGrants ?? []}
+        setStatusError={setStatusError}
+        setStatusSuccess={setStatusSuccess}
+        snapshots={snapshots}
+      />
       <UiSurface padding="lg" radius="md" shadow="sm">
         <UiInline justify="space-between" mb="md">
           <UiText fw={700}>API keys</UiText>

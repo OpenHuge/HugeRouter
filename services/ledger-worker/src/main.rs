@@ -136,6 +136,7 @@ async fn publish_budget_threshold_event(
         serde_json::json!({
             "tenant_id": event.tenant_id,
             "project_id": event.project_id,
+            "owner_account_id": event.owner_account_id,
             "currency": event.currency,
             "threshold_status": event.threshold_status,
             "billable_cost_micros": event.billable_cost_micros,

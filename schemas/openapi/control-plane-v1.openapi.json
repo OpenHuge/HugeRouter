@@ -163,6 +163,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "owner_account_id",
+            "in": "query",
+            "description": "Filter by owner account id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2179,6 +2188,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpeningGrantRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Revoke an opening grant",
@@ -2663,6 +2682,15 @@
             }
           },
           {
+            "name": "owner_account_id",
+            "in": "query",
+            "description": "Filter by owner account id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "window_start",
             "in": "query",
             "description": "Inclusive RFC3339 start timestamp",
@@ -2760,6 +2788,15 @@
             }
           },
           {
+            "name": "owner_account_id",
+            "in": "query",
+            "description": "Filter by owner account id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "window_start",
             "in": "query",
             "description": "Inclusive RFC3339 start timestamp",
@@ -2849,6 +2886,12 @@
           },
           "last_projected_at": {
             "type": "string"
+          },
+          "owner_account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "oneOf": [
@@ -3127,6 +3170,12 @@
         "properties": {
           "activation_id": {
             "type": "string"
+          },
+          "redemption_code": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -3219,6 +3268,7 @@
         "type": "object",
         "required": [
           "config_snapshot_id",
+          "owner_account_id",
           "grantee_kind",
           "grantee_id",
           "expires_at"
@@ -3247,6 +3297,9 @@
               "string",
               "null"
             ]
+          },
+          "owner_account_id": {
+            "type": "string"
           },
           "scopes": {
             "type": "array",
@@ -5071,6 +5124,7 @@
           "grant_id",
           "tenant_id",
           "project_id",
+          "owner_account_id",
           "grantee_kind",
           "grantee_id",
           "config_snapshot_id",
@@ -5132,6 +5186,9 @@
               "null"
             ]
           },
+          "owner_account_id": {
+            "type": "string"
+          },
           "project_id": {
             "$ref": "#/components/schemas/ProjectId"
           },
@@ -5190,6 +5247,19 @@
           },
           "grant": {
             "$ref": "#/components/schemas/OpeningGrant"
+          }
+        }
+      },
+      "OpeningGrantRevokeRequest": {
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -6733,6 +6803,12 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "owner_account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "oneOf": [

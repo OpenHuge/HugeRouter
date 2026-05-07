@@ -5,6 +5,7 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "route_policies",
     "api_keys",
     "opening_grants",
+    "opening_grant_owner_locks",
     "deliveries",
     "delivery_codes",
     "delivery_entitlements",
@@ -84,14 +85,28 @@ pub const MIGRATIONS: &[&str] = &[
         grant_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         project_id TEXT NOT NULL,
+        owner_account_id TEXT NOT NULL,
         config_snapshot_id TEXT NOT NULL,
         grantee_kind TEXT NOT NULL,
         grantee_id TEXT NOT NULL,
         status TEXT NOT NULL,
         credential_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
         payload JSONB NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+    )",
+    r"ALTER TABLE opening_grants ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default'",
+    r"ALTER TABLE opening_grants ALTER COLUMN owner_account_id SET DEFAULT 'tenant_project_default'",
+    r"ALTER TABLE opening_grants ADD COLUMN IF NOT EXISTS expires_at TEXT NOT NULL DEFAULT '2999-01-01T00:00:00Z'",
+    r"CREATE INDEX IF NOT EXISTS opening_grants_owner_active_idx
+       ON opening_grants (tenant_id, project_id, owner_account_id, status, expires_at)",
+    r"CREATE TABLE IF NOT EXISTS opening_grant_owner_locks (
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        owner_account_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, project_id, owner_account_id)
     )",
     r"CREATE TABLE IF NOT EXISTS deliveries (
         delivery_id TEXT PRIMARY KEY,
@@ -514,3 +529,38 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL
     )",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{MIGRATIONS, REQUIRED_TABLES};
+
+    const RUNTIME_SCHEMA_SQL: &str = include_str!("../../../infra/sql/runtime-schema.sql");
+
+    #[test]
+    fn migrations_include_opening_grant_owner_lock_table() {
+        assert!(REQUIRED_TABLES.contains(&"opening_grant_owner_locks"));
+        assert!(
+            MIGRATIONS
+                .iter()
+                .any(|statement| statement.contains("opening_grant_owner_locks"))
+        );
+        assert!(
+            RUNTIME_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS opening_grant_owner_locks")
+        );
+    }
+
+    #[test]
+    fn runtime_schema_migrates_owner_scoped_projection_primary_keys() {
+        assert!(RUNTIME_SCHEMA_SQL.contains("ALTER TABLE usage_daily_projections DROP CONSTRAINT"));
+        assert!(RUNTIME_SCHEMA_SQL.contains("ALTER TABLE balance_projections DROP CONSTRAINT"));
+        assert!(
+            RUNTIME_SCHEMA_SQL.contains(
+                "PRIMARY KEY (tenant_id, project_id, owner_account_id, usage_date, provider_id, model_alias)"
+            )
+        );
+        assert!(
+            RUNTIME_SCHEMA_SQL
+                .contains("PRIMARY KEY (tenant_id, project_id, owner_account_id, currency)")
+        );
+    }
+}

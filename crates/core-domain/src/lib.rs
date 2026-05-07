@@ -5,6 +5,8 @@ use std::fmt::{self, Display, Formatter};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+pub const DEFAULT_OWNER_ACCOUNT_ID: &str = "tenant_project_default";
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainError {
     #[error("expected id with prefix `{expected_prefix}` but received `{actual}`")]
@@ -1050,6 +1052,8 @@ pub struct UsageEvent {
     pub route_receipt_id: RouteReceiptId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub tenant_id: TenantId,
     pub project_id: ProjectId,
     pub provider_resource_id: ProviderResourceId,
@@ -1353,6 +1357,7 @@ mod tests {
             usage_event_id: UsageEventId::parse("usageevt_123").unwrap(),
             route_receipt_id: RouteReceiptId::parse("routercpt_123").unwrap(),
             grant_id: Some("grant_acme_customer".to_string()),
+            owner_account_id: Some("acct_acme_owner".to_string()),
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: ProjectId::parse("proj_core").unwrap(),
             provider_resource_id: ProviderResourceId::parse("prvrsrc_123").unwrap(),
@@ -1376,6 +1381,7 @@ mod tests {
 
         assert_eq!(reparsed, event);
         assert_eq!(value["grant_id"], "grant_acme_customer");
+        assert_eq!(value["owner_account_id"], "acct_acme_owner");
         assert_eq!(value["phase"], "final");
         assert_eq!(
             value["usage"],

@@ -51,7 +51,6 @@ import {
   type EmailLoginCompleteRequest,
   type EmailLoginStartRequest,
   type EmailLoginStartResponse,
-  type ErrorEnvelope,
   type GatewayAnthropicMessagesRequest,
   type GatewayAnthropicMessagesResponse,
   type GatewayChatRequest,
@@ -85,54 +84,25 @@ import {
   CONTROL_PLANE_OPERATIONS,
   GATEWAY_OPERATIONS
 } from './generated/operation-meta.ts'
+import {
+  createOpeningGrantOperations,
+  type OpeningGrantsClient
+} from './opening-grants.ts'
+import {
+  ContractApiError,
+  buildHeaders,
+  buildUrl,
+  defaultFetch,
+  requestAuthJson,
+  requestJson
+} from './http.ts'
+import type { ClientOptions } from './http.ts'
 
-type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+export { ContractApiError, ControlPlaneClientError } from './http.ts'
+export type { ClientOptions, FetchLike } from './http.ts'
+
 type OperationId = (typeof CONTROL_PLANE_OPERATIONS)[number]['id']
 type GatewayOperationId = (typeof GATEWAY_OPERATIONS)[number]['id']
-
-export class ContractApiError extends Error {
-  readonly status: number
-  readonly envelope: ErrorEnvelope
-
-  constructor(status: number, envelope: ErrorEnvelope) {
-    super(envelope.error.message)
-    this.status = status
-    this.envelope = envelope
-  }
-}
-
-export class ControlPlaneClientError extends Error {
-  readonly code?: string
-  readonly meta: {
-    requestId?: string
-    traceId?: string
-  }
-  readonly status: number
-
-  constructor(
-    message: string,
-    status: number,
-    options: {
-      code?: string
-      meta?: {
-        requestId?: string
-        traceId?: string
-      }
-    } = {}
-  ) {
-    super(message)
-    this.code = options.code
-    this.meta = options.meta ?? {}
-    this.name = 'ControlPlaneClientError'
-    this.status = status
-  }
-}
-
-export type ClientOptions = {
-  baseUrl: string
-  fetch?: FetchLike
-  headers?: HeadersInit
-}
 
 export type ControlPlaneClient = {
   readonly contractVersion: typeof CONTRACT_VERSION
@@ -177,12 +147,14 @@ export type ControlPlaneClient = {
   getUsageSummary: (query: {
     tenant_id: string
     project_id?: string
+    owner_account_id?: string
     window_start?: string
     window_end?: string
   }) => Promise<UsageSummaryResponse>
   getUsageBreakdown: (query: {
     tenant_id: string
     project_id?: string
+    owner_account_id?: string
     window_start?: string
     window_end?: string
     group_by?: 'provider' | 'model' | 'day'
@@ -192,7 +164,11 @@ export type ControlPlaneClient = {
   getBalanceProjection: (query: {
     tenant_id: string
     project_id?: string
+    owner_account_id?: string
   }) => Promise<BalanceProjectionResponse>
+  listOpeningGrants: OpeningGrantsClient['listOpeningGrants']
+  createOpeningGrant: OpeningGrantsClient['createOpeningGrant']
+  revokeOpeningGrant: OpeningGrantsClient['revokeOpeningGrant']
   getPricingCatalog: () => Promise<PricingCatalogResponse>
   createPricingSimulation: (
     request: PricingSimulationRequest
@@ -236,170 +212,6 @@ const resolveGatewayOperation = (id: GatewayOperationId) => {
     throw new Error(`Missing gateway operation metadata for ${id}`)
   }
   return operation
-}
-
-const buildUrl = (
-  baseUrl: string,
-  pathTemplate: string,
-  params?: Record<string, string>,
-  query?: Record<string, string | number | undefined>
-) => {
-  const path = Object.entries(params ?? {}).reduce(
-    (currentPath, [key, value]) =>
-      currentPath.replace(`{${key}}`, encodeURIComponent(value)),
-    pathTemplate
-  )
-
-  const queryString = new URLSearchParams(
-    Object.entries(query ?? {}).flatMap(([key, value]) =>
-      value == null || value === '' ? [] : [[key, String(value)]]
-    )
-  ).toString()
-
-  if (!baseUrl) {
-    return queryString ? `${path}?${queryString}` : path
-  }
-
-  const url = new URL(path, ensureTrailingSlash(baseUrl))
-  if (queryString) {
-    url.search = queryString
-  }
-  return url.toString()
-}
-
-const ensureTrailingSlash = (baseUrl: string) =>
-  baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
-
-const defaultFetch = (): FetchLike => {
-  if (!globalThis.fetch) {
-    throw new Error('No fetch implementation was provided to the API client')
-  }
-
-  return globalThis.fetch.bind(globalThis)
-}
-
-const buildHeaders = (
-  defaults: Record<string, string>,
-  headers?: HeadersInit
-) => {
-  const merged = new Headers(defaults)
-
-  if (headers) {
-    new Headers(headers).forEach((value, key) => {
-      merged.set(key, value)
-    })
-  }
-
-  return merged
-}
-
-const requestJson = async <T>({
-  baseUrl,
-  fetchImpl,
-  headers,
-  method,
-  path,
-  params,
-  query,
-  body,
-  parse
-}: {
-  baseUrl: string
-  fetchImpl: FetchLike
-  headers?: HeadersInit
-  method: string
-  path: string
-  params?: Record<string, string>
-  query?: Record<string, string | number | undefined>
-  body?: unknown
-  parse: (payload: unknown) => T
-}) => {
-  const response = await fetchImpl(buildUrl(baseUrl, path, params, query), {
-    method,
-    credentials: 'include',
-    headers: buildHeaders(
-      {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {})
-      },
-      headers
-    ),
-    body: body ? JSON.stringify(body) : undefined
-  })
-
-  const payload: unknown = await response.json()
-
-  if (!response.ok) {
-    throw new ContractApiError(response.status, errorEnvelopeSchema.parse(payload))
-  }
-
-  return parse(payload)
-}
-
-const requestAuthJson = async <T>({
-  baseUrl,
-  fetchImpl,
-  headers,
-  method,
-  path,
-  body,
-  parse
-}: {
-  baseUrl: string
-  fetchImpl: FetchLike
-  headers?: HeadersInit
-  method: string
-  path: string
-  body?: unknown
-  parse: (payload: unknown) => T
-}) => {
-  const response = await fetchImpl(buildUrl(baseUrl, path), {
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'include',
-    method,
-    headers: buildHeaders(
-      {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {})
-      },
-      headers
-    )
-  })
-
-  const payload: unknown = await response.json()
-
-  if (!response.ok) {
-    const errorPayload = payload as
-      | {
-          code?: string
-          error?: {
-            code?: string
-            message?: string
-            requestId?: string
-            traceId?: string
-          }
-          message?: string
-          requestId?: string
-          traceId?: string
-        }
-      | undefined
-
-    throw new ControlPlaneClientError(
-      errorPayload?.error?.message ??
-        errorPayload?.message ??
-        `Control plane auth request failed with status ${response.status}`,
-      response.status,
-      {
-        code: errorPayload?.error?.code ?? errorPayload?.code,
-        meta: {
-          requestId: errorPayload?.error?.requestId ?? errorPayload?.requestId,
-          traceId: errorPayload?.error?.traceId ?? errorPayload?.traceId
-        }
-      }
-    )
-  }
-
-  return parse(payload)
 }
 
 export const createControlPlaneClient = (
@@ -687,6 +499,13 @@ export const createControlPlaneClient = (
         parse: (payload) => balanceProjectionResponseSchema.parse(payload)
       })
     },
+    ...createOpeningGrantOperations({
+      baseUrl: options.baseUrl,
+      fetchImpl,
+      headers: options.headers,
+      requestJson,
+      resolveOperation
+    }),
     async getPricingCatalog() {
       const operation = resolveOperation('getPricingCatalog')
       return requestJson({

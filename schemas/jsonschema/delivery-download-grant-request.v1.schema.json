@@ -8,6 +8,12 @@
   "properties": {
     "activation_id": {
       "type": "string"
+    },
+    "redemption_code": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   }
 }

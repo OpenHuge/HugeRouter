@@ -26,13 +26,40 @@ import {
 import {
   getConsoleDataService,
   getControlPlaneActionErrorMessage,
-  type OAuthCarpoolMutationInput,
   type OAuthCarpoolView,
-  type OAuthSharingLeaseMutationInput,
   type OAuthSharingLeaseView,
   type OAuthSharingUsageView,
-  type ProviderResourceMutationInput,
 } from "../features/control-plane/service";
+import {
+  authKindOptions,
+  buildCarpoolInput,
+  buildCodexAuthUploadInput,
+  buildProviderMutationInput,
+  buildSharingLeaseInput,
+  createEmptyCarpoolForm,
+  createEmptyCodexAuthUpload,
+  createEmptyProviderForm,
+  createEmptySharingLeaseForm,
+  credentialOwnerOptions,
+  deploymentScopeOptions,
+  latestSignalForProvider,
+  providerCapabilityLabels,
+  providerHealthOptions,
+  providerStatusOptions,
+  providerToFormState,
+  provenanceOptions,
+  validateCarpoolForm,
+  validateCodexAuthUpload,
+  validateProviderForm,
+  validateSharingLeaseForm,
+  type CarpoolFormState,
+  type CodexAuthUploadErrors,
+  type CodexAuthUploadState,
+  type ProviderFormErrors,
+  type ProviderFormState,
+  type SharingFormErrors,
+  type SharingLeaseFormState,
+} from "../features/control-plane/providers-view-model";
 import type {
   ProjectSummary,
   RoutePolicyView,
@@ -52,250 +79,6 @@ type ProvidersPageData = {
   routePolicies: RoutePolicyView[];
   routeReceipts: RouteReceiptView[];
 };
-
-type ProviderFormState = {
-  authKind: ProviderResourceMutationInput["authKind"];
-  budgetPolicyId: string;
-  credentialOwnerType: ProviderResourceMutationInput["credentialOwnerType"];
-  deploymentScope: ProviderResourceMutationInput["deploymentScope"];
-  endpointBaseUrl: string;
-  healthState: ProviderResourceMutationInput["healthState"];
-  name: string;
-  projectId: string;
-  providerId: string;
-  providerResourceId: string;
-  provenanceClass: ProviderResourceMutationInput["provenanceClass"];
-  region: string;
-  status: ProviderResourceMutationInput["status"];
-  supportsJsonMode: boolean;
-  supportsStreaming: boolean;
-  supportsToolCalling: boolean;
-};
-
-type ProviderFormErrors = Partial<Record<keyof ProviderFormState, string>>;
-
-type CodexAuthUploadState = {
-  displayName: string;
-  endpointBaseUrl: string;
-  file: File | null;
-  projectId: string;
-  providerResourceId: string;
-  region: string;
-};
-
-type CodexAuthUploadErrors = Partial<
-  Record<keyof CodexAuthUploadState, string>
->;
-
-type SharingLeaseFormState = {
-  borrowerWorkspaceId: string;
-  expiresAt: string;
-  leaseId: string;
-  maxConcurrentRuns: number;
-  policy: OAuthSharingLeaseMutationInput["policy"];
-  poolId: string;
-  provider: OAuthSharingLeaseMutationInput["provider"];
-  status: OAuthSharingLeaseMutationInput["status"];
-  turnBudget: number;
-};
-
-type CarpoolFormState = {
-  carpoolId: string;
-  enabled: boolean;
-  memberWorkspaceIds: string;
-  name: string;
-  perMemberConcurrencyLimit: number;
-  perMemberTurnBudget: number;
-  poolIds: string;
-  provider: OAuthCarpoolMutationInput["provider"];
-  strategy: OAuthCarpoolMutationInput["strategy"];
-};
-
-type SharingFormErrors = Partial<
-  Record<keyof SharingLeaseFormState | keyof CarpoolFormState, string>
->;
-
-const providerStatusOptions = [
-  { label: "active", value: "active" },
-  { label: "quarantined", value: "quarantined" },
-  { label: "draining", value: "draining" },
-  { label: "disabled", value: "disabled" },
-  { label: "deleted", value: "deleted" },
-] as const;
-
-const providerHealthOptions = [
-  { label: "healthy", value: "healthy" },
-  { label: "degraded", value: "degraded" },
-  { label: "quarantined", value: "quarantined" },
-  { label: "draining", value: "draining" },
-  { label: "disabled", value: "disabled" },
-] as const;
-
-const authKindOptions = [
-  { label: "api_key", value: "api_key" },
-  {
-    label: "oauth_client_credentials",
-    value: "oauth_client_credentials",
-  },
-  { label: "session_broker", value: "session_broker" },
-] as const;
-
-const provenanceOptions = [
-  { label: "official_api", value: "official_api" },
-  { label: "official_gateway", value: "official_gateway" },
-  {
-    label: "byo_customer_credential",
-    value: "byo_customer_credential",
-  },
-  {
-    label: "dedicated_managed_account",
-    value: "dedicated_managed_account",
-  },
-  { label: "shared_brokered_pool", value: "shared_brokered_pool" },
-  {
-    label: "unofficial_client_channel",
-    value: "unofficial_client_channel",
-  },
-] as const;
-
-const credentialOwnerOptions = [
-  { label: "platform", value: "platform" },
-  { label: "tenant", value: "tenant" },
-  { label: "project", value: "project" },
-  { label: "partner", value: "partner" },
-] as const;
-
-const deploymentScopeOptions = [
-  { label: "shared", value: "shared" },
-  { label: "tenant_dedicated", value: "tenant_dedicated" },
-  { label: "project_dedicated", value: "project_dedicated" },
-] as const;
-
-function createEmptyProviderForm(): ProviderFormState {
-  return {
-    authKind: "api_key",
-    budgetPolicyId: "",
-    credentialOwnerType: "platform",
-    deploymentScope: "shared",
-    endpointBaseUrl: "https://",
-    healthState: "healthy",
-    name: "",
-    projectId: "",
-    providerId: "",
-    providerResourceId: "",
-    provenanceClass: "official_api",
-    region: "",
-    status: "active",
-    supportsJsonMode: true,
-    supportsStreaming: true,
-    supportsToolCalling: true,
-  };
-}
-
-function createEmptyCodexAuthUpload(): CodexAuthUploadState {
-  return {
-    displayName: "",
-    endpointBaseUrl: "https://",
-    file: null,
-    projectId: "",
-    providerResourceId: "",
-    region: "global",
-  };
-}
-
-function defaultSharingExpiry() {
-  return new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
-}
-
-function createEmptySharingLeaseForm(): SharingLeaseFormState {
-  return {
-    borrowerWorkspaceId: "tenant_acme",
-    expiresAt: defaultSharingExpiry(),
-    leaseId: "",
-    maxConcurrentRuns: 1,
-    policy: "fair_share",
-    poolId: "",
-    provider: "codex",
-    status: "active",
-    turnBudget: 20,
-  };
-}
-
-function createEmptyCarpoolForm(): CarpoolFormState {
-  return {
-    carpoolId: "",
-    enabled: true,
-    memberWorkspaceIds: "tenant_acme",
-    name: "",
-    perMemberConcurrencyLimit: 2,
-    perMemberTurnBudget: 50,
-    poolIds: "",
-    provider: "codex",
-    strategy: "fair_share",
-  };
-}
-
-function splitCsv(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function providerToFormState(provider: ProviderResource): ProviderFormState {
-  return {
-    authKind: provider.auth_kind,
-    budgetPolicyId: provider.budget_policy_id ?? "",
-    credentialOwnerType: provider.credential_owner_type,
-    deploymentScope: provider.deployment_scope,
-    endpointBaseUrl: provider.endpoint_base_url,
-    healthState: provider.health_state,
-    name: provider.name,
-    projectId: provider.project_id ?? "",
-    providerId: provider.provider_id,
-    providerResourceId: provider.provider_resource_id,
-    provenanceClass: provider.provenance_class,
-    region: provider.region,
-    status: provider.status,
-    supportsJsonMode: provider.capabilities.supports_json_mode,
-    supportsStreaming: provider.capabilities.supports_streaming,
-    supportsToolCalling: provider.capabilities.supports_tool_calling,
-  };
-}
-
-function validateProviderForm(form: ProviderFormState) {
-  const errors: ProviderFormErrors = {};
-
-  if (!/^prvrsrc_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.providerResourceId)) {
-    errors.providerResourceId =
-      "Use an id that starts with prvrsrc_ and contains letters, digits, _ or -.";
-  }
-
-  if (!form.name.trim()) {
-    errors.name = "Enter a provider resource name.";
-  }
-
-  if (!form.providerId.trim()) {
-    errors.providerId = "Enter the upstream provider id.";
-  }
-
-  if (!form.region.trim()) {
-    errors.region = "Enter a deployment region.";
-  }
-
-  if (!/^https:\/\/.+/.test(form.endpointBaseUrl.trim())) {
-    errors.endpointBaseUrl = "Use an HTTPS endpoint URL.";
-  }
-
-  if (
-    form.budgetPolicyId.trim() &&
-    !/^budgetpol_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.budgetPolicyId)
-  ) {
-    errors.budgetPolicyId = "Budget policy ids must start with budgetpol_.";
-  }
-
-  return errors;
-}
 
 export const Route = createFileRoute("/app/providers")({
   loader: () =>
@@ -496,28 +279,7 @@ function ProvidersPage() {
     setStatusError(null);
     setStatusSuccess(null);
 
-    const input: ProviderResourceMutationInput = {
-      authKind: formState.authKind,
-      budgetPolicyId: formState.budgetPolicyId.trim() || undefined,
-      capabilities: {
-        supportsJsonMode: formState.supportsJsonMode,
-        supportsStreaming: formState.supportsStreaming,
-        supportsToolCalling: formState.supportsToolCalling,
-      },
-      credentialOwnerType: formState.credentialOwnerType,
-      createdAt: editingProvider?.created_at,
-      deploymentScope: formState.deploymentScope,
-      endpointBaseUrl: formState.endpointBaseUrl.trim(),
-      healthState: formState.healthState,
-      name: formState.name.trim(),
-      projectId: formState.projectId || undefined,
-      providerId: formState.providerId.trim(),
-      providerResourceId: formState.providerResourceId.trim(),
-      provenanceClass: formState.provenanceClass,
-      region: formState.region.trim(),
-      status: formState.status,
-      version: editingProvider?.version,
-    };
+    const input = buildProviderMutationInput(formState, editingProvider);
 
     try {
       if (formMode === "edit" && editingProvider) {
@@ -568,28 +330,7 @@ function ProvidersPage() {
   }
 
   async function onUploadCodexAuth() {
-    const errors: CodexAuthUploadErrors = {};
-    if (!codexAuthUpload.displayName.trim()) {
-      errors.displayName = "Enter a display name.";
-    }
-    if (!codexAuthUpload.file) {
-      errors.file = "Choose a Codex auth.json file.";
-    }
-    if (
-      codexAuthUpload.providerResourceId.trim() &&
-      !/^prvrsrc_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(
-        codexAuthUpload.providerResourceId.trim(),
-      )
-    ) {
-      errors.providerResourceId =
-        "Provider resource ids must start with prvrsrc_.";
-    }
-    if (!/^https:\/\/.+/.test(codexAuthUpload.endpointBaseUrl.trim())) {
-      errors.endpointBaseUrl = "Use an HTTPS reverse proxy endpoint.";
-    }
-    if (!codexAuthUpload.region.trim()) {
-      errors.region = "Enter a region label.";
-    }
+    const errors = validateCodexAuthUpload(codexAuthUpload);
     setCodexAuthUploadErrors(errors);
     if (Object.keys(errors).length > 0 || !codexAuthUpload.file) {
       return;
@@ -600,15 +341,9 @@ function ProvidersPage() {
     setStatusSuccess(null);
     try {
       const authJson = JSON.parse(await codexAuthUpload.file.text());
-      const created = await getConsoleDataService().uploadCodexAuthAccount({
-        authJson,
-        displayName: codexAuthUpload.displayName.trim(),
-        endpointBaseUrl: codexAuthUpload.endpointBaseUrl.trim(),
-        projectId: codexAuthUpload.projectId || undefined,
-        providerResourceId:
-          codexAuthUpload.providerResourceId.trim() || undefined,
-        region: codexAuthUpload.region.trim(),
-      });
+      const created = await getConsoleDataService().uploadCodexAuthAccount(
+        buildCodexAuthUploadInput(codexAuthUpload, authJson),
+      );
       setCodexAuthUpload(createEmptyCodexAuthUpload());
       setStatusSuccess(
         `Added ${created.displayName} to the Codex auth account pool.`,
@@ -626,19 +361,7 @@ function ProvidersPage() {
   }
 
   async function onCreateSharingLease() {
-    const errors: SharingFormErrors = {};
-    if (!sharingLeaseForm.leaseId.trim()) {
-      errors.leaseId = "Enter a lease id.";
-    }
-    if (!sharingLeaseForm.borrowerWorkspaceId.trim()) {
-      errors.borrowerWorkspaceId = "Enter a borrower workspace id.";
-    }
-    if (!sharingLeaseForm.poolId.trim()) {
-      errors.poolId = "Enter a pool id.";
-    }
-    if (!sharingLeaseForm.expiresAt.trim()) {
-      errors.expiresAt = "Enter an expiration timestamp.";
-    }
+    const errors = validateSharingLeaseForm(sharingLeaseForm);
     setSharingFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       return;
@@ -648,19 +371,9 @@ function ProvidersPage() {
     setStatusError(null);
     setStatusSuccess(null);
     try {
-      await getConsoleDataService().upsertOAuthSharingLease({
-        allowedAccountIds: [],
-        borrowerWorkspaceId: sharingLeaseForm.borrowerWorkspaceId.trim(),
-        expiresAt: sharingLeaseForm.expiresAt.trim(),
-        leaseId: sharingLeaseForm.leaseId.trim(),
-        maxConcurrentRuns: sharingLeaseForm.maxConcurrentRuns,
-        policy: sharingLeaseForm.policy,
-        poolId: sharingLeaseForm.poolId.trim(),
-        provider: sharingLeaseForm.provider,
-        startsAt: new Date().toISOString(),
-        status: sharingLeaseForm.status,
-        turnBudget: sharingLeaseForm.turnBudget,
-      });
+      await getConsoleDataService().upsertOAuthSharingLease(
+        buildSharingLeaseInput(sharingLeaseForm),
+      );
       setSharingLeaseForm(createEmptySharingLeaseForm());
       setStatusSuccess("Created sharing lease.");
       await refreshRoute();
@@ -687,19 +400,7 @@ function ProvidersPage() {
   }
 
   async function onCreateCarpool() {
-    const errors: SharingFormErrors = {};
-    if (!carpoolForm.carpoolId.trim()) {
-      errors.carpoolId = "Enter a carpool id.";
-    }
-    if (!carpoolForm.name.trim()) {
-      errors.name = "Enter a carpool name.";
-    }
-    if (splitCsv(carpoolForm.memberWorkspaceIds).length === 0) {
-      errors.memberWorkspaceIds = "Enter at least one member workspace.";
-    }
-    if (splitCsv(carpoolForm.poolIds).length === 0) {
-      errors.poolIds = "Enter at least one pool id.";
-    }
+    const errors = validateCarpoolForm(carpoolForm);
     setSharingFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       return;
@@ -709,17 +410,9 @@ function ProvidersPage() {
     setStatusError(null);
     setStatusSuccess(null);
     try {
-      await getConsoleDataService().upsertOAuthCarpool({
-        carpoolId: carpoolForm.carpoolId.trim(),
-        enabled: carpoolForm.enabled,
-        memberWorkspaceIds: splitCsv(carpoolForm.memberWorkspaceIds),
-        name: carpoolForm.name.trim(),
-        perMemberConcurrencyLimit: carpoolForm.perMemberConcurrencyLimit,
-        perMemberTurnBudget: carpoolForm.perMemberTurnBudget,
-        poolIds: splitCsv(carpoolForm.poolIds),
-        provider: carpoolForm.provider,
-        strategy: carpoolForm.strategy,
-      });
+      await getConsoleDataService().upsertOAuthCarpool(
+        buildCarpoolInput(carpoolForm),
+      );
       setCarpoolForm(createEmptyCarpoolForm());
       setStatusSuccess("Created carpool.");
       await refreshRoute();
@@ -1479,41 +1172,4 @@ function ProvidersPage() {
       </UiSurface>
     </UiStack>
   );
-}
-
-function providerCapabilityLabels(provider: ProviderResource) {
-  return [
-    provider.capabilities.supports_streaming ? "streaming" : null,
-    provider.capabilities.supports_tool_calling ? "tool_calling" : null,
-    provider.capabilities.supports_json_mode ? "json_mode" : null,
-    provider.capabilities.supports_realtime ? "realtime" : null,
-    provider.capabilities.supports_response_model_metadata
-      ? "response_model_metadata"
-      : null,
-  ].filter(Boolean) as string[];
-}
-
-function latestSignalForProvider(
-  provider: ProviderResource,
-  routeReceipts: RouteReceiptView[],
-  routePolicyNames: Map<string, string>,
-) {
-  const receipt = routeReceipts.find(
-    (candidate) =>
-      candidate.selectedTargetId === provider.provider_resource_id ||
-      candidate.excludedTargets.some(
-        (target) =>
-          target.provider_resource_id === provider.provider_resource_id,
-      ),
-  );
-
-  if (!receipt) {
-    return null;
-  }
-
-  if (receipt.selectedTargetId === provider.provider_resource_id) {
-    return `${routePolicyNames.get(receipt.routePolicyId) ?? receipt.routeName}: selected`;
-  }
-
-  return `${routePolicyNames.get(receipt.routePolicyId) ?? receipt.routeName}: ${receipt.excludedTargets[0]?.reason_code ?? "excluded"}`;
 }

@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateOpeningGrantRequest",
+  "type": "object",
+  "required": [
+    "config_snapshot_id",
+    "expires_at",
+    "grantee_id",
+    "grantee_kind",
+    "owner_account_id"
+  ],
+  "properties": {
+    "config_snapshot_id": {
+      "$ref": "#/definitions/ConfigSnapshotId"
+    },
+    "credential_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expires_at": {
+      "type": "string"
+    },
+    "grantee_id": {
+      "type": "string"
+    },
+    "grantee_kind": {
+      "type": "string"
+    },
+    "grantee_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner_account_id": {
+      "type": "string"
+    },
+    "scopes": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "ConfigSnapshotId": {
+      "type": "string"
+    }
+  }
+}

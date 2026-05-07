@@ -163,6 +163,7 @@ pub fn sample_usage_event() -> UsageEvent {
         usage_event_id: core_domain::UsageEventId::parse("usageevt_123").unwrap(),
         route_receipt_id: RouteReceiptId::parse("routercpt_123").unwrap(),
         grant_id: Some("grant_acme_customer".to_string()),
+        owner_account_id: Some("acct_acme_owner".to_string()),
         tenant_id: TenantId::parse("tenant_acme").unwrap(),
         project_id: ProjectId::parse("proj_core").unwrap(),
         provider_resource_id: ProviderResourceId::parse("prvrsrc_openai_primary").unwrap(),
@@ -330,6 +331,7 @@ pub fn sample_usage_summary_response() -> UsageSummaryResponse {
         data: UsageSummary {
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            owner_account_id: Some("acct_acme_owner".to_string()),
             window_start: "2026-04-21T00:00:00Z".to_string(),
             window_end: "2026-04-21T23:59:59Z".to_string(),
             currency: "USD".to_string(),
@@ -394,6 +396,7 @@ pub fn sample_balance_projection_response() -> BalanceProjectionResponse {
         data: BalanceProjection {
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: Some(ProjectId::parse("proj_core").unwrap()),
+            owner_account_id: Some("acct_acme_owner".to_string()),
             currency: "USD".to_string(),
             provider_cost_total: MonetaryAmount {
                 currency: "USD".to_string(),

@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpeningGrant",
+  "type": "object",
+  "required": [
+    "budget_policy_id",
+    "config_snapshot_id",
+    "created_at",
+    "created_by",
+    "credential_id",
+    "credential_key_prefix",
+    "credential_kind",
+    "credential_last_four",
+    "expires_at",
+    "grant_id",
+    "grantee_id",
+    "grantee_kind",
+    "owner_account_id",
+    "project_id",
+    "provider_resource_ids",
+    "route_policy_id",
+    "scopes",
+    "status",
+    "tenant_id",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "budget_policy_id": {
+      "$ref": "#/definitions/BudgetPolicyId"
+    },
+    "config_snapshot_id": {
+      "$ref": "#/definitions/ConfigSnapshotId"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "credential_id": {
+      "type": "string"
+    },
+    "credential_key_prefix": {
+      "type": "string"
+    },
+    "credential_kind": {
+      "type": "string"
+    },
+    "credential_last_four": {
+      "type": "string"
+    },
+    "expires_at": {
+      "type": "string"
+    },
+    "grant_id": {
+      "type": "string"
+    },
+    "grantee_id": {
+      "type": "string"
+    },
+    "grantee_kind": {
+      "type": "string"
+    },
+    "grantee_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner_account_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "$ref": "#/definitions/ProjectId"
+    },
+    "provider_resource_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ProviderResourceId"
+      }
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revoked_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "route_policy_id": {
+      "$ref": "#/definitions/RoutePolicyId"
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string"
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "BudgetPolicyId": {
+      "type": "string"
+    },
+    "ConfigSnapshotId": {
+      "type": "string"
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "ProviderResourceId": {
+      "type": "string"
+    },
+    "RoutePolicyId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

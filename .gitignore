@@ -101,8 +101,13 @@ storybook-static
 target
 .turbo
 tmp-tanstack/
+apps/console-web/.tanstack/
 .devcontainer/local/
+.codex-deploy/
+artifacts/run/
+artifacts/final-close/runtime-v2/
 packages/typescript-config/dist-types/
+packages/*/dist-types/
 
 # Gatsby files
 .cache/

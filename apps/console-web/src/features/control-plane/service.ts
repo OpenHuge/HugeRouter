@@ -5,23 +5,16 @@ import {
   type ControlPlaneClient,
 } from "@huge-router/ts-api-client";
 import {
-  cardProductSchema,
   type BillingExportJob,
   configSnapshotSchema,
   type ConfigSnapshot,
-  merchantShopSchema,
-  merchantWorkspaceResponseSchema,
   type Project,
   type ProviderResource,
-  providerResourceSchema,
-  relayEvaluationSchema,
-  replayCapsuleResponseSchema,
   type RoutePolicy,
   type RouteReceipt,
   routePolicySchema,
   routeReceiptSchema,
   type RouteSimulationResponse,
-  trialConnectionSchema,
 } from "@huge-router/ts-shared-schema";
 import type { AuthSessionEnvelope } from "../auth/auth-contract";
 import { authSessionQueryKey } from "../auth/auth-queries";
@@ -35,6 +28,8 @@ import type {
   ConfigSnapshotView,
   MerchantShopView,
   MerchantWorkspaceData,
+  OpeningGrantCreateResult,
+  OpeningGrantView,
   OverviewData,
   ReplayCapsuleView,
   ProjectSummary,
@@ -50,6 +45,12 @@ import type {
   WechatPaymentOrderView,
   WechatPayPrepayResult,
 } from "./types";
+import { createOpeningGrantService, type OpeningGrantCreateInput } from "./opening-grants-service";
+import {
+  createProviderResourcesService,
+  type ProviderResourceMutationInput,
+} from "./providers-service";
+import { createMerchantService } from "./merchant-service";
 
 export type ConsoleDataService = {
   getOverview: () => Promise<OverviewData>;
@@ -136,6 +137,9 @@ export type ConsoleDataService = {
     expectedVersion: number,
   ) => Promise<RoutePolicy>;
   listApiKeys: () => Promise<ApiKeyView[]>;
+  listOpeningGrants: () => Promise<OpeningGrantView[]>;
+  createOpeningGrant: (input: OpeningGrantCreateInput) => Promise<OpeningGrantCreateResult>;
+  revokeOpeningGrant: (grantId: string, expectedVersion: number) => Promise<OpeningGrantView>;
   createApiKey: (input: {
     apiKey: string;
     displayName: string;
@@ -179,6 +183,8 @@ type ActionErrorKind =
   | "billing-export-queue"
   | "card-product-create"
   | "merchant-shop-create"
+  | "opening-grant-create"
+  | "opening-grant-revoke"
   | "provider-create"
   | "provider-disable"
   | "provider-update"
@@ -194,34 +200,7 @@ type ActionErrorKind =
   | "trial-connection-create"
   | "wechat-pay-prepay";
 
-export type ProviderResourceMutationInput = {
-  authKind: "api_key" | "oauth_client_credentials" | "session_broker";
-  budgetPolicyId?: string;
-  capabilities: {
-    supportsJsonMode: boolean;
-    supportsStreaming: boolean;
-    supportsToolCalling: boolean;
-  };
-  credentialOwnerType: "platform" | "tenant" | "project" | "partner";
-  createdAt?: string;
-  deploymentScope: "shared" | "tenant_dedicated" | "project_dedicated";
-  endpointBaseUrl: string;
-  healthState: "healthy" | "degraded" | "quarantined" | "draining" | "disabled";
-  name: string;
-  projectId?: string;
-  providerId: string;
-  providerResourceId: string;
-  provenanceClass:
-    | "official_api"
-    | "official_gateway"
-    | "byo_customer_credential"
-    | "dedicated_managed_account"
-    | "shared_brokered_pool"
-    | "unofficial_client_channel";
-  region: string;
-  status: "active" | "disabled" | "draining" | "quarantined" | "deleted";
-  version?: number;
-};
+export type { ProviderResourceMutationInput } from "./providers-service";
 
 export type CodexAuthAccountUploadInput = {
   authJson: unknown;
@@ -544,6 +523,8 @@ function isRecoverableMissingEndpoint(error: unknown) {
     ? isNotFoundErrorStatus(error.status)
     : false;
 }
+
+const openingGrantService = createOpeningGrantService({ isRecoverableMissingEndpoint, requestControlPlaneJson });
 
 function getAuthEnvelope() {
   return getQueryClient().getQueryData<AuthSessionEnvelope>(
@@ -1037,122 +1018,6 @@ function parseWechatPaymentOrder(payload: unknown): WechatPaymentOrderView {
   };
 }
 
-function toMerchantShopView(
-  shop: ReturnType<typeof merchantShopSchema.parse>,
-): MerchantShopView {
-  return {
-    announcement: shop.announcement,
-    createdAt: shop.created_at,
-    displayName: shop.display_name,
-    fulfillmentMode: shop.fulfillment_mode,
-    merchantShopId: shop.merchant_shop_id,
-    slug: shop.slug,
-    status: shop.status,
-    updatedAt: shop.updated_at,
-    version: shop.version,
-  };
-}
-
-function toCardProductView(
-  product: ReturnType<typeof cardProductSchema.parse>,
-): CardProductView {
-  return {
-    cardProductId: product.card_product_id,
-    createdAt: product.created_at,
-    deliveryKind: product.delivery_kind,
-    description: product.description,
-    faceValueUsd: product.face_value_usd,
-    inventoryCount: product.inventory_count,
-    merchantShopId: product.merchant_shop_id,
-    retailPriceUsd: product.retail_price_usd,
-    status: product.status,
-    supportsTrial: product.supports_trial,
-    title: product.title,
-    updatedAt: product.updated_at,
-    version: product.version,
-  };
-}
-
-function toTrialConnectionView(
-  connection: ReturnType<typeof trialConnectionSchema.parse>,
-): TrialConnectionView {
-  return {
-    apiKeyMasked: connection.api_key_masked,
-    createdAt: connection.created_at,
-    endpointBaseUrl: connection.endpoint_base_url,
-    lastVerifiedAt: connection.last_verified_at,
-    notes: connection.notes,
-    providerLabel: connection.provider_label,
-    status: connection.status,
-    targetModel: connection.target_model,
-    trialConnectionId: connection.trial_connection_id,
-    updatedAt: connection.updated_at,
-    version: connection.version,
-  };
-}
-
-function toRelayEvaluationView(
-  evaluation: ReturnType<typeof relayEvaluationSchema.parse>,
-): RelayEvaluationView {
-  return {
-    createdAt: evaluation.created_at,
-    detectedChannel: evaluation.detected_channel,
-    endpointBaseUrl: evaluation.endpoint_base_url,
-    estimatedTokensSaved: evaluation.estimated_tokens_saved,
-    fingerprintStatus: evaluation.fingerprint_status,
-    multimodalStatus: evaluation.multimodal_status,
-    overallScore: evaluation.overall_score,
-    protocolStatus: evaluation.protocol_status,
-    providerLabel: evaluation.provider_label,
-    relayEvaluationId: evaluation.relay_evaluation_id,
-    replayCapsuleId: evaluation.replay_capsule_id,
-    runnerMode: evaluation.runner_mode,
-    sampleRequestCount: evaluation.sample_request_count,
-    summary: evaluation.summary,
-    targetModel: evaluation.target_model,
-    tokenStatus: evaluation.token_status,
-    trialConnectionId: evaluation.trial_connection_id,
-    verdict: evaluation.verdict,
-  };
-}
-
-function parseMerchantWorkspace(payload: unknown): MerchantWorkspaceData {
-  const parsed = merchantWorkspaceResponseSchema.parse(payload).data;
-
-  return {
-    cardProducts: parsed.card_products.map(toCardProductView),
-    merchantEnabled: parsed.merchant_enabled,
-    recentEvaluations: parsed.recent_evaluations.map(toRelayEvaluationView),
-    shops: parsed.shops.map(toMerchantShopView),
-    tenantId: parsed.tenant_id,
-    trialConnections: parsed.trial_connections.map(toTrialConnectionView),
-  };
-}
-
-function parseReplayCapsule(payload: unknown): ReplayCapsuleView {
-  const parsed = replayCapsuleResponseSchema.parse(payload).replay_capsule;
-
-  return {
-    configSnapshotId: parsed.config_snapshot_id,
-    normalizedRequestSummary: {
-      estimatedPromptTokens:
-        parsed.normalized_request_summary.estimated_prompt_tokens,
-      modelAlias: parsed.normalized_request_summary.model_alias,
-      protocolFamily: parsed.normalized_request_summary.protocol_family,
-    },
-    redactionTier: parsed.redaction_tier,
-    replayCapsuleId: parsed.replay_capsule_id,
-    requestId: parsed.request_id,
-    routeReceiptId: parsed.route_receipt_id,
-    traceId: parsed.trace_id,
-    upstreamErrorCode: parsed.upstream_error_summary?.code,
-  };
-}
-
-function parseProviderResourceRecord(payload: unknown) {
-  return providerResourceSchema.parse(payload);
-}
-
 function parseRoutePolicyRecord(payload: unknown) {
   return routePolicySchema.parse(payload);
 }
@@ -1206,6 +1071,14 @@ export function getControlPlaneActionErrorMessage(
       : "That resource no longer exists. Refresh the page and try again.";
   }
 
+  if (code === "opening_grant_limit_reached") {
+    return "This owner account already has 8 active child keys. Revoke or let one expire before creating another.";
+  }
+
+  if (code === "opening_grant_grantee_active") {
+    return "That grantee already has an active child key for this owner account.";
+  }
+
   if (status === 409 || code?.endsWith("_version_conflict")) {
     return "This resource changed since you opened it. Refresh the page and try again.";
   }
@@ -1223,6 +1096,11 @@ export function getControlPlaneActionErrorMessage(
     code === "route_policy_invalid" ||
     code === "route_policy_id_invalid" ||
     code === "config_snapshot_invalid" ||
+    code === "opening_owner_account_id_invalid" ||
+    code === "opening_grantee_kind_invalid" ||
+    code === "opening_grantee_required" ||
+    code === "opening_expires_at_invalid" ||
+    code === "opening_scope_invalid" ||
     code === "provider_resource_id_invalid"
   ) {
     return "Review the form fields and submit again.";
@@ -1263,6 +1141,9 @@ export function getControlPlaneActionErrorMessage(
   if (kind === "api-key-revoke") {
     return "The API key could not be revoked.";
   }
+
+  if (kind === "opening-grant-create") return "The child key could not be created.";
+  if (kind === "opening-grant-revoke") return "The child key could not be revoked.";
 
   if (kind === "snapshot-activate") {
     return "The config snapshot could not be activated.";
@@ -1388,65 +1269,6 @@ async function activateConfigSnapshotFromControlPlane(
 
     throw error;
   }
-}
-
-async function createProviderResourceInControlPlane(
-  providerResource: ProviderResource,
-) {
-  return requestControlPlaneJson(
-    "/v1/provider-resources",
-    parseProviderResourceRecord,
-    {
-      body: JSON.stringify(providerResource),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    },
-  );
-}
-
-async function updateProviderResourceInControlPlane(
-  providerResourceId: string,
-  providerResource: ProviderResource,
-  expectedVersion: number,
-) {
-  return requestControlPlaneJson(
-    `/v1/provider-resources/${encodeURIComponent(providerResourceId)}`,
-    parseProviderResourceRecord,
-    {
-      body: JSON.stringify({
-        ...providerResource,
-        expected_version: expectedVersion,
-      }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "PUT",
-    },
-  );
-}
-
-async function disableProviderResourceInControlPlane(
-  providerResourceId: string,
-  expectedVersion: number,
-) {
-  return requestControlPlaneJson(
-    `/v1/provider-resources/${encodeURIComponent(providerResourceId)}/disable`,
-    parseProviderResourceRecord,
-    {
-      body: JSON.stringify({
-        expected_version: expectedVersion,
-      }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    },
-  );
 }
 
 function toCodexAuthAccountView(payload: unknown): CodexAuthAccountView {
@@ -1896,19 +1718,6 @@ async function createApiKeyInControlPlane(input: {
   });
 }
 
-async function getMerchantWorkspaceFromControlPlane() {
-  return requestControlPlaneJson(
-    "/v1/merchant/workspace",
-    parseMerchantWorkspace,
-    {
-      headers: {
-        Accept: "application/json",
-      },
-      method: "GET",
-    },
-  );
-}
-
 async function createWechatPayPrepayInControlPlane(input: {
   amountTotal: number;
   channel: "native" | "jsapi";
@@ -1947,125 +1756,6 @@ async function getWechatPaymentOrderFromControlPlane(
   return requestControlPlaneJson(
     `/v1/billing/wechat-pay/orders/${encodeURIComponent(outTradeNo)}${query}`,
     parseWechatPaymentOrder,
-    {
-      headers: {
-        Accept: "application/json",
-      },
-      method: "GET",
-    },
-  );
-}
-
-async function createMerchantShopInControlPlane(input: {
-  merchantShopId: string;
-  slug: string;
-  displayName: string;
-  announcement?: string;
-}) {
-  return requestControlPlaneJson(
-    "/v1/merchant/shops",
-    (payload) => toMerchantShopView(merchantShopSchema.parse(payload)),
-    {
-      body: JSON.stringify({
-        announcement: input.announcement,
-        display_name: input.displayName,
-        merchant_shop_id: input.merchantShopId,
-        slug: input.slug,
-      }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    },
-  );
-}
-
-async function createCardProductInControlPlane(input: {
-  cardProductId: string;
-  merchantShopId: string;
-  title: string;
-  description: string;
-  inventoryCount: number;
-  faceValueUsd: string;
-  retailPriceUsd: string;
-  supportsTrial: boolean;
-}) {
-  return requestControlPlaneJson(
-    "/v1/merchant/card-products",
-    (payload) => toCardProductView(cardProductSchema.parse(payload)),
-    {
-      body: JSON.stringify({
-        card_product_id: input.cardProductId,
-        description: input.description,
-        face_value_usd: input.faceValueUsd,
-        inventory_count: input.inventoryCount,
-        merchant_shop_id: input.merchantShopId,
-        retail_price_usd: input.retailPriceUsd,
-        supports_trial: input.supportsTrial,
-        title: input.title,
-      }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    },
-  );
-}
-
-async function createTrialConnectionInControlPlane(input: {
-  trialConnectionId: string;
-  providerLabel: string;
-  endpointBaseUrl: string;
-  apiKey: string;
-  targetModel: string;
-  notes?: string;
-}) {
-  return requestControlPlaneJson(
-    "/v1/merchant/trial-connections",
-    (payload) => toTrialConnectionView(trialConnectionSchema.parse(payload)),
-    {
-      body: JSON.stringify({
-        api_key: input.apiKey,
-        endpoint_base_url: input.endpointBaseUrl,
-        notes: input.notes,
-        provider_label: input.providerLabel,
-        target_model: input.targetModel,
-        trial_connection_id: input.trialConnectionId,
-      }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    },
-  );
-}
-
-async function createRelayEvaluationInControlPlane(input: {
-  trialConnectionId: string;
-}) {
-  return requestControlPlaneJson(
-    "/v1/merchant/evaluations",
-    (payload) => toRelayEvaluationView(relayEvaluationSchema.parse(payload)),
-    {
-      body: JSON.stringify({
-        trial_connection_id: input.trialConnectionId,
-      }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    },
-  );
-}
-
-async function getReplayCapsuleFromControlPlane(replayCapsuleId: string) {
-  return requestControlPlaneJson(
-    `/v1/replay-capsules/${encodeURIComponent(replayCapsuleId)}`,
-    parseReplayCapsule,
     {
       headers: {
         Accept: "application/json",
@@ -2186,39 +1876,6 @@ function requireActiveTenantId() {
   return tenantId;
 }
 
-function toProviderResourcePayload(
-  input: ProviderResourceMutationInput,
-): ProviderResource {
-  return {
-    auth_kind: input.authKind,
-    budget_policy_id: input.budgetPolicyId,
-    capabilities: {
-      supports_json_mode: input.capabilities.supportsJsonMode,
-      supports_realtime: false,
-      supports_response_model_metadata: true,
-      supports_streaming: input.capabilities.supportsStreaming,
-      supports_tool_calling: input.capabilities.supportsToolCalling,
-    },
-    created_at: input.createdAt ?? currentTimestamp(),
-    credential_owner_type: input.credentialOwnerType,
-    deployment_scope: input.deploymentScope,
-    endpoint_base_url: input.endpointBaseUrl,
-    health_state: input.healthState,
-    is_transit_gateway: false,
-    name: input.name,
-    project_id: input.projectId,
-    provider_id: input.providerId,
-    provider_resource_id: input.providerResourceId,
-    provenance_class: input.provenanceClass,
-    region: input.region,
-    status: input.status,
-    supported_protocol_families: ["openai_chat"],
-    tenant_id: requireActiveTenantId(),
-    updated_at: currentTimestamp(),
-    version: input.version ?? 1,
-  };
-}
-
 function toRoutePolicyPayload(input: RoutePolicyMutationInput): RoutePolicy {
   return {
     created_at: input.createdAt ?? currentTimestamp(),
@@ -2268,6 +1925,16 @@ async function loadControlPlaneData() {
     tenants,
   };
 }
+
+const providerResourcesService = createProviderResourcesService({
+  getActiveTenantId,
+  requestControlPlaneJson,
+  timestamp: currentTimestamp,
+});
+
+const merchantService = createMerchantService({
+  requestControlPlaneJson,
+});
 
 const defaultConsoleDataService: ConsoleDataService = {
   async getOverview() {
@@ -2471,11 +2138,11 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async getMerchantWorkspace() {
-    return getMerchantWorkspaceFromControlPlane();
+    return merchantService.getMerchantWorkspace();
   },
 
   async getReplayCapsule(replayCapsuleId) {
-    return getReplayCapsuleFromControlPlane(replayCapsuleId);
+    return merchantService.getReplayCapsule(replayCapsuleId);
   },
 
   async getTenantDetail(tenantId) {
@@ -2634,9 +2301,7 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async createProviderResource(providerResource) {
-    return createProviderResourceInControlPlane(
-      toProviderResourcePayload(providerResource),
-    );
+    return providerResourcesService.createProviderResource(providerResource);
   },
 
   async updateProviderResource(
@@ -2644,15 +2309,15 @@ const defaultConsoleDataService: ConsoleDataService = {
     providerResource,
     expectedVersion,
   ) {
-    return updateProviderResourceInControlPlane(
+    return providerResourcesService.updateProviderResource(
       providerResourceId,
-      toProviderResourcePayload(providerResource),
+      providerResource,
       expectedVersion,
     );
   },
 
   async disableProviderResource(providerResourceId, expectedVersion) {
-    return disableProviderResourceInControlPlane(
+    return providerResourcesService.disableProviderResource(
       providerResourceId,
       expectedVersion,
     );
@@ -2714,6 +2379,16 @@ const defaultConsoleDataService: ConsoleDataService = {
     return listTenantApiKeysFromControlPlane();
   },
 
+  async listOpeningGrants() {
+    const grants = await openingGrantService.listOpeningGrants();
+
+    return filterByTenant(grants);
+  },
+
+  async createOpeningGrant(input) { return openingGrantService.createOpeningGrant(input); },
+
+  async revokeOpeningGrant(grantId, expectedVersion) { return openingGrantService.revokeOpeningGrant(grantId, expectedVersion); },
+
   async createApiKey(input) {
     const created = await createApiKeyInControlPlane(input);
 
@@ -2731,19 +2406,19 @@ const defaultConsoleDataService: ConsoleDataService = {
   },
 
   async createMerchantShop(input) {
-    return createMerchantShopInControlPlane(input);
+    return merchantService.createMerchantShop(input);
   },
 
   async createCardProduct(input) {
-    return createCardProductInControlPlane(input);
+    return merchantService.createCardProduct(input);
   },
 
   async createTrialConnection(input) {
-    return createTrialConnectionInControlPlane(input);
+    return merchantService.createTrialConnection(input);
   },
 
   async runRelayEvaluation(input) {
-    return createRelayEvaluationInControlPlane(input);
+    return merchantService.runRelayEvaluation(input);
   },
 
   async downloadBillingExport(exportJobId) {

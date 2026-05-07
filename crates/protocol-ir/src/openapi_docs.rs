@@ -119,6 +119,7 @@ use utoipa::OpenApi;
             OpeningCredential,
             OpeningGrant,
             OpeningGrantCreateResponse,
+            OpeningGrantRevokeRequest,
             OpeningGrantsResponse,
             Project,
             ProjectId,
@@ -352,6 +353,7 @@ const fn create_opening_grant() {}
     post,
     path = "/v1/opening-grants/{grant_id}/revoke",
     tag = "openings",
+    request_body = OpeningGrantRevokeRequest,
     params(
         ("grant_id" = String, Path, description = "Opening grant id")
     ),
@@ -795,6 +797,7 @@ const fn activate_config_snapshot() {}
     params(
         ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
         ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("owner_account_id" = Option<String>, Query, description = "Filter by owner account id"),
         ("window_start" = Option<String>, Query, description = "Inclusive RFC3339 start timestamp"),
         ("window_end" = Option<String>, Query, description = "Inclusive RFC3339 end timestamp")
     ),
@@ -813,6 +816,7 @@ const fn get_usage_summary() {}
     params(
         ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
         ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("owner_account_id" = Option<String>, Query, description = "Filter by owner account id"),
         ("window_start" = Option<String>, Query, description = "Inclusive RFC3339 start timestamp"),
         ("window_end" = Option<String>, Query, description = "Inclusive RFC3339 end timestamp"),
         ("group_by" = Option<String>, Query, description = "Breakdown dimension: provider, model, or day"),
@@ -833,7 +837,8 @@ const fn get_usage_breakdown() {}
     tag = "routing",
     params(
         ("tenant_id" = Option<String>, Query, description = "Filter by tenant id"),
-        ("project_id" = Option<String>, Query, description = "Filter by project id")
+        ("project_id" = Option<String>, Query, description = "Filter by project id"),
+        ("owner_account_id" = Option<String>, Query, description = "Filter by owner account id")
     ),
     responses(
         (status = 200, description = "Billing projection summary", body = BalanceProjectionResponse),

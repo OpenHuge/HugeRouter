@@ -2,6 +2,7 @@ import {
   apiKeysInitialState,
   billingExportResponse,
   configSnapshotsResponse,
+  openingGrantsInitialState,
   providerResourcesResponse,
   routePoliciesResponse,
   type BillingExportJobState,
@@ -25,6 +26,7 @@ export type RoutePolicyRecord = (typeof routePoliciesResponse.data)[number];
 export type ConfigSnapshotRecord =
   (typeof configSnapshotsResponse.data)[number];
 export type ApiKeyRecord = (typeof apiKeysInitialState)[number];
+export type OpeningGrantRecord = (typeof openingGrantsInitialState)[number];
 export type OAuthSharingLeaseRecord = {
   allowed_account_ids?: string[];
   borrower_workspace_id: string;
@@ -69,6 +71,7 @@ export type ControlPlaneMockState = {
   billingExportPollCount: number;
   cardProducts: CardProductRecord[];
   configSnapshots: ConfigSnapshotRecord[];
+  openingGrants: OpeningGrantRecord[];
   oauthCarpools: OAuthCarpoolRecord[];
   oauthSharingAuditEvents: OAuthSharingAuditEventRecord[];
   oauthSharingLeases: OAuthSharingLeaseRecord[];
@@ -87,6 +90,7 @@ export function createInitialControlPlaneMockState(): ControlPlaneMockState {
     billingExportPollCount: 0,
     cardProducts: structuredClone(cardProductsInitialState),
     configSnapshots: structuredClone(configSnapshotsResponse.data),
+    openingGrants: structuredClone(openingGrantsInitialState),
     oauthCarpools: [
       {
         carpool_id: "carpool_codex_acme",

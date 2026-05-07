@@ -37,6 +37,12 @@
         "last_projected_at": {
           "type": "string"
         },
+        "owner_account_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "project_id": {
           "anyOf": [
             {

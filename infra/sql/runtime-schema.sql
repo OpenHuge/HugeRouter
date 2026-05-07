@@ -44,6 +44,33 @@ CREATE TABLE IF NOT EXISTS api_keys (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS opening_grants (
+    grant_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
+    config_snapshot_id TEXT NOT NULL,
+    grantee_kind TEXT NOT NULL,
+    grantee_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    credential_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS opening_grants_owner_active_idx
+    ON opening_grants (tenant_id, project_id, owner_account_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS opening_grant_owner_locks (
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, project_id, owner_account_id)
+);
+
 CREATE TABLE IF NOT EXISTS deliveries (
     delivery_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -523,6 +550,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
     ledger_entry_id TEXT PRIMARY KEY,
     usage_event_id TEXT NOT NULL,
     grant_id TEXT NULL,
+    owner_account_id TEXT NULL,
     usage_phase TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
@@ -542,6 +570,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_cost_micros BIGINT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS grant_id TEXT;
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS owner_account_id TEXT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS billable_cost_micros BIGINT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_id TEXT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS model_alias TEXT;
@@ -552,6 +581,7 @@ ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS cached_input_tokens BIGINT;
 CREATE TABLE IF NOT EXISTS usage_daily_projections (
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
     usage_date DATE NOT NULL,
     provider_id TEXT NOT NULL,
     model_alias TEXT NOT NULL,
@@ -563,12 +593,13 @@ CREATE TABLE IF NOT EXISTS usage_daily_projections (
     billable_cost_micros BIGINT NOT NULL,
     event_count BIGINT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, project_id, usage_date, provider_id, model_alias)
+    PRIMARY KEY (tenant_id, project_id, owner_account_id, usage_date, provider_id, model_alias)
 );
 
 CREATE TABLE IF NOT EXISTS balance_projections (
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
     currency TEXT NOT NULL,
     provider_cost_micros BIGINT NOT NULL,
     billable_cost_micros BIGINT NOT NULL,
@@ -577,18 +608,69 @@ CREATE TABLE IF NOT EXISTS balance_projections (
     threshold_status TEXT NOT NULL,
     threshold_crossed_at TIMESTAMPTZ NULL,
     last_projected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, project_id, currency)
+    PRIMARY KEY (tenant_id, project_id, owner_account_id, currency)
 );
 
 CREATE TABLE IF NOT EXISTS budget_threshold_events (
     budget_threshold_event_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
     currency TEXT NOT NULL,
     threshold_status TEXT NOT NULL,
     billable_cost_micros BIGINT NOT NULL,
     configured_budget_micros BIGINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE usage_daily_projections ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default';
+ALTER TABLE balance_projections ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default';
+ALTER TABLE budget_threshold_events ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default';
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'usage_daily_projections'::regclass
+          AND conname = 'usage_daily_projections_pkey'
+          AND pg_get_constraintdef(oid) NOT LIKE '%owner_account_id%'
+    ) THEN
+        ALTER TABLE usage_daily_projections DROP CONSTRAINT usage_daily_projections_pkey;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'usage_daily_projections'::regclass
+          AND conname = 'usage_daily_projections_pkey'
+    ) THEN
+        ALTER TABLE usage_daily_projections
+            ADD CONSTRAINT usage_daily_projections_pkey
+            PRIMARY KEY (tenant_id, project_id, owner_account_id, usage_date, provider_id, model_alias);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'balance_projections'::regclass
+          AND conname = 'balance_projections_pkey'
+          AND pg_get_constraintdef(oid) NOT LIKE '%owner_account_id%'
+    ) THEN
+        ALTER TABLE balance_projections DROP CONSTRAINT balance_projections_pkey;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'balance_projections'::regclass
+          AND conname = 'balance_projections_pkey'
+    ) THEN
+        ALTER TABLE balance_projections
+            ADD CONSTRAINT balance_projections_pkey
+            PRIMARY KEY (tenant_id, project_id, owner_account_id, currency);
+    END IF;
+END $$;
 
 COMMIT;

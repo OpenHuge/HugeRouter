@@ -111,6 +111,19 @@ fn json_schema_artifacts() -> anyhow::Result<Vec<ArtifactFile>> {
         schema_artifact::<BillingExportJobsResponse>(
             "schemas/jsonschema/billing-export-jobs-response.v1.schema.json",
         )?,
+        schema_artifact::<CreateOpeningGrantRequest>(
+            "schemas/jsonschema/opening-grant-create-request.v1.schema.json",
+        )?,
+        schema_artifact::<OpeningGrant>("schemas/jsonschema/opening-grant.v1.schema.json")?,
+        schema_artifact::<OpeningGrantCreateResponse>(
+            "schemas/jsonschema/opening-grant-create-response.v1.schema.json",
+        )?,
+        schema_artifact::<OpeningGrantRevokeRequest>(
+            "schemas/jsonschema/opening-grant-revoke-request.v1.schema.json",
+        )?,
+        schema_artifact::<OpeningGrantsResponse>(
+            "schemas/jsonschema/opening-grants-response.v1.schema.json",
+        )?,
         schema_artifact::<CreateDeliveryRequest>(
             "schemas/jsonschema/delivery-prepare-request.v1.schema.json",
         )?,
@@ -570,6 +583,9 @@ export const CONTROL_PLANE_OPERATIONS = [\n\
   {{ id: 'createBillingExport', method: 'POST', path: '/v1/billing/exports' }},\n\
   {{ id: 'listBillingExports', method: 'GET', path: '/v1/billing/exports' }},\n\
   {{ id: 'getBillingExport', method: 'GET', path: '/v1/billing/exports/{{export_job_id}}' }},\n\
+  {{ id: 'listOpeningGrants', method: 'GET', path: '/v1/opening-grants' }},\n\
+  {{ id: 'createOpeningGrant', method: 'POST', path: '/v1/opening-grants' }},\n\
+  {{ id: 'revokeOpeningGrant', method: 'POST', path: '/v1/opening-grants/{{grant_id}}/revoke' }},\n\
   {{ id: 'prepareDelivery', method: 'POST', path: '/v1/deliveries/prepare' }},\n\
   {{ id: 'getDelivery', method: 'GET', path: '/v1/deliveries/{{delivery_id}}' }},\n\
   {{ id: 'revokeDelivery', method: 'POST', path: '/v1/deliveries/{{delivery_id}}/revoke' }},\n\

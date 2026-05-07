@@ -123,6 +123,12 @@
         "model_alias": {
           "type": "string"
         },
+        "owner_account_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "phase": {
           "$ref": "#/definitions/UsagePhase"
         },
