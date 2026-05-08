@@ -2,6 +2,114 @@ use super::*;
 use crate::BASE64;
 use base64::Engine as _;
 
+fn request_with_bearer(
+    method: &str,
+    uri: &str,
+    bearer: &str,
+    body: Option<serde_json::Value>,
+) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {bearer}"));
+    if let Some(body) = body {
+        builder = builder.header("content-type", "application/json");
+        builder.body(Body::from(body.to_string())).unwrap()
+    } else {
+        builder.body(Body::empty()).unwrap()
+    }
+}
+
+async fn issue_producer_authorization_for_test(app: axum::Router, owner_account_id: &str) -> Value {
+    let response = app
+        .oneshot(request_with_bearer(
+            "POST",
+            "/internal/producer-authorizations",
+            "test-internal-token",
+            Some(json!({
+                "tenant_id": "tenant_acme",
+                "project_id": "proj_core",
+                "provider": "chatgpt",
+                "owner_account_id": owner_account_id,
+                "service_kind": "manual_browser_account",
+                "service_days": 30
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    response_json(response).await
+}
+
+async fn redeem_producer_authorization_for_test(
+    app: axum::Router,
+    authorization_code: &str,
+) -> Value {
+    let response = app
+        .oneshot(request(
+            "POST",
+            "/v1/producer-authorizations/redeem",
+            None,
+            Some(json!({ "authorization_code": authorization_code })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response_json(response).await
+}
+
+async fn producer_token_for_owner_for_test(app: axum::Router, owner_account_id: &str) -> String {
+    let issued = issue_producer_authorization_for_test(app.clone(), owner_account_id).await;
+    let authorization_code = issued["authorization_code"].as_str().unwrap();
+    let redeemed = redeem_producer_authorization_for_test(app, authorization_code).await;
+    redeemed["producer_token"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn producer_token_can_prepare_and_read_redemption_units_via_v1_routes() {
+    let (_state, _admin_cookie, app) = platform_admin_app().await;
+    let owner_account_id = "acct_v1_producer_redemption_units";
+    let producer_token = producer_token_for_owner_for_test(app.clone(), owner_account_id).await;
+
+    let prepared = app
+        .clone()
+        .oneshot(request_with_bearer(
+            "POST",
+            "/v1/deliveries/redemption-units/prepare",
+            &producer_token,
+            Some(json!({
+                "tenant_id": "tenant_acme",
+                "project_id": "proj_core",
+                "provider": "chatgpt",
+                "owner_account_id": owner_account_id,
+                "service_kind": "manual_browser_account",
+                "service_days": 30
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(prepared.status(), StatusCode::OK);
+    let prepared = response_json(prepared).await;
+    assert_eq!(prepared["data"]["owner_account_id"], owner_account_id);
+    assert_eq!(prepared["data"]["unit_count"], 8);
+
+    let inventory = app
+        .oneshot(request_with_bearer(
+            "GET",
+            &format!(
+                "/v1/delivery-redemption-inventory?tenant_id=tenant_acme&project_id=proj_core&owner_account_id={owner_account_id}"
+            ),
+            &producer_token,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(inventory.status(), StatusCode::OK);
+    let inventory = response_json(inventory).await;
+    assert_eq!(inventory["data"]["owners"][0]["owner_account_id"], owner_account_id);
+    assert_eq!(inventory["data"]["owners"][0]["active_count"], 8);
+}
+
 #[tokio::test]
 async fn delivery_redemption_units_prepare_audit_and_redeem_are_owner_scoped() {
     let (_state, admin_cookie, app) = platform_admin_app().await;

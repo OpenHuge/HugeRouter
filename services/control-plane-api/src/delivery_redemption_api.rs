@@ -19,9 +19,10 @@ use crate::store::{
     build_prepared_delivery_records,
 };
 use crate::{
-    ApiError, ControlPlaneState, INTERNAL_DELIVERY_OPERATOR_ACTOR, authorize_v1_request,
-    delivery_service_kind, delivery_timestamps, generate_delivery_code, generate_stable_id,
-    load_project, next_request_context, require_internal_gateway_auth, validate_delivery_provider,
+    ApiError, ControlPlaneState, INTERNAL_DELIVERY_OPERATOR_ACTOR,
+    authorize_delivery_producer_request, authorize_v1_request, delivery_service_kind,
+    delivery_timestamps, generate_delivery_code, generate_stable_id, load_project,
+    next_request_context, require_internal_gateway_auth, validate_delivery_provider,
     validate_delivery_service_days,
 };
 
@@ -40,6 +41,24 @@ pub async fn prepare_delivery_redemption_units(
     Json(request): Json<PrepareDeliveryRedemptionUnitsRequest>,
 ) -> Result<Json<PrepareDeliveryRedemptionUnitsResponse>, ApiError> {
     let context = next_request_context();
+    if let Ok(producer) = authorize_delivery_producer_request(&state, &headers, &context).await {
+        let owner_account_id =
+            validate_opening_owner_account_id(&request.owner_account_id, &context)?;
+        let provider = validate_delivery_provider(&request.provider, &context)?;
+        let service_kind = delivery_service_kind(request.service_kind.as_deref(), &context)?;
+        validate_delivery_service_days(request.service_days, &context)?;
+        producer.ensure_scope(request.tenant_id.as_str(), request.project_id.as_str(), &context)?;
+        producer.ensure_owner_account(&owner_account_id, &context)?;
+        producer.ensure_provider(&provider, &context)?;
+        producer.ensure_service_defaults(&service_kind, request.service_days, &context)?;
+        return prepare_delivery_redemption_units_with_actor(
+            &state,
+            request,
+            producer.actor_id(),
+            &context,
+        )
+        .await;
+    }
     let authz = authorize_v1_request(&state, &headers, &context).await?;
     authz.ensure_manage_tenant(request.tenant_id.as_str(), &context)?;
     prepare_delivery_redemption_units_with_actor(&state, request, authz.actor_id(), &context).await
@@ -51,6 +70,24 @@ pub async fn prepare_delivery_redemption_units_internal(
     Json(request): Json<PrepareDeliveryRedemptionUnitsRequest>,
 ) -> Result<Json<PrepareDeliveryRedemptionUnitsResponse>, ApiError> {
     let context = next_request_context();
+    if let Ok(producer) = authorize_delivery_producer_request(&state, &headers, &context).await {
+        let owner_account_id =
+            validate_opening_owner_account_id(&request.owner_account_id, &context)?;
+        let provider = validate_delivery_provider(&request.provider, &context)?;
+        let service_kind = delivery_service_kind(request.service_kind.as_deref(), &context)?;
+        validate_delivery_service_days(request.service_days, &context)?;
+        producer.ensure_scope(request.tenant_id.as_str(), request.project_id.as_str(), &context)?;
+        producer.ensure_owner_account(&owner_account_id, &context)?;
+        producer.ensure_provider(&provider, &context)?;
+        producer.ensure_service_defaults(&service_kind, request.service_days, &context)?;
+        return prepare_delivery_redemption_units_with_actor(
+            &state,
+            request,
+            producer.actor_id(),
+            &context,
+        )
+        .await;
+    }
     require_internal_gateway_auth(&state, &headers, &context)?;
     prepare_delivery_redemption_units_with_actor(
         &state,
@@ -67,8 +104,11 @@ pub async fn list_delivery_redemption_inventory(
     Query(query): Query<DeliveryRedemptionInventoryQuery>,
 ) -> Result<Json<DeliveryRedemptionInventoryResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    authz.ensure_read_tenant(query.tenant_id.as_str(), &context)?;
+    let owner_account_id = query
+        .owner_account_id
+        .as_deref()
+        .map(|value| validate_opening_owner_account_id(value, &context))
+        .transpose()?;
     let project = load_project(&state, query.project_id.as_str(), &context).await?;
     if project.tenant_id != query.tenant_id {
         return Err(ApiError::bad_request(
@@ -77,11 +117,30 @@ pub async fn list_delivery_redemption_inventory(
             &context,
         ));
     }
-    let owner_account_id = query
-        .owner_account_id
-        .as_deref()
-        .map(|value| validate_opening_owner_account_id(value, &context))
-        .transpose()?;
+    if let Ok(producer) = authorize_delivery_producer_request(&state, &headers, &context).await {
+        producer.ensure_scope(query.tenant_id.as_str(), query.project_id.as_str(), &context)?;
+        if let Some(owner_account_id) = owner_account_id.as_deref() {
+            producer.ensure_owner_account(owner_account_id, &context)?;
+        }
+        return state
+            .store
+            .list_delivery_redemption_inventory(
+                &query.tenant_id,
+                &query.project_id,
+                owner_account_id.as_deref(),
+            )
+            .await
+            .map(Json)
+            .map_err(|error| {
+                ApiError::internal(
+                    "delivery_redemption_inventory_unavailable",
+                    format!("failed to load delivery redemption inventory: {error}"),
+                    &context,
+                )
+            });
+    }
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    authz.ensure_read_tenant(query.tenant_id.as_str(), &context)?;
     state
         .store
         .list_delivery_redemption_inventory(
