@@ -112,6 +112,7 @@ const DELIVERY_UPLOAD_MAX_ITEMS: usize = 500;
 const STABLE_ID_RANDOM_LEN: usize = 16;
 const CUSTOMER_DELIVERY_REDEEM_ACTOR: &str = "customer_delivery_redeem";
 const CUSTOMER_DELIVERY_DOWNLOAD_GRANT_ACTOR: &str = "customer_delivery_download_grant";
+const DELIVERY_PRODUCER_TOKEN_TTL_SECONDS: u64 = 60 * 60 * 24 * 30;
 pub(crate) const INTERNAL_DELIVERY_OPERATOR_ACTOR: &str = "internal_delivery_operator";
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
@@ -473,6 +474,50 @@ pub(crate) struct ControlPlaneAuthorizer {
     session: core_domain::AuthLoginResult,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DeliveryProducerAuthorizer {
+    token: DeliveryProducerTokenClaims,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeliveryProducerTokenClaims {
+    tenant_id: String,
+    project_id: String,
+    provider: String,
+    owner_account_id: String,
+    service_kind: String,
+    service_days: u32,
+    actor_id: String,
+    expires_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct IssueProducerAuthorizationRequest {
+    pub tenant_id: core_domain::TenantId,
+    pub project_id: core_domain::ProjectId,
+    pub provider: String,
+    pub owner_account_id: String,
+    pub service_kind: Option<String>,
+    pub service_days: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RedeemProducerAuthorizationRequest {
+    pub authorization_code: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct IssueProducerAuthorizationResponse {
+    pub authorization_code: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RedeemProducerAuthorizationResponse {
+    pub producer_token: String,
+    pub expires_at: String,
+}
+
 impl ControlPlaneAuthorizer {
     const fn new(session: core_domain::AuthLoginResult) -> Self {
         Self { session }
@@ -611,6 +656,82 @@ impl ControlPlaneAuthorizer {
 
     const fn authenticated_by(&self) -> AuthProvider {
         self.session.session.authenticated_by
+    }
+}
+
+impl DeliveryProducerAuthorizer {
+    fn new(token: DeliveryProducerTokenClaims) -> Self {
+        Self { token }
+    }
+
+    pub(crate) fn ensure_scope(
+        &self,
+        tenant_id: &str,
+        project_id: &str,
+        context: &RequestContext,
+    ) -> Result<(), ApiError> {
+        if self.token.tenant_id == tenant_id && self.token.project_id == project_id {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "producer_scope_denied",
+                "producer token is not valid for this tenant/project".to_string(),
+                context,
+            ))
+        }
+    }
+
+    pub(crate) fn ensure_owner_account(
+        &self,
+        owner_account_id: &str,
+        context: &RequestContext,
+    ) -> Result<(), ApiError> {
+        if self.token.owner_account_id == owner_account_id {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "producer_owner_denied",
+                "producer token is not valid for this owner account".to_string(),
+                context,
+            ))
+        }
+    }
+
+    pub(crate) fn ensure_provider(
+        &self,
+        provider: &str,
+        context: &RequestContext,
+    ) -> Result<(), ApiError> {
+        if self.token.provider == provider {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "producer_provider_denied",
+                "producer token is not valid for this provider".to_string(),
+                context,
+            ))
+        }
+    }
+
+    pub(crate) fn ensure_service_defaults(
+        &self,
+        service_kind: &str,
+        service_days: u32,
+        context: &RequestContext,
+    ) -> Result<(), ApiError> {
+        if self.token.service_kind == service_kind && self.token.service_days == service_days {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "producer_service_denied",
+                "producer token is not valid for this service".to_string(),
+                context,
+            ))
+        }
+    }
+
+    pub(crate) fn actor_id(&self) -> String {
+        self.token.actor_id.clone()
     }
 }
 
@@ -777,6 +898,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             "/v1/delivery-redemption-inventory",
             get(delivery_redemption_api::list_delivery_redemption_inventory),
         )
+        .route(
+            "/v1/producer-authorizations/redeem",
+            post(redeem_producer_authorization),
+        )
         .route("/v1/deliveries/{delivery_id}", get(get_delivery))
         .route("/v1/deliveries/{delivery_id}/revoke", post(revoke_delivery))
         .route(
@@ -934,6 +1059,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/internal/deliveries/redemption-units/prepare",
             post(delivery_redemption_api::prepare_delivery_redemption_units_internal),
+        )
+        .route(
+            "/internal/producer-authorizations",
+            post(issue_producer_authorization),
         )
         .route(
             "/internal/delivery-uploads",
@@ -2236,6 +2365,55 @@ async fn prepare_delivery_internal(
     )
     .await?;
     Ok(Json(response))
+}
+
+async fn issue_producer_authorization(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<IssueProducerAuthorizationRequest>,
+) -> Result<(StatusCode, Json<IssueProducerAuthorizationResponse>), ApiError> {
+    let context = next_request_context();
+    require_internal_gateway_auth(&state, &headers, &context)?;
+    let provider = validate_delivery_provider(&request.provider, &context)?;
+    let owner_account_id =
+        validate_opening_owner_account_id(&request.owner_account_id, &context)?;
+    let service_kind = delivery_service_kind(request.service_kind.as_deref(), &context)?;
+    validate_delivery_service_days(request.service_days, &context)?;
+    let project = load_project(&state, request.project_id.as_str(), &context).await?;
+    ensure_project_matches_tenant(&project, request.tenant_id.as_str(), &context)?;
+
+    let claims = DeliveryProducerTokenClaims {
+        tenant_id: request.tenant_id.as_str().to_string(),
+        project_id: request.project_id.as_str().to_string(),
+        provider,
+        owner_account_id,
+        service_kind,
+        service_days: request.service_days,
+        actor_id: INTERNAL_DELIVERY_OPERATOR_ACTOR.to_string(),
+        expires_at: expires_at(DELIVERY_PRODUCER_TOKEN_TTL_SECONDS),
+    };
+    let authorization_code = encode_delivery_producer_token("dpa", &claims, &context)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(IssueProducerAuthorizationResponse {
+            authorization_code,
+            expires_at: claims.expires_at,
+        }),
+    ))
+}
+
+async fn redeem_producer_authorization(
+    State(state): State<ControlPlaneState>,
+    Json(request): Json<RedeemProducerAuthorizationRequest>,
+) -> Result<Json<RedeemProducerAuthorizationResponse>, ApiError> {
+    let context = next_request_context();
+    let claims = decode_delivery_producer_token("dpa", &request.authorization_code, &context)?;
+    ensure_delivery_producer_claims_current(&state, &claims, &context).await?;
+    let token = encode_delivery_producer_token("dpt", &claims, &context)?;
+    Ok(Json(RedeemProducerAuthorizationResponse {
+        producer_token: token,
+        expires_at: claims.expires_at,
+    }))
 }
 
 async fn prepare_delivery_with_actor(
@@ -6172,6 +6350,124 @@ fn bearer_token_from_headers(
     } else {
         Ok(token.to_string())
     }
+}
+
+pub(crate) async fn authorize_delivery_producer_request(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<DeliveryProducerAuthorizer, ApiError> {
+    let token = bearer_token_from_headers(headers, "producer_token_missing", context)?;
+    let claims = decode_delivery_producer_token("dpt", &token, context)?;
+    ensure_delivery_producer_claims_current(state, &claims, context).await?;
+    Ok(DeliveryProducerAuthorizer::new(claims))
+}
+
+async fn ensure_delivery_producer_claims_current(
+    state: &ControlPlaneState,
+    claims: &DeliveryProducerTokenClaims,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    let expires_at = OffsetDateTime::parse(&claims.expires_at, &Rfc3339).map_err(|_| {
+        ApiError::unauthorized(
+            "producer_token_invalid",
+            "producer token expiration is invalid".to_string(),
+            context,
+        )
+    })?;
+    if expires_at <= OffsetDateTime::now_utc() {
+        return Err(ApiError::unauthorized(
+            "producer_token_expired",
+            "producer token has expired".to_string(),
+            context,
+        ));
+    }
+
+    let project = load_project(state, &claims.project_id, context).await?;
+    ensure_project_matches_tenant(&project, &claims.tenant_id, context)?;
+    validate_delivery_provider(&claims.provider, context)?;
+    validate_opening_owner_account_id(&claims.owner_account_id, context)?;
+    delivery_service_kind(Some(&claims.service_kind), context)?;
+    validate_delivery_service_days(claims.service_days, context)
+}
+
+fn encode_delivery_producer_token(
+    prefix: &str,
+    claims: &DeliveryProducerTokenClaims,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let payload = serde_json::to_vec(claims).map_err(|error| {
+        ApiError::internal(
+            "producer_token_generation_failed",
+            format!("failed to encode producer token payload: {error}"),
+            context,
+        )
+    })?;
+    let payload_segment = BASE64_URL_SAFE_NO_PAD.encode(&payload);
+    let signature_segment = sign_delivery_producer_payload(&payload_segment);
+    Ok(format!("{prefix}.{payload_segment}.{signature_segment}"))
+}
+
+fn decode_delivery_producer_token(
+    expected_prefix: &str,
+    token: &str,
+    context: &RequestContext,
+) -> Result<DeliveryProducerTokenClaims, ApiError> {
+    let mut parts = token.trim().split('.');
+    let prefix = parts.next();
+    let payload_segment = parts.next();
+    let signature_segment = parts.next();
+    if prefix != Some(expected_prefix)
+        || payload_segment.is_none()
+        || signature_segment.is_none()
+        || parts.next().is_some()
+    {
+        return Err(ApiError::unauthorized(
+            "producer_token_invalid",
+            "producer token format is invalid".to_string(),
+            context,
+        ));
+    }
+    let payload_segment = payload_segment.expect("checked above");
+    let signature_segment = signature_segment.expect("checked above");
+    let expected_signature = sign_delivery_producer_payload(payload_segment);
+    if signature_segment != expected_signature {
+        return Err(ApiError::unauthorized(
+            "producer_token_invalid",
+            "producer token signature is invalid".to_string(),
+            context,
+        ));
+    }
+    let payload = BASE64_URL_SAFE_NO_PAD
+        .decode(payload_segment)
+        .map_err(|_| {
+            ApiError::unauthorized(
+                "producer_token_invalid",
+                "producer token payload is invalid".to_string(),
+                context,
+            )
+        })?;
+    serde_json::from_slice(&payload).map_err(|_| {
+        ApiError::unauthorized(
+            "producer_token_invalid",
+            "producer token payload is invalid".to_string(),
+            context,
+        )
+    })
+}
+
+fn sign_delivery_producer_payload(payload_segment: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(payload_segment.as_bytes());
+    hasher.update(b".");
+    hasher.update(delivery_producer_token_secret().as_bytes());
+    BASE64_URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+fn delivery_producer_token_secret() -> String {
+    std::env::var("CONTROL_PLANE_PRODUCER_TOKEN_SECRET")
+        .or_else(|_| std::env::var("CONTROL_PLANE_INTERNAL_TOKEN"))
+        .unwrap_or_else(|_| "huge-router-local-producer-token-secret".to_string())
 }
 
 fn generate_delivery_download_token(context: &RequestContext) -> Result<String, ApiError> {
