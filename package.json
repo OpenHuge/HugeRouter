@@ -29,7 +29,8 @@
     "rust:lint": "node ./scripts/run-cargo.mjs clippy --workspace --all-targets --locked -- -D warnings",
     "rust:fmt:check": "node ./scripts/run-cargo.mjs fmt --all -- --check",
     "release:notes": "node ./scripts/generate-changelog.mjs",
-    "fmt": "prettier --write . && node ./scripts/run-cargo.mjs fmt --all"
+    "fmt": "prettier --write . && node ./scripts/run-cargo.mjs fmt --all",
+    "seed:hugecode-shop": "node ./scripts/seed-hugecode-shop.mjs"
   },
   "devDependencies": {
     "oxlint": "1.61.0",

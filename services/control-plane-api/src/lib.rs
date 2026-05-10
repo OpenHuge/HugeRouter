@@ -7560,6 +7560,7 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     mod delivery_redemption_tests;
+    mod merchant_checkout_tests;
 
     use super::{
         ControlPlaneState, OAuthProviderConfig, RequestContext, app_with_state,
@@ -7624,6 +7625,24 @@ mod tests {
             )
             .await
             .expect("platform admin session should issue");
+        format!("huge_router_session={session_id}")
+    }
+
+    async fn platform_wechat_cookie(state: &ControlPlaneState) -> String {
+        let session_id = "sess_platform_wechat_test";
+        let (authenticated_at, expires_at) = fresh_session_window();
+        state
+            .store
+            .issue_session(
+                session_id,
+                AuthProvider::Wechat,
+                &IdentityLookup::ProviderSubject(AuthProvider::Wechat, "wechat_ops".to_string()),
+                "platform-admin",
+                &authenticated_at,
+                &expires_at,
+            )
+            .await
+            .expect("platform WeChat session should issue");
         format!("huge_router_session={session_id}")
     }
 

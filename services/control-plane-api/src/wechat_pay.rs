@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const WECHAT_PAY_API_BASE_URL: &str = "https://api.mch.weixin.qq.com";
-const DEFAULT_PAYMENT_DESCRIPTION: &str = "HugeRouter balance recharge";
+const DEFAULT_PAYMENT_DESCRIPTION: &str = "HugeRouter order payment";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -627,7 +627,7 @@ mod tests {
             project_id: None,
             amount_total: 0,
             currency: "CNY".to_string(),
-            description: "Recharge".to_string(),
+            description: "Order payment".to_string(),
             channel: WechatPayChannel::Native,
             payer_openid: None,
             attach: None,
@@ -643,13 +643,25 @@ mod tests {
             project_id: None,
             amount_total: 1,
             currency: "CNY".to_string(),
-            description: "Recharge".to_string(),
+            description: "Order payment".to_string(),
             channel: WechatPayChannel::Jsapi,
             payer_openid: None,
             attach: None,
         };
 
         assert!(validate_prepay_request(&request).is_err());
+    }
+
+    #[test]
+    fn prepay_deserializes_neutral_default_description() {
+        let request: WechatPayPrepayRequest = serde_json::from_value(serde_json::json!({
+            "tenant_id": "tenant_acme",
+            "amount_total": 1,
+            "channel": "native"
+        }))
+        .unwrap();
+
+        assert_eq!(request.description, "HugeRouter order payment");
     }
 
     #[test]

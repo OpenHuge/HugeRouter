@@ -209,7 +209,7 @@ function BillingPage() {
     const amountTotal = Math.round(Number(paymentAmountYuan) * 100);
 
     if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
-      setStatusError("Enter a valid recharge amount.");
+      setStatusError("Enter a valid payment amount.");
       setStatusSuccess(null);
       return;
     }
@@ -222,7 +222,7 @@ function BillingPage() {
       const payment = await getConsoleDataService().createWechatPayPrepay({
         amountTotal,
         channel: paymentChannel,
-        description: "HugeRouter balance recharge",
+        description: "HugeRouter order payment",
         payerOpenid:
           paymentChannel === "jsapi" && payerOpenid.trim().length > 0
             ? payerOpenid.trim()
@@ -399,7 +399,7 @@ function BillingPage() {
       </UiSurface>
       <UiSurface padding="lg" radius="md" shadow="sm">
         <UiInline justify="space-between" mb="md">
-          <UiText fw={700}>WeChat Pay recharge</UiText>
+          <UiText fw={700}>WeChat Pay order payment</UiText>
           <UiChip color="yellow" variant="light">
             sandbox/manual gate
           </UiChip>

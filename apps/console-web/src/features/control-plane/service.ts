@@ -1139,7 +1139,7 @@ export function getControlPlaneActionErrorMessage(
   }
 
   if (code === "wechat_pay_not_configured") {
-    return "WeChat Pay is not configured; keep recharge and renewal in manual-only mode until sandbox credentials are available.";
+    return "WeChat Pay is not configured; keep payments and renewals in manual-only mode until sandbox credentials are available.";
   }
 
   if (kind === "wechat-pay-prepay") {
