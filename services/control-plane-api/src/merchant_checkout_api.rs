@@ -4,9 +4,14 @@ use axum::{
     http::HeaderMap,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL_SAFE_NO_PAD};
+use core_domain::UserId;
 use ring::rand;
 use serde::Deserialize;
 
+use crate::alipay::{
+    AlipayClient, AlipayPrecreateRequest, AlipayPrecreateResponse,
+    new_out_trade_no as new_alipay_out_trade_no,
+};
 use crate::store::{
     self, MerchantProductFulfillmentDraft, MerchantProductFulfillmentResult,
     MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductPrepayDraft,
@@ -18,7 +23,7 @@ use crate::wechat_pay::{
 use crate::wechat_pay_api::wechat_pay_channel_slug;
 use crate::{
     ApiError, AuthProvider, ControlPlaneAuthorizer, ControlPlaneState, RequestContext,
-    authorize_v1_request, download_grant_issue_result_to_response,
+    authorize_optional_v1_request, authorize_v1_request, download_grant_issue_result_to_response,
     generate_delivery_download_token, generate_stable_id, next_request_context,
     redeem_result_to_response, sha256_hex,
 };
@@ -65,8 +70,7 @@ pub async fn create_merchant_product_order(
     Json(request): Json<CreateMerchantProductOrderRequest>,
 ) -> Result<Json<store::MerchantProductOrderResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    ensure_wechat_buyer(&authz, &context)?;
+    let buyer_user_id = resolve_checkout_buyer_user_id(&state, &headers, &context).await?;
     let card_product_id = request.card_product_id.trim();
     if card_product_id.is_empty() {
         return Err(ApiError::bad_request(
@@ -80,7 +84,7 @@ pub async fn create_merchant_product_order(
         .create_merchant_product_order(MerchantProductOrderDraft {
             order_id: generate_stable_id("morder", &context)?,
             card_product_id: card_product_id.to_string(),
-            buyer_user_id: authz.user_id().clone(),
+            buyer_user_id,
         })
         .await
         .map_err(|error| {
@@ -111,12 +115,11 @@ pub async fn create_merchant_product_order(
 
 pub async fn get_merchant_product_order(
     State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
+    _headers: HeaderMap,
     Path(order_id): Path<String>,
 ) -> Result<Json<store::MerchantProductOrderResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    let response = load_merchant_order_for_buyer(&state, &authz, &order_id, &context).await?;
+    let response = load_merchant_order(&state, &order_id, &context).await?;
     Ok(Json(response))
 }
 
@@ -127,9 +130,7 @@ pub async fn create_merchant_product_order_wechat_prepay(
     Json(request): Json<MerchantProductPrepayRequest>,
 ) -> Result<Json<WechatPayPrepayResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
-    ensure_wechat_buyer(&authz, &context)?;
-    let order = load_merchant_order_for_buyer(&state, &authz, &order_id, &context).await?;
+    let order = load_merchant_order(&state, &order_id, &context).await?;
     if order.data.status == store::MERCHANT_ORDER_STATUS_FULFILLED {
         return Err(ApiError::conflict(
             "merchant_order_already_fulfilled",
@@ -138,6 +139,8 @@ pub async fn create_merchant_product_order_wechat_prepay(
         ));
     }
     let payer_openid = if matches!(request.channel, crate::wechat_pay::WechatPayChannel::Jsapi) {
+        let authz = authorize_v1_request(&state, &headers, &context).await?;
+        ensure_wechat_buyer(&authz, &context)?;
         Some(
             state
                 .store
@@ -263,6 +266,107 @@ pub async fn create_merchant_product_order_wechat_prepay(
     Ok(Json(response))
 }
 
+pub async fn create_merchant_product_order_alipay_prepay(
+    State(state): State<ControlPlaneState>,
+    _headers: HeaderMap,
+    Path(order_id): Path<String>,
+) -> Result<Json<AlipayPrecreateResponse>, ApiError> {
+    let context = next_request_context();
+    let order = load_merchant_order(&state, &order_id, &context).await?;
+    if order.data.status == store::MERCHANT_ORDER_STATUS_FULFILLED {
+        return Err(ApiError::conflict(
+            "merchant_order_already_fulfilled",
+            "merchant product order has already been fulfilled".to_string(),
+            &context,
+        ));
+    }
+    let client = AlipayClient::from_env().map_err(|error| {
+        ApiError::internal(
+            "alipay_not_configured",
+            format!("Alipay is not configured: {error}"),
+            &context,
+        )
+    })?;
+    let out_trade_no = new_alipay_out_trade_no(
+        order.data.tenant_id.as_str(),
+        Some(order.data.project_id.as_str()),
+    );
+    let request = AlipayPrecreateRequest {
+        tenant_id: order.data.tenant_id.as_str().to_string(),
+        project_id: Some(order.data.project_id.as_str().to_string()),
+        amount_total: order.data.amount_total,
+        currency: "CNY".to_string(),
+        description: format!("Card product {}", order.data.card_product_id.as_str()),
+        attach: Some(order.data.order_id.clone()),
+    };
+    crate::alipay_api::validate_alipay_payment_request(&request, &context)?;
+    let mut payment_order = crate::alipay_api::new_alipay_order(
+        &out_trade_no,
+        order.data.tenant_id.as_str(),
+        Some(order.data.project_id.as_str().to_string()),
+        order.data.amount_total,
+        serde_json::json!({
+            "merchant_product_order_id": order.data.order_id,
+            "card_product_id": order.data.card_product_id,
+            "description": "Card product checkout",
+        }),
+    );
+    state
+        .store
+        .create_alipay_payment_order(payment_order.clone())
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "alipay_order_persist_failed",
+                format!("failed to persist Alipay order: {error}"),
+                &context,
+            )
+        })?;
+    let response = match client.precreate(request, &out_trade_no).await {
+        Ok(response) => response,
+        Err(error) => {
+            payment_order.status = "failed".to_string();
+            payment_order.updated_at = now_rfc3339();
+            let _ = state.store.update_alipay_payment_order(payment_order).await;
+            return Err(ApiError::bad_request(
+                "alipay_precreate_failed",
+                format!("Alipay precreate request failed: {error}"),
+                &context,
+            ));
+        }
+    };
+    payment_order.status = "pending".to_string();
+    payment_order.code_url = Some(response.qr_code.clone());
+    payment_order.updated_at = now_rfc3339();
+    state
+        .store
+        .update_alipay_payment_order(payment_order)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "alipay_order_persist_failed",
+                format!("failed to update Alipay order: {error}"),
+                &context,
+            )
+        })?;
+    state
+        .store
+        .attach_merchant_order_prepay(MerchantProductPrepayDraft {
+            order_id: order.data.order_id,
+            out_trade_no,
+            channel: "alipay_qr".to_string(),
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "merchant_order_prepay_attach_failed",
+                format!("failed to attach Alipay prepay to merchant order: {error}"),
+                &context,
+            )
+        })?;
+    Ok(Json(response))
+}
+
 pub async fn get_merchant_pickup(
     State(state): State<ControlPlaneState>,
     Path(pickup_token): Path<String>,
@@ -324,7 +428,7 @@ pub async fn settle_merchant_product_order_for_payment(
             download_grant_id: generate_stable_id("dlgrant", context)?,
             download_token: generate_delivery_download_token(context)?,
             pickup_token: generate_pickup_token(context)?,
-            fulfilled_by: "merchant_product_wechat_pay".to_string(),
+            fulfilled_by: "merchant_product_payment".to_string(),
         })
         .await
         .map_err(|error| {
@@ -361,6 +465,23 @@ pub async fn settle_merchant_product_order_for_payment(
     }
 }
 
+async fn resolve_checkout_buyer_user_id(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<UserId, ApiError> {
+    if let Some(authz) = authorize_optional_v1_request(state, headers, context).await? {
+        return Ok(authz.user_id().clone());
+    }
+    UserId::parse(generate_stable_id("user", context)?).map_err(|error| {
+        ApiError::internal(
+            "checkout_buyer_id_generation_failed",
+            format!("failed to create public checkout buyer id: {error}"),
+            context,
+        )
+    })
+}
+
 fn ensure_wechat_buyer(
     authz: &ControlPlaneAuthorizer,
     context: &RequestContext,
@@ -376,9 +497,8 @@ fn ensure_wechat_buyer(
     }
 }
 
-async fn load_merchant_order_for_buyer(
+async fn load_merchant_order(
     state: &ControlPlaneState,
-    authz: &ControlPlaneAuthorizer,
     order_id: &str,
     context: &RequestContext,
 ) -> Result<store::MerchantProductOrderResponse, ApiError> {
@@ -400,13 +520,6 @@ async fn load_merchant_order_for_buyer(
                 context,
             )
         })?;
-    if response.data.buyer_user_id != *authz.user_id() {
-        return Err(ApiError::forbidden(
-            "merchant_order_forbidden",
-            "merchant product order belongs to another buyer".to_string(),
-            context,
-        ));
-    }
     Ok(response)
 }
 

@@ -37,6 +37,7 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "route_receipt_diagnostics",
     "billing_export_jobs",
     "wechat_payment_orders",
+    "alipay_payment_orders",
     "billing_renewal_intents",
     "pricing_catalog_entries",
     "codex_auth_accounts",
@@ -464,6 +465,25 @@ pub const MIGRATIONS: &[&str] = &[
         content_type TEXT NULL
     )",
     r"CREATE TABLE IF NOT EXISTS wechat_payment_orders (
+        out_trade_no TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        project_id TEXT NULL,
+        amount_total BIGINT NOT NULL,
+        currency TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        status TEXT NOT NULL,
+        trade_state TEXT NULL,
+        code_url TEXT NULL,
+        prepay_id TEXT NULL,
+        transaction_id TEXT NULL,
+        notification_id TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        paid_at TEXT NULL,
+        payload JSONB NOT NULL
+    )",
+    r"CREATE TABLE IF NOT EXISTS alipay_payment_orders (
         out_trade_no TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         project_id TEXT NULL,

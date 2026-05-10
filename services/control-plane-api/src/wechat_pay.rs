@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const WECHAT_PAY_API_BASE_URL: &str = "https://api.mch.weixin.qq.com";
+const WECHAT_PAY_USER_AGENT: &str = "HugeRouter-WechatPay/1.0";
 const DEFAULT_PAYMENT_DESCRIPTION: &str = "HugeRouter order payment";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +123,7 @@ struct WechatPayConfig {
     private_key: RsaPrivateKey,
     api_v3_key: String,
     platform_public_key: RsaPublicKey,
+    platform_public_key_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +167,7 @@ impl WechatPayClient {
                 private_key: parse_private_key(&private_key_pem)?,
                 api_v3_key: required_env("WECHAT_PAY_API_V3_KEY")?,
                 platform_public_key,
+                platform_public_key_id: optional_env("WECHAT_PAY_PLATFORM_PUBLIC_KEY_ID"),
             },
             http_client: HttpClient::new(),
         })
@@ -189,10 +192,7 @@ impl WechatPayClient {
         let body = build_prepay_body(&self.config, &request, out_trade_no);
         let body_text = serde_json::to_string(&body)?;
         let authorization = self.authorization_header(Method::POST.as_str(), path, &body_text);
-        let response = self
-            .http_client
-            .post(url)
-            .header("Accept", "application/json")
+        let response = wechat_pay_api_request(self.http_client.post(url))
             .header("Content-Type", "application/json")
             .header("Authorization", authorization)
             .body(body_text)
@@ -259,10 +259,7 @@ impl WechatPayClient {
         );
         let url = format!("{WECHAT_PAY_API_BASE_URL}{path}");
         let authorization = self.authorization_header(Method::GET.as_str(), &path, "");
-        let response = self
-            .http_client
-            .get(url)
-            .header("Accept", "application/json")
+        let response = wechat_pay_api_request(self.http_client.get(url))
             .header("Authorization", authorization)
             .send()
             .await
@@ -351,8 +348,10 @@ impl WechatPayClient {
         let timestamp = header_value(headers, "Wechatpay-Timestamp")?;
         let nonce = header_value(headers, "Wechatpay-Nonce")?;
         let signature = header_value(headers, "Wechatpay-Signature")?;
-        let _serial = header_value(headers, "Wechatpay-Serial")?;
-        let message = signature_message(method, path, timestamp, nonce, body);
+        let serial = header_value(headers, "Wechatpay-Serial")?;
+        self.ensure_wechat_pay_serial(serial)?;
+        let _ = (method, path);
+        let message = wechat_pay_response_signature_message(timestamp, nonce, body);
 
         verify_message(&self.config.platform_public_key, &message, signature)
             .context("invalid WeChat Pay response signature")
@@ -361,6 +360,7 @@ impl WechatPayClient {
     fn verify_notification(&self, headers: &WechatPayHeaders, body: &[u8]) -> Result<()> {
         let body_text =
             std::str::from_utf8(body).context("WeChat Pay notification body is not UTF-8")?;
+        self.ensure_wechat_pay_serial(&headers.serial)?;
         let message = format!("{}\n{}\n{}\n", headers.timestamp, headers.nonce, body_text);
         verify_message(
             &self.config.platform_public_key,
@@ -373,6 +373,17 @@ impl WechatPayClient {
                 headers.serial
             )
         })
+    }
+
+    fn ensure_wechat_pay_serial(&self, serial: &str) -> Result<()> {
+        if let Some(expected_serial) = self.config.platform_public_key_id.as_deref() {
+            if serial != expected_serial {
+                bail!(
+                    "WeChat Pay serial mismatch: expected {expected_serial}, got {serial}"
+                );
+            }
+        }
+        Ok(())
     }
 
     fn decrypt_resource(&self, resource: &WechatPayEncryptedResource) -> Result<Value> {
@@ -532,6 +543,10 @@ fn signature_message(method: &str, path: &str, timestamp: &str, nonce: &str, bod
     format!("{method}\n{path}\n{timestamp}\n{nonce}\n{body}\n")
 }
 
+fn wechat_pay_response_signature_message(timestamp: &str, nonce: &str, body: &str) -> String {
+    format!("{timestamp}\n{nonce}\n{body}\n")
+}
+
 fn sign_message(private_key: &RsaPrivateKey, message: &str) -> String {
     let signing_key = SigningKey::<Sha256>::new(private_key.clone());
     let signature = signing_key.sign(message.as_bytes());
@@ -573,11 +588,14 @@ fn parse_public_key(pem: &str) -> Result<RsaPublicKey> {
 }
 
 fn required_env(name: &str) -> Result<String> {
+    optional_env(name).ok_or_else(|| anyhow!("{name} is required"))
+}
+
+fn optional_env(name: &str) -> Option<String> {
     std::env::var(name)
         .map(|value| value.trim().to_string())
         .ok()
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("{name} is required"))
 }
 
 fn env_secret_or_file(value_name: &str, path_name: &str) -> Result<String> {
@@ -613,12 +631,39 @@ fn header_value<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Resu
         .with_context(|| format!("invalid WeChat Pay response header {name}"))
 }
 
+fn wechat_pay_api_request(builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    builder
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::USER_AGENT, WECHAT_PAY_USER_AGENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        WechatPayChannel, WechatPayPrepayRequest, build_out_trade_no, validate_out_trade_no,
-        validate_prepay_request,
+        WECHAT_PAY_USER_AGENT, WechatPayChannel, WechatPayPrepayRequest, build_out_trade_no,
+        WechatPayClient, WechatPayConfig, validate_out_trade_no, validate_prepay_request,
+        wechat_pay_api_request,
     };
+    use rsa::{RsaPrivateKey, RsaPublicKey};
+    use rsa::rand_core::OsRng;
+
+    #[test]
+    fn wechat_pay_api_requests_include_required_identity_headers() {
+        let request = wechat_pay_api_request(
+            reqwest::Client::new().get("https://api.mch.weixin.qq.com/v3/pay/transactions/native"),
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request.headers().get(reqwest::header::ACCEPT).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            request.headers().get(reqwest::header::USER_AGENT).unwrap(),
+            WECHAT_PAY_USER_AGENT
+        );
+    }
 
     #[test]
     fn prepay_validation_requires_positive_amount() {
@@ -672,4 +717,64 @@ mod tests {
         assert!(out_trade_no.len() <= 32);
         assert!(validate_out_trade_no(&out_trade_no).is_ok());
     }
+
+    #[test]
+    fn configured_wechat_pay_public_key_id_must_match_response_serial() {
+        let private_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let public_key = RsaPublicKey::from(&private_key);
+        let client = WechatPayClient {
+            config: WechatPayConfig {
+                app_id: "wx_test".to_string(),
+                mchid: "mch_test".to_string(),
+                merchant_serial_no: "merchant_serial".to_string(),
+                notify_url: "https://example.test/notify".to_string(),
+                private_key,
+                api_v3_key: "12345678901234567890123456789012".to_string(),
+                platform_public_key: public_key,
+                platform_public_key_id: Some("PUB_KEY_ID_test".to_string()),
+            },
+            http_client: reqwest::Client::new(),
+        };
+
+        assert!(client.ensure_wechat_pay_serial("PUB_KEY_ID_test").is_ok());
+        assert!(client.ensure_wechat_pay_serial("other_serial").is_err());
+    }
+
+    #[test]
+    fn response_verification_uses_wechat_pay_response_signature_message() {
+        let private_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let public_key = RsaPublicKey::from(&private_key);
+        let client = WechatPayClient {
+            config: WechatPayConfig {
+                app_id: "wx_test".to_string(),
+                mchid: "mch_test".to_string(),
+                merchant_serial_no: "merchant_serial".to_string(),
+                notify_url: "https://example.test/notify".to_string(),
+                private_key: private_key.clone(),
+                api_v3_key: "12345678901234567890123456789012".to_string(),
+                platform_public_key: public_key,
+                platform_public_key_id: Some("PUB_KEY_ID_test".to_string()),
+            },
+            http_client: reqwest::Client::new(),
+        };
+        let timestamp = "1777777777";
+        let nonce = "nonce";
+        let body = r#"{"code_url":"weixin://wxpay/bizpayurl?pr=test"}"#;
+        let signature = sign_message(
+            &private_key,
+            &wechat_pay_response_signature_message(timestamp, nonce, body),
+        );
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("Wechatpay-Timestamp", timestamp.parse().unwrap());
+        headers.insert("Wechatpay-Nonce", nonce.parse().unwrap());
+        headers.insert("Wechatpay-Serial", "PUB_KEY_ID_test".parse().unwrap());
+        headers.insert("Wechatpay-Signature", signature.parse().unwrap());
+
+        assert!(
+            client
+                .verify_response("POST", "/v3/pay/transactions/native", &headers, body)
+                .is_ok()
+        );
+    }
+
 }

@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_lines, clippy::uninlined_format_args)]
 
+mod alipay;
+mod alipay_api;
 mod delivery_redemption_api;
 mod delivery_redemption_policy;
 mod merchant_api;
@@ -822,6 +824,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             post(merchant_checkout_api::create_merchant_product_order_wechat_prepay),
         )
         .route(
+            "/v1/merchant-product-orders/{order_id}/alipay/prepay",
+            post(merchant_checkout_api::create_merchant_product_order_alipay_prepay),
+        )
+        .route(
             "/v1/pickups/{pickup_token}",
             get(merchant_checkout_api::get_merchant_pickup),
         )
@@ -1104,6 +1110,18 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         .route(
             "/v1/billing/wechat-pay/orders/{out_trade_no}",
             get(wechat_pay_api::get_wechat_payment_order),
+        )
+        .route(
+            "/v1/billing/alipay/prepay",
+            post(alipay_api::create_alipay_prepay),
+        )
+        .route(
+            "/v1/billing/alipay/notify",
+            post(alipay_api::accept_alipay_notification),
+        )
+        .route(
+            "/v1/billing/alipay/orders/{out_trade_no}",
+            get(alipay_api::get_alipay_payment_order),
         )
         .route("/v1/route-simulations", post(create_route_simulation))
         .route("/v1/route-receipts", get(route_receipts::list))
@@ -5092,6 +5110,21 @@ pub(crate) async fn authorize_v1_request(
     require_session(state, headers, context)
         .await
         .map(ControlPlaneAuthorizer::new)
+}
+
+pub(crate) async fn authorize_optional_v1_request(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<Option<ControlPlaneAuthorizer>, ApiError> {
+    if extract_session_cookie(headers).is_none() {
+        return Ok(None);
+    }
+    match require_session(state, headers, context).await {
+        Ok(session) => Ok(Some(ControlPlaneAuthorizer::new(session))),
+        Err(error) if error.code == "auth_invalid" => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 async fn require_session(

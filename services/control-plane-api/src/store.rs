@@ -235,6 +235,7 @@ pub struct MemoryStore {
     route_receipts: HashMap<String, RouteReceipt>,
     billing_export_jobs: Vec<BillingExportJobRecord>,
     wechat_payment_orders: HashMap<String, WechatPaymentOrderRecord>,
+    alipay_payment_orders: HashMap<String, AlipayPaymentOrderRecord>,
     renewal_intents: Vec<RenewalIntent>,
     route_policy_disabled_ids: HashSet<String>,
     api_keys: Vec<ApiKeyRecord>,
@@ -731,6 +732,40 @@ pub struct WechatPaymentOrderRecord {
 #[derive(Debug, Clone, Serialize)]
 pub struct WechatPaymentOrderResponse {
     pub data: WechatPaymentOrderRecord,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlipayPaymentOrderRecord {
+    pub out_trade_no: String,
+    pub tenant_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub amount_total: u32,
+    pub currency: String,
+    pub channel: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trade_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prepay_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub expires_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paid_at: Option<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AlipayPaymentOrderResponse {
+    pub data: AlipayPaymentOrderRecord,
 }
 
 #[derive(Debug, Clone)]
@@ -2260,6 +2295,7 @@ impl MemoryStore {
                 .collect(),
             billing_export_jobs: Vec::new(),
             wechat_payment_orders: HashMap::new(),
+            alipay_payment_orders: HashMap::new(),
             renewal_intents: Vec::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
@@ -4765,6 +4801,54 @@ impl StoreMode {
                 Ok(WechatPaymentOrderResponse { data: record })
             }
             Self::Postgres(store) => store.update_wechat_payment_order(record).await,
+        }
+    }
+
+    pub async fn create_alipay_payment_order(
+        &self,
+        record: AlipayPaymentOrderRecord,
+    ) -> Result<AlipayPaymentOrderResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                store
+                    .alipay_payment_orders
+                    .insert(record.out_trade_no.clone(), record.clone());
+                Ok(AlipayPaymentOrderResponse { data: record })
+            }
+            Self::Postgres(store) => store.create_alipay_payment_order(record).await,
+        }
+    }
+
+    pub async fn get_alipay_payment_order(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<AlipayPaymentOrderResponse>> {
+        match self {
+            Self::Memory(store) => Ok(store
+                .read()
+                .expect("memory store read lock")
+                .alipay_payment_orders
+                .get(out_trade_no)
+                .cloned()
+                .map(|data| AlipayPaymentOrderResponse { data })),
+            Self::Postgres(store) => store.get_alipay_payment_order(out_trade_no).await,
+        }
+    }
+
+    pub async fn update_alipay_payment_order(
+        &self,
+        record: AlipayPaymentOrderRecord,
+    ) -> Result<AlipayPaymentOrderResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                store
+                    .alipay_payment_orders
+                    .insert(record.out_trade_no.clone(), record.clone());
+                Ok(AlipayPaymentOrderResponse { data: record })
+            }
+            Self::Postgres(store) => store.update_alipay_payment_order(record).await,
         }
     }
 
@@ -9007,6 +9091,94 @@ impl PostgresStore {
         .await?;
 
         Ok(WechatPaymentOrderResponse { data: record })
+    }
+
+    async fn create_alipay_payment_order(
+        &self,
+        record: AlipayPaymentOrderRecord,
+    ) -> Result<AlipayPaymentOrderResponse> {
+        sqlx::query(
+            r#"
+            INSERT INTO alipay_payment_orders (
+                out_trade_no, tenant_id, project_id, amount_total, currency, channel,
+                status, trade_state, code_url, prepay_id, transaction_id, notification_id,
+                created_at, updated_at, expires_at, paid_at, payload
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17
+            )
+            "#,
+        )
+        .bind(&record.out_trade_no)
+        .bind(&record.tenant_id)
+        .bind(record.project_id.as_deref())
+        .bind(i64::from(record.amount_total))
+        .bind(&record.currency)
+        .bind(&record.channel)
+        .bind(&record.status)
+        .bind(record.trade_state.as_deref())
+        .bind(record.code_url.as_deref())
+        .bind(record.prepay_id.as_deref())
+        .bind(record.transaction_id.as_deref())
+        .bind(record.notification_id.as_deref())
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .bind(&record.expires_at)
+        .bind(record.paid_at.as_deref())
+        .bind(Json(&record))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(AlipayPaymentOrderResponse { data: record })
+    }
+
+    async fn get_alipay_payment_order(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<AlipayPaymentOrderResponse>> {
+        let row = sqlx::query("SELECT payload FROM alipay_payment_orders WHERE out_trade_no = $1")
+            .bind(out_trade_no)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.map(|row| AlipayPaymentOrderResponse {
+            data: row.get::<Json<AlipayPaymentOrderRecord>, _>("payload").0,
+        }))
+    }
+
+    async fn update_alipay_payment_order(
+        &self,
+        record: AlipayPaymentOrderRecord,
+    ) -> Result<AlipayPaymentOrderResponse> {
+        sqlx::query(
+            r#"
+            UPDATE alipay_payment_orders
+               SET status = $2,
+                   trade_state = $3,
+                   code_url = $4,
+                   prepay_id = $5,
+                   transaction_id = $6,
+                   notification_id = $7,
+                   updated_at = $8,
+                   paid_at = $9,
+                   payload = $10
+             WHERE out_trade_no = $1
+            "#,
+        )
+        .bind(&record.out_trade_no)
+        .bind(&record.status)
+        .bind(record.trade_state.as_deref())
+        .bind(record.code_url.as_deref())
+        .bind(record.prepay_id.as_deref())
+        .bind(record.transaction_id.as_deref())
+        .bind(record.notification_id.as_deref())
+        .bind(&record.updated_at)
+        .bind(record.paid_at.as_deref())
+        .bind(Json(&record))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(AlipayPaymentOrderResponse { data: record })
     }
 
     async fn create_renewal_intent(

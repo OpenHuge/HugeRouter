@@ -2,6 +2,92 @@ use super::*;
 use crate::store::{MerchantProductFulfillmentDraft, MerchantProductFulfillmentResult};
 
 #[tokio::test]
+async fn public_checkout_order_without_session_reserves_inventory() {
+    let (_state, admin_cookie, app) = platform_admin_app().await;
+
+    let shop = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/shops",
+            Some(&admin_cookie),
+            Some(json!({
+                "merchant_shop_id": "mshop_public_checkout_test",
+                "slug": "public-checkout-test",
+                "display_name": "Public Checkout Test",
+                "announcement": "Public checkout test shop"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(shop.status(), StatusCode::OK);
+
+    let delivery_body = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+    let delivery_id = delivery_body["data"]["delivery"]["delivery_id"]
+        .as_str()
+        .unwrap();
+
+    let product = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cardprod_public_checkout_test",
+                "merchant_shop_id": "mshop_public_checkout_test",
+                "project_id": "proj_core",
+                "title": "HugeCode Public Checkout",
+                "description": "Public checkout product",
+                "inventory_count": 1,
+                "face_value_usd": "0",
+                "retail_price_usd": "0",
+                "retail_price_cny_total": 1,
+                "supports_trial": false,
+                "sale_enabled": true,
+                "delivery_ids": [delivery_id]
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(product.status(), StatusCode::OK);
+
+    let order = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders",
+            None,
+            Some(json!({
+                "card_product_id": "cardprod_public_checkout_test"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(order.status(), StatusCode::OK);
+    let order_body = response_json(order).await;
+    assert_eq!(order_body["data"]["status"], "created");
+    assert!(
+        order_body["data"]["buyer_user_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("user_")
+    );
+
+    let order_id = order_body["data"]["order_id"].as_str().unwrap();
+    let read_order = app
+        .oneshot(request(
+            "GET",
+            &format!("/v1/merchant-product-orders/{order_id}"),
+            None,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(read_order.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn merchant_pickup_requires_fulfilled_payment_order() {
     let (state, admin_cookie, app) = platform_admin_app().await;
     let wechat_cookie = platform_wechat_cookie(&state).await;
