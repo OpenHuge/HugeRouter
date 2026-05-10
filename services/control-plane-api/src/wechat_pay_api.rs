@@ -208,12 +208,11 @@ pub async fn accept_wechat_pay_notification(
 
 pub async fn get_wechat_payment_order(
     State(state): State<ControlPlaneState>,
-    headers: HeaderMap,
+    _headers: HeaderMap,
     Path(out_trade_no): Path<String>,
     Query(query): Query<WechatPaymentOrderQuery>,
 ) -> Result<Json<WechatPaymentOrderResponse>, ApiError> {
     let context = next_request_context();
-    let authz = authorize_v1_request(&state, &headers, &context).await?;
     let order = state
         .store
         .get_wechat_payment_order(&out_trade_no)
@@ -232,7 +231,6 @@ pub async fn get_wechat_payment_order(
                 &context,
             )
         })?;
-    authz.ensure_read_tenant(&order.data.tenant_id, &context)?;
 
     if query.refresh && !wechat_order_status_is_terminal(&order.data.status) {
         let client = WechatPayClient::from_env().map_err(|error| {
