@@ -62,8 +62,18 @@ pub struct MerchantProductOrderRecord {
     pub download_grant_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub download_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buyer_contact: Option<MerchantProductOrderBuyerContactRecord>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MerchantProductOrderBuyerContactRecord {
+    pub phone_masked: String,
+    pub phone_hash: String,
+    pub lookup_passphrase_hash: String,
+    pub lookup_passphrase_hint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,8 +103,28 @@ pub struct MerchantProductOrderPublicView {
     pub activation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub download_grant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buyer_contact: Option<MerchantProductOrderBuyerContactPublicView>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantProductOrderBuyerContactPublicView {
+    pub phone_masked: String,
+    pub lookup_passphrase_hint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookup_passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantProductOrderHistoryResponse {
+    pub data: MerchantProductOrderHistoryPayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantProductOrderHistoryPayload {
+    pub orders: Vec<MerchantProductOrderPublicView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -131,6 +161,7 @@ pub struct MerchantProductOrderDraft {
     pub order_id: String,
     pub card_product_id: String,
     pub buyer_user_id: UserId,
+    pub buyer_contact: Option<MerchantProductOrderBuyerContactRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +282,41 @@ impl StoreMode {
         }
     }
 
+    pub async fn list_merchant_product_orders_by_guest_lookup(
+        &self,
+        phone_hash: &str,
+        lookup_passphrase_hash: &str,
+    ) -> Result<MerchantProductOrderHistoryResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let mut orders = store
+                    .merchant_product_orders
+                    .iter()
+                    .filter(|order| {
+                        order.buyer_contact.as_ref().is_some_and(|contact| {
+                            contact.phone_hash == phone_hash
+                                && contact.lookup_passphrase_hash == lookup_passphrase_hash
+                        })
+                    })
+                    .map(|order| merchant_product_order_response(order).data)
+                    .collect::<Vec<_>>();
+                orders.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+                Ok(MerchantProductOrderHistoryResponse {
+                    data: MerchantProductOrderHistoryPayload { orders },
+                })
+            }
+            Self::Postgres(store) => {
+                store
+                    .list_merchant_product_orders_by_guest_lookup(
+                        phone_hash,
+                        lookup_passphrase_hash,
+                    )
+                    .await
+            }
+        }
+    }
+
     pub async fn attach_merchant_order_prepay(
         &self,
         draft: MerchantProductPrepayDraft,
@@ -350,6 +416,13 @@ pub(super) fn merchant_product_order_response(
             pickup_token: order.pickup_token.clone(),
             activation_id: order.activation_id.clone(),
             download_grant_id: order.download_grant_id.clone(),
+            buyer_contact: order.buyer_contact.as_ref().map(|contact| {
+                MerchantProductOrderBuyerContactPublicView {
+                    phone_masked: contact.phone_masked.clone(),
+                    lookup_passphrase_hint: contact.lookup_passphrase_hint.clone(),
+                    lookup_passphrase: None,
+                }
+            }),
             created_at: order.created_at.clone(),
             updated_at: order.updated_at.clone(),
         },
@@ -523,6 +596,7 @@ fn create_memory_merchant_product_order(
         activation_id: None,
         download_grant_id: None,
         download_token: None,
+        buyer_contact: draft.buyer_contact,
         created_at: now.clone(),
         updated_at: now.clone(),
     };

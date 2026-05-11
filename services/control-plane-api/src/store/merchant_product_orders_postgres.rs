@@ -4,9 +4,9 @@ use super::merchant_product_orders::{
     MERCHANT_ORDER_STATUS_PAYMENT_PENDING, MerchantPickupResponse, MerchantProductFulfillmentDraft,
     MerchantProductFulfillmentResult, MerchantProductInventoryRecord,
     MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductOrderRecord,
-    MerchantProductOrderResponse, MerchantProductPrepayDraft, MerchantPublicProduct,
-    MerchantPublicShop, MerchantPublicShopResponse, merchant_pickup_response,
-    merchant_product_order_response,
+    MerchantProductOrderHistoryResponse, MerchantProductOrderResponse,
+    MerchantProductPrepayDraft, MerchantPublicProduct, MerchantPublicShop,
+    MerchantPublicShopResponse, merchant_pickup_response, merchant_product_order_response,
 };
 use super::{
     BTreeMap, CardProduct, CardProductStatus, DELIVERY_ARTIFACT_STATUS_ACTIVE,
@@ -231,6 +231,7 @@ impl PostgresStore {
             activation_id: None,
             download_grant_id: None,
             download_token: None,
+            buyer_contact: draft.buyer_contact,
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -310,6 +311,35 @@ impl PostgresStore {
                 &row.get::<Json<MerchantProductOrderRecord>, _>("payload").0,
             )
         }))
+    }
+
+    pub(super) async fn list_merchant_product_orders_by_guest_lookup(
+        &self,
+        phone_hash: &str,
+        lookup_passphrase_hash: &str,
+    ) -> Result<MerchantProductOrderHistoryResponse> {
+        let rows = sqlx::query(
+            "SELECT payload FROM merchant_product_orders
+              WHERE payload #>> '{buyer_contact,phone_hash}' = $1
+                AND payload #>> '{buyer_contact,lookup_passphrase_hash}' = $2
+              ORDER BY created_at DESC",
+        )
+        .bind(phone_hash)
+        .bind(lookup_passphrase_hash)
+        .fetch_all(&self.pool)
+        .await?;
+        let orders = rows
+            .into_iter()
+            .map(|row| {
+                merchant_product_order_response(
+                    &row.get::<Json<MerchantProductOrderRecord>, _>("payload").0,
+                )
+                .data
+            })
+            .collect();
+        Ok(MerchantProductOrderHistoryResponse {
+            data: super::merchant_product_orders::MerchantProductOrderHistoryPayload { orders },
+        })
     }
 
     pub(super) async fn attach_merchant_order_prepay(

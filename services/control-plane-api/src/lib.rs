@@ -816,6 +816,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             post(merchant_checkout_api::create_merchant_product_order),
         )
         .route(
+            "/v1/merchant-product-orders/history",
+            post(merchant_checkout_api::list_merchant_product_order_history),
+        )
+        .route(
             "/v1/merchant-product-orders/{order_id}",
             get(merchant_checkout_api::get_merchant_product_order),
         )

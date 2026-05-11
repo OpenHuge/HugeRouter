@@ -31,6 +31,14 @@ use crate::{
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateMerchantProductOrderRequest {
     pub card_product_id: String,
+    pub buyer_phone: Option<String>,
+    pub lookup_passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MerchantProductOrderHistoryRequest {
+    pub buyer_phone: String,
+    pub lookup_passphrase: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -71,6 +79,14 @@ pub async fn create_merchant_product_order(
 ) -> Result<Json<store::MerchantProductOrderResponse>, ApiError> {
     let context = next_request_context();
     let buyer_user_id = resolve_checkout_buyer_user_id(&state, &headers, &context).await?;
+    let buyer_contact = build_buyer_contact(
+        request.buyer_phone.as_deref(),
+        request.lookup_passphrase.as_deref(),
+        &context,
+    )?;
+    let generated_lookup_passphrase = buyer_contact
+        .as_ref()
+        .and_then(|contact| contact.generated_passphrase.clone());
     let card_product_id = request.card_product_id.trim();
     if card_product_id.is_empty() {
         return Err(ApiError::bad_request(
@@ -85,6 +101,7 @@ pub async fn create_merchant_product_order(
             order_id: generate_stable_id("morder", &context)?,
             card_product_id: card_product_id.to_string(),
             buyer_user_id,
+            buyer_contact: buyer_contact.map(|contact| contact.record),
         })
         .await
         .map_err(|error| {
@@ -94,7 +111,15 @@ pub async fn create_merchant_product_order(
                 &context,
             )
         })? {
-        MerchantProductOrderCreateResult::Created(response) => Ok(Json(*response)),
+        MerchantProductOrderCreateResult::Created(mut response) => {
+            if let (Some(public_contact), Some(generated)) = (
+                response.data.buyer_contact.as_mut(),
+                generated_lookup_passphrase,
+            ) {
+                public_contact.lookup_passphrase = Some(generated);
+            }
+            Ok(Json(*response))
+        }
         MerchantProductOrderCreateResult::ProductNotFound => Err(ApiError::not_found(
             "card_product_not_found",
             format!("card product `{card_product_id}` was not found"),
@@ -111,6 +136,30 @@ pub async fn create_merchant_product_order(
             &context,
         )),
     }
+}
+
+pub async fn list_merchant_product_order_history(
+    State(state): State<ControlPlaneState>,
+    Json(request): Json<MerchantProductOrderHistoryRequest>,
+) -> Result<Json<store::MerchantProductOrderHistoryResponse>, ApiError> {
+    let context = next_request_context();
+    let phone = normalize_buyer_phone(&request.buyer_phone, &context)?;
+    let passphrase = normalize_lookup_passphrase(&request.lookup_passphrase, &context)?;
+    state
+        .store
+        .list_merchant_product_orders_by_guest_lookup(
+            &guest_phone_hash(&phone),
+            &guest_lookup_passphrase_hash(&phone, &passphrase),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| {
+            ApiError::internal(
+                "merchant_order_history_unavailable",
+                format!("failed to load merchant product order history: {error}"),
+                &context,
+            )
+        })
 }
 
 pub async fn get_merchant_product_order(
@@ -537,4 +586,118 @@ fn generate_pickup_token(context: &RequestContext) -> Result<String, ApiError> {
         "pickup_{}",
         BASE64_URL_SAFE_NO_PAD.encode(token_bytes)
     ))
+}
+
+struct PreparedBuyerContact {
+    record: store::MerchantProductOrderBuyerContactRecord,
+    generated_passphrase: Option<String>,
+}
+
+fn build_buyer_contact(
+    buyer_phone: Option<&str>,
+    lookup_passphrase: Option<&str>,
+    context: &RequestContext,
+) -> Result<Option<PreparedBuyerContact>, ApiError> {
+    let Some(phone) = buyer_phone else {
+        return Ok(None);
+    };
+    let normalized_phone = normalize_buyer_phone(phone, context)?;
+    let (normalized_passphrase, generated_passphrase) =
+        match lookup_passphrase.and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        }) {
+            Some(passphrase) => (normalize_lookup_passphrase(passphrase, context)?, None),
+            None => {
+                let generated = generate_lookup_passphrase(context)?;
+                (generated.clone(), Some(generated))
+            }
+        };
+    Ok(Some(PreparedBuyerContact {
+        record: store::MerchantProductOrderBuyerContactRecord {
+            phone_masked: mask_buyer_phone(&normalized_phone),
+            phone_hash: guest_phone_hash(&normalized_phone),
+            lookup_passphrase_hash: guest_lookup_passphrase_hash(
+                &normalized_phone,
+                &normalized_passphrase,
+            ),
+            lookup_passphrase_hint: generated_passphrase
+                .clone()
+                .unwrap_or_else(|| mask_lookup_passphrase(&normalized_passphrase)),
+        },
+        generated_passphrase,
+    }))
+}
+
+fn normalize_buyer_phone(value: &str, context: &RequestContext) -> Result<String, ApiError> {
+    let digits = value
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
+    let normalized = digits
+        .strip_prefix("86")
+        .filter(|rest| rest.len() == 11)
+        .unwrap_or(&digits);
+    if normalized.len() == 11 && normalized.starts_with('1') {
+        Ok(normalized.to_string())
+    } else {
+        Err(ApiError::bad_request(
+            "buyer_phone_invalid",
+            "buyer_phone must be a valid mainland China mobile number".to_string(),
+            context,
+        ))
+    }
+}
+
+fn normalize_lookup_passphrase(value: &str, context: &RequestContext) -> Result<String, ApiError> {
+    let normalized = value.trim();
+    if (6..=32).contains(&normalized.chars().count())
+        && normalized
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        Ok(normalized.to_ascii_uppercase())
+    } else {
+        Err(ApiError::bad_request(
+            "lookup_passphrase_invalid",
+            "lookup_passphrase must be 6 to 32 letters or digits".to_string(),
+            context,
+        ))
+    }
+}
+
+fn mask_buyer_phone(phone: &str) -> String {
+    format!("{}****{}", &phone[..3], &phone[7..])
+}
+
+fn mask_lookup_passphrase(passphrase: &str) -> String {
+    if passphrase.len() <= 8 {
+        return "已设置".to_string();
+    }
+    format!("{}***{}", &passphrase[..2], &passphrase[passphrase.len() - 2..])
+}
+
+fn guest_phone_hash(phone: &str) -> String {
+    sha256_hex(&format!("merchant-order-phone:{phone}"))
+}
+
+fn guest_lookup_passphrase_hash(phone: &str, passphrase: &str) -> String {
+    sha256_hex(&format!("merchant-order-lookup:{phone}:{passphrase}"))
+}
+
+fn generate_lookup_passphrase(context: &RequestContext) -> Result<String, ApiError> {
+    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let rng = rand::SystemRandom::new();
+    let mut bytes = [0_u8; 6];
+    rand::SecureRandom::fill(&rng, &mut bytes).map_err(|_| {
+        ApiError::internal(
+            "lookup_passphrase_generation_failed",
+            "failed to generate order lookup passphrase".to_string(),
+            context,
+        )
+    })?;
+    Ok(bytes
+        .iter()
+        .map(|byte| ALPHABET[usize::from(*byte) % ALPHABET.len()] as char)
+        .collect())
 }

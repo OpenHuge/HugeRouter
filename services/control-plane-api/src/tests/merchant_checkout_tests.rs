@@ -88,6 +88,131 @@ async fn public_checkout_order_without_session_reserves_inventory() {
 }
 
 #[tokio::test]
+async fn guest_checkout_order_history_uses_phone_and_lookup_passphrase() {
+    let (_state, admin_cookie, app) = platform_admin_app().await;
+
+    let shop = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/shops",
+            Some(&admin_cookie),
+            Some(json!({
+                "merchant_shop_id": "mshop_guest_history_test",
+                "slug": "guest-history-test",
+                "display_name": "Guest History Test",
+                "announcement": "Guest checkout history test shop"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(shop.status(), StatusCode::OK);
+
+    let delivery_body = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+    let delivery_id = delivery_body["data"]["delivery"]["delivery_id"]
+        .as_str()
+        .unwrap();
+
+    let product = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cardprod_guest_history_test",
+                "merchant_shop_id": "mshop_guest_history_test",
+                "project_id": "proj_core",
+                "title": "HugeCode Guest History",
+                "description": "Guest history product",
+                "inventory_count": 1,
+                "face_value_usd": "0",
+                "retail_price_usd": "0",
+                "retail_price_cny_total": 1,
+                "supports_trial": false,
+                "sale_enabled": true,
+                "delivery_ids": [delivery_id]
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(product.status(), StatusCode::OK);
+
+    let order = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders",
+            None,
+            Some(json!({
+                "card_product_id": "cardprod_guest_history_test",
+                "buyer_phone": " 138 0013 8000 "
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(order.status(), StatusCode::OK);
+    let order_body = response_json(order).await;
+    let generated_passphrase = order_body["data"]["buyer_contact"]["lookup_passphrase"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        order_body["data"]["buyer_contact"]["phone_masked"],
+        "138****8000"
+    );
+    assert_eq!(
+        order_body["data"]["buyer_contact"]["lookup_passphrase_hint"],
+        generated_passphrase
+    );
+    assert!(generated_passphrase.len() >= 6);
+    assert!(order_body["data"]["buyer_contact"]["phone"].is_null());
+
+    let history = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders/history",
+            None,
+            Some(json!({
+                "buyer_phone": "13800138000",
+                "lookup_passphrase": generated_passphrase
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(history.status(), StatusCode::OK);
+    let history_body = response_json(history).await;
+    assert_eq!(history_body["data"]["orders"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        history_body["data"]["orders"][0]["order_id"],
+        order_body["data"]["order_id"]
+    );
+    assert!(history_body["data"]["orders"][0]["buyer_contact"]["lookup_passphrase"].is_null());
+
+    let wrong_history = app
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders/history",
+            None,
+            Some(json!({
+                "buyer_phone": "13800138000",
+                "lookup_passphrase": "wrong1"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(wrong_history.status(), StatusCode::OK);
+    let wrong_history_body = response_json(wrong_history).await;
+    assert_eq!(
+        wrong_history_body["data"]["orders"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn merchant_pickup_requires_fulfilled_payment_order() {
     let (state, admin_cookie, app) = platform_admin_app().await;
     let wechat_cookie = platform_wechat_cookie(&state).await;

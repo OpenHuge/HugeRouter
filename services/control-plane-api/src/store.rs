@@ -94,10 +94,12 @@ pub use delivery_redemption_units::{
     owner_redemption_capacity_blocker_for_memory, owner_redemption_capacity_blocker_for_postgres,
 };
 pub use merchant_product_orders::{
-    MERCHANT_ORDER_STATUS_FULFILLED, MerchantPickupResponse, MerchantProductFulfillmentDraft,
-    MerchantProductFulfillmentResult, MerchantProductInventoryRecord,
-    MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductOrderRecord,
-    MerchantProductOrderResponse, MerchantProductPrepayDraft, MerchantPublicShopResponse,
+    MERCHANT_ORDER_STATUS_FULFILLED, MerchantPickupResponse,
+    MerchantProductFulfillmentDraft, MerchantProductFulfillmentResult,
+    MerchantProductInventoryRecord, MerchantProductOrderBuyerContactRecord,
+    MerchantProductOrderCreateResult, MerchantProductOrderDraft,
+    MerchantProductOrderHistoryResponse, MerchantProductOrderRecord, MerchantProductOrderResponse,
+    MerchantProductPrepayDraft, MerchantPublicShopResponse,
 };
 use opening_grants::{
     OPENING_GRANT_OWNER_LOCK_INSERT_SQL, OPENING_GRANT_OWNER_LOCK_SELECT_SQL,
