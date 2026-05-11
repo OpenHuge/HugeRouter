@@ -236,12 +236,28 @@ impl AlipayClient {
 }
 
 fn precreate_biz_content(request: &AlipayPrecreateRequest, out_trade_no: &str) -> Value {
-    serde_json::json!({
+    precreate_biz_content_with_seller_id(
+        request,
+        out_trade_no,
+        optional_env("ALIPAY_SELLER_ID").as_deref(),
+    )
+}
+
+fn precreate_biz_content_with_seller_id(
+    request: &AlipayPrecreateRequest,
+    out_trade_no: &str,
+    seller_id: Option<&str>,
+) -> Value {
+    let mut content = serde_json::json!({
         "out_trade_no": out_trade_no,
         "product_code": "FACE_TO_FACE_PAYMENT",
         "total_amount": amount_total_to_yuan(request.amount_total),
         "subject": request.description,
-    })
+    });
+    if let Some(seller_id) = seller_id.map(str::trim).filter(|value| !value.is_empty()) {
+        content["seller_id"] = Value::String(seller_id.to_string());
+    }
+    content
 }
 
 pub fn new_out_trade_no(tenant_id: &str, project_id: Option<&str>) -> String {
@@ -306,6 +322,13 @@ fn required_env(name: &str) -> Result<String> {
         .ok()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("{name} is required"))
+}
+
+fn optional_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
 }
 
 fn env_secret_or_file(value_name: &str, path_name: &str) -> Result<String> {
@@ -533,7 +556,7 @@ mod tests {
     use super::{
         amount_total_to_yuan, alipay_sign_content, extract_response_sign_content,
         new_out_trade_no, normalize_private_key_pem, normalize_public_key_pem,
-        precreate_biz_content,
+        precreate_biz_content_with_seller_id,
         AlipayPrecreateRequest,
     };
     use std::collections::BTreeMap;
@@ -596,9 +619,11 @@ mod tests {
             description: "HugeCode Pro".to_string(),
             attach: None,
         };
-        let biz_content = precreate_biz_content(&request, "ha_order_1");
+        let biz_content =
+            precreate_biz_content_with_seller_id(&request, "ha_order_1", Some("2088580598294871"));
         assert_eq!(biz_content["out_trade_no"], "ha_order_1");
         assert_eq!(biz_content["product_code"], "FACE_TO_FACE_PAYMENT");
+        assert_eq!(biz_content["seller_id"], "2088580598294871");
         assert_eq!(biz_content["total_amount"], "0.01");
         assert_eq!(biz_content["subject"], "HugeCode Pro");
     }
