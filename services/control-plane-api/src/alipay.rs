@@ -57,7 +57,6 @@ pub struct AlipayNotifyPayload {
 struct AlipayConfig {
     app_id: String,
     notify_url: String,
-    return_url: Option<String>,
     private_key: RsaPrivateKey,
     alipay_public_key: RsaPublicKey,
 }
@@ -76,7 +75,6 @@ impl AlipayClient {
             config: AlipayConfig {
                 app_id: required_env("ALIPAY_APP_ID")?,
                 notify_url: required_env("ALIPAY_NOTIFY_URL")?,
-                return_url: optional_env("ALIPAY_RETURN_URL"),
                 private_key: parse_private_key(&private_key_pem)?,
                 alipay_public_key: parse_public_key(&public_key_pem)?,
             },
@@ -89,29 +87,28 @@ impl AlipayClient {
         request: AlipayPrecreateRequest,
         out_trade_no: &str,
     ) -> Result<AlipayPrecreateResponse> {
-        let qr_code = self.page_pay_url(&request, out_trade_no)?;
+        validate_precreate_request(&request)?;
+        validate_out_trade_no(out_trade_no)?;
+        let result = self
+            .execute_payment(
+                "alipay.trade.precreate",
+                precreate_biz_content(&request, out_trade_no),
+            )
+            .await?;
+        let qr_code = result
+            .get("qr_code")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("Alipay precreate response is missing qr_code"))?
+            .to_string();
         Ok(AlipayPrecreateResponse {
             app_id: self.config.app_id.clone(),
             out_trade_no: out_trade_no.to_string(),
             channel: "alipay_qr".to_string(),
-            pay_url: Some(qr_code.clone()),
+            pay_url: None,
             code_qr_svg: render_qr_svg(&qr_code)?,
             qr_code,
         })
-    }
-
-    pub fn page_pay_url(
-        &self,
-        request: &AlipayPrecreateRequest,
-        out_trade_no: &str,
-    ) -> Result<String> {
-        validate_precreate_request(request)?;
-        validate_out_trade_no(out_trade_no)?;
-        let params = self.signed_page_params(
-            "alipay.trade.page.pay",
-            page_pay_biz_content(request, out_trade_no),
-        );
-        Ok(format!("{ALIPAY_GATEWAY_URL}?{}", form_encode(&params)))
     }
 
     pub async fn query_order(&self, out_trade_no: &str) -> Result<Value> {
@@ -148,8 +145,21 @@ impl AlipayClient {
         })
     }
 
+    async fn execute_payment(&self, method: &str, biz_content: Value) -> Result<Value> {
+        self.execute_with_notify_url(method, biz_content, true).await
+    }
+
     async fn execute(&self, method: &str, biz_content: Value) -> Result<Value> {
-        let params = self.signed_api_params(method, biz_content);
+        self.execute_with_notify_url(method, biz_content, false).await
+    }
+
+    async fn execute_with_notify_url(
+        &self,
+        method: &str,
+        biz_content: Value,
+        include_notify_url: bool,
+    ) -> Result<Value> {
+        let params = self.signed_api_params(method, biz_content, include_notify_url);
         let response = self
             .http_client
             .post(ALIPAY_GATEWAY_URL)
@@ -191,19 +201,20 @@ impl AlipayClient {
         Ok(result)
     }
 
-    fn signed_api_params(&self, method: &str, biz_content: Value) -> BTreeMap<String, String> {
-        self.signed_params(method, biz_content, false)
-    }
-
-    fn signed_page_params(&self, method: &str, biz_content: Value) -> BTreeMap<String, String> {
-        self.signed_params(method, biz_content, true)
+    fn signed_api_params(
+        &self,
+        method: &str,
+        biz_content: Value,
+        include_notify_url: bool,
+    ) -> BTreeMap<String, String> {
+        self.signed_params(method, biz_content, include_notify_url)
     }
 
     fn signed_params(
         &self,
         method: &str,
         biz_content: Value,
-        include_payment_urls: bool,
+        include_notify_url: bool,
     ) -> BTreeMap<String, String> {
         let mut params = BTreeMap::new();
         params.insert("app_id".to_string(), self.config.app_id.clone());
@@ -213,11 +224,8 @@ impl AlipayClient {
         params.insert("sign_type".to_string(), "RSA2".to_string());
         params.insert("timestamp".to_string(), alipay_timestamp());
         params.insert("version".to_string(), "1.0".to_string());
-        if include_payment_urls {
+        if include_notify_url {
             params.insert("notify_url".to_string(), self.config.notify_url.clone());
-            if let Some(return_url) = self.config.return_url.as_ref() {
-                params.insert("return_url".to_string(), return_url.clone());
-            }
         }
         params.insert("biz_content".to_string(), biz_content.to_string());
         let sign_content = alipay_sign_content(&params, &["sign"]);
@@ -227,10 +235,10 @@ impl AlipayClient {
     }
 }
 
-fn page_pay_biz_content(request: &AlipayPrecreateRequest, out_trade_no: &str) -> Value {
+fn precreate_biz_content(request: &AlipayPrecreateRequest, out_trade_no: &str) -> Value {
     serde_json::json!({
         "out_trade_no": out_trade_no,
-        "product_code": "FAST_INSTANT_TRADE_PAY",
+        "product_code": "FACE_TO_FACE_PAYMENT",
         "total_amount": amount_total_to_yuan(request.amount_total),
         "subject": request.description,
     })
@@ -298,13 +306,6 @@ fn required_env(name: &str) -> Result<String> {
         .ok()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("{name} is required"))
-}
-
-fn optional_env(name: &str) -> Option<String> {
-    std::env::var(name)
-        .map(|value| value.trim().to_string())
-        .ok()
-        .filter(|value| !value.is_empty())
 }
 
 fn env_secret_or_file(value_name: &str, path_name: &str) -> Result<String> {
@@ -531,7 +532,8 @@ fn default_payment_description() -> String {
 mod tests {
     use super::{
         amount_total_to_yuan, alipay_sign_content, extract_response_sign_content,
-        new_out_trade_no, normalize_private_key_pem, normalize_public_key_pem, page_pay_biz_content,
+        new_out_trade_no, normalize_private_key_pem, normalize_public_key_pem,
+        precreate_biz_content,
         AlipayPrecreateRequest,
     };
     use std::collections::BTreeMap;
@@ -585,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn page_pay_biz_content_uses_website_payment_product() {
+    fn precreate_biz_content_uses_face_to_face_payment_product() {
         let request = AlipayPrecreateRequest {
             tenant_id: "tenant_acme".to_string(),
             project_id: Some("proj_core".to_string()),
@@ -594,9 +596,9 @@ mod tests {
             description: "HugeCode Pro".to_string(),
             attach: None,
         };
-        let biz_content = page_pay_biz_content(&request, "ha_order_1");
+        let biz_content = precreate_biz_content(&request, "ha_order_1");
         assert_eq!(biz_content["out_trade_no"], "ha_order_1");
-        assert_eq!(biz_content["product_code"], "FAST_INSTANT_TRADE_PAY");
+        assert_eq!(biz_content["product_code"], "FACE_TO_FACE_PAYMENT");
         assert_eq!(biz_content["total_amount"], "0.01");
         assert_eq!(biz_content["subject"], "HugeCode Pro");
     }
