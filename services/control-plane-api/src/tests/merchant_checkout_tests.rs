@@ -194,6 +194,10 @@ async fn fulfilled_merchant_order_exposes_pickup_token_once() {
     let delivery_id = delivery_body["data"]["delivery"]["delivery_id"]
         .as_str()
         .unwrap();
+    let browser_file_unlock_code = delivery_body["one_time_codes"]["browser_file_unlock_code"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let product = app
         .clone()
@@ -268,5 +272,9 @@ async fn fulfilled_merchant_order_exposes_pickup_token_once() {
     assert_eq!(
         pickup_body["data"]["download_token"],
         "dltok_hugecode_fulfilled_test"
+    );
+    assert_eq!(
+        pickup_body["data"]["browser_file_unlock_code"].as_str(),
+        Some(browser_file_unlock_code.as_str())
     );
 }

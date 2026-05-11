@@ -1,12 +1,13 @@
 use super::{
     CardProduct, CardProductId, CardProductStatus, DELIVERY_ARTIFACT_STATUS_ACTIVE,
-    DELIVERY_CODE_TYPE_REDEMPTION, DELIVERY_STATUS_PREPARED, DeliveryActivationResponse,
-    DeliveryDownloadGrantDraft, DeliveryDownloadGrantIssueResult, DeliveryRedeemResult,
-    MemoryStore, MerchantShop, MerchantShopId, MerchantShopStatus, ProjectId, Result, StoreMode,
-    TenantId, UserId, activate_delivery_entitlement, anyhow, apply_segment_for_artifact,
+    DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK, DELIVERY_CODE_TYPE_REDEMPTION,
+    DELIVERY_STATUS_PREPARED, DeliveryActivationResponse, DeliveryDownloadGrantDraft,
+    DeliveryDownloadGrantIssueResult, DeliveryRedeemResult, MemoryStore, MerchantShop,
+    MerchantShopId, MerchantShopStatus, ProjectId, Result, StoreMode, TenantId, UserId,
+    activate_delivery_entitlement, anyhow, apply_segment_for_artifact,
     blocked_delivery_activation_result, blocked_redemption_code_result,
-    build_delivery_activation_record, hash_api_key, issue_memory_delivery_download_grant,
-    next_id_suffix, now_rfc3339,
+    build_delivery_activation_record, delivery_secret_key, hash_api_key,
+    issue_memory_delivery_download_grant, next_id_suffix, now_rfc3339,
 };
 use serde::{Deserialize, Serialize};
 
@@ -122,6 +123,7 @@ pub struct MerchantPickupResponse {
 pub struct MerchantPickupPayload {
     pub order: MerchantProductOrderPublicView,
     pub download_token: String,
+    pub browser_file_unlock_code: String,
 }
 
 #[derive(Debug, Clone)]
@@ -286,7 +288,16 @@ impl StoreMode {
                     .merchant_product_orders
                     .iter()
                     .find(|order| order.pickup_token_hash.as_deref() == Some(pickup_token_hash))
-                    .and_then(merchant_pickup_response))
+                    .and_then(|order| {
+                        let browser_file_unlock_code = store
+                            .delivery_secret_plaintexts
+                            .get(&delivery_secret_key(
+                                &order.inventory_delivery_id,
+                                DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
+                            ))
+                            .cloned();
+                        merchant_pickup_response(order, browser_file_unlock_code)
+                    }))
             }
             Self::Postgres(store) => store.get_pickup_by_token_hash(pickup_token_hash).await,
         }
@@ -347,15 +358,18 @@ pub(super) fn merchant_product_order_response(
 
 pub(super) fn merchant_pickup_response(
     order: &MerchantProductOrderRecord,
+    browser_file_unlock_code: Option<String>,
 ) -> Option<MerchantPickupResponse> {
     if order.status != MERCHANT_ORDER_STATUS_FULFILLED {
         return None;
     }
     let download_token = order.download_token.clone()?;
+    let browser_file_unlock_code = browser_file_unlock_code?;
     Some(MerchantPickupResponse {
         data: MerchantPickupPayload {
             order: merchant_product_order_response(order).data,
             download_token,
+            browser_file_unlock_code,
         },
     })
 }

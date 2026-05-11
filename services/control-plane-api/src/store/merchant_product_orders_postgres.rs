@@ -420,9 +420,17 @@ impl PostgresStore {
                 .bind(pickup_token_hash)
                 .fetch_optional(&self.pool)
                 .await?;
-        Ok(row.and_then(|row| {
-            merchant_pickup_response(&row.get::<Json<MerchantProductOrderRecord>, _>("payload").0)
-        }))
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let order = row.get::<Json<MerchantProductOrderRecord>, _>("payload").0;
+        let browser_file_unlock_code = self
+            .get_delivery_secret_plaintext(
+                &order.inventory_delivery_id,
+                super::DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
+            )
+            .await?;
+        Ok(merchant_pickup_response(&order, browser_file_unlock_code))
     }
 
     pub(super) async fn upsert_wechat_user_openid(
