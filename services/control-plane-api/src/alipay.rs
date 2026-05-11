@@ -57,6 +57,7 @@ pub struct AlipayNotifyPayload {
 struct AlipayConfig {
     app_id: String,
     notify_url: String,
+    app_auth_token: Option<String>,
     private_key: RsaPrivateKey,
     alipay_public_key: RsaPublicKey,
 }
@@ -75,6 +76,7 @@ impl AlipayClient {
             config: AlipayConfig {
                 app_id: required_env("ALIPAY_APP_ID")?,
                 notify_url: required_env("ALIPAY_NOTIFY_URL")?,
+                app_auth_token: optional_env("ALIPAY_APP_AUTH_TOKEN"),
                 private_key: parse_private_key(&private_key_pem)?,
                 alipay_public_key: parse_public_key(&public_key_pem)?,
             },
@@ -226,6 +228,9 @@ impl AlipayClient {
         params.insert("version".to_string(), "1.0".to_string());
         if include_notify_url {
             params.insert("notify_url".to_string(), self.config.notify_url.clone());
+        }
+        if let Some(app_auth_token) = self.config.app_auth_token.as_deref() {
+            params.insert("app_auth_token".to_string(), app_auth_token.to_string());
         }
         params.insert("biz_content".to_string(), biz_content.to_string());
         let sign_content = alipay_sign_content(&params, &["sign"]);
@@ -577,6 +582,34 @@ mod tests {
             alipay_sign_content(&params, &["sign"]),
             "app_id=app&method=alipay.trade.precreate"
         );
+    }
+
+    #[test]
+    fn signed_params_include_app_auth_token_when_configured() {
+        let private_key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+        let client = AlipayClient {
+            config: AlipayConfig {
+                app_id: "app_1".to_string(),
+                notify_url: "https://pay.example.com/notify".to_string(),
+                app_auth_token: Some("auth-token-1".to_string()),
+                private_key,
+                alipay_public_key: RsaPublicKey::new(
+                    rsa::BigUint::from(65537u32),
+                    rsa::BigUint::from(17u32),
+                )
+                .unwrap(),
+            },
+            http_client: HttpClient::new(),
+        };
+
+        let params = client.signed_api_params(
+            "alipay.trade.precreate",
+            serde_json::json!({ "out_trade_no": "ha_order_1" }),
+            true,
+        );
+
+        assert_eq!(params["app_auth_token"], "auth-token-1");
+        assert!(params.contains_key("sign"));
     }
 
     #[test]
