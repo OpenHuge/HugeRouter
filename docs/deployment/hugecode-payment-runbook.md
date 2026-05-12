@@ -15,6 +15,15 @@ This runbook covers the first-release payment integration:
 Configure these on the HugeRouter server:
 
 ```dotenv
+CLIENT_BROWSER_PROXY_TOKEN=
+CLIENT_BROWSER_PROXY_SCHEME=socks5
+CLIENT_BROWSER_PROXY_HOST=
+CLIENT_BROWSER_PROXY_PORT=
+CLIENT_BROWSER_PROXY_USERNAME=
+CLIENT_BROWSER_PROXY_PASSWORD=
+CLIENT_BROWSER_PROXY_CONNECT_HOST=
+CLIENT_BROWSER_PROXY_BYPASS_RULES=<local>;localhost;127.0.0.1;::1
+
 WECHAT_PAY_APP_ID=
 WECHAT_PAY_MCH_ID=
 WECHAT_PAY_MERCHANT_SERIAL_NO=
@@ -31,17 +40,23 @@ WECHAT_PAY_MAX_AMOUNT_TOTAL=1000000
 Use either `WECHAT_PAY_MERCHANT_PRIVATE_KEY_PATH` or `WECHAT_PAY_MERCHANT_PRIVATE_KEY`.
 Use either `WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH` or `WECHAT_PAY_PLATFORM_PUBLIC_KEY`.
 
+`CLIENT_BROWSER_PROXY_TOKEN` is the token packaged into HugeCode as
+`clientBrowserProxyToken`. The proxy host, port, username, password, and
+connect host stay on the HugeRouter server and are returned only from
+`GET /v1/client/browser-proxy` after `Authorization: Bearer $CLIENT_BROWSER_PROXY_TOKEN`.
+
 ## HugeCode Environment
 
 Configure HugeCode with public routing only:
 
 ```dotenv
 VITE_OPENHUGE_CONTROL_PLANE_BASE_URL=https://<router-domain>
+OPENHUGE_CLIENT_BROWSER_PROXY_TOKEN=<client-browser-proxy-token>
 VITE_OPENHUGE_CDK_SHOP_SLUG=hugecode-cdk
 VITE_OPENHUGE_WORKSPACE_SLUG=openhuge
 ```
 
-Do not put WeChat merchant keys, APIv3 keys, or platform public keys in HugeCode.
+Do not put proxy host, proxy password, WeChat merchant keys, APIv3 keys, or platform public keys in HugeCode.
 
 ## WeChat Merchant Backend
 

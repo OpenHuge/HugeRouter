@@ -2,6 +2,7 @@
 
 mod alipay;
 mod alipay_api;
+mod client_browser_proxy;
 mod delivery_redemption_api;
 mod delivery_redemption_policy;
 mod merchant_api;
@@ -121,6 +122,7 @@ static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(10_000);
 
 #[derive(Clone, Debug)]
 pub struct ControlPlaneState {
+    client_browser_proxy_config: Option<client_browser_proxy::ClientBrowserProxyConfig>,
     frontend_base_url: String,
     internal_gateway_token: Option<String>,
     pub(crate) store: StoreMode,
@@ -132,6 +134,10 @@ impl ControlPlaneState {
     /// Returns an error when the configured persistent store cannot be initialized.
     pub async fn from_env() -> Result<Self> {
         Ok(Self {
+            client_browser_proxy_config:
+                client_browser_proxy::client_browser_proxy_config_from_lookup(|name| {
+                    std::env::var(name).ok()
+                }),
             frontend_base_url: std::env::var("CONSOLE_WEB_BASE_URL")
                 .unwrap_or_else(|_| FRONTEND_BASE_URL.to_string()),
             internal_gateway_token: std::env::var("CONTROL_PLANE_INTERNAL_TOKEN")
@@ -144,6 +150,19 @@ impl ControlPlaneState {
     #[cfg(test)]
     fn memory() -> Self {
         Self {
+            client_browser_proxy_config: None,
+            frontend_base_url: FRONTEND_BASE_URL.to_string(),
+            internal_gateway_token: Some("test-internal-token".to_string()),
+            store: StoreMode::memory(),
+        }
+    }
+
+    #[cfg(test)]
+    fn memory_with_client_browser_proxy(
+        client_browser_proxy_config: client_browser_proxy::ClientBrowserProxyConfig,
+    ) -> Self {
+        Self {
+            client_browser_proxy_config: Some(client_browser_proxy_config),
             frontend_base_url: FRONTEND_BASE_URL.to_string(),
             internal_gateway_token: Some("test-internal-token".to_string()),
             store: StoreMode::memory(),
@@ -807,6 +826,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
         )
         .route("/v1/tenants", get(list_tenants))
         .route("/v1/projects", get(list_projects))
+        .route(
+            "/v1/client/browser-proxy",
+            get(client_browser_proxy::get_client_browser_proxy),
+        )
         .route(
             "/v1/shops/{slug}",
             get(merchant_checkout_api::get_public_shop),
@@ -7896,9 +7919,9 @@ mod tests {
     mod merchant_checkout_tests;
 
     use super::{
-        ControlPlaneState, OAuthProviderConfig, RequestContext, app_with_state,
-        ensure_oauth_payload_ok, generate_stable_id, oauth_authorization_url_from_config,
-        resolve_oidc_membership,
+        app_with_state, client_browser_proxy, ensure_oauth_payload_ok, generate_stable_id,
+        oauth_authorization_url_from_config, resolve_oidc_membership, ControlPlaneState,
+        OAuthProviderConfig, RequestContext,
     };
     use crate::store::{
         DeliveryPrepareDraft, IdentityLookup, OAuthSharingUsageFilters, OpeningGrantDraft,
@@ -7915,9 +7938,8 @@ mod tests {
     use core_domain::{
         AdmissionResult, AuthProvider, AuthProviderLink, AuthProviderLinkId, BudgetPolicyId,
         ConfigSnapshotId, ExcludedTarget, FallbackTransition, ProjectId, ProviderResourceId,
-        RoutePolicyId, RouteReceipt, ScoreBreakdown, TenantId, TenantMembership,
-        TenantMembershipId, TenantMembershipRole, TenantMembershipStatus, TenantSummary, UserId,
-        UserIdentity,
+        RoutePolicyId, RouteReceipt, ScoreBreakdown, TenantId, TenantMembership, TenantMembershipId,
+        TenantMembershipRole, TenantMembershipStatus, TenantSummary, UserId, UserIdentity,
     };
     use serde_json::{Value, json};
     use std::sync::{Arc, RwLock};
@@ -8595,6 +8617,91 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn client_browser_proxy_requires_server_configuration() {
+        let response = app_with_state(ControlPlaneState::memory())
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/client/browser-proxy")
+                    .header(AUTHORIZATION, "Bearer client-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = response_json(response).await;
+        assert_eq!(body["code"], "client_browser_proxy_unconfigured");
+    }
+
+    #[tokio::test]
+    async fn client_browser_proxy_returns_config_with_valid_token() {
+        let proxy_config = client_browser_proxy::client_browser_proxy_config_from_lookup(|name| {
+            match name {
+                "CLIENT_BROWSER_PROXY_TOKEN" => Some("client-token".to_string()),
+                "CLIENT_BROWSER_PROXY_HOST" => Some("relay.example.com".to_string()),
+                "CLIENT_BROWSER_PROXY_PORT" => Some("34072".to_string()),
+                "CLIENT_BROWSER_PROXY_USERNAME" => Some("hugeproxy".to_string()),
+                "CLIENT_BROWSER_PROXY_PASSWORD" => Some("secret".to_string()),
+                "CLIENT_BROWSER_PROXY_CONNECT_HOST" => Some("203.0.113.10".to_string()),
+                _ => None,
+            }
+        })
+        .unwrap();
+        let response =
+            app_with_state(ControlPlaneState::memory_with_client_browser_proxy(proxy_config))
+                .oneshot(
+                    Request::builder()
+                        .uri("/v1/client/browser-proxy")
+                        .header(AUTHORIZATION, "Bearer client-token")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["version"], 1);
+        assert_eq!(body["scheme"], "socks5");
+        assert_eq!(body["host"], "relay.example.com");
+        assert_eq!(body["port"], 34072);
+        assert_eq!(body["username"], "hugeproxy");
+        assert_eq!(body["password"], "secret");
+        assert_eq!(body["connect_host"], "203.0.113.10");
+    }
+
+    #[tokio::test]
+    async fn client_browser_proxy_rejects_invalid_token() {
+        let proxy_config = client_browser_proxy::client_browser_proxy_config_from_lookup(|name| {
+            match name {
+                "CLIENT_BROWSER_PROXY_TOKEN" => Some("client-token".to_string()),
+                "CLIENT_BROWSER_PROXY_HOST" => Some("relay.example.com".to_string()),
+                "CLIENT_BROWSER_PROXY_PORT" => Some("34072".to_string()),
+                "CLIENT_BROWSER_PROXY_USERNAME" => Some("hugeproxy".to_string()),
+                "CLIENT_BROWSER_PROXY_PASSWORD" => Some("secret".to_string()),
+                _ => None,
+            }
+        })
+        .unwrap();
+        let response =
+            app_with_state(ControlPlaneState::memory_with_client_browser_proxy(proxy_config))
+                .oneshot(
+                    Request::builder()
+                        .uri("/v1/client/browser-proxy")
+                        .header(AUTHORIZATION, "Bearer wrong-token")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = response_json(response).await;
+        assert_eq!(body["code"], "client_browser_proxy_forbidden");
     }
 
     #[tokio::test]
