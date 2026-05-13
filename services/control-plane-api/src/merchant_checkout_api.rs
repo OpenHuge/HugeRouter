@@ -13,8 +13,9 @@ use crate::alipay::{
     new_out_trade_no as new_alipay_out_trade_no,
 };
 use crate::store::{
-    self, MerchantProductFulfillmentDraft, MerchantProductFulfillmentResult,
-    MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductPrepayDraft,
+    self, MerchantProductExperienceConfig, MerchantProductFulfillmentDraft,
+    MerchantProductFulfillmentResult, MerchantProductOrderCreateResult, MerchantProductOrderDraft,
+    MerchantProductPrepayDraft, PromotionClaimDraft,
     WechatPaymentOrderRecord, expires_at, now_rfc3339,
 };
 use crate::wechat_pay::{
@@ -95,13 +96,32 @@ pub async fn create_merchant_product_order(
             &context,
         ));
     }
+    let experience = load_card_product_experience_config(&state, card_product_id, &context).await?;
+    if let Some(experience) = experience.as_ref() {
+        ensure_experience_checkout_allowed(
+            &state,
+            experience,
+            buyer_contact.as_ref().map(|contact| &contact.record),
+            &buyer_user_id,
+            &context,
+        )
+        .await?;
+    }
+    let experience_record = experience.as_ref().map(|experience| store::MerchantProductOrderExperienceRecord {
+        campaign_id: experience.campaign_id.clone(),
+        experience_kind: experience.kind.clone(),
+        issued_at: now_rfc3339(),
+        expires_at: expires_at(u64::from(experience.duration_minutes) * 60),
+    });
+    let buyer_contact_record = buyer_contact.as_ref().map(|contact| contact.record.clone());
     match state
         .store
         .create_merchant_product_order(MerchantProductOrderDraft {
             order_id: generate_stable_id("morder", &context)?,
             card_product_id: card_product_id.to_string(),
             buyer_user_id,
-            buyer_contact: buyer_contact.map(|contact| contact.record),
+            buyer_contact: buyer_contact_record,
+            experience: experience_record,
         })
         .await
         .map_err(|error| {
@@ -455,9 +475,9 @@ pub async fn settle_merchant_product_order_for_payment(
     out_trade_no: &str,
     context: &RequestContext,
 ) -> Result<(), ApiError> {
-    let Some(order) = state
+    let Some(order_record) = state
         .store
-        .get_merchant_product_order_by_out_trade_no(out_trade_no)
+        .get_merchant_product_order_record_by_out_trade_no(out_trade_no)
         .await
         .map_err(|error| {
             ApiError::internal(
@@ -469,10 +489,34 @@ pub async fn settle_merchant_product_order_for_payment(
     else {
         return Ok(());
     };
+    if let Some(experience) = order_record.experience.as_ref() {
+        if let Some(contact) = order_record.buyer_contact.as_ref() {
+            state
+                .store
+                .create_promotion_claim(PromotionClaimDraft {
+                    claim_id: generate_stable_id("pclaim", context)?,
+                    campaign_id: experience.campaign_id.clone(),
+                    phone_hash: contact.phone_hash.clone(),
+                    buyer_user_id: order_record.buyer_user_id.as_str().to_string(),
+                    order_id: order_record.order_id.clone(),
+                    status: "active".to_string(),
+                    created_at: now_rfc3339(),
+                    expires_at: experience.expires_at.clone(),
+                })
+                .await
+                .map_err(|error| {
+                    ApiError::internal(
+                        "promotion_claim_create_failed",
+                        format!("failed to create promotion claim: {error}"),
+                        context,
+                    )
+                })?;
+        }
+    }
     match state
         .store
         .fulfill_merchant_product_order(MerchantProductFulfillmentDraft {
-            order_id: order.data.order_id,
+            order_id: order_record.order_id,
             activation_id: generate_stable_id("activation", context)?,
             download_grant_id: generate_stable_id("dlgrant", context)?,
             download_token: generate_delivery_download_token(context)?,
@@ -627,6 +671,65 @@ fn build_buyer_contact(
         },
         generated_passphrase,
     }))
+}
+
+async fn load_card_product_experience_config(
+    state: &ControlPlaneState,
+    card_product_id: &str,
+    context: &RequestContext,
+) -> Result<Option<MerchantProductExperienceConfig>, ApiError> {
+    state
+        .store
+        .get_merchant_product_experience_config(card_product_id)
+        .await
+        .map_err(|error| {
+            ApiError::internal(
+                "experience_config_lookup_failed",
+                format!("failed to inspect experience config: {error}"),
+                context,
+            )
+        })
+}
+
+async fn ensure_experience_checkout_allowed(
+    state: &ControlPlaneState,
+    experience: &MerchantProductExperienceConfig,
+    buyer_contact: Option<&store::MerchantProductOrderBuyerContactRecord>,
+    buyer_user_id: &UserId,
+    context: &RequestContext,
+) -> Result<(), ApiError> {
+    let buyer_contact = buyer_contact.ok_or_else(|| {
+        ApiError::bad_request(
+            "experience_phone_required",
+            "experience checkout requires a buyer phone".to_string(),
+            context,
+        )
+    })?;
+    if experience.requires_phone {
+        let existing = state
+            .store
+            .find_active_promotion_claim(&experience.campaign_id, &buyer_contact.phone_hash)
+            .await
+            .map_err(|error| {
+                ApiError::internal(
+                    "promotion_claim_lookup_failed",
+                    format!("failed to inspect promotion claim: {error}"),
+                    context,
+                )
+            })?;
+        if existing.is_some() {
+            return Err(ApiError::conflict(
+                "experience_already_claimed",
+                format!(
+                    "experience campaign `{}` has already been claimed for this phone",
+                    experience.campaign_id
+                ),
+                context,
+            ));
+        }
+    }
+    let _ = buyer_user_id;
+    Ok(())
 }
 
 fn normalize_buyer_phone(value: &str, context: &RequestContext) -> Result<String, ApiError> {

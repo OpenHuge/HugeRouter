@@ -44,6 +44,17 @@ pub struct CreateCardProductRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertMerchantProductExperienceConfigRequest {
+    pub card_product_id: String,
+    pub campaign_id: String,
+    pub experience_kind: String,
+    pub duration_minutes: u32,
+    pub requires_phone: bool,
+    #[serde(default = "default_true")]
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTrialConnectionRequest {
     pub trial_connection_id: String,
     pub provider_label: String,
@@ -211,6 +222,61 @@ pub async fn create_card_product(
     Ok(Json(created))
 }
 
+pub async fn upsert_merchant_product_experience_config(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertMerchantProductExperienceConfigRequest>,
+) -> Result<Json<crate::store::MerchantProductExperienceConfig>, ApiError> {
+    let context = next_request_context();
+    let authz = authorize_v1_request(&state, &headers, &context).await?;
+    let _tenant_id = resolve_active_tenant(&authz, &context)?;
+    if request.card_product_id.trim().is_empty() {
+        return Err(bad_request_error(
+            "validation_failed",
+            "card_product_id is required",
+            &context,
+        ));
+    }
+    if request.campaign_id.trim().is_empty() {
+        return Err(bad_request_error(
+            "validation_failed",
+            "campaign_id is required",
+            &context,
+        ));
+    }
+    if request.experience_kind.trim().is_empty() {
+        return Err(bad_request_error(
+            "validation_failed",
+            "experience_kind is required",
+            &context,
+        ));
+    }
+    if request.duration_minutes == 0 {
+        return Err(bad_request_error(
+            "validation_failed",
+            "duration_minutes must be greater than zero",
+            &context,
+        ));
+    }
+
+    let created = state
+        .store
+        .upsert_merchant_product_experience_config(crate::store::MerchantProductExperienceConfig {
+            card_product_id: request.card_product_id.trim().to_string(),
+            campaign_id: request.campaign_id.trim().to_string(),
+            kind: request.experience_kind.trim().to_string(),
+            duration_minutes: request.duration_minutes,
+            requires_phone: request.requires_phone,
+            is_active: request.is_active,
+            created_at: now_rfc3339(),
+            updated_at: now_rfc3339(),
+        })
+        .await
+        .map_err(|error| merchant_mutation_error(&error, &context))?;
+
+    Ok(Json(created))
+}
+
 pub async fn create_trial_connection(
     State(state): State<ControlPlaneState>,
     headers: HeaderMap,
@@ -336,6 +402,10 @@ fn resolve_active_tenant(
             context,
         )
     })
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 fn mask_trial_api_key(api_key: &str) -> String {

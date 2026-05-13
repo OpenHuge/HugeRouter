@@ -27,8 +27,10 @@ pub const REQUIRED_TABLES: &[&str] = &[
     "login_flows",
     "merchant_shops",
     "card_products",
+    "merchant_product_experience_configs",
     "merchant_product_inventory",
     "merchant_product_orders",
+    "promotion_claims",
     "wechat_user_openids",
     "trial_connections",
     "relay_evaluations",
@@ -374,6 +376,17 @@ pub const MIGRATIONS: &[&str] = &[
         merchant_shop_id TEXT NOT NULL,
         payload JSONB NOT NULL
     )",
+    r"CREATE TABLE IF NOT EXISTS merchant_product_experience_configs (
+        card_product_id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        experience_kind TEXT NOT NULL,
+        duration_minutes BIGINT NOT NULL,
+        requires_phone BOOLEAN NOT NULL,
+        is_active BOOLEAN NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )",
     r"CREATE TABLE IF NOT EXISTS merchant_product_inventory (
         inventory_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
@@ -413,6 +426,19 @@ pub const MIGRATIONS: &[&str] = &[
     )",
     r"CREATE INDEX IF NOT EXISTS merchant_product_orders_buyer_idx
        ON merchant_product_orders (buyer_user_id, created_at)",
+    r"CREATE TABLE IF NOT EXISTS promotion_claims (
+        claim_id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        phone_hash TEXT NOT NULL,
+        buyer_user_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TEXT NOT NULL
+    )",
+    r"CREATE UNIQUE INDEX IF NOT EXISTS promotion_claims_campaign_phone_uidx
+       ON promotion_claims (campaign_id, phone_hash)",
     r"CREATE TABLE IF NOT EXISTS wechat_user_openids (
         user_id TEXT PRIMARY KEY,
         openid TEXT NOT NULL,

@@ -95,11 +95,13 @@ pub use delivery_redemption_units::{
 };
 pub use merchant_product_orders::{
     MERCHANT_ORDER_STATUS_FULFILLED, MerchantPickupResponse,
+    MerchantProductExperienceConfig,
     MerchantProductFulfillmentDraft, MerchantProductFulfillmentResult,
     MerchantProductInventoryRecord, MerchantProductOrderBuyerContactRecord,
     MerchantProductOrderCreateResult, MerchantProductOrderDraft,
     MerchantProductOrderHistoryResponse, MerchantProductOrderRecord, MerchantProductOrderResponse,
-    MerchantProductPrepayDraft, MerchantPublicShopResponse,
+    MerchantProductPrepayDraft, MerchantPublicShopResponse, PromotionClaimDraft,
+    PromotionClaimRecord,
 };
 use opening_grants::{
     OPENING_GRANT_OWNER_LOCK_INSERT_SQL, OPENING_GRANT_OWNER_LOCK_SELECT_SQL,
@@ -220,8 +222,10 @@ pub struct MemoryStore {
     config_snapshots: Vec<ConfigSnapshot>,
     merchant_shops: Vec<MerchantShop>,
     card_products: Vec<CardProduct>,
+    merchant_product_experience_configs: Vec<MerchantProductExperienceConfig>,
     merchant_product_inventory: Vec<MerchantProductInventoryRecord>,
     merchant_product_orders: Vec<MerchantProductOrderRecord>,
+    promotion_claims: Vec<PromotionClaimRecord>,
     wechat_user_openids: HashMap<String, String>,
     trial_connections: Vec<TrialConnection>,
     relay_evaluations: Vec<RelayEvaluation>,
@@ -2272,8 +2276,10 @@ impl MemoryStore {
             config_snapshots: seed.config_snapshots,
             merchant_shops: seed.merchant_shops,
             card_products: seed.card_products,
+            merchant_product_experience_configs: Vec::new(),
             merchant_product_inventory: Vec::new(),
             merchant_product_orders: Vec::new(),
+            promotion_claims: Vec::new(),
             trial_connections: seed.trial_connections,
             relay_evaluations: seed.relay_evaluations,
             replay_capsules: seed
@@ -2776,6 +2782,20 @@ impl StoreMode {
                 Ok(product)
             }
             Self::Postgres(store) => store.create_card_product(&product).await,
+        }
+    }
+
+    pub async fn get_card_product(&self, card_product_id: &str) -> Result<Option<CardProduct>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .card_products
+                    .iter()
+                    .find(|product| product.card_product_id.as_str() == card_product_id)
+                    .cloned())
+            }
+            Self::Postgres(store) => store.get_card_product(card_product_id).await,
         }
     }
 
@@ -4926,6 +4946,49 @@ impl StoreMode {
                 };
             }
             Self::Postgres(_) => panic!("test helper only supports memory store"),
+        }
+    }
+
+    pub async fn find_active_promotion_claim(
+        &self,
+        campaign_id: &str,
+        phone_hash: &str,
+    ) -> Result<Option<PromotionClaimRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .promotion_claims
+                    .iter()
+                    .find(|claim| {
+                        claim.campaign_id == campaign_id
+                            && claim.phone_hash == phone_hash
+                            && claim.status == "active"
+                    })
+                    .cloned())
+            }
+            Self::Postgres(store) => store.find_active_promotion_claim(campaign_id, phone_hash).await,
+        }
+    }
+
+    pub async fn create_promotion_claim(&self, draft: PromotionClaimDraft) -> Result<PromotionClaimRecord> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let record = PromotionClaimRecord {
+                    buyer_user_id: draft.buyer_user_id,
+                    campaign_id: draft.campaign_id,
+                    claim_id: draft.claim_id,
+                    created_at: draft.created_at,
+                    expires_at: draft.expires_at,
+                    order_id: draft.order_id,
+                    phone_hash: draft.phone_hash,
+                    status: draft.status,
+                };
+                store.promotion_claims.push(record.clone());
+                Ok(record)
+            }
+            Self::Postgres(store) => store.create_promotion_claim(draft).await,
         }
     }
 }

@@ -9,6 +9,7 @@ use super::{
     build_delivery_activation_record, delivery_secret_key, hash_api_key,
     issue_memory_delivery_download_grant, next_id_suffix, now_rfc3339,
 };
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use serde::{Deserialize, Serialize};
 
 pub const MERCHANT_INVENTORY_STATUS_AVAILABLE: &str = "available";
@@ -17,6 +18,7 @@ pub const MERCHANT_INVENTORY_STATUS_SOLD: &str = "sold";
 pub const MERCHANT_ORDER_STATUS_CREATED: &str = "created";
 pub const MERCHANT_ORDER_STATUS_PAYMENT_PENDING: &str = "payment_pending";
 pub const MERCHANT_ORDER_STATUS_FULFILLED: &str = "fulfilled";
+pub const MERCHANT_ORDER_STATUS_EXPIRED: &str = "expired";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MerchantProductInventoryRecord {
@@ -64,6 +66,8 @@ pub struct MerchantProductOrderRecord {
     pub download_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub buyer_contact: Option<MerchantProductOrderBuyerContactRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experience: Option<MerchantProductOrderExperienceRecord>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -74,6 +78,14 @@ pub struct MerchantProductOrderBuyerContactRecord {
     pub phone_hash: String,
     pub lookup_passphrase_hash: String,
     pub lookup_passphrase_hint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MerchantProductOrderExperienceRecord {
+    pub campaign_id: String,
+    pub experience_kind: String,
+    pub issued_at: String,
+    pub expires_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +117,12 @@ pub struct MerchantProductOrderPublicView {
     pub download_grant_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub buyer_contact: Option<MerchantProductOrderBuyerContactPublicView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experience: Option<MerchantProductOrderExperiencePublicView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub is_expired: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -115,6 +133,14 @@ pub struct MerchantProductOrderBuyerContactPublicView {
     pub lookup_passphrase_hint: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookup_passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MerchantProductOrderExperiencePublicView {
+    pub campaign_id: String,
+    pub experience_kind: String,
+    pub issued_at: String,
+    pub expires_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -162,6 +188,53 @@ pub struct MerchantProductOrderDraft {
     pub card_product_id: String,
     pub buyer_user_id: UserId,
     pub buyer_contact: Option<MerchantProductOrderBuyerContactRecord>,
+    pub experience: Option<MerchantProductOrderExperienceRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MerchantProductExperienceConfig {
+    pub card_product_id: String,
+    pub campaign_id: String,
+    pub duration_minutes: u32,
+    pub kind: String,
+    pub requires_phone: bool,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromotionClaimRecord {
+    pub claim_id: String,
+    pub campaign_id: String,
+    pub phone_hash: String,
+    pub buyer_user_id: String,
+    pub order_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PromotionClaimDraft {
+    pub claim_id: String,
+    pub campaign_id: String,
+    pub phone_hash: String,
+    pub buyer_user_id: String,
+    pub order_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+pub fn merchant_order_is_expired(order: &MerchantProductOrderRecord) -> bool {
+    let Some(experience) = order.experience.as_ref() else {
+        return false;
+    };
+    let Ok(expires_at) = OffsetDateTime::parse(&experience.expires_at, &Rfc3339) else {
+        return false;
+    };
+    expires_at <= OffsetDateTime::now_utc() || order.status == MERCHANT_ORDER_STATUS_EXPIRED
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +273,49 @@ pub enum MerchantProductFulfillmentResult {
 }
 
 impl StoreMode {
+    pub async fn upsert_merchant_product_experience_config(
+        &self,
+        config: MerchantProductExperienceConfig,
+    ) -> Result<MerchantProductExperienceConfig> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if let Some(index) = store
+                    .merchant_product_experience_configs
+                    .iter()
+                    .position(|existing| existing.card_product_id == config.card_product_id)
+                {
+                    store.merchant_product_experience_configs[index] = config.clone();
+                } else {
+                    store.merchant_product_experience_configs.push(config.clone());
+                }
+                Ok(config)
+            }
+            Self::Postgres(store) => store.upsert_merchant_product_experience_config(config).await,
+        }
+    }
+
+    pub async fn get_merchant_product_experience_config(
+        &self,
+        card_product_id: &str,
+    ) -> Result<Option<MerchantProductExperienceConfig>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .merchant_product_experience_configs
+                    .iter()
+                    .find(|config| config.card_product_id == card_product_id && config.is_active)
+                    .cloned())
+            }
+            Self::Postgres(store) => {
+                store
+                    .get_merchant_product_experience_config(card_product_id)
+                    .await
+            }
+        }
+    }
+
     pub async fn bind_card_product_deliveries(
         &self,
         card_product_id: &str,
@@ -261,6 +377,23 @@ impl StoreMode {
         }
     }
 
+    pub async fn get_merchant_product_order_record(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<MerchantProductOrderRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .merchant_product_orders
+                    .iter()
+                    .find(|order| order.order_id == order_id)
+                    .cloned())
+            }
+            Self::Postgres(store) => store.get_merchant_product_order_record(order_id).await,
+        }
+    }
+
     pub async fn get_merchant_product_order_by_out_trade_no(
         &self,
         out_trade_no: &str,
@@ -277,6 +410,27 @@ impl StoreMode {
             Self::Postgres(store) => {
                 store
                     .get_merchant_product_order_by_out_trade_no(out_trade_no)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_merchant_product_order_record_by_out_trade_no(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<MerchantProductOrderRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .merchant_product_orders
+                    .iter()
+                    .find(|order| order.out_trade_no.as_deref() == Some(out_trade_no))
+                    .cloned())
+            }
+            Self::Postgres(store) => {
+                store
+                    .get_merchant_product_order_record_by_out_trade_no(out_trade_no)
                     .await
             }
         }
@@ -394,11 +548,35 @@ impl StoreMode {
             Self::Postgres(store) => store.get_wechat_user_openid(user_id).await,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn replace_merchant_product_order_for_test(
+        &self,
+        order: MerchantProductOrderRecord,
+    ) -> bool {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let Some(index) = store
+                    .merchant_product_orders
+                    .iter()
+                    .position(|existing| existing.order_id == order.order_id)
+                else {
+                    return false;
+                };
+                store.merchant_product_orders[index] = order;
+                true
+            }
+            Self::Postgres(_) => false,
+        }
+    }
 }
 
 pub(super) fn merchant_product_order_response(
     order: &MerchantProductOrderRecord,
 ) -> MerchantProductOrderResponse {
+    let expires_at = order.experience.as_ref().map(|experience| experience.expires_at.clone());
+    let is_expired = order.status == MERCHANT_ORDER_STATUS_EXPIRED;
     MerchantProductOrderResponse {
         data: MerchantProductOrderPublicView {
             order_id: order.order_id.clone(),
@@ -423,6 +601,17 @@ pub(super) fn merchant_product_order_response(
                     lookup_passphrase: None,
                 }
             }),
+            experience: order
+                .experience
+                .as_ref()
+                .map(|experience| MerchantProductOrderExperiencePublicView {
+                    campaign_id: experience.campaign_id.clone(),
+                    experience_kind: experience.experience_kind.clone(),
+                    issued_at: experience.issued_at.clone(),
+                    expires_at: experience.expires_at.clone(),
+                }),
+            expires_at,
+            is_expired,
             created_at: order.created_at.clone(),
             updated_at: order.updated_at.clone(),
         },
@@ -433,7 +622,7 @@ pub(super) fn merchant_pickup_response(
     order: &MerchantProductOrderRecord,
     browser_file_unlock_code: Option<String>,
 ) -> Option<MerchantPickupResponse> {
-    if order.status != MERCHANT_ORDER_STATUS_FULFILLED {
+    if order.status != MERCHANT_ORDER_STATUS_FULFILLED || merchant_order_is_expired(order) {
         return None;
     }
     let download_token = order.download_token.clone()?;
@@ -597,6 +786,7 @@ fn create_memory_merchant_product_order(
         download_grant_id: None,
         download_token: None,
         buyer_contact: draft.buyer_contact,
+        experience: draft.experience,
         created_at: now.clone(),
         updated_at: now.clone(),
     };

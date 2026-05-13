@@ -4,7 +4,8 @@ use super::merchant_product_orders::{
     MERCHANT_ORDER_STATUS_PAYMENT_PENDING, MerchantPickupResponse, MerchantProductFulfillmentDraft,
     MerchantProductFulfillmentResult, MerchantProductInventoryRecord,
     MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductOrderRecord,
-    MerchantProductOrderHistoryResponse, MerchantProductOrderResponse,
+    MerchantProductOrderHistoryResponse, MerchantProductOrderResponse, PromotionClaimDraft,
+    PromotionClaimRecord,
     MerchantProductPrepayDraft, MerchantPublicProduct, MerchantPublicShop,
     MerchantPublicShopResponse, merchant_pickup_response, merchant_product_order_response,
 };
@@ -23,6 +24,69 @@ use super::{
 };
 
 impl PostgresStore {
+    pub(super) async fn upsert_merchant_product_experience_config(
+        &self,
+        config: super::merchant_product_orders::MerchantProductExperienceConfig,
+    ) -> Result<super::merchant_product_orders::MerchantProductExperienceConfig> {
+        let now = now_rfc3339();
+        let next = super::merchant_product_orders::MerchantProductExperienceConfig {
+            updated_at: now,
+            ..config
+        };
+        sqlx::query(
+            "INSERT INTO merchant_product_experience_configs
+                (card_product_id, campaign_id, experience_kind, duration_minutes, requires_phone, is_active, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (card_product_id) DO UPDATE
+             SET campaign_id = EXCLUDED.campaign_id,
+                 experience_kind = EXCLUDED.experience_kind,
+                 duration_minutes = EXCLUDED.duration_minutes,
+                 requires_phone = EXCLUDED.requires_phone,
+                 is_active = EXCLUDED.is_active,
+                 payload = EXCLUDED.payload,
+                 updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&next.card_product_id)
+        .bind(&next.campaign_id)
+        .bind(&next.kind)
+        .bind(i64::from(next.duration_minutes))
+        .bind(next.requires_phone)
+        .bind(next.is_active)
+        .bind(Json(&next))
+        .bind(&next.created_at)
+        .bind(&next.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(next)
+    }
+
+    pub(super) async fn get_merchant_product_experience_config(
+        &self,
+        card_product_id: &str,
+    ) -> Result<Option<super::merchant_product_orders::MerchantProductExperienceConfig>> {
+        let row = sqlx::query(
+            "SELECT payload FROM merchant_product_experience_configs
+              WHERE card_product_id = $1 AND is_active = true",
+        )
+        .bind(card_product_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| {
+            row.get::<Json<super::merchant_product_orders::MerchantProductExperienceConfig>, _>(
+                "payload",
+            )
+            .0
+        }))
+    }
+
+    pub(super) async fn get_card_product(&self, card_product_id: &str) -> Result<Option<CardProduct>> {
+        let row = sqlx::query("SELECT payload FROM card_products WHERE card_product_id = $1")
+            .bind(card_product_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<Json<CardProduct>, _>("payload").0))
+    }
+
     pub(super) async fn bind_card_product_deliveries(
         &self,
         card_product_id: &str,
@@ -232,6 +296,7 @@ impl PostgresStore {
             download_grant_id: None,
             download_token: None,
             buyer_contact: draft.buyer_contact,
+            experience: draft.experience,
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -297,6 +362,17 @@ impl PostgresStore {
         }))
     }
 
+    pub(super) async fn get_merchant_product_order_record(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<MerchantProductOrderRecord>> {
+        let row = sqlx::query("SELECT payload FROM merchant_product_orders WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<Json<MerchantProductOrderRecord>, _>("payload").0))
+    }
+
     pub(super) async fn get_merchant_product_order_by_out_trade_no(
         &self,
         out_trade_no: &str,
@@ -311,6 +387,18 @@ impl PostgresStore {
                 &row.get::<Json<MerchantProductOrderRecord>, _>("payload").0,
             )
         }))
+    }
+
+    pub(super) async fn get_merchant_product_order_record_by_out_trade_no(
+        &self,
+        out_trade_no: &str,
+    ) -> Result<Option<MerchantProductOrderRecord>> {
+        let row =
+            sqlx::query("SELECT payload FROM merchant_product_orders WHERE out_trade_no = $1")
+                .bind(out_trade_no)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|row| row.get::<Json<MerchantProductOrderRecord>, _>("payload").0))
     }
 
     pub(super) async fn list_merchant_product_orders_by_guest_lookup(
@@ -361,6 +449,56 @@ impl PostgresStore {
         order.updated_at = now_rfc3339();
         self.update_merchant_product_order(&order).await?;
         Ok(Some(merchant_product_order_response(&order)))
+    }
+
+    pub(super) async fn find_active_promotion_claim(
+        &self,
+        campaign_id: &str,
+        phone_hash: &str,
+    ) -> Result<Option<PromotionClaimRecord>> {
+        let row = sqlx::query(
+            "SELECT payload FROM promotion_claims
+              WHERE campaign_id = $1 AND phone_hash = $2 AND status = 'active'
+              LIMIT 1",
+        )
+        .bind(campaign_id)
+        .bind(phone_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get::<Json<PromotionClaimRecord>, _>("payload").0))
+    }
+
+    pub(super) async fn create_promotion_claim(
+        &self,
+        draft: PromotionClaimDraft,
+    ) -> Result<PromotionClaimRecord> {
+        let record = PromotionClaimRecord {
+            buyer_user_id: draft.buyer_user_id,
+            campaign_id: draft.campaign_id,
+            claim_id: draft.claim_id,
+            created_at: draft.created_at,
+            expires_at: draft.expires_at,
+            order_id: draft.order_id,
+            phone_hash: draft.phone_hash,
+            status: draft.status,
+        };
+        sqlx::query(
+            "INSERT INTO promotion_claims
+                (claim_id, campaign_id, phone_hash, buyer_user_id, order_id, status, expires_at, payload, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(&record.claim_id)
+        .bind(&record.campaign_id)
+        .bind(&record.phone_hash)
+        .bind(&record.buyer_user_id)
+        .bind(&record.order_id)
+        .bind(&record.status)
+        .bind(&record.expires_at)
+        .bind(Json(&record))
+        .bind(&record.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(record)
     }
 
     pub(super) async fn fulfill_merchant_product_order(

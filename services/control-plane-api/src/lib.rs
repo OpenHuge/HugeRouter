@@ -871,6 +871,10 @@ fn app_with_state(state: ControlPlaneState) -> Router {
             post(merchant_api::create_card_product),
         )
         .route(
+            "/v1/merchant/card-products/experience-config",
+            post(merchant_api::upsert_merchant_product_experience_config),
+        )
+        .route(
             "/v1/merchant/trial-connections",
             post(merchant_api::create_trial_connection),
         )

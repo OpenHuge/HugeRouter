@@ -213,6 +213,215 @@ async fn guest_checkout_order_history_uses_phone_and_lookup_passphrase() {
 }
 
 #[tokio::test]
+async fn experience_checkout_requires_phone() {
+    let (_state, admin_cookie, app) = platform_admin_app().await;
+
+    let shop = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/shops",
+            Some(&admin_cookie),
+            Some(json!({
+                "merchant_shop_id": "mshop_experience_phone_test",
+                "slug": "experience-phone-test",
+                "display_name": "Experience Phone Test",
+                "announcement": "Experience phone test shop"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(shop.status(), StatusCode::OK);
+
+    let delivery_body = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+    let delivery_id = delivery_body["data"]["delivery"]["delivery_id"]
+        .as_str()
+        .unwrap();
+
+    let product = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cardprod_experience_phone_test",
+                "merchant_shop_id": "mshop_experience_phone_test",
+                "project_id": "proj_core",
+                "title": "Experience Trial",
+                "description": "Experience trial product",
+                "inventory_count": 1,
+                "face_value_usd": "0",
+                "retail_price_usd": "0",
+                "retail_price_cny_total": 10,
+                "supports_trial": false,
+                "sale_enabled": true,
+                "delivery_ids": [delivery_id]
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(product.status(), StatusCode::OK);
+
+    let experience = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products/experience-config",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cardprod_experience_phone_test",
+                "campaign_id": "exp_phone_required",
+                "experience_kind": "paid_trial",
+                "duration_minutes": 60,
+                "requires_phone": true,
+                "is_active": true
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(experience.status(), StatusCode::OK);
+
+    let order = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders",
+            None,
+            Some(json!({
+                "card_product_id": "cardprod_experience_phone_test"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(order.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(order).await;
+    assert_eq!(body["code"], "experience_phone_required");
+}
+
+#[tokio::test]
+async fn experience_checkout_rejects_second_claim_for_same_phone() {
+    let (state, admin_cookie, app) = platform_admin_app().await;
+
+    let shop = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/shops",
+            Some(&admin_cookie),
+            Some(json!({
+                "merchant_shop_id": "mshop_experience_limit_test",
+                "slug": "experience-limit-test",
+                "display_name": "Experience Limit Test",
+                "announcement": "Experience limit test shop"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(shop.status(), StatusCode::OK);
+
+    let delivery_a = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+    let delivery_a_id = delivery_a["data"]["delivery"]["delivery_id"].as_str().unwrap();
+    let delivery_b = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+    let delivery_b_id = delivery_b["data"]["delivery"]["delivery_id"].as_str().unwrap();
+
+    let product = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cardprod_experience_limit_test",
+                "merchant_shop_id": "mshop_experience_limit_test",
+                "project_id": "proj_core",
+                "title": "Experience Limit Trial",
+                "description": "Experience limit product",
+                "inventory_count": 2,
+                "face_value_usd": "0",
+                "retail_price_usd": "0",
+                "retail_price_cny_total": 10,
+                "supports_trial": false,
+                "sale_enabled": true,
+                "delivery_ids": [delivery_a_id, delivery_b_id]
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(product.status(), StatusCode::OK);
+
+    let experience = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products/experience-config",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cardprod_experience_limit_test",
+                "campaign_id": "exp_limit_one",
+                "experience_kind": "paid_trial",
+                "duration_minutes": 60,
+                "requires_phone": true,
+                "is_active": true
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(experience.status(), StatusCode::OK);
+
+    let first_order = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders",
+            None,
+            Some(json!({
+                "card_product_id": "cardprod_experience_limit_test",
+                "buyer_phone": "13800138000"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first_order.status(), StatusCode::OK);
+    let first_order_body = response_json(first_order).await;
+    let order_id = first_order_body["data"]["order_id"].as_str().unwrap().to_string();
+
+    let fulfilled = state
+        .store
+        .fulfill_merchant_product_order(MerchantProductFulfillmentDraft {
+            order_id,
+            activation_id: "activation_experience_limit_test".to_string(),
+            download_grant_id: "dlgrant_experience_limit_test".to_string(),
+            download_token: "dltok_experience_limit_test".to_string(),
+            pickup_token: "pickup_experience_limit_test".to_string(),
+            fulfilled_by: "test".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        fulfilled,
+        MerchantProductFulfillmentResult::Fulfilled(_)
+    ));
+
+    let second_order = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders",
+            None,
+            Some(json!({
+                "card_product_id": "cardprod_experience_limit_test",
+                "buyer_phone": "13800138000"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second_order.status(), StatusCode::CONFLICT);
+    let second_body = response_json(second_order).await;
+    assert_eq!(second_body["code"], "experience_already_claimed");
+}
+
+#[tokio::test]
 async fn merchant_pickup_requires_fulfilled_payment_order() {
     let (state, admin_cookie, app) = platform_admin_app().await;
     let wechat_cookie = platform_wechat_cookie(&state).await;
@@ -402,4 +611,132 @@ async fn fulfilled_merchant_order_exposes_pickup_token_once() {
         pickup_body["data"]["browser_file_unlock_code"].as_str(),
         Some(browser_file_unlock_code.as_str())
     );
+}
+
+#[tokio::test]
+async fn expired_experience_order_hides_pickup() {
+    let (state, admin_cookie, app) = platform_admin_app().await;
+
+    let shop = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/shops",
+            Some(&admin_cookie),
+            Some(json!({
+                "merchant_shop_id": "mshop_hugecode_expired_experience_test",
+                "slug": "hugecode-expired-experience-test",
+                "display_name": "HugeCode Expired Experience Test",
+                "announcement": "Expired experience test shop"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(shop.status(), StatusCode::OK);
+
+    let delivery_body = prepare_delivery_for_test(app.clone(), &admin_cookie).await;
+    let delivery_id = delivery_body["data"]["delivery"]["delivery_id"]
+        .as_str()
+        .unwrap();
+
+    let product = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cprod_hugecode_expired_experience_test",
+                "merchant_shop_id": "mshop_hugecode_expired_experience_test",
+                "project_id": "proj_core",
+                "title": "HugeCode Expired Experience",
+                "description": "Expired experience product",
+                "inventory_count": 1,
+                "face_value_usd": "0",
+                "retail_price_usd": "0",
+                "retail_price_cny_total": 10,
+                "supports_trial": false,
+                "sale_enabled": true,
+                "delivery_ids": [delivery_id]
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(product.status(), StatusCode::OK);
+
+    let experience = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant/card-products/experience-config",
+            Some(&admin_cookie),
+            Some(json!({
+                "card_product_id": "cprod_hugecode_expired_experience_test",
+                "campaign_id": "exp_expired_pickup",
+                "experience_kind": "paid_trial",
+                "duration_minutes": 1,
+                "requires_phone": true,
+                "is_active": true
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(experience.status(), StatusCode::OK);
+
+    let order = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/v1/merchant-product-orders",
+            None,
+            Some(json!({
+                "card_product_id": "cprod_hugecode_expired_experience_test",
+                "buyer_phone": "13800138001"
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(order.status(), StatusCode::OK);
+    let order_body = response_json(order).await;
+    let order_id = order_body["data"]["order_id"].as_str().unwrap().to_string();
+
+    let fulfilled = state
+        .store
+        .fulfill_merchant_product_order(MerchantProductFulfillmentDraft {
+            order_id: order_id.clone(),
+            activation_id: "activation_expired_experience_test".to_string(),
+            download_grant_id: "dlgrant_expired_experience_test".to_string(),
+            download_token: "dltok_expired_experience_test".to_string(),
+            pickup_token: "pickup_expired_experience_test".to_string(),
+            fulfilled_by: "test".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        fulfilled,
+        MerchantProductFulfillmentResult::Fulfilled(_)
+    ));
+
+    let mut record = state
+        .store
+        .get_merchant_product_order_record(&order_id)
+        .await
+        .unwrap()
+        .unwrap();
+    if let Some(experience) = record.experience.as_mut() {
+        experience.expires_at = "2020-01-01T00:00:00Z".to_string();
+    }
+    record.status = "expired".to_string();
+    assert!(state.store.replace_merchant_product_order_for_test(record));
+
+    let pickup = app
+        .oneshot(request(
+            "GET",
+            "/v1/pickups/pickup_expired_experience_test",
+            None,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(pickup.status(), StatusCode::NOT_FOUND);
 }
