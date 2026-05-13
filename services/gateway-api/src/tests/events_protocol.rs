@@ -19,9 +19,13 @@ async fn returns_forbidden_when_api_key_scope_does_not_match_active_config() {
         auth_store: Arc::new(StaticApiKeyScopeStore {
             scope: GatewayApiKeyScope {
                 credential_id: "cred_other".to_string(),
+                grant_id: None,
+                owner_account_id: None,
                 tenant_id: "tenant_platform".to_string(),
                 project_id: Some("proj_core".to_string()),
                 status: "active".to_string(),
+                config_snapshot_id: None,
+                route_policy_id: None,
                 scopes: Vec::new(),
             },
         }),
@@ -87,9 +91,13 @@ async fn allows_tenant_scoped_api_keys_without_project_scope() {
         auth_store: Arc::new(StaticApiKeyScopeStore {
             scope: GatewayApiKeyScope {
                 credential_id: "cred_tenant_shared".to_string(),
+                grant_id: None,
+                owner_account_id: None,
                 tenant_id: "tenant_acme".to_string(),
                 project_id: None,
                 status: "active".to_string(),
+                config_snapshot_id: None,
+                route_policy_id: None,
                 scopes: Vec::new(),
             },
         }),

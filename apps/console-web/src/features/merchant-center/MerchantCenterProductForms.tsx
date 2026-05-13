@@ -5,6 +5,7 @@ import {
   UiInline,
   UiSelect,
   UiStack,
+  UiSwitch,
   UiText,
   UiTextField,
   UiTextarea,
@@ -94,6 +95,20 @@ export function CardProductCard({
                 />
                 <FieldErrorText error={cardErrors.merchantShopId} />
               </UiStack>
+              <UiStack gap="xs">
+                <UiTextField
+                  label="Project id"
+                  onChange={(event) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      projectId: event.currentTarget.value,
+                    }))
+                  }
+                  placeholder="proj_core"
+                  value={cardForm.projectId}
+                />
+                <FieldErrorText error={cardErrors.projectId} />
+              </UiStack>
             </UiInline>
             <UiInline align="flex-start" grow>
               <UiStack gap="xs">
@@ -124,6 +139,18 @@ export function CardProductCard({
                     }))
                   }
                   value={cardForm.supportsTrial}
+                />
+              </UiStack>
+              <UiStack gap="xs">
+                <UiSwitch
+                  checked={cardForm.saleEnabled}
+                  label="Enable WeChat sale"
+                  onChange={(event) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      saleEnabled: event.currentTarget.checked,
+                    }))
+                  }
                 />
               </UiStack>
             </UiInline>
@@ -182,7 +209,34 @@ export function CardProductCard({
                 />
                 <FieldErrorText error={cardErrors.retailPriceUsd} />
               </UiStack>
+              <UiStack gap="xs">
+                <UiTextField
+                  label="CNY price cents"
+                  onChange={(event) =>
+                    setCardForm((current) => ({
+                      ...current,
+                      retailPriceCnyTotal: event.currentTarget.value,
+                    }))
+                  }
+                  placeholder="199"
+                  value={cardForm.retailPriceCnyTotal}
+                />
+                <FieldErrorText error={cardErrors.retailPriceCnyTotal} />
+              </UiStack>
             </UiInline>
+            <UiTextarea
+              label="Delivery inventory ids"
+              minRows={3}
+              onChange={(event) =>
+                setCardForm((current) => ({
+                  ...current,
+                  deliveryIds: event.currentTarget.value,
+                }))
+              }
+              placeholder="delivery_abc123, delivery_def456"
+              value={cardForm.deliveryIds}
+            />
+            <FieldErrorText error={cardErrors.deliveryIds} />
             <UiInline justify="flex-end">
               <UiButton
                 loading={isSubmittingCard}

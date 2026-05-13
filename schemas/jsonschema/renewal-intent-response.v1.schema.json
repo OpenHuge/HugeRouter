@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RenewalIntentResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "$ref": "#/definitions/RenewalIntent"
+    }
+  },
+  "definitions": {
+    "ProjectId": {
+      "type": "string"
+    },
+    "RenewalIntent": {
+      "type": "object",
+      "required": [
+        "created_at",
+        "created_by",
+        "grant_id",
+        "out_trade_no",
+        "payment_status",
+        "previous_expires_at",
+        "previous_grant_status",
+        "project_id",
+        "reason",
+        "reason_code",
+        "renew_expires_at",
+        "renewal_intent_id",
+        "status",
+        "tenant_id",
+        "updated_at"
+      ],
+      "properties": {
+        "applied_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "grant_id": {
+          "type": "string"
+        },
+        "out_trade_no": {
+          "type": "string"
+        },
+        "payment_status": {
+          "type": "string"
+        },
+        "previous_expires_at": {
+          "type": "string"
+        },
+        "previous_grant_status": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "renew_expires_at": {
+          "type": "string"
+        },
+        "renewal_intent_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

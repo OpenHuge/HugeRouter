@@ -1,0 +1,82 @@
+{
+  "data": {
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core",
+    "window_start": "2026-05-01T00:00:00Z",
+    "window_end": "2026-05-31T23:59:59Z",
+    "totals": {
+      "deliveries": 1,
+      "artifacts": 1,
+      "upload_batches": 1,
+      "upload_items": 1,
+      "activations": 1,
+      "download_grants": 1,
+      "entitlements": 1,
+      "service_segments": 1,
+      "lifecycle_events": 1,
+      "exceptions": 1
+    },
+    "status_counts": [
+      {
+        "domain": "delivery",
+        "status": "active",
+        "count": 1
+      },
+      {
+        "domain": "download_grant",
+        "status": "used",
+        "count": 1
+      }
+    ],
+    "recent_events": [
+      {
+        "event_id": "delivery_created:delivery_10001:2026-05-05T10:00:00Z",
+        "event_type": "delivery_created",
+        "object_type": "delivery",
+        "object_id": "delivery_10001",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "upload_batch_id": "dlvup_10004",
+        "status": "active",
+        "occurred_at": "2026-05-05T10:00:00Z",
+        "summary": "Delivery fact created"
+      },
+      {
+        "event_id": "delivery_download_grant_used:dlgrant_10003:2026-05-05T10:11:00Z",
+        "event_type": "delivery_download_grant_used",
+        "object_type": "delivery_download_grant",
+        "object_id": "dlgrant_10003",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "entitlement_id": "dlvent_delivery_10001",
+        "activation_id": "activation_10002",
+        "artifact_id": "artifact_10002",
+        "grant_id": "dlgrant_10003",
+        "upload_batch_id": "dlvup_10004",
+        "upload_item_id": "dlvupitem_10004_1",
+        "status": "used",
+        "occurred_at": "2026-05-05T10:11:00Z",
+        "summary": "Download grant consumed"
+      }
+    ],
+    "exceptions": [
+      {
+        "exception_id": "entitlement_needs_manual_supply:dlvent_delivery_10001:2026-05-05T10:12:00Z",
+        "exception_type": "entitlement_needs_manual_supply",
+        "severity": "critical",
+        "tenant_id": "tenant_acme",
+        "project_id": "proj_core",
+        "delivery_id": "delivery_10001",
+        "entitlement_id": "dlvent_delivery_10001",
+        "upload_batch_id": "dlvup_10004",
+        "upload_item_id": "dlvupitem_10004_1",
+        "status": "needs_manual_supply",
+        "reason": "continuation_artifact_missing",
+        "occurred_at": "2026-05-05T10:12:00Z",
+        "summary": "Delivery entitlement requires operator attention"
+      }
+    ]
+  }
+}

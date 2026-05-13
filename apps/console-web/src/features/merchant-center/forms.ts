@@ -8,11 +8,15 @@ export type ShopFormState = {
 export type CardProductFormState = {
   cardProductId: string;
   merchantShopId: string;
+  projectId: string;
   title: string;
   description: string;
   inventoryCount: string;
   faceValueUsd: string;
   retailPriceUsd: string;
+  retailPriceCnyTotal: string;
+  saleEnabled: boolean;
+  deliveryIds: string;
   supportsTrial: string;
 };
 
@@ -44,10 +48,14 @@ export function createCardProductForm(): CardProductFormState {
   return {
     cardProductId: "",
     description: "",
+    deliveryIds: "",
     faceValueUsd: "",
     inventoryCount: "10",
     merchantShopId: "",
+    projectId: "",
+    retailPriceCnyTotal: "",
     retailPriceUsd: "",
+    saleEnabled: false,
     supportsTrial: "true",
     title: "",
   };
@@ -101,6 +109,13 @@ export function validateCardProductForm(
     errors.merchantShopId = "Select a merchant shop.";
   }
 
+  if (
+    form.projectId.trim() &&
+    !/^proj_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(form.projectId.trim())
+  ) {
+    errors.projectId = "Use an id with the proj_ prefix.";
+  }
+
   if (!form.title.trim()) {
     errors.title = "Enter a product title.";
   }
@@ -117,8 +132,26 @@ export function validateCardProductForm(
     errors.retailPriceUsd = "Enter a numeric retail price.";
   }
 
+  if (
+    form.retailPriceCnyTotal.trim() &&
+    !/^\d+$/.test(form.retailPriceCnyTotal.trim())
+  ) {
+    errors.retailPriceCnyTotal = "Enter a CNY cent amount.";
+  }
+
   if (!/^\d+$/.test(form.inventoryCount)) {
     errors.inventoryCount = "Enter a non-negative inventory count.";
+  }
+
+  const deliveryIds = form.deliveryIds
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const invalidDeliveryId = deliveryIds.find(
+    (deliveryId) => !/^delivery_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(deliveryId),
+  );
+  if (invalidDeliveryId) {
+    errors.deliveryIds = "Use delivery_ ids separated by commas or new lines.";
   }
 
   return errors;

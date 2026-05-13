@@ -164,13 +164,23 @@ function MerchantCenterContent({ data }: { data: MerchantWorkspaceData }) {
     setStatusSuccess(null);
 
     try {
+      const deliveryIds = cardForm.deliveryIds
+        .split(/[\s,]+/)
+        .map((value) => value.trim())
+        .filter(Boolean);
       const created = await getConsoleDataService().createCardProduct({
         cardProductId: cardForm.cardProductId.trim(),
         description: cardForm.description.trim(),
+        deliveryIds,
         faceValueUsd: cardForm.faceValueUsd.trim(),
         inventoryCount: Number(cardForm.inventoryCount),
         merchantShopId: cardForm.merchantShopId,
+        projectId: cardForm.projectId.trim() || undefined,
+        retailPriceCnyTotal: cardForm.retailPriceCnyTotal.trim()
+          ? Number(cardForm.retailPriceCnyTotal)
+          : undefined,
         retailPriceUsd: cardForm.retailPriceUsd.trim(),
+        saleEnabled: cardForm.saleEnabled,
         supportsTrial: cardForm.supportsTrial === "true",
         title: cardForm.title.trim(),
       });

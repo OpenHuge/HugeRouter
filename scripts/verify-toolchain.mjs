@@ -16,6 +16,10 @@ const expectedNode = packageJson.engines?.node
 const expectedPnpm =
   packageJson.engines?.pnpm ?? packageJson.packageManager?.split('@')[1]
 const expectedRust = rustToolchain.match(/^channel = "([^"]+)"$/m)?.[1]
+const pnpmCommand =
+  process.platform === 'win32'
+    ? ['cmd.exe', ['/d', '/s', '/c', 'pnpm.cmd', '--version']]
+    : ['pnpm', ['--version']]
 
 if (!expectedNode || !expectedPnpm || !expectedRust) {
   console.error('Unable to resolve the expected Node, pnpm, or Rust versions.')
@@ -27,8 +31,8 @@ function parseVersion(output) {
   return match?.[1] ?? output.trim()
 }
 
-function detect(command, args, label) {
-  const result = spawnSync(command, args, { encoding: 'utf8' })
+function detect(command, args, label, options = {}) {
+  const result = spawnSync(command, args, { encoding: 'utf8', ...options })
   if (result.error) {
     return {
       label,
@@ -61,7 +65,7 @@ const checks = [
     fix: `Install Node.js ${expectedNode} or reopen the devcontainer.`
   },
   {
-    ...detect('pnpm', ['--version'], 'pnpm'),
+    ...detect(pnpmCommand[0], pnpmCommand[1], 'pnpm'),
     expected: expectedPnpm,
     fix: `Run "corepack enable && corepack prepare pnpm@${expectedPnpm} --activate".`
   },

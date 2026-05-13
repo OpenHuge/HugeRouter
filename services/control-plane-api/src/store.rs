@@ -35,27 +35,40 @@ use core_domain::{
     AdmissionResult, AuthKind, AuthLoginResult, AuthProvider, AuthProviderAvailability,
     AuthProviderLink, AuthSession, AuthSessionId, AuthSessionState, BudgetPolicyId,
     CardDeliveryKind, CardProduct, CardProductId, CardProductStatus, ConfigSnapshot,
-    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DeploymentScope, HealthState,
-    LogoutResponse, MerchantFulfillmentMode, MerchantShop, MerchantShopId, MerchantShopStatus,
-    MonetaryAmount, NormalizedRequestSummary, OAuthProvider, Project, ProjectId, ProvenanceClass,
-    ProviderCapabilities, ProviderResource, ProviderResourceId, ProviderResourceStatus,
-    RedactionTier, RelayCheckStatus, RelayEvaluation, RelayEvaluationId, RelayEvaluationRunnerMode,
-    RelayEvaluationVerdict, ReplayCapsule, ReplayCapsuleId, RoutePolicy, RoutePolicyId,
-    RouteReceipt, RouteReceiptId, Tenant, TenantId, TenantMembership, TenantMembershipId,
-    TenantMembershipRole, TenantMembershipStatus, TenantSummary, TrialConnection,
-    TrialConnectionId, TrialConnectionStatus, UnlinkAuthProviderResponse, UpstreamErrorSummary,
-    UserId, UserIdentity,
+    ConfigSnapshotId, ConfigSnapshotStatus, CredentialOwnerType, DEFAULT_OWNER_ACCOUNT_ID,
+    DeploymentScope, HealthState, LogoutResponse, MerchantFulfillmentMode, MerchantShop,
+    MerchantShopId, MerchantShopStatus, MonetaryAmount, NormalizedRequestSummary, OAuthProvider,
+    Project, ProjectId, ProvenanceClass, ProviderCapabilities, ProviderResource,
+    ProviderResourceId, ProviderResourceStatus, RedactionTier, RelayCheckStatus, RelayEvaluation,
+    RelayEvaluationId, RelayEvaluationRunnerMode, RelayEvaluationVerdict, ReplayCapsule,
+    ReplayCapsuleId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptId, Tenant, TenantId,
+    TenantMembership, TenantMembershipId, TenantMembershipRole, TenantMembershipStatus,
+    TenantSummary, TrialConnection, TrialConnectionId, TrialConnectionStatus,
+    UnlinkAuthProviderResponse, UpstreamErrorSummary, UsageMetrics, UserId, UserIdentity,
 };
-use metering::{PricingCatalog, default_budget_micros};
+use metering::{PricingCatalog, default_budget_micros_for_scope};
 use protocol_ir::{
     BalanceProjection, BalanceProjectionResponse, BillingExportJob, BillingExportJobResponse,
-    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse,
-    PricingCatalogResponse, PricingSimulationRequest, PricingSimulationResponse, ProjectsResponse,
-    ProtocolFamily, ProviderResourcesResponse, RouteDiagnosticDecision, RouteDiagnosticTarget,
+    BillingExportJobsResponse, BillingExportRequest, ConfigSnapshotResponse, Delivery,
+    DeliveryActivation, DeliveryActivationResponse, DeliveryArtifact, DeliveryArtifactResponse,
+    DeliveryArtifactsResponse, DeliveryCode, DeliveryDownloadGrant,
+    DeliveryDownloadGrantIssueResponse, DeliveryDownloadGrantResponse, DeliveryEntitlement,
+    DeliveryLifecycleEvent, DeliveryLifecycleEventsResponse, DeliveryLifecycleResponse,
+    DeliveryOneTimeCodes, DeliveryOperationsDetail, DeliveryOperationsDetailResponse,
+    DeliveryOperationsException, DeliveryOperationsExceptionsResponse, DeliveryOperationsOverview,
+    DeliveryOperationsOverviewResponse, DeliveryOperationsStatusCount,
+    DeliveryOperationsTimelineEvent, DeliveryOperationsTimelineResponse, DeliveryOperationsTotals,
+    DeliveryPrepareResponse, DeliveryProjection, DeliveryResponse, DeliveryServiceSegment,
+    DeliveryServiceSegmentsResponse, DeliveryUploadBatch, DeliveryUploadBatchItem,
+    DeliveryUploadBatchItemsResponse, DeliveryUploadBatchResponse, OpeningGrant,
+    OpeningGrantsResponse, PricingCatalogResponse, PricingSimulationRequest,
+    PricingSimulationResponse, ProjectsResponse, ProtocolFamily, ProviderResourcesResponse,
+    RenewalIntent, RenewalIntentsResponse, RouteDiagnosticDecision, RouteDiagnosticTarget,
     RouteDiagnosticsResponse, RoutePoliciesResponse, RouteReceiptDecisionTraceStep,
     RouteReceiptDiagnosticsResponse, RouteReceiptPolicyCheck, RouteReceiptProviderAttempt,
     RouteReceiptResponse, RouteReceiptSummary, RouteSimulationRequest, RouteSimulationResponse,
-    TenantsResponse, UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
+    SaleReadiness, SaleReadyCheck, SaleReadyHandoff, SaleReadyPackageResponse, TenantsResponse,
+    UsageBreakdownResponse, UsageBreakdownRow, UsageSummary, UsageSummaryResponse,
 };
 use routing_engine::{
     ProviderTargetKind, ProviderTargetRuntime, RoutingConfig, RoutingRequest, health_state_slug,
@@ -71,13 +84,104 @@ use std::{
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+mod delivery_redemption_units;
+mod merchant_product_orders;
+mod merchant_product_orders_postgres;
+mod opening_grants;
+mod shared_account_packages;
+mod shared_account_packages_postgres;
+
+pub use delivery_redemption_units::{
+    DeliveryRedemptionUnitDraft, DeliveryRedemptionUnitsPrepareResult,
+    owner_redemption_capacity_blocker_for_memory, owner_redemption_capacity_blocker_for_postgres,
+};
+pub use merchant_product_orders::{
+    MERCHANT_ORDER_STATUS_FULFILLED, MerchantPickupResponse, MerchantProductFulfillmentDraft,
+    MerchantProductFulfillmentResult, MerchantProductInventoryRecord,
+    MerchantProductOrderCreateResult, MerchantProductOrderDraft, MerchantProductOrderRecord,
+    MerchantProductOrderResponse, MerchantProductPrepayDraft, MerchantPublicShopResponse,
+};
+use opening_grants::{
+    OPENING_GRANT_OWNER_LOCK_INSERT_SQL, OPENING_GRANT_OWNER_LOCK_SELECT_SQL,
+    opening_grant_create_blocker,
+};
+pub use opening_grants::{OpeningGrantCreateResult, OpeningGrantDraft, OpeningGrantRecord};
+pub use shared_account_packages::{
+    PublishSharedAccountPackageVersionDraft, SharedAccountPackageHeadRecord,
+    SharedAccountPackageVersionRecord,
+};
+
 pub const SESSION_TTL_SECONDS: u64 = 60 * 60 * 8;
 pub const ACTIVE_CONFIG_ALIAS: &str = "active";
 const DEFAULT_OAUTH_POOL_RUNTIME_LEASE_TTL_SECONDS: u64 = 120;
 const DEFAULT_OAUTH_POOL_SESSION_BINDING_TTL_SECONDS: u64 = 60 * 60 * 24;
 const OAUTH_POOL_COOLDOWN_SECONDS: u64 = 60 * 5;
 const OAUTH_POOL_MAX_COOLDOWN_SECONDS: u64 = 60 * 60;
-
+const PROVIDER_RESOURCE_INTAKE_PENDING_PROBE: &str = "manual_intake_pending_live_probe";
+const PROVIDER_RESOURCE_INTAKE_PENDING_MESSAGE: &str =
+    "Resource registered but not route eligible until live probe or operator approval.";
+pub const DELIVERY_SOURCE_MANUAL_OPERATOR: &str = "manual_operator";
+pub const DELIVERY_STATUS_PREPARED: &str = "prepared";
+pub const DELIVERY_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_STATUS_EXPIRED: &str = "expired";
+pub const DELIVERY_CODE_TYPE_REDEMPTION: &str =
+    crate::delivery_redemption_policy::DELIVERY_CODE_TYPE_REDEMPTION;
+pub const DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK: &str =
+    crate::delivery_redemption_policy::DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK;
+pub const DELIVERY_CODE_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_CODE_STATUS_USED: &str = "used";
+pub const DELIVERY_CODE_FORMAT_REDEMPTION_V2: &str =
+    crate::delivery_redemption_policy::DELIVERY_CODE_FORMAT_REDEMPTION_V2;
+pub const DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V2: &str =
+    crate::delivery_redemption_policy::DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V2;
+pub const DELIVERY_ENTITLEMENT_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_ENTITLEMENT_STATUS_PENDING_ACTIVATION: &str = "pending_activation";
+pub const DELIVERY_ENTITLEMENT_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_ENTITLEMENT_STATUS_SUSPENDED: &str = "suspended";
+pub const DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY: &str = "needs_manual_supply";
+pub const DELIVERY_ARTIFACT_KIND_BROWSER_ACCOUNT_BUNDLE: &str = "browser_account_bundle";
+pub const DELIVERY_ARTIFACT_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_ARTIFACT_STATUS_SUPERSEDED: &str = "superseded";
+pub const DELIVERY_ARTIFACT_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_ARTIFACT_STORAGE_BACKEND_DB_INLINE: &str = "db_inline";
+pub const DELIVERY_ARTIFACT_MAX_BYTES: usize = 16 * 1024 * 1024;
+pub const DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2: &str =
+    crate::delivery_redemption_policy::DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2;
+pub const DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2: &str =
+    crate::delivery_redemption_policy::DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2;
+pub const DELIVERY_ACTIVATION_STATUS_ACTIVATED: &str = "activated";
+pub const DELIVERY_ACTIVATION_SOURCE_REDEMPTION_CODE: &str = "redemption_code";
+pub const DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_DOWNLOAD_GRANT_STATUS_USED: &str = "used";
+pub const DELIVERY_DOWNLOAD_GRANT_STATUS_EXPIRED: &str = "expired";
+pub const DELIVERY_DOWNLOAD_GRANT_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_DOWNLOAD_GRANT_TTL_SECONDS: u64 = 15 * 60;
+pub const DELIVERY_DOWNLOAD_GRANT_MAX_USES: u32 = 1;
+pub const DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_PRODUCER_AUTHORIZATION_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_PRODUCER_AUTHORIZATION_STATUS_EXPIRED: &str = "expired";
+pub const DELIVERY_PRODUCER_TOKEN_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_PRODUCER_TOKEN_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_PRODUCER_TOKEN_STATUS_EXPIRED: &str = "expired";
+pub const DELIVERY_PRODUCER_TOKEN_TTL_SECONDS: u64 = 60 * 60 * 24 * 30;
+pub const DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE: &str = "active";
+pub const DELIVERY_SERVICE_SEGMENT_STATUS_SCHEDULED: &str = "scheduled";
+pub const DELIVERY_SERVICE_SEGMENT_STATUS_EXPIRED: &str = "expired";
+pub const DELIVERY_SERVICE_SEGMENT_STATUS_REVOKED: &str = "revoked";
+pub const DELIVERY_LIFECYCLE_EVENT_SEGMENT_CREATED: &str = "segment_created";
+pub const DELIVERY_LIFECYCLE_EVENT_NEEDS_MANUAL_SUPPLY: &str = "needs_manual_supply";
+pub const DELIVERY_LIFECYCLE_EVENT_RENEWED: &str = "entitlement_renewed";
+pub const DELIVERY_LIFECYCLE_EVENT_EXPIRED: &str = "entitlement_expired";
+pub const DELIVERY_UPLOAD_BATCH_STATUS_QUEUED: &str = "queued";
+pub const DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING: &str = "processing";
+pub const DELIVERY_UPLOAD_BATCH_STATUS_SUCCEEDED: &str = "succeeded";
+pub const DELIVERY_UPLOAD_BATCH_STATUS_PARTIALLY_FAILED: &str = "partially_failed";
+pub const DELIVERY_UPLOAD_BATCH_STATUS_FAILED: &str = "failed";
+pub const DELIVERY_UPLOAD_ITEM_STATUS_PENDING: &str = "pending";
+pub const DELIVERY_UPLOAD_ITEM_STATUS_ACCEPTED: &str = "accepted";
+pub const DELIVERY_UPLOAD_ITEM_STATUS_DUPLICATE: &str = "duplicate";
+pub const DELIVERY_UPLOAD_ITEM_STATUS_REJECTED: &str = "rejected";
+pub const DELIVERY_UPLOAD_ITEM_STATUS_FAILED: &str = "failed";
 const PROVIDER_CATALOG: &[(AuthProvider, &str, &str)] = &[
     (
         AuthProvider::Email,
@@ -127,6 +231,9 @@ pub struct MemoryStore {
     config_snapshots: Vec<ConfigSnapshot>,
     merchant_shops: Vec<MerchantShop>,
     card_products: Vec<CardProduct>,
+    merchant_product_inventory: Vec<MerchantProductInventoryRecord>,
+    merchant_product_orders: Vec<MerchantProductOrderRecord>,
+    wechat_user_openids: HashMap<String, String>,
     trial_connections: Vec<TrialConnection>,
     relay_evaluations: Vec<RelayEvaluation>,
     replay_capsules: HashMap<String, ReplayCapsule>,
@@ -141,8 +248,25 @@ pub struct MemoryStore {
     route_receipts: HashMap<String, RouteReceipt>,
     billing_export_jobs: Vec<BillingExportJobRecord>,
     wechat_payment_orders: HashMap<String, WechatPaymentOrderRecord>,
+    renewal_intents: Vec<RenewalIntent>,
     route_policy_disabled_ids: HashSet<String>,
     api_keys: Vec<ApiKeyRecord>,
+    opening_grants: Vec<OpeningGrantRecord>,
+    deliveries: Vec<DeliveryRecord>,
+    delivery_codes: Vec<DeliveryCodeRecord>,
+    delivery_secret_plaintexts: HashMap<String, String>,
+    delivery_entitlements: Vec<DeliveryEntitlementRecord>,
+    delivery_artifacts: Vec<DeliveryArtifactRecord>,
+    delivery_activations: Vec<DeliveryActivationRecord>,
+    delivery_download_grants: Vec<DeliveryDownloadGrantRecord>,
+    delivery_producer_authorizations: Vec<DeliveryProducerAuthorizationRecord>,
+    delivery_producer_tokens: Vec<DeliveryProducerTokenRecord>,
+    delivery_service_segments: Vec<DeliveryServiceSegmentRecord>,
+    delivery_lifecycle_events: Vec<DeliveryLifecycleEventRecord>,
+    delivery_upload_batches: Vec<DeliveryUploadBatchRecord>,
+    delivery_upload_batch_items: Vec<DeliveryUploadBatchItemRecord>,
+    shared_account_package_heads: HashMap<String, SharedAccountPackageHeadRecord>,
+    shared_account_package_versions: Vec<SharedAccountPackageVersionRecord>,
     codex_auth_accounts: Vec<CodexAuthAccountRecord>,
     oauth_sharing_leases: Vec<OAuthSharingLeaseRecord>,
     oauth_carpools: Vec<OAuthCarpoolRecord>,
@@ -162,6 +286,530 @@ pub struct ApiKeyRecord {
     pub created_at: String,
     pub updated_at: String,
     pub version: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryPrepareDraft {
+    pub delivery_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub owner_account_id: String,
+    pub redemption_batch_id: Option<String>,
+    pub provider: String,
+    pub operator_id: String,
+    pub customer_label: Option<String>,
+    pub service_kind: String,
+    pub service_days: u32,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub code_expires_at: String,
+    pub enforce_owner_redemption_capacity: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryRecord {
+    pub delivery_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    #[serde(default = "default_delivery_owner_account_id")]
+    pub owner_account_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redemption_batch_id: Option<String>,
+    pub provider: String,
+    pub status: String,
+    pub operator_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_label: Option<String>,
+    pub source: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCodeRecord {
+    pub code_id: String,
+    pub delivery_id: String,
+    pub code_type: String,
+    pub code_hash: String,
+    pub code_prefix: String,
+    pub code_last_four: String,
+    pub format_version: String,
+    pub status: String,
+    pub expires_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryEntitlementRecord {
+    pub entitlement_id: String,
+    pub delivery_id: String,
+    pub service_kind: String,
+    pub service_days: u32,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activated_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default = "default_record_version")]
+    pub version: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryArtifactDraft {
+    pub artifact_id: String,
+    pub delivery_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub artifact_kind: String,
+    pub provider: String,
+    pub file_name: Option<String>,
+    pub content_type: String,
+    pub carrier_valid_until: Option<String>,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+    pub secret_kind: String,
+    pub ciphertext: Vec<u8>,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryArtifactRecord {
+    pub artifact_id: String,
+    pub delivery_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub artifact_kind: String,
+    pub provider: String,
+    pub status: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    pub content_type: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+    pub storage_backend: String,
+    pub storage_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carrier_valid_until: Option<String>,
+    #[serde(default = "default_delivery_account_bundle_encryption_protocol")]
+    pub encryption_protocol: String,
+    #[serde(default = "default_delivery_account_bundle_encryption_version")]
+    pub encryption_version: String,
+    #[serde(default = "default_delivery_artifact_secret_kind")]
+    pub secret_kind: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+    #[serde(skip)]
+    pub ciphertext: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryUploadBatchDraft {
+    pub batch_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub source_file_name: String,
+    pub source_file_sha256: String,
+    pub idempotency_key: Option<String>,
+    pub items: Vec<DeliveryUploadBatchItemDraft>,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryUploadBatchItemDraft {
+    pub item_id: String,
+    pub row_index: u32,
+    pub delivery_id: String,
+    pub artifact_kind: String,
+    pub file_name: Option<String>,
+    pub content_type: String,
+    pub carrier_valid_until: Option<String>,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+    pub secret_kind: String,
+    pub ciphertext: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryUploadBatchRecord {
+    pub batch_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub source_file_name: String,
+    pub source_file_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
+    pub total_count: u32,
+    pub success_count: u32,
+    pub failed_count: u32,
+    pub duplicate_count: u32,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_summary: Option<String>,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryUploadBatchItemRecord {
+    pub item_id: String,
+    pub batch_id: String,
+    pub row_index: u32,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub delivery_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    pub status: String,
+    pub artifact_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    pub content_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub carrier_valid_until: Option<String>,
+    #[serde(default = "default_delivery_account_bundle_encryption_protocol")]
+    pub encryption_protocol: String,
+    #[serde(default = "default_delivery_account_bundle_encryption_version")]
+    pub encryption_version: String,
+    #[serde(default = "default_delivery_artifact_secret_kind")]
+    pub secret_kind: String,
+    pub payload_sha256: String,
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip)]
+    pub ciphertext: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryServiceSegmentRecord {
+    pub segment_id: String,
+    pub entitlement_id: String,
+    pub activation_id: String,
+    pub delivery_id: String,
+    pub artifact_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub segment_index: u32,
+    pub effective_from: String,
+    pub effective_until: String,
+    pub carrier_valid_until: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryLifecycleEventRecord {
+    pub event_id: String,
+    pub entitlement_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_id: Option<String>,
+    pub event_type: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub created_by: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub payload: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryActivationRecord {
+    pub activation_id: String,
+    pub delivery_id: String,
+    pub code_id: String,
+    pub entitlement_id: String,
+    pub artifact_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub activation_source: String,
+    pub activated_at: String,
+    pub entitlement_ends_at: String,
+    pub artifact: DeliveryArtifact,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryDownloadGrantDraft {
+    pub grant_id: String,
+    pub activation_id: String,
+    pub token_plaintext: String,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryDownloadGrantRecord {
+    pub grant_id: String,
+    pub activation_id: String,
+    pub delivery_id: String,
+    pub artifact_id: String,
+    pub entitlement_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub token_hash: String,
+    pub token_prefix: String,
+    pub token_last_four: String,
+    pub expires_at: String,
+    pub max_uses: u32,
+    pub use_count: u32,
+    pub artifact: DeliveryArtifact,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryProducerAuthorizationDraft {
+    pub authorization_id: String,
+    pub authorization_code_plaintext: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub owner_account_id: String,
+    pub provider: String,
+    pub service_kind: String,
+    pub service_days: u32,
+    pub expires_at: String,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryProducerAuthorizationRecord {
+    pub authorization_id: String,
+    pub code_hash: String,
+    pub code_prefix: String,
+    pub code_last_four: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub owner_account_id: String,
+    pub provider: String,
+    pub service_kind: String,
+    pub service_days: u32,
+    pub status: String,
+    pub expires_at: String,
+    pub redeem_count: u64,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_redeemed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryProducerTokenDraft {
+    pub token_id: String,
+    pub token_plaintext: String,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryProducerTokenRecord {
+    pub token_id: String,
+    pub authorization_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_expires_at: Option<String>,
+    pub token_hash: String,
+    pub token_prefix: String,
+    pub token_last_four: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub owner_account_id: String,
+    pub provider: String,
+    pub service_kind: String,
+    pub service_days: u32,
+    pub status: String,
+    pub expires_at: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryProducerAuthorizationRedeemResult {
+    Redeemed(Box<DeliveryProducerTokenRecord>),
+    AuthorizationNotFound,
+    AuthorizationExpired,
+    AuthorizationRevoked,
+    AuthorizationNotActive(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryProducerTokenResolveResult {
+    Resolved(Box<DeliveryProducerTokenRecord>),
+    TokenNotFound,
+    TokenExpired,
+    TokenRevoked,
+    AuthorizationExpired,
+    AuthorizationRevoked,
+    AuthorizationNotActive(String),
+    TokenNotActive(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryDownloadArtifactPayload {
+    pub grant: DeliveryDownloadGrant,
+    pub file_name: String,
+    pub content_type: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+    pub ciphertext: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryEntitlementExtendDraft {
+    pub entitlement_id: String,
+    pub expected_version: u64,
+    pub extend_days: u32,
+    pub reason: Option<String>,
+    pub actor_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryRedeemResult {
+    Activated(Box<DeliveryActivationResponse>),
+    RedemptionCodeNotFound,
+    RedemptionCodeUsed,
+    RedemptionCodeExpired,
+    RedemptionCodeRevoked,
+    RedemptionCodeNotActive(String),
+    DeliveryNotFound,
+    DeliveryNotActive(String),
+    EntitlementNotFound,
+    EntitlementNotActive(String),
+    ArtifactMissing,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryDownloadGrantIssueResult {
+    Issued(Box<DeliveryDownloadGrantIssueResponse>),
+    ActivationNotFound,
+    ActivationNotActive(String),
+    EntitlementNotFound,
+    EntitlementNotActive(String),
+    ArtifactMissing,
+    ArtifactNotAvailable(String),
+    SegmentMissing,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryLifecycleResult {
+    Applied(Box<DeliveryLifecycleResponse>),
+    EntitlementNotFound,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryUploadProcessResult {
+    Processed(Box<DeliveryUploadBatchResponse>),
+    BatchNotFound,
+    BatchAlreadyProcessing,
+    ScopeBusy,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryDownloadConsumeResult {
+    Retrieved(Box<DeliveryDownloadArtifactPayload>),
+    GrantNotFound,
+    GrantUsed,
+    GrantExpired,
+    GrantRevoked,
+    GrantNotActive(String),
+    ActivationNotFound,
+    ActivationNotActive(String),
+    EntitlementNotFound,
+    EntitlementNotActive(String),
+    ArtifactMissing,
+    ArtifactNotAvailable(String),
+    SegmentMissing,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryPrepareResult {
+    Prepared(Box<DeliveryPrepareResponse>),
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedDeliveryRecords {
+    delivery: DeliveryRecord,
+    codes: Vec<DeliveryCodeRecord>,
+    entitlement: DeliveryEntitlementRecord,
+    enforce_owner_redemption_capacity: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +844,33 @@ pub struct WechatPaymentOrderRecord {
 #[derive(Debug, Clone, Serialize)]
 pub struct WechatPaymentOrderResponse {
     pub data: WechatPaymentOrderRecord,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenewalIntentDraft {
+    pub renewal_intent_id: String,
+    pub out_trade_no: String,
+    pub grant_id: String,
+    pub renew_expires_at: String,
+    pub reason: Option<String>,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenewalIntentFilters {
+    pub tenant_id: Option<String>,
+    pub project_id: Option<String>,
+    pub grant_id: Option<String>,
+    pub out_trade_no: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+pub enum RenewalIntentCreateResult {
+    Created(RenewalIntent),
+    OrderNotFound,
+    GrantNotFound,
+    GrantMismatch,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -569,9 +1244,16 @@ pub enum UsageBreakdownGroupBy {
 #[derive(Debug, Clone)]
 pub struct ResolvedApiKey {
     pub api_key_id: String,
+    pub grant_id: Option<String>,
+    pub owner_account_id: Option<String>,
     pub tenant_id: TenantId,
     pub project_id: Option<ProjectId>,
     pub is_active: bool,
+    pub status: String,
+    pub config_snapshot_id: Option<ConfigSnapshotId>,
+    pub route_policy_id: Option<RoutePolicyId>,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -629,10 +1311,331 @@ impl ApiKeyRecord {
             .find(|resource| resource.provider_resource_id == self.provider_resource_id)?;
         Some(ResolvedApiKey {
             api_key_id: self.api_key_id.clone(),
+            grant_id: None,
+            owner_account_id: None,
             tenant_id: provider_resource.tenant_id.clone(),
             project_id: provider_resource.project_id.clone(),
             is_active: true,
+            status: "active".to_string(),
+            config_snapshot_id: None,
+            route_policy_id: None,
+            scopes: Vec::new(),
+            expires_at: None,
         })
+    }
+}
+
+impl DeliveryRecord {
+    fn effective_status(&self, entitlement: &DeliveryEntitlementRecord) -> String {
+        if self.status == DELIVERY_STATUS_REVOKED {
+            DELIVERY_STATUS_REVOKED.to_string()
+        } else if entitlement.effective_status() == DELIVERY_STATUS_EXPIRED {
+            DELIVERY_STATUS_EXPIRED.to_string()
+        } else {
+            self.status.clone()
+        }
+    }
+
+    fn public_view(&self, entitlement: &DeliveryEntitlementRecord) -> Delivery {
+        Delivery {
+            delivery_id: self.delivery_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            owner_account_id: self.owner_account_id.clone(),
+            redemption_batch_id: self.redemption_batch_id.clone(),
+            provider: self.provider.clone(),
+            status: self.effective_status(entitlement),
+            operator_id: self.operator_id.clone(),
+            customer_label: self.customer_label.clone(),
+            source: self.source.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+            revoked_at: self.revoked_at.clone(),
+            revoked_by: self.revoked_by.clone(),
+            revoke_reason: self.revoke_reason.clone(),
+        }
+    }
+}
+
+impl DeliveryCodeRecord {
+    fn effective_status(&self) -> String {
+        if self.status == "active" && timestamp_is_expired(&self.expires_at) {
+            DELIVERY_STATUS_EXPIRED.to_string()
+        } else {
+            self.status.clone()
+        }
+    }
+
+    fn public_view(&self) -> DeliveryCode {
+        DeliveryCode {
+            code_id: self.code_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            code_type: self.code_type.clone(),
+            code_prefix: self.code_prefix.clone(),
+            code_last_four: self.code_last_four.clone(),
+            format_version: self.format_version.clone(),
+            status: self.effective_status(),
+            expires_at: self.expires_at.clone(),
+            used_at: self.used_at.clone(),
+            revoked_at: self.revoked_at.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+        }
+    }
+}
+
+impl DeliveryEntitlementRecord {
+    fn effective_status(&self) -> String {
+        if matches!(
+            self.status.as_str(),
+            DELIVERY_ENTITLEMENT_STATUS_REVOKED
+                | DELIVERY_ENTITLEMENT_STATUS_SUSPENDED
+                | DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY
+                | DELIVERY_ENTITLEMENT_STATUS_PENDING_ACTIVATION
+        ) {
+            self.status.clone()
+        } else if timestamp_is_expired(&self.ends_at) {
+            DELIVERY_STATUS_EXPIRED.to_string()
+        } else if timestamp_is_future(&self.starts_at) {
+            DELIVERY_ENTITLEMENT_STATUS_PENDING_ACTIVATION.to_string()
+        } else {
+            DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string()
+        }
+    }
+
+    fn public_view(&self) -> DeliveryEntitlement {
+        DeliveryEntitlement {
+            entitlement_id: self.entitlement_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            service_kind: self.service_kind.clone(),
+            service_days: self.service_days,
+            starts_at: self.starts_at.clone(),
+            ends_at: self.ends_at.clone(),
+            service_starts_at: self.starts_at.clone(),
+            service_ends_at: self.ends_at.clone(),
+            status: self.effective_status(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+        }
+    }
+}
+
+impl DeliveryArtifactRecord {
+    fn public_view(&self) -> DeliveryArtifact {
+        DeliveryArtifact {
+            artifact_id: self.artifact_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            artifact_kind: self.artifact_kind.clone(),
+            provider: self.provider.clone(),
+            status: self.status.clone(),
+            version: self.version,
+            file_name: self.file_name.clone(),
+            content_type: self.content_type.clone(),
+            size_bytes: self.size_bytes,
+            sha256: self.sha256.clone(),
+            storage_backend: self.storage_backend.clone(),
+            storage_ref: self.storage_ref.clone(),
+            carrier_valid_until: self.carrier_valid_until.clone(),
+            encryption_protocol: self.encryption_protocol.clone(),
+            encryption_version: self.encryption_version.clone(),
+            secret_kind: self.secret_kind.clone(),
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            superseded_at: self.superseded_at.clone(),
+            superseded_by: self.superseded_by.clone(),
+            revoked_at: self.revoked_at.clone(),
+            revoked_by: self.revoked_by.clone(),
+            revoke_reason: self.revoke_reason.clone(),
+        }
+    }
+}
+
+impl DeliveryUploadBatchRecord {
+    fn public_response(&self) -> DeliveryUploadBatchResponse {
+        DeliveryUploadBatchResponse {
+            data: self.public_view(),
+        }
+    }
+
+    fn public_view(&self) -> DeliveryUploadBatch {
+        DeliveryUploadBatch {
+            batch_id: self.batch_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            provider: self.provider.clone(),
+            status: self.status.clone(),
+            source_file_name: self.source_file_name.clone(),
+            source_file_sha256: self.source_file_sha256.clone(),
+            idempotency_key: self.idempotency_key.clone(),
+            total_count: self.total_count,
+            success_count: self.success_count,
+            failed_count: self.failed_count,
+            duplicate_count: self.duplicate_count,
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            started_at: self.started_at.clone(),
+            finished_at: self.finished_at.clone(),
+            error_summary: self.error_summary.clone(),
+            version: self.version,
+        }
+    }
+}
+
+impl DeliveryUploadBatchItemRecord {
+    fn public_view(&self) -> DeliveryUploadBatchItem {
+        DeliveryUploadBatchItem {
+            item_id: self.item_id.clone(),
+            batch_id: self.batch_id.clone(),
+            row_index: self.row_index,
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            artifact_id: self.artifact_id.clone(),
+            status: self.status.clone(),
+            artifact_kind: self.artifact_kind.clone(),
+            file_name: self.file_name.clone(),
+            content_type: self.content_type.clone(),
+            carrier_valid_until: self.carrier_valid_until.clone(),
+            encryption_protocol: self.encryption_protocol.clone(),
+            encryption_version: self.encryption_version.clone(),
+            secret_kind: self.secret_kind.clone(),
+            payload_sha256: self.payload_sha256.clone(),
+            size_bytes: self.size_bytes,
+            error_code: self.error_code.clone(),
+            error_message: self.error_message.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+        }
+    }
+}
+
+impl DeliveryServiceSegmentRecord {
+    fn effective_status(&self) -> String {
+        if self.status == DELIVERY_SERVICE_SEGMENT_STATUS_REVOKED {
+            DELIVERY_SERVICE_SEGMENT_STATUS_REVOKED.to_string()
+        } else if timestamp_is_expired(&self.effective_until) {
+            DELIVERY_SERVICE_SEGMENT_STATUS_EXPIRED.to_string()
+        } else if self.status == DELIVERY_SERVICE_SEGMENT_STATUS_SCHEDULED
+            && !timestamp_is_future(&self.effective_from)
+        {
+            DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE.to_string()
+        } else if self.status == DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE
+            && timestamp_is_expired(&self.effective_until)
+        {
+            DELIVERY_SERVICE_SEGMENT_STATUS_EXPIRED.to_string()
+        } else {
+            self.status.clone()
+        }
+    }
+
+    fn public_view(&self) -> DeliveryServiceSegment {
+        DeliveryServiceSegment {
+            segment_id: self.segment_id.clone(),
+            entitlement_id: self.entitlement_id.clone(),
+            activation_id: self.activation_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            artifact_id: self.artifact_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            provider: self.provider.clone(),
+            status: self.effective_status(),
+            segment_index: self.segment_index,
+            effective_from: self.effective_from.clone(),
+            effective_until: self.effective_until.clone(),
+            carrier_valid_until: self.carrier_valid_until.clone(),
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+        }
+    }
+}
+
+impl DeliveryLifecycleEventRecord {
+    fn public_view(&self) -> DeliveryLifecycleEvent {
+        DeliveryLifecycleEvent {
+            event_id: self.event_id.clone(),
+            entitlement_id: self.entitlement_id.clone(),
+            segment_id: self.segment_id.clone(),
+            event_type: self.event_type.clone(),
+            status: self.status.clone(),
+            reason: self.reason.clone(),
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            payload: self.payload.clone(),
+        }
+    }
+}
+
+impl DeliveryActivationRecord {
+    fn public_view(&self) -> DeliveryActivation {
+        DeliveryActivation {
+            activation_id: self.activation_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            artifact_id: self.artifact_id.clone(),
+            entitlement_id: self.entitlement_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            provider: self.provider.clone(),
+            status: self.status.clone(),
+            activation_source: self.activation_source.clone(),
+            activated_at: self.activated_at.clone(),
+            entitlement_ends_at: self.entitlement_ends_at.clone(),
+            artifact: self.artifact.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            revoked_at: self.revoked_at.clone(),
+            revoked_by: self.revoked_by.clone(),
+            revoke_reason: self.revoke_reason.clone(),
+        }
+    }
+}
+
+impl DeliveryDownloadGrantRecord {
+    fn effective_status(&self) -> String {
+        if self.status == DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE
+            && timestamp_is_expired(&self.expires_at)
+        {
+            DELIVERY_DOWNLOAD_GRANT_STATUS_EXPIRED.to_string()
+        } else {
+            self.status.clone()
+        }
+    }
+
+    fn public_view(&self) -> DeliveryDownloadGrant {
+        DeliveryDownloadGrant {
+            grant_id: self.grant_id.clone(),
+            activation_id: self.activation_id.clone(),
+            delivery_id: self.delivery_id.clone(),
+            artifact_id: self.artifact_id.clone(),
+            entitlement_id: self.entitlement_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            project_id: self.project_id.clone(),
+            provider: self.provider.clone(),
+            status: self.effective_status(),
+            token_prefix: self.token_prefix.clone(),
+            token_last_four: self.token_last_four.clone(),
+            expires_at: self.expires_at.clone(),
+            max_uses: self.max_uses,
+            use_count: self.use_count,
+            artifact: self.artifact.clone(),
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            version: self.version,
+            used_at: self.used_at.clone(),
+            revoked_at: self.revoked_at.clone(),
+            revoked_by: self.revoked_by.clone(),
+            revoke_reason: self.revoke_reason.clone(),
+        }
     }
 }
 
@@ -754,6 +1757,38 @@ pub struct RouteReceiptFilters {
     pub provider_resource_id: Option<String>,
     pub admission_result: Option<String>,
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryOperationsScope {
+    pub tenant_id: TenantId,
+    pub project_id: Option<ProjectId>,
+    pub window_start: String,
+    pub window_end: String,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryOperationsExceptionFilters {
+    pub scope: DeliveryOperationsScope,
+    pub status: Option<String>,
+    pub exception_type: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeliveryOperationsObjectRef {
+    Delivery(String),
+    Entitlement(String),
+    Activation(String),
+    Artifact(String),
+    DownloadGrant(String),
+    ServiceSegment(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveryOperationsObjectFilters {
+    pub scope: DeliveryOperationsScope,
+    pub object_ref: DeliveryOperationsObjectRef,
 }
 
 #[derive(Debug, Clone)]
@@ -1076,6 +2111,7 @@ impl SeedData {
             card_product_id: CardProductId::parse("cardprod_acme_trial").unwrap(),
             tenant_id: tenant_acme.tenant_id.clone(),
             merchant_shop_id: merchant_shop.merchant_shop_id.clone(),
+            project_id: Some(proj_core.project_id.clone()),
             title: "Claude Trial Pack".to_string(),
             description: "Starter batch for relay verification and low-risk onboarding."
                 .to_string(),
@@ -1083,8 +2119,10 @@ impl SeedData {
             inventory_count: 32,
             face_value_usd: "1.00".to_string(),
             retail_price_usd: "1.99".to_string(),
+            retail_price_cny_total: Some(199),
             delivery_kind: CardDeliveryKind::DirectSecret,
             supports_trial: true,
+            sale_enabled: false,
             version: 1,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -1310,6 +2348,8 @@ impl MemoryStore {
             config_snapshots: seed.config_snapshots,
             merchant_shops: seed.merchant_shops,
             card_products: seed.card_products,
+            merchant_product_inventory: Vec::new(),
+            merchant_product_orders: Vec::new(),
             trial_connections: seed.trial_connections,
             relay_evaluations: seed.relay_evaluations,
             replay_capsules: seed
@@ -1325,6 +2365,7 @@ impl MemoryStore {
             provider_subject_to_user_id,
             sessions: HashMap::new(),
             login_flows: HashMap::new(),
+            wechat_user_openids: HashMap::new(),
             route_receipts: seed
                 .route_receipts
                 .into_iter()
@@ -1332,8 +2373,25 @@ impl MemoryStore {
                 .collect(),
             billing_export_jobs: Vec::new(),
             wechat_payment_orders: HashMap::new(),
+            renewal_intents: Vec::new(),
             route_policy_disabled_ids: HashSet::new(),
             api_keys: Vec::new(),
+            opening_grants: Vec::new(),
+            deliveries: Vec::new(),
+            delivery_codes: Vec::new(),
+            delivery_secret_plaintexts: HashMap::new(),
+            delivery_entitlements: Vec::new(),
+            delivery_artifacts: Vec::new(),
+            delivery_activations: Vec::new(),
+            delivery_download_grants: Vec::new(),
+            delivery_producer_authorizations: Vec::new(),
+            delivery_producer_tokens: Vec::new(),
+            delivery_service_segments: Vec::new(),
+            delivery_lifecycle_events: Vec::new(),
+            delivery_upload_batches: Vec::new(),
+            delivery_upload_batch_items: Vec::new(),
+            shared_account_package_heads: HashMap::new(),
+            shared_account_package_versions: Vec::new(),
             codex_auth_accounts: Vec::new(),
             oauth_sharing_leases: Vec::new(),
             oauth_carpools: Vec::new(),
@@ -1353,6 +2411,61 @@ impl MemoryStore {
 }
 
 impl StoreMode {
+    pub async fn get_shared_account_package_head(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<SharedAccountPackageHeadRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store.shared_account_package_heads.get(account_id).cloned())
+            }
+            Self::Postgres(store) => store.get_shared_account_package_head(account_id).await,
+        }
+    }
+
+    pub async fn publish_shared_account_package_version(
+        &self,
+        draft: PublishSharedAccountPackageVersionDraft,
+    ) -> Result<(SharedAccountPackageHeadRecord, SharedAccountPackageVersionRecord)> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                let next_version = store
+                    .shared_account_package_heads
+                    .get(&draft.account_id)
+                    .map_or(1, |head| head.current_version + 1);
+                let version = SharedAccountPackageVersionRecord {
+                    account_id: draft.account_id.clone(),
+                    version: next_version,
+                    file_name: draft.file_name.clone(),
+                    file_hash: draft.file_hash.clone(),
+                    import_secret: draft.import_secret.clone(),
+                    serialized: draft.serialized.clone(),
+                    base_version: draft.base_version,
+                    created_at: draft.created_at.clone(),
+                    updated_by_client_id: draft.updated_by_client_id.clone(),
+                };
+                let head = SharedAccountPackageHeadRecord {
+                    account_id: draft.account_id,
+                    current_version: next_version,
+                    file_name: draft.file_name,
+                    file_hash: draft.file_hash,
+                    import_secret: draft.import_secret,
+                    serialized: draft.serialized,
+                    updated_at: draft.created_at,
+                    updated_by_client_id: draft.updated_by_client_id,
+                };
+                store
+                    .shared_account_package_heads
+                    .insert(head.account_id.clone(), head.clone());
+                store.shared_account_package_versions.push(version.clone());
+                Ok((head, version))
+            }
+            Self::Postgres(store) => store.publish_shared_account_package_version(draft).await,
+        }
+    }
+
     pub fn memory() -> Self {
         Self::Memory(Arc::new(RwLock::new(MemoryStore::bootstrap())))
     }
@@ -1993,6 +3106,7 @@ impl StoreMode {
         &self,
         mut provider_resource: ProviderResource,
     ) -> Result<ProviderResource> {
+        fail_close_new_provider_resource(&mut provider_resource);
         provider_resource.version = 1;
         provider_resource.created_at = now_rfc3339();
         provider_resource.updated_at = now_rfc3339();
@@ -2212,6 +3326,915 @@ impl StoreMode {
                 })
             }
             Self::Postgres(store) => store.list_api_keys().await,
+        }
+    }
+
+    pub async fn create_opening_grant(
+        &self,
+        draft: OpeningGrantDraft,
+        credential_plaintext: &str,
+    ) -> Result<OpeningGrantCreateResult> {
+        let now = now_rfc3339();
+        let credential_hash = hash_api_key(credential_plaintext);
+        let record = OpeningGrantRecord {
+            grant_id: draft.grant_id,
+            tenant_id: draft.tenant_id,
+            project_id: draft.project_id,
+            owner_account_id: draft.owner_account_id,
+            grantee_kind: draft.grantee_kind,
+            grantee_id: draft.grantee_id,
+            grantee_label: draft.grantee_label,
+            config_snapshot_id: draft.config_snapshot_id,
+            route_policy_id: draft.route_policy_id,
+            budget_policy_id: draft.budget_policy_id,
+            provider_resource_ids: draft.provider_resource_ids,
+            credential_kind: draft.credential_kind,
+            credential_id: format!("cred_{}", &credential_hash[..16]),
+            credential_key_prefix: api_key_prefix(credential_plaintext),
+            credential_last_four: credential_last_four(credential_plaintext),
+            credential_hash,
+            scopes: draft.scopes,
+            expires_at: draft.expires_at,
+            status: "active".to_string(),
+            created_by: draft.created_by,
+            created_at: now.clone(),
+            updated_at: now,
+            version: 1,
+            revoked_at: None,
+            revoked_by: None,
+        };
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if let Some(blocker) = opening_grant_create_blocker(&store.opening_grants, &record)
+                {
+                    return Ok(blocker);
+                }
+                store.opening_grants.push(record.clone());
+                Ok(OpeningGrantCreateResult::Created(Box::new(
+                    record.public_view(),
+                )))
+            }
+            Self::Postgres(store) => store.create_opening_grant(&record).await,
+        }
+    }
+
+    pub async fn list_opening_grants(&self) -> Result<OpeningGrantsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(OpeningGrantsResponse {
+                    data: store
+                        .opening_grants
+                        .iter()
+                        .map(OpeningGrantRecord::public_view)
+                        .collect(),
+                })
+            }
+            Self::Postgres(store) => store.list_opening_grants().await,
+        }
+    }
+
+    pub async fn prepare_delivery(
+        &self,
+        draft: DeliveryPrepareDraft,
+        redemption_code: &str,
+        browser_file_unlock_code: &str,
+    ) -> Result<DeliveryPrepareResult> {
+        let prepared = prepare_delivery_records(draft, redemption_code, browser_file_unlock_code);
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if let Some(blocker) = owner_redemption_capacity_blocker_for_memory(
+                    &store.deliveries,
+                    &store.delivery_codes,
+                    &prepared,
+                ) {
+                    return Ok(blocker);
+                }
+                store.deliveries.push(prepared.delivery.clone());
+                store.delivery_codes.extend(prepared.codes.clone());
+                store.delivery_secret_plaintexts.insert(
+                    delivery_secret_key(
+                        &prepared.delivery.delivery_id,
+                        DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK,
+                    ),
+                    browser_file_unlock_code.to_string(),
+                );
+                store
+                    .delivery_entitlements
+                    .push(prepared.entitlement.clone());
+                Ok(DeliveryPrepareResult::Prepared(Box::new(
+                    DeliveryPrepareResponse {
+                        data: delivery_projection(
+                            &prepared.delivery,
+                            &prepared.codes,
+                            &prepared.entitlement,
+                        ),
+                        one_time_codes: DeliveryOneTimeCodes {
+                            redemption_code: redemption_code.to_string(),
+                            browser_file_unlock_code: browser_file_unlock_code.to_string(),
+                        },
+                    },
+                )))
+            }
+            Self::Postgres(store) => {
+                store
+                    .prepare_delivery(&prepared, redemption_code, browser_file_unlock_code)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_delivery(&self, delivery_id: &str) -> Result<Option<DeliveryResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(memory_delivery_projection(&store, delivery_id)
+                    .map(|data| DeliveryResponse { data }))
+            }
+            Self::Postgres(store) => store.get_delivery(delivery_id).await,
+        }
+    }
+
+    pub async fn get_delivery_secret_plaintext(
+        &self,
+        delivery_id: &str,
+        code_type: &str,
+    ) -> Result<Option<String>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_secret_plaintexts
+                    .get(&delivery_secret_key(delivery_id, code_type))
+                    .cloned())
+            }
+            Self::Postgres(store) => {
+                store
+                    .get_delivery_secret_plaintext(delivery_id, code_type)
+                    .await
+            }
+        }
+    }
+
+    pub async fn revoke_delivery(
+        &self,
+        delivery_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+        revoke_reason: Option<String>,
+    ) -> Result<ConcurrencyResult<DeliveryResponse>> {
+        match self {
+            Self::Memory(store) => Ok(revoke_memory_delivery(
+                &mut store.write().expect("memory store write lock"),
+                delivery_id,
+                expected_version,
+                revoked_by,
+                revoke_reason,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .revoke_delivery(delivery_id, expected_version, revoked_by, revoke_reason)
+                    .await
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn delivery_code_hashes_for_tests(&self, delivery_id: &str) -> Result<Vec<String>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_codes
+                    .iter()
+                    .filter(|code| code.delivery_id == delivery_id)
+                    .map(|code| code.code_hash.clone())
+                    .collect())
+            }
+            Self::Postgres(store) => {
+                let rows = sqlx::query(
+                    "SELECT code_hash
+                       FROM delivery_codes
+                      WHERE delivery_id = $1
+                      ORDER BY code_type",
+                )
+                .bind(delivery_id)
+                .fetch_all(&store.pool)
+                .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|row| row.get::<String, _>("code_hash"))
+                    .collect())
+            }
+        }
+    }
+
+    pub async fn create_delivery_artifact(
+        &self,
+        draft: DeliveryArtifactDraft,
+    ) -> Result<DeliveryArtifactResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(DeliveryArtifactResponse {
+                    data: insert_memory_delivery_artifact(&mut store, draft).public_view(),
+                })
+            }
+            Self::Postgres(store) => store.create_delivery_artifact(draft).await,
+        }
+    }
+
+    pub async fn create_delivery_upload_batch(
+        &self,
+        draft: DeliveryUploadBatchDraft,
+    ) -> Result<DeliveryUploadBatchResponse> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(insert_memory_delivery_upload_batch(&mut store, draft).public_response())
+            }
+            Self::Postgres(store) => store.create_delivery_upload_batch(draft).await,
+        }
+    }
+
+    pub async fn get_delivery_upload_batch(
+        &self,
+        batch_id: &str,
+    ) -> Result<Option<DeliveryUploadBatchResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_upload_batches
+                    .iter()
+                    .find(|batch| batch.batch_id == batch_id)
+                    .map(DeliveryUploadBatchRecord::public_response))
+            }
+            Self::Postgres(store) => store.get_delivery_upload_batch(batch_id).await,
+        }
+    }
+
+    pub async fn list_delivery_upload_batch_items(
+        &self,
+        batch_id: &str,
+    ) -> Result<Option<DeliveryUploadBatchItemsResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                if !store
+                    .delivery_upload_batches
+                    .iter()
+                    .any(|batch| batch.batch_id == batch_id)
+                {
+                    return Ok(None);
+                }
+                let mut data = store
+                    .delivery_upload_batch_items
+                    .iter()
+                    .filter(|item| item.batch_id == batch_id)
+                    .map(DeliveryUploadBatchItemRecord::public_view)
+                    .collect::<Vec<_>>();
+                data.sort_by(|left, right| left.row_index.cmp(&right.row_index));
+                Ok(Some(DeliveryUploadBatchItemsResponse { data }))
+            }
+            Self::Postgres(store) => store.list_delivery_upload_batch_items(batch_id).await,
+        }
+    }
+
+    pub async fn process_delivery_upload_batch(
+        &self,
+        batch_id: &str,
+        actor_id: &str,
+    ) -> Result<DeliveryUploadProcessResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(process_memory_delivery_upload_batch(
+                    &mut store, batch_id, actor_id,
+                ))
+            }
+            Self::Postgres(store) => {
+                store
+                    .process_delivery_upload_batch(batch_id, actor_id)
+                    .await
+            }
+        }
+    }
+
+    pub async fn list_delivery_artifacts(
+        &self,
+        delivery_id: &str,
+    ) -> Result<DeliveryArtifactsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let mut data = store
+                    .delivery_artifacts
+                    .iter()
+                    .filter(|artifact| artifact.delivery_id == delivery_id)
+                    .map(DeliveryArtifactRecord::public_view)
+                    .collect::<Vec<_>>();
+                data.sort_by(|left, right| {
+                    right
+                        .version
+                        .cmp(&left.version)
+                        .then_with(|| right.created_at.cmp(&left.created_at))
+                });
+                Ok(DeliveryArtifactsResponse { data })
+            }
+            Self::Postgres(store) => store.list_delivery_artifacts(delivery_id).await,
+        }
+    }
+
+    pub async fn get_delivery_artifact(
+        &self,
+        delivery_id: &str,
+        artifact_id: &str,
+    ) -> Result<Option<DeliveryArtifactResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_artifacts
+                    .iter()
+                    .find(|artifact| {
+                        artifact.delivery_id == delivery_id && artifact.artifact_id == artifact_id
+                    })
+                    .map(|artifact| DeliveryArtifactResponse {
+                        data: artifact.public_view(),
+                    }))
+            }
+            Self::Postgres(store) => store.get_delivery_artifact(delivery_id, artifact_id).await,
+        }
+    }
+
+    pub async fn get_delivery_by_redemption_code_hash(
+        &self,
+        code_hash: &str,
+    ) -> Result<Option<DeliveryResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let delivery_id = store
+                    .delivery_codes
+                    .iter()
+                    .find(|code| {
+                        code.code_type == DELIVERY_CODE_TYPE_REDEMPTION
+                            && code.code_hash == code_hash
+                    })
+                    .map(|code| code.delivery_id.clone());
+                Ok(delivery_id.and_then(|delivery_id| {
+                    memory_delivery_projection(&store, &delivery_id)
+                        .map(|data| DeliveryResponse { data })
+                }))
+            }
+            Self::Postgres(store) => store.get_delivery_by_redemption_code_hash(code_hash).await,
+        }
+    }
+
+    pub async fn get_delivery_by_entitlement_id(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<Option<DeliveryResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let delivery_id = store
+                    .delivery_entitlements
+                    .iter()
+                    .find(|entitlement| entitlement.entitlement_id == entitlement_id)
+                    .map(|entitlement| entitlement.delivery_id.clone());
+                Ok(delivery_id.and_then(|delivery_id| {
+                    memory_delivery_projection(&store, &delivery_id)
+                        .map(|data| DeliveryResponse { data })
+                }))
+            }
+            Self::Postgres(store) => store.get_delivery_by_entitlement_id(entitlement_id).await,
+        }
+    }
+
+    pub async fn redeem_delivery_activation(
+        &self,
+        code_hash: &str,
+        activation_id: String,
+        activated_by: &str,
+    ) -> Result<DeliveryRedeemResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(redeem_memory_delivery_activation(
+                    &mut store,
+                    code_hash,
+                    activation_id,
+                    activated_by,
+                ))
+            }
+            Self::Postgres(store) => {
+                store
+                    .redeem_delivery_activation(code_hash, activation_id, activated_by)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_delivery_activation(
+        &self,
+        activation_id: &str,
+    ) -> Result<Option<DeliveryActivationResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_activations
+                    .iter()
+                    .find(|activation| activation.activation_id == activation_id)
+                    .map(|activation| DeliveryActivationResponse {
+                        data: activation.public_view(),
+                    }))
+            }
+            Self::Postgres(store) => store.get_delivery_activation(activation_id).await,
+        }
+    }
+
+    pub async fn list_delivery_service_segments(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<DeliveryServiceSegmentsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let mut data = store
+                    .delivery_service_segments
+                    .iter()
+                    .filter(|segment| segment.entitlement_id == entitlement_id)
+                    .map(DeliveryServiceSegmentRecord::public_view)
+                    .collect::<Vec<_>>();
+                data.sort_by(|left, right| left.segment_index.cmp(&right.segment_index));
+                Ok(DeliveryServiceSegmentsResponse { data })
+            }
+            Self::Postgres(store) => store.list_delivery_service_segments(entitlement_id).await,
+        }
+    }
+
+    pub async fn list_delivery_lifecycle_events(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<DeliveryLifecycleEventsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                let mut data = store
+                    .delivery_lifecycle_events
+                    .iter()
+                    .filter(|event| event.entitlement_id == entitlement_id)
+                    .map(DeliveryLifecycleEventRecord::public_view)
+                    .collect::<Vec<_>>();
+                data.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+                Ok(DeliveryLifecycleEventsResponse { data })
+            }
+            Self::Postgres(store) => store.list_delivery_lifecycle_events(entitlement_id).await,
+        }
+    }
+
+    pub async fn reconcile_delivery_lifecycle(
+        &self,
+        entitlement_id: &str,
+        actor_id: &str,
+    ) -> Result<DeliveryLifecycleResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(reconcile_memory_delivery_lifecycle(
+                    &mut store,
+                    entitlement_id,
+                    actor_id,
+                ))
+            }
+            Self::Postgres(store) => {
+                store
+                    .reconcile_delivery_lifecycle(entitlement_id, actor_id)
+                    .await
+            }
+        }
+    }
+
+    pub async fn extend_delivery_entitlement(
+        &self,
+        draft: DeliveryEntitlementExtendDraft,
+    ) -> Result<ConcurrencyResult<DeliveryLifecycleResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(extend_memory_delivery_entitlement(&mut store, draft))
+            }
+            Self::Postgres(store) => store.extend_delivery_entitlement(draft).await,
+        }
+    }
+
+    pub async fn get_delivery_operations_overview(
+        &self,
+        scope: DeliveryOperationsScope,
+    ) -> Result<DeliveryOperationsOverviewResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(delivery_operations_overview(
+                    delivery_operations_records_from_memory(&store),
+                    scope,
+                ))
+            }
+            Self::Postgres(store) => {
+                let records = store.load_delivery_operations_records(&scope).await?;
+                Ok(delivery_operations_overview(records, scope))
+            }
+        }
+    }
+
+    pub async fn get_delivery_operations_timeline(
+        &self,
+        filters: DeliveryOperationsObjectFilters,
+    ) -> Result<Option<DeliveryOperationsTimelineResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(delivery_operations_timeline(
+                    delivery_operations_records_from_memory(&store),
+                    filters,
+                ))
+            }
+            Self::Postgres(store) => {
+                let records = store
+                    .load_delivery_operations_records(&filters.scope)
+                    .await?;
+                Ok(delivery_operations_timeline(records, filters))
+            }
+        }
+    }
+
+    pub async fn list_delivery_operations_exceptions(
+        &self,
+        filters: DeliveryOperationsExceptionFilters,
+    ) -> Result<DeliveryOperationsExceptionsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(delivery_operations_exceptions(
+                    delivery_operations_records_from_memory(&store),
+                    filters,
+                ))
+            }
+            Self::Postgres(store) => {
+                let records = store
+                    .load_delivery_operations_records(&filters.scope)
+                    .await?;
+                Ok(delivery_operations_exceptions(records, filters))
+            }
+        }
+    }
+
+    pub async fn get_delivery_operations_detail(
+        &self,
+        filters: DeliveryOperationsObjectFilters,
+    ) -> Result<Option<DeliveryOperationsDetailResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(delivery_operations_detail(
+                    delivery_operations_records_from_memory(&store),
+                    filters,
+                ))
+            }
+            Self::Postgres(store) => {
+                let records = store
+                    .load_delivery_operations_records(&filters.scope)
+                    .await?;
+                Ok(delivery_operations_detail(records, filters))
+            }
+        }
+    }
+
+    pub async fn issue_delivery_download_grant(
+        &self,
+        draft: DeliveryDownloadGrantDraft,
+    ) -> Result<DeliveryDownloadGrantIssueResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(issue_memory_delivery_download_grant(&mut store, draft))
+            }
+            Self::Postgres(store) => store.issue_delivery_download_grant(draft).await,
+        }
+    }
+
+    pub async fn get_delivery_download_grant(
+        &self,
+        grant_id: &str,
+    ) -> Result<Option<DeliveryDownloadGrantResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_download_grants
+                    .iter()
+                    .find(|grant| grant.grant_id == grant_id)
+                    .map(|grant| DeliveryDownloadGrantResponse {
+                        data: grant.public_view(),
+                    }))
+            }
+            Self::Postgres(store) => store.get_delivery_download_grant(grant_id).await,
+        }
+    }
+
+    pub async fn revoke_delivery_download_grant(
+        &self,
+        grant_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+        revoke_reason: Option<String>,
+    ) -> Result<ConcurrencyResult<DeliveryDownloadGrantResponse>> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(revoke_memory_delivery_download_grant(
+                    &mut store,
+                    grant_id,
+                    expected_version,
+                    revoked_by,
+                    revoke_reason,
+                ))
+            }
+            Self::Postgres(store) => {
+                store
+                    .revoke_delivery_download_grant(
+                        grant_id,
+                        expected_version,
+                        revoked_by,
+                        revoke_reason,
+                    )
+                    .await
+            }
+        }
+    }
+
+    pub async fn consume_delivery_download_grant(
+        &self,
+        token_hash: &str,
+    ) -> Result<DeliveryDownloadConsumeResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(consume_memory_delivery_download_grant(
+                    &mut store, token_hash,
+                ))
+            }
+            Self::Postgres(store) => store.consume_delivery_download_grant(token_hash).await,
+        }
+    }
+
+    pub async fn create_delivery_producer_authorization(
+        &self,
+        draft: DeliveryProducerAuthorizationDraft,
+    ) -> Result<DeliveryProducerAuthorizationRecord> {
+        let record = build_delivery_producer_authorization_record(&draft);
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                revoke_active_memory_delivery_producer_authorizations_for_scope(
+                    &mut store,
+                    &record,
+                    &record.created_by,
+                    "rotated",
+                );
+                store.delivery_producer_authorizations.push(record.clone());
+                Ok(record)
+            }
+            Self::Postgres(store) => store.create_delivery_producer_authorization(&record).await,
+        }
+    }
+
+    pub async fn redeem_delivery_producer_authorization(
+        &self,
+        authorization_code_hash: &str,
+        draft: DeliveryProducerTokenDraft,
+    ) -> Result<DeliveryProducerAuthorizationRedeemResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(redeem_memory_delivery_producer_authorization(
+                    &mut store,
+                    authorization_code_hash,
+                    draft,
+                ))
+            }
+            Self::Postgres(store) => {
+                store
+                    .redeem_delivery_producer_authorization(authorization_code_hash, draft)
+                    .await
+            }
+        }
+    }
+
+    pub async fn resolve_delivery_producer_token(
+        &self,
+        token_hash: &str,
+    ) -> Result<DeliveryProducerTokenResolveResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(resolve_memory_delivery_producer_token(
+                    &mut store, token_hash,
+                ))
+            }
+            Self::Postgres(store) => store.resolve_delivery_producer_token(token_hash).await,
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn delivery_artifact_ciphertext_for_tests(
+        &self,
+        artifact_id: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_artifacts
+                    .iter()
+                    .find(|artifact| artifact.artifact_id == artifact_id)
+                    .map(|artifact| artifact.ciphertext.clone()))
+            }
+            Self::Postgres(store) => {
+                let row = sqlx::query(
+                    "SELECT ciphertext
+                       FROM delivery_artifacts
+                      WHERE artifact_id = $1",
+                )
+                .bind(artifact_id)
+                .fetch_optional(&store.pool)
+                .await?;
+                Ok(row.map(|row| row.get::<Vec<u8>, _>("ciphertext")))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn delivery_download_token_hashes_for_tests(
+        &self,
+        grant_id: &str,
+    ) -> Result<Vec<String>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_download_grants
+                    .iter()
+                    .filter(|grant| grant.grant_id == grant_id)
+                    .map(|grant| grant.token_hash.clone())
+                    .collect())
+            }
+            Self::Postgres(store) => {
+                let rows = sqlx::query(
+                    "SELECT token_hash
+                       FROM delivery_download_grants
+                      WHERE grant_id = $1",
+                )
+                .bind(grant_id)
+                .fetch_all(&store.pool)
+                .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|row| row.get::<String, _>("token_hash"))
+                    .collect())
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn expire_delivery_download_grant_for_tests(&self, grant_id: &str) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if let Some(grant) = store
+                    .delivery_download_grants
+                    .iter_mut()
+                    .find(|grant| grant.grant_id == grant_id)
+                {
+                    grant.expires_at = "2000-01-01T00:00:00Z".to_string();
+                    grant.updated_at = now_rfc3339();
+                }
+                Ok(())
+            }
+            Self::Postgres(store) => {
+                let Some(row) = sqlx::query(
+                    "SELECT payload
+                       FROM delivery_download_grants
+                      WHERE grant_id = $1",
+                )
+                .bind(grant_id)
+                .fetch_optional(&store.pool)
+                .await?
+                else {
+                    return Ok(());
+                };
+                let mut grant = row.get::<Json<DeliveryDownloadGrantRecord>, _>("payload").0;
+                grant.expires_at = "2000-01-01T00:00:00Z".to_string();
+                grant.updated_at = now_rfc3339();
+                sqlx::query(
+                    "UPDATE delivery_download_grants
+                        SET expires_at = $2, payload = $3, updated_at = $4
+                      WHERE grant_id = $1",
+                )
+                .bind(grant_id)
+                .bind(&grant.expires_at)
+                .bind(Json(&grant))
+                .bind(&grant.updated_at)
+                .execute(&store.pool)
+                .await?;
+                Ok(())
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn expire_delivery_entitlement_for_tests(&self, entitlement_id: &str) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                if let Some(entitlement) = store
+                    .delivery_entitlements
+                    .iter_mut()
+                    .find(|entitlement| entitlement.entitlement_id == entitlement_id)
+                {
+                    entitlement.ends_at = "2000-01-01T00:00:00Z".to_string();
+                    entitlement.updated_at = now_rfc3339();
+                    entitlement.version = entitlement.version.saturating_add(1);
+                }
+                Ok(())
+            }
+            Self::Postgres(store) => {
+                let Some(row) = sqlx::query(
+                    "SELECT payload
+                       FROM delivery_entitlements
+                      WHERE entitlement_id = $1",
+                )
+                .bind(entitlement_id)
+                .fetch_optional(&store.pool)
+                .await?
+                else {
+                    return Ok(());
+                };
+                let mut entitlement = row.get::<Json<DeliveryEntitlementRecord>, _>("payload").0;
+                entitlement.ends_at = "2000-01-01T00:00:00Z".to_string();
+                entitlement.updated_at = now_rfc3339();
+                entitlement.version = entitlement.version.saturating_add(1);
+                sqlx::query(
+                    "UPDATE delivery_entitlements
+                        SET ends_at = $2, payload = $3, updated_at = $4
+                      WHERE entitlement_id = $1",
+                )
+                .bind(entitlement_id)
+                .bind(&entitlement.ends_at)
+                .bind(Json(&entitlement))
+                .bind(&entitlement.updated_at)
+                .execute(&store.pool)
+                .await?;
+                Ok(())
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn delivery_activation_records_for_tests(
+        &self,
+        delivery_id: &str,
+    ) -> Result<Vec<DeliveryActivationRecord>> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(store
+                    .delivery_activations
+                    .iter()
+                    .filter(|activation| activation.delivery_id == delivery_id)
+                    .cloned()
+                    .collect())
+            }
+            Self::Postgres(store) => {
+                let rows = sqlx::query(
+                    "SELECT payload
+                       FROM delivery_activations
+                      WHERE delivery_id = $1
+                      ORDER BY activated_at",
+                )
+                .bind(delivery_id)
+                .fetch_all(&store.pool)
+                .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|row| row.get::<Json<DeliveryActivationRecord>, _>("payload").0)
+                    .collect())
+            }
         }
     }
 
@@ -2503,11 +4526,39 @@ impl StoreMode {
         }
     }
 
+    pub async fn revoke_opening_grant(
+        &self,
+        grant_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+    ) -> Result<ConcurrencyResult<OpeningGrant>> {
+        match self {
+            Self::Memory(store) => Ok(revoke_memory_opening_grant(
+                &mut store.write().expect("memory store write lock"),
+                grant_id,
+                expected_version,
+                revoked_by,
+            )),
+            Self::Postgres(store) => {
+                store
+                    .revoke_opening_grant(grant_id, expected_version, revoked_by)
+                    .await
+            }
+        }
+    }
+
     pub async fn resolve_api_key(&self, api_key: &str) -> Result<Option<ResolvedApiKey>> {
         let hash = hash_api_key(api_key);
         match self {
             Self::Memory(store) => {
                 let store = store.read().expect("memory store read lock");
+                if let Some(grant) = store
+                    .opening_grants
+                    .iter()
+                    .find(|item| item.credential_hash == hash)
+                {
+                    return Ok(Some(grant.to_resolved()));
+                }
                 Ok(store
                     .api_keys
                     .iter()
@@ -2539,6 +4590,65 @@ impl StoreMode {
             }
             Self::Postgres(store) => store.get_config_snapshot(config_snapshot_id).await,
         }
+    }
+
+    pub async fn get_config_snapshot_sale_readiness(
+        &self,
+        config_snapshot_id: &str,
+    ) -> Result<Option<SaleReadyPackageResponse>> {
+        let Some(snapshot) = self.get_config_snapshot(config_snapshot_id).await? else {
+            return Ok(None);
+        };
+        let snapshot = snapshot.config_snapshot;
+        let route_policy = self
+            .get_route_policy(snapshot.route_policy_id.as_str())
+            .await?;
+        let mut provider_resources = Vec::with_capacity(snapshot.provider_resource_ids.len());
+        let mut missing_provider_resource_ids = Vec::new();
+        for provider_resource_id in &snapshot.provider_resource_ids {
+            match self
+                .get_provider_resource(provider_resource_id.as_str())
+                .await?
+            {
+                Some(resource) => provider_resources.push(resource),
+                None => missing_provider_resource_ids.push(provider_resource_id.to_string()),
+            }
+        }
+
+        let active_snapshot_id = self
+            .get_config_snapshot(ACTIVE_CONFIG_ALIAS)
+            .await?
+            .map(|response| response.config_snapshot.config_snapshot_id);
+        let route_simulation =
+            sale_ready_route_simulation(&snapshot, route_policy.as_ref(), &provider_resources);
+        let pricing = match sale_ready_pricing_request(
+            route_policy.as_ref(),
+            route_simulation.as_ref(),
+            &provider_resources,
+        ) {
+            Some(request) => Some(self.create_pricing_simulation(request).await?),
+            None => None,
+        };
+        let budget = Some(
+            self.get_balance_projection(
+                snapshot.tenant_id.as_str(),
+                Some(snapshot.project_id.to_string()),
+                None,
+            )
+            .await?
+            .data,
+        );
+
+        Ok(Some(build_sale_ready_package_response(
+            snapshot,
+            route_policy,
+            provider_resources,
+            missing_provider_resource_ids,
+            active_snapshot_id,
+            route_simulation,
+            pricing,
+            budget,
+        )))
     }
 
     pub async fn activate_config_snapshot(
@@ -2639,6 +4749,7 @@ impl StoreMode {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
     ) -> Result<UsageSummaryResponse> {
@@ -2646,12 +4757,19 @@ impl StoreMode {
             Self::Memory(_) => Ok(sample_usage_summary_response(
                 tenant_id,
                 project_id.as_deref(),
+                owner_account_id.as_deref(),
                 window_start.as_deref(),
                 window_end.as_deref(),
             )),
             Self::Postgres(store) => {
                 store
-                    .get_usage_summary(tenant_id, project_id, window_start, window_end)
+                    .get_usage_summary(
+                        tenant_id,
+                        project_id,
+                        owner_account_id,
+                        window_start,
+                        window_end,
+                    )
                     .await
             }
         }
@@ -2661,6 +4779,7 @@ impl StoreMode {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
         group_by: UsageBreakdownGroupBy,
@@ -2671,6 +4790,7 @@ impl StoreMode {
             Self::Memory(_) => Ok(sample_usage_breakdown_response(
                 tenant_id,
                 project_id.as_deref(),
+                owner_account_id.as_deref(),
                 group_by,
                 cursor,
                 limit,
@@ -2680,6 +4800,7 @@ impl StoreMode {
                     .get_usage_breakdown(
                         tenant_id,
                         project_id,
+                        owner_account_id,
                         window_start,
                         window_end,
                         group_by,
@@ -2695,13 +4816,19 @@ impl StoreMode {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
     ) -> Result<BalanceProjectionResponse> {
         match self {
             Self::Memory(_) => Ok(sample_balance_projection_response(
                 tenant_id,
                 project_id.as_deref(),
+                owner_account_id.as_deref(),
             )),
-            Self::Postgres(store) => store.get_balance_projection(tenant_id, project_id).await,
+            Self::Postgres(store) => {
+                store
+                    .get_balance_projection(tenant_id, project_id, owner_account_id)
+                    .await
+            }
         }
     }
 
@@ -2766,7 +4893,12 @@ impl StoreMode {
                         .expect("memory store read lock")
                         .billing_export_jobs
                         .iter()
-                        .map(|record| record.job.clone())
+                        .map(|record| {
+                            maybe_complete_memory_export_job(
+                                record.job.clone(),
+                                record.content.is_some(),
+                            )
+                        })
                         .collect(),
                     tenant_id,
                     project_id,
@@ -2863,6 +4995,34 @@ impl StoreMode {
                 Ok(WechatPaymentOrderResponse { data: record })
             }
             Self::Postgres(store) => store.update_wechat_payment_order(record).await,
+        }
+    }
+
+    pub async fn create_renewal_intent(
+        &self,
+        draft: RenewalIntentDraft,
+    ) -> Result<RenewalIntentCreateResult> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().expect("memory store write lock");
+                Ok(create_memory_renewal_intent(&mut store, draft))
+            }
+            Self::Postgres(store) => store.create_renewal_intent(draft).await,
+        }
+    }
+
+    pub async fn list_renewal_intents(
+        &self,
+        filters: RenewalIntentFilters,
+    ) -> Result<RenewalIntentsResponse> {
+        match self {
+            Self::Memory(store) => {
+                let store = store.read().expect("memory store read lock");
+                Ok(RenewalIntentsResponse {
+                    data: filter_renewal_intents(store.renewal_intents.clone(), &filters),
+                })
+            }
+            Self::Postgres(store) => store.list_renewal_intents(filters).await,
         }
     }
 
@@ -3846,6 +6006,2126 @@ impl PostgresStore {
         })
     }
 
+    async fn create_opening_grant(
+        &self,
+        record: &OpeningGrantRecord,
+    ) -> Result<OpeningGrantCreateResult> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(OPENING_GRANT_OWNER_LOCK_INSERT_SQL)
+            .bind(record.tenant_id.as_str())
+            .bind(record.project_id.as_str())
+            .bind(&record.owner_account_id)
+            .bind(&record.created_at)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(OPENING_GRANT_OWNER_LOCK_SELECT_SQL)
+            .bind(record.tenant_id.as_str())
+            .bind(record.project_id.as_str())
+            .bind(&record.owner_account_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let existing_rows = sqlx::query(
+            "SELECT payload FROM opening_grants
+              WHERE tenant_id = $1 AND project_id = $2 AND owner_account_id = $3
+              FOR UPDATE",
+        )
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_str())
+        .bind(&record.owner_account_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let existing = existing_rows
+            .into_iter()
+            .map(|row| row.get::<Json<OpeningGrantRecord>, _>("payload").0)
+            .collect::<Vec<_>>();
+        if let Some(blocker) = opening_grant_create_blocker(&existing, record) {
+            tx.rollback().await?;
+            return Ok(blocker);
+        }
+
+        sqlx::query(
+            "INSERT INTO opening_grants
+                (grant_id, tenant_id, project_id, owner_account_id, config_snapshot_id, grantee_kind, grantee_id, status, credential_hash, expires_at, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        )
+        .bind(&record.grant_id)
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_str())
+        .bind(&record.owner_account_id)
+        .bind(record.config_snapshot_id.as_str())
+        .bind(&record.grantee_kind)
+        .bind(&record.grantee_id)
+        .bind(&record.status)
+        .bind(&record.credential_hash)
+        .bind(&record.expires_at)
+        .bind(Json(record))
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(OpeningGrantCreateResult::Created(Box::new(
+            record.public_view(),
+        )))
+    }
+
+    async fn list_opening_grants(&self) -> Result<OpeningGrantsResponse> {
+        let rows = sqlx::query("SELECT payload FROM opening_grants ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(OpeningGrantsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<OpeningGrantRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        })
+    }
+
+    async fn prepare_delivery(
+        &self,
+        prepared: &PreparedDeliveryRecords,
+        redemption_code: &str,
+        browser_file_unlock_code: &str,
+    ) -> Result<DeliveryPrepareResult> {
+        let mut tx = self.pool.begin().await?;
+        if let Some(blocker) =
+            owner_redemption_capacity_blocker_for_postgres(&mut tx, prepared).await?
+        {
+            tx.rollback().await?;
+            return Ok(blocker);
+        }
+        sqlx::query(
+            "INSERT INTO deliveries
+                (delivery_id, tenant_id, project_id, owner_account_id, redemption_batch_id, provider, status, operator_id, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        )
+        .bind(&prepared.delivery.delivery_id)
+        .bind(prepared.delivery.tenant_id.as_str())
+        .bind(prepared.delivery.project_id.as_str())
+        .bind(&prepared.delivery.owner_account_id)
+        .bind(&prepared.delivery.redemption_batch_id)
+        .bind(&prepared.delivery.provider)
+        .bind(&prepared.delivery.status)
+        .bind(&prepared.delivery.operator_id)
+        .bind(Json(&prepared.delivery))
+        .bind(&prepared.delivery.created_at)
+        .bind(&prepared.delivery.updated_at)
+        .execute(&mut *tx)
+        .await?;
+
+        for code in &prepared.codes {
+            sqlx::query(
+                "INSERT INTO delivery_codes
+                    (code_id, delivery_id, code_type, code_hash, status, expires_at, payload, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            )
+            .bind(&code.code_id)
+            .bind(&code.delivery_id)
+            .bind(&code.code_type)
+            .bind(&code.code_hash)
+            .bind(&code.status)
+            .bind(&code.expires_at)
+            .bind(Json(code))
+            .bind(&code.created_at)
+            .bind(&code.updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            "INSERT INTO delivery_secret_plaintexts
+                (delivery_id, code_type, secret_plaintext, created_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (delivery_id, code_type) DO UPDATE
+                SET secret_plaintext = EXCLUDED.secret_plaintext,
+                    created_at = EXCLUDED.created_at,
+                    used_at = NULL",
+        )
+        .bind(&prepared.delivery.delivery_id)
+        .bind(DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK)
+        .bind(browser_file_unlock_code)
+        .bind(&prepared.delivery.created_at)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO delivery_entitlements
+                (entitlement_id, delivery_id, status, ends_at, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(&prepared.entitlement.entitlement_id)
+        .bind(&prepared.entitlement.delivery_id)
+        .bind(&prepared.entitlement.status)
+        .bind(&prepared.entitlement.ends_at)
+        .bind(Json(&prepared.entitlement))
+        .bind(&prepared.entitlement.created_at)
+        .bind(&prepared.entitlement.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(DeliveryPrepareResult::Prepared(Box::new(
+            DeliveryPrepareResponse {
+                data: delivery_projection(
+                    &prepared.delivery,
+                    &prepared.codes,
+                    &prepared.entitlement,
+                ),
+                one_time_codes: DeliveryOneTimeCodes {
+                    redemption_code: redemption_code.to_string(),
+                    browser_file_unlock_code: browser_file_unlock_code.to_string(),
+                },
+            },
+        )))
+    }
+
+    async fn get_delivery(&self, delivery_id: &str) -> Result<Option<DeliveryResponse>> {
+        let Some(delivery_row) =
+            sqlx::query("SELECT payload FROM deliveries WHERE delivery_id = $1")
+                .bind(delivery_id)
+                .fetch_optional(&self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+        let delivery = delivery_row.get::<Json<DeliveryRecord>, _>("payload").0;
+        let code_rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_codes
+              WHERE delivery_id = $1
+              ORDER BY code_type",
+        )
+        .bind(delivery_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let codes = code_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryCodeRecord>, _>("payload").0)
+            .collect::<Vec<_>>();
+        let entitlement_row =
+            sqlx::query("SELECT payload FROM delivery_entitlements WHERE delivery_id = $1")
+                .bind(delivery_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some(entitlement_row) = entitlement_row else {
+            return Ok(None);
+        };
+        let entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        Ok(Some(DeliveryResponse {
+            data: delivery_projection(&delivery, &codes, &entitlement),
+        }))
+    }
+
+    async fn get_delivery_secret_plaintext(
+        &self,
+        delivery_id: &str,
+        code_type: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query(
+            "SELECT secret_plaintext
+               FROM delivery_secret_plaintexts
+              WHERE delivery_id = $1 AND code_type = $2",
+        )
+        .bind(delivery_id)
+        .bind(code_type)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get("secret_plaintext")))
+    }
+
+    async fn revoke_delivery(
+        &self,
+        delivery_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+        revoke_reason: Option<String>,
+    ) -> Result<ConcurrencyResult<DeliveryResponse>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT payload FROM deliveries WHERE delivery_id = $1 FOR UPDATE")
+            .bind(delivery_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let mut delivery = row.get::<Json<DeliveryRecord>, _>("payload").0;
+        if delivery.version != expected_version {
+            tx.commit().await?;
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+
+        let now = now_rfc3339();
+        delivery.status = DELIVERY_STATUS_REVOKED.to_string();
+        delivery.revoked_at = Some(now.clone());
+        delivery.revoked_by = Some(revoked_by.to_string());
+        delivery.revoke_reason = revoke_reason;
+        delivery.updated_at = now.clone();
+        delivery.version = delivery.version.saturating_add(1);
+        sqlx::query(
+            "UPDATE deliveries
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE delivery_id = $1",
+        )
+        .bind(&delivery.delivery_id)
+        .bind(&delivery.status)
+        .bind(Json(&delivery))
+        .bind(&delivery.updated_at)
+        .execute(&mut *tx)
+        .await?;
+
+        let code_rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_codes
+              WHERE delivery_id = $1
+              FOR UPDATE",
+        )
+        .bind(delivery_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut codes = Vec::with_capacity(code_rows.len());
+        for row in code_rows {
+            let mut code = row.get::<Json<DeliveryCodeRecord>, _>("payload").0;
+            code.status = DELIVERY_STATUS_REVOKED.to_string();
+            code.revoked_at = Some(now.clone());
+            code.updated_at = now.clone();
+            code.version = code.version.saturating_add(1);
+            sqlx::query(
+                "UPDATE delivery_codes
+                    SET status = $2, payload = $3, updated_at = $4
+                  WHERE code_id = $1",
+            )
+            .bind(&code.code_id)
+            .bind(&code.status)
+            .bind(Json(&code))
+            .bind(&code.updated_at)
+            .execute(&mut *tx)
+            .await?;
+            codes.push(code);
+        }
+        codes.sort_by(|left, right| left.code_type.cmp(&right.code_type));
+
+        let entitlement_row = sqlx::query(
+            "SELECT payload FROM delivery_entitlements WHERE delivery_id = $1 FOR UPDATE",
+        )
+        .bind(delivery_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(entitlement_row) = entitlement_row else {
+            tx.commit().await?;
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let mut entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        entitlement.status = DELIVERY_ENTITLEMENT_STATUS_REVOKED.to_string();
+        entitlement.updated_at = now;
+        sqlx::query(
+            "UPDATE delivery_entitlements
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE entitlement_id = $1",
+        )
+        .bind(&entitlement.entitlement_id)
+        .bind(&entitlement.status)
+        .bind(Json(&entitlement))
+        .bind(&entitlement.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(ConcurrencyResult::Applied(DeliveryResponse {
+            data: delivery_projection(&delivery, &codes, &entitlement),
+        }))
+    }
+
+    async fn create_delivery_artifact(
+        &self,
+        draft: DeliveryArtifactDraft,
+    ) -> Result<DeliveryArtifactResponse> {
+        let mut tx = self.pool.begin().await?;
+        let existing_rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_artifacts
+              WHERE delivery_id = $1
+              FOR UPDATE",
+        )
+        .bind(&draft.delivery_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut existing = existing_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryArtifactRecord>, _>("payload").0)
+            .collect::<Vec<_>>();
+        let artifact = build_delivery_artifact_record(&draft, &existing);
+        let now = artifact.created_at.clone();
+        for item in existing
+            .iter_mut()
+            .filter(|item| item.status == DELIVERY_ARTIFACT_STATUS_ACTIVE)
+        {
+            item.status = DELIVERY_ARTIFACT_STATUS_SUPERSEDED.to_string();
+            item.superseded_at = Some(now.clone());
+            item.superseded_by = Some(artifact.artifact_id.clone());
+            item.updated_at = now.clone();
+            sqlx::query(
+                "UPDATE delivery_artifacts
+                    SET status = $2, payload = $3, updated_at = $4
+                  WHERE artifact_id = $1",
+            )
+            .bind(&item.artifact_id)
+            .bind(&item.status)
+            .bind(Json(&item))
+            .bind(&item.updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "INSERT INTO delivery_artifacts
+                (artifact_id, delivery_id, tenant_id, project_id, status, version, sha256, size_bytes, storage_backend, storage_ref, ciphertext, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        )
+        .bind(&artifact.artifact_id)
+        .bind(&artifact.delivery_id)
+        .bind(artifact.tenant_id.as_str())
+        .bind(artifact.project_id.as_str())
+        .bind(&artifact.status)
+        .bind(i64::try_from(artifact.version).unwrap_or(i64::MAX))
+        .bind(&artifact.sha256)
+        .bind(i64::try_from(artifact.size_bytes).unwrap_or(i64::MAX))
+        .bind(&artifact.storage_backend)
+        .bind(&artifact.storage_ref)
+        .bind(&artifact.ciphertext)
+        .bind(Json(&artifact))
+        .bind(&artifact.created_at)
+        .bind(&artifact.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(DeliveryArtifactResponse {
+            data: artifact.public_view(),
+        })
+    }
+
+    async fn create_delivery_upload_batch(
+        &self,
+        draft: DeliveryUploadBatchDraft,
+    ) -> Result<DeliveryUploadBatchResponse> {
+        let batch = build_delivery_upload_batch_record(&draft);
+        let items = build_delivery_upload_batch_item_records(&draft, &batch);
+        let mut tx = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            "INSERT INTO delivery_upload_batches
+                (batch_id, tenant_id, project_id, provider, status, idempotency_key, source_file_name, source_file_sha256, total_count, success_count, failed_count, duplicate_count, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(&batch.batch_id)
+        .bind(batch.tenant_id.as_str())
+        .bind(batch.project_id.as_str())
+        .bind(&batch.provider)
+        .bind(&batch.status)
+        .bind(&batch.idempotency_key)
+        .bind(&batch.source_file_name)
+        .bind(&batch.source_file_sha256)
+        .bind(i64::from(batch.total_count))
+        .bind(i64::from(batch.success_count))
+        .bind(i64::from(batch.failed_count))
+        .bind(i64::from(batch.duplicate_count))
+        .bind(Json(&batch))
+        .bind(&batch.created_at)
+        .bind(&batch.updated_at)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if inserted == 0 {
+            tx.commit().await?;
+            return self
+                .get_delivery_upload_batch_by_dedupe(
+                    &draft.tenant_id,
+                    &draft.project_id,
+                    draft.idempotency_key.as_deref(),
+                    &draft.source_file_sha256,
+                )
+                .await?
+                .ok_or_else(|| anyhow!("delivery upload batch dedupe conflict was not readable"));
+        }
+        for item in items {
+            sqlx::query(
+                "INSERT INTO delivery_upload_batch_items
+                    (item_id, batch_id, tenant_id, project_id, delivery_id, status, row_index, payload_sha256, size_bytes, ciphertext, payload, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            )
+            .bind(&item.item_id)
+            .bind(&item.batch_id)
+            .bind(item.tenant_id.as_str())
+            .bind(item.project_id.as_str())
+            .bind(&item.delivery_id)
+            .bind(&item.status)
+            .bind(i64::from(item.row_index))
+            .bind(&item.payload_sha256)
+            .bind(i64::try_from(item.size_bytes).unwrap_or(i64::MAX))
+            .bind(&item.ciphertext)
+            .bind(Json(&item))
+            .bind(&item.created_at)
+            .bind(&item.updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(batch.public_response())
+    }
+
+    async fn get_delivery_upload_batch(
+        &self,
+        batch_id: &str,
+    ) -> Result<Option<DeliveryUploadBatchResponse>> {
+        let row = sqlx::query(
+            "SELECT payload
+               FROM delivery_upload_batches
+              WHERE batch_id = $1",
+        )
+        .bind(batch_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| {
+            row.get::<Json<DeliveryUploadBatchRecord>, _>("payload")
+                .0
+                .public_response()
+        }))
+    }
+
+    async fn get_delivery_upload_batch_by_dedupe(
+        &self,
+        tenant_id: &TenantId,
+        project_id: &ProjectId,
+        idempotency_key: Option<&str>,
+        source_file_sha256: &str,
+    ) -> Result<Option<DeliveryUploadBatchResponse>> {
+        let row = if let Some(idempotency_key) = idempotency_key {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_upload_batches
+                  WHERE tenant_id = $1
+                    AND project_id = $2
+                    AND (source_file_sha256 = $3 OR idempotency_key = $4)
+                  ORDER BY created_at
+                  LIMIT 1",
+            )
+            .bind(tenant_id.as_str())
+            .bind(project_id.as_str())
+            .bind(source_file_sha256)
+            .bind(idempotency_key)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_upload_batches
+                  WHERE tenant_id = $1
+                    AND project_id = $2
+                    AND source_file_sha256 = $3
+                  ORDER BY created_at
+                  LIMIT 1",
+            )
+            .bind(tenant_id.as_str())
+            .bind(project_id.as_str())
+            .bind(source_file_sha256)
+            .fetch_optional(&self.pool)
+            .await?
+        };
+        Ok(row.map(|row| {
+            row.get::<Json<DeliveryUploadBatchRecord>, _>("payload")
+                .0
+                .public_response()
+        }))
+    }
+
+    async fn list_delivery_upload_batch_items(
+        &self,
+        batch_id: &str,
+    ) -> Result<Option<DeliveryUploadBatchItemsResponse>> {
+        if self.get_delivery_upload_batch(batch_id).await?.is_none() {
+            return Ok(None);
+        }
+        let rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_upload_batch_items
+              WHERE batch_id = $1
+              ORDER BY row_index",
+        )
+        .bind(batch_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(Some(DeliveryUploadBatchItemsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<DeliveryUploadBatchItemRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        }))
+    }
+
+    async fn process_delivery_upload_batch(
+        &self,
+        batch_id: &str,
+        actor_id: &str,
+    ) -> Result<DeliveryUploadProcessResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(batch_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_upload_batches
+              WHERE batch_id = $1
+              FOR UPDATE",
+        )
+        .bind(batch_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(DeliveryUploadProcessResult::BatchNotFound);
+        };
+        let mut batch = batch_row
+            .get::<Json<DeliveryUploadBatchRecord>, _>("payload")
+            .0;
+        if delivery_upload_batch_is_terminal(&batch.status) {
+            tx.commit().await?;
+            return Ok(DeliveryUploadProcessResult::Processed(Box::new(
+                batch.public_response(),
+            )));
+        }
+        if batch.status == DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING {
+            tx.commit().await?;
+            return Ok(DeliveryUploadProcessResult::BatchAlreadyProcessing);
+        }
+        let scope_busy = sqlx::query(
+            "SELECT batch_id
+               FROM delivery_upload_batches
+              WHERE tenant_id = $1 AND project_id = $2 AND status = $3 AND batch_id <> $4
+              LIMIT 1
+              FOR UPDATE",
+        )
+        .bind(batch.tenant_id.as_str())
+        .bind(batch.project_id.as_str())
+        .bind(DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING)
+        .bind(&batch.batch_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
+        if scope_busy {
+            tx.commit().await?;
+            return Ok(DeliveryUploadProcessResult::ScopeBusy);
+        }
+
+        let now = now_rfc3339();
+        batch.status = DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING.to_string();
+        batch.started_at = Some(now.clone());
+        batch.updated_at = now;
+        batch.version = batch.version.saturating_add(1);
+        update_postgres_upload_batch(&mut tx, &batch).await?;
+
+        let item_rows = sqlx::query(
+            "SELECT payload, ciphertext
+               FROM delivery_upload_batch_items
+              WHERE batch_id = $1
+              ORDER BY row_index
+              FOR UPDATE",
+        )
+        .bind(&batch.batch_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut items = item_rows
+            .into_iter()
+            .map(|row| {
+                hydrate_upload_batch_item_ciphertext(
+                    row.get::<Json<DeliveryUploadBatchItemRecord>, _>("payload")
+                        .0,
+                    row.get::<Vec<u8>, _>("ciphertext"),
+                )
+            })
+            .collect::<Vec<_>>();
+        for item in &mut items {
+            if item.status != DELIVERY_UPLOAD_ITEM_STATUS_PENDING {
+                continue;
+            }
+            let outcome =
+                postgres_delivery_upload_item_outcome(&mut tx, item, &batch, actor_id).await?;
+            apply_delivery_upload_item_outcome(item, outcome);
+            update_postgres_upload_item(&mut tx, item).await?;
+        }
+
+        finalize_postgres_delivery_upload_batch(&mut tx, &mut batch, &items).await?;
+        tx.commit().await?;
+        Ok(DeliveryUploadProcessResult::Processed(Box::new(
+            batch.public_response(),
+        )))
+    }
+
+    async fn list_delivery_artifacts(
+        &self,
+        delivery_id: &str,
+    ) -> Result<DeliveryArtifactsResponse> {
+        let rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_artifacts
+              WHERE delivery_id = $1
+              ORDER BY version DESC, created_at DESC",
+        )
+        .bind(delivery_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(DeliveryArtifactsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<DeliveryArtifactRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        })
+    }
+
+    async fn get_delivery_artifact(
+        &self,
+        delivery_id: &str,
+        artifact_id: &str,
+    ) -> Result<Option<DeliveryArtifactResponse>> {
+        let row = sqlx::query(
+            "SELECT payload
+               FROM delivery_artifacts
+              WHERE delivery_id = $1 AND artifact_id = $2",
+        )
+        .bind(delivery_id)
+        .bind(artifact_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| DeliveryArtifactResponse {
+            data: row
+                .get::<Json<DeliveryArtifactRecord>, _>("payload")
+                .0
+                .public_view(),
+        }))
+    }
+
+    async fn get_delivery_by_redemption_code_hash(
+        &self,
+        code_hash: &str,
+    ) -> Result<Option<DeliveryResponse>> {
+        let row = sqlx::query(
+            "SELECT delivery_id
+               FROM delivery_codes
+              WHERE code_type = $1 AND code_hash = $2",
+        )
+        .bind(DELIVERY_CODE_TYPE_REDEMPTION)
+        .bind(code_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(delivery_id) = row.map(|row| row.get::<String, _>("delivery_id")) else {
+            return Ok(None);
+        };
+        self.get_delivery(&delivery_id).await
+    }
+
+    async fn get_delivery_by_entitlement_id(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<Option<DeliveryResponse>> {
+        let row = sqlx::query(
+            "SELECT delivery_id
+               FROM delivery_entitlements
+              WHERE entitlement_id = $1",
+        )
+        .bind(entitlement_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(delivery_id) = row.map(|row| row.get::<String, _>("delivery_id")) else {
+            return Ok(None);
+        };
+        self.get_delivery(&delivery_id).await
+    }
+
+    async fn redeem_delivery_activation(
+        &self,
+        code_hash: &str,
+        activation_id: String,
+        activated_by: &str,
+    ) -> Result<DeliveryRedeemResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(code_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_codes
+              WHERE code_type = $1 AND code_hash = $2
+              FOR UPDATE",
+        )
+        .bind(DELIVERY_CODE_TYPE_REDEMPTION)
+        .bind(code_hash)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::RedemptionCodeNotFound);
+        };
+        let mut code = code_row.get::<Json<DeliveryCodeRecord>, _>("payload").0;
+        if let Some(result) = blocked_redemption_code_result(&code) {
+            return Ok(result);
+        }
+
+        let Some(delivery_row) = sqlx::query(
+            "SELECT payload
+               FROM deliveries
+              WHERE delivery_id = $1
+              FOR UPDATE",
+        )
+        .bind(&code.delivery_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::DeliveryNotFound);
+        };
+        let delivery = delivery_row.get::<Json<DeliveryRecord>, _>("payload").0;
+
+        let Some(entitlement_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_entitlements
+              WHERE delivery_id = $1
+              FOR UPDATE",
+        )
+        .bind(&code.delivery_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::EntitlementNotFound);
+        };
+        let mut entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_delivery_activation_result(&delivery, &entitlement) {
+            return Ok(result);
+        }
+
+        let Some(artifact_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_artifacts
+              WHERE delivery_id = $1 AND status = $2
+              ORDER BY version DESC
+              LIMIT 1
+              FOR UPDATE",
+        )
+        .bind(&code.delivery_id)
+        .bind(DELIVERY_ARTIFACT_STATUS_ACTIVE)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryRedeemResult::ArtifactMissing);
+        };
+        let artifact = artifact_row
+            .get::<Json<DeliveryArtifactRecord>, _>("payload")
+            .0;
+
+        activate_delivery_entitlement(&mut entitlement, None);
+        let activation = build_delivery_activation_record(
+            &activation_id,
+            &delivery,
+            &mut code,
+            &entitlement,
+            &artifact,
+        );
+        let mut new_segments = Vec::<DeliveryServiceSegmentRecord>::new();
+        let mut new_events = Vec::<DeliveryLifecycleEventRecord>::new();
+        if let Some(segment) = build_postgres_service_segment_record(
+            &[],
+            &[],
+            &entitlement,
+            &activation,
+            &artifact,
+            activation.activated_at.clone(),
+            activated_by,
+        ) {
+            new_events.push(postgres_lifecycle_event_record(
+                &entitlement.entitlement_id,
+                Some(segment.segment_id.clone()),
+                DELIVERY_LIFECYCLE_EVENT_SEGMENT_CREATED,
+                DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE,
+                Some("activation_segment".to_string()),
+                activated_by,
+                BTreeMap::from([
+                    ("artifact_id".to_string(), artifact.artifact_id.clone()),
+                    (
+                        "effective_until".to_string(),
+                        segment.effective_until.clone(),
+                    ),
+                ]),
+            ));
+            new_segments.push(segment);
+        } else {
+            entitlement.status = DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY.to_string();
+            entitlement.updated_at = now_rfc3339();
+            entitlement.version = entitlement.version.saturating_add(1);
+            new_events.push(postgres_lifecycle_event_record(
+                &entitlement.entitlement_id,
+                None,
+                DELIVERY_LIFECYCLE_EVENT_NEEDS_MANUAL_SUPPLY,
+                DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY,
+                Some("activation_artifact_missing_carrier_window".to_string()),
+                activated_by,
+                BTreeMap::new(),
+            ));
+        }
+        sqlx::query(
+            "UPDATE delivery_codes
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE code_id = $1",
+        )
+        .bind(&code.code_id)
+        .bind(&code.status)
+        .bind(Json(&code))
+        .bind(&code.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        update_postgres_entitlement(&mut tx, &entitlement).await?;
+        sqlx::query(
+            "INSERT INTO delivery_activations
+                (activation_id, delivery_id, code_id, artifact_id, entitlement_id, tenant_id, project_id, status, activated_at, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(&activation.activation_id)
+        .bind(&activation.delivery_id)
+        .bind(&activation.code_id)
+        .bind(&activation.artifact_id)
+        .bind(&activation.entitlement_id)
+        .bind(activation.tenant_id.as_str())
+        .bind(activation.project_id.as_str())
+        .bind(&activation.status)
+        .bind(&activation.activated_at)
+        .bind(Json(&activation))
+        .bind(&activation.created_at)
+        .bind(&activation.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        insert_postgres_service_segments(&mut tx, &new_segments).await?;
+        insert_postgres_lifecycle_events(&mut tx, &new_events).await?;
+        tx.commit().await?;
+        Ok(DeliveryRedeemResult::Activated(Box::new(
+            DeliveryActivationResponse {
+                data: activation.public_view(),
+            },
+        )))
+    }
+
+    async fn get_delivery_activation(
+        &self,
+        activation_id: &str,
+    ) -> Result<Option<DeliveryActivationResponse>> {
+        let row = sqlx::query(
+            "SELECT payload
+               FROM delivery_activations
+              WHERE activation_id = $1",
+        )
+        .bind(activation_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| DeliveryActivationResponse {
+            data: row
+                .get::<Json<DeliveryActivationRecord>, _>("payload")
+                .0
+                .public_view(),
+        }))
+    }
+
+    async fn list_delivery_service_segments(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<DeliveryServiceSegmentsResponse> {
+        let rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_service_segments
+              WHERE entitlement_id = $1
+              ORDER BY segment_index",
+        )
+        .bind(entitlement_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(DeliveryServiceSegmentsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<DeliveryServiceSegmentRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        })
+    }
+
+    async fn list_delivery_lifecycle_events(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<DeliveryLifecycleEventsResponse> {
+        let rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_lifecycle_events
+              WHERE entitlement_id = $1
+              ORDER BY created_at",
+        )
+        .bind(entitlement_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(DeliveryLifecycleEventsResponse {
+            data: rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<DeliveryLifecycleEventRecord>, _>("payload")
+                        .0
+                        .public_view()
+                })
+                .collect(),
+        })
+    }
+
+    async fn load_delivery_operations_records(
+        &self,
+        scope: &DeliveryOperationsScope,
+    ) -> Result<DeliveryOperationsRecords> {
+        let delivery_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM deliveries
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM deliveries
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let deliveries = delivery_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryRecord>, _>("payload").0)
+            .collect::<Vec<_>>();
+        let delivery_ids = deliveries
+            .iter()
+            .map(|delivery| delivery.delivery_id.clone())
+            .collect::<HashSet<_>>();
+
+        let code_rows = sqlx::query("SELECT payload FROM delivery_codes")
+            .fetch_all(&self.pool)
+            .await?;
+        let codes = code_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryCodeRecord>, _>("payload").0)
+            .filter(|code| delivery_ids.contains(&code.delivery_id))
+            .collect::<Vec<_>>();
+
+        let entitlement_rows = sqlx::query("SELECT payload FROM delivery_entitlements")
+            .fetch_all(&self.pool)
+            .await?;
+        let entitlements = entitlement_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryEntitlementRecord>, _>("payload").0)
+            .filter(|entitlement| delivery_ids.contains(&entitlement.delivery_id))
+            .collect::<Vec<_>>();
+        let entitlement_ids = entitlements
+            .iter()
+            .map(|entitlement| entitlement.entitlement_id.clone())
+            .collect::<HashSet<_>>();
+
+        let artifact_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_artifacts
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_artifacts
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let artifacts = artifact_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryArtifactRecord>, _>("payload").0)
+            .filter(|artifact| delivery_ids.contains(&artifact.delivery_id))
+            .collect::<Vec<_>>();
+
+        let activation_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_activations
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_activations
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let activations = activation_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryActivationRecord>, _>("payload").0)
+            .filter(|activation| delivery_ids.contains(&activation.delivery_id))
+            .collect::<Vec<_>>();
+
+        let grant_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_download_grants
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_download_grants
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let download_grants = grant_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryDownloadGrantRecord>, _>("payload").0)
+            .filter(|grant| delivery_ids.contains(&grant.delivery_id))
+            .collect::<Vec<_>>();
+
+        let segment_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_service_segments
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_service_segments
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let service_segments = segment_rows
+            .into_iter()
+            .map(|row| {
+                row.get::<Json<DeliveryServiceSegmentRecord>, _>("payload")
+                    .0
+            })
+            .filter(|segment| delivery_ids.contains(&segment.delivery_id))
+            .collect::<Vec<_>>();
+
+        let event_rows = sqlx::query("SELECT payload FROM delivery_lifecycle_events")
+            .fetch_all(&self.pool)
+            .await?;
+        let lifecycle_events = event_rows
+            .into_iter()
+            .map(|row| {
+                row.get::<Json<DeliveryLifecycleEventRecord>, _>("payload")
+                    .0
+            })
+            .filter(|event| entitlement_ids.contains(&event.entitlement_id))
+            .collect::<Vec<_>>();
+
+        let upload_batch_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_upload_batches
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_upload_batches
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let upload_batches = upload_batch_rows
+            .into_iter()
+            .map(|row| row.get::<Json<DeliveryUploadBatchRecord>, _>("payload").0)
+            .collect::<Vec<_>>();
+        let upload_batch_ids = upload_batches
+            .iter()
+            .map(|batch| batch.batch_id.clone())
+            .collect::<HashSet<_>>();
+
+        let upload_item_rows = if let Some(project_id) = scope.project_id.as_ref() {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_upload_batch_items
+                  WHERE tenant_id = $1 AND project_id = $2",
+            )
+            .bind(scope.tenant_id.as_str())
+            .bind(project_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT payload
+                   FROM delivery_upload_batch_items
+                  WHERE tenant_id = $1",
+            )
+            .bind(scope.tenant_id.as_str())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        let upload_items = upload_item_rows
+            .into_iter()
+            .map(|row| {
+                row.get::<Json<DeliveryUploadBatchItemRecord>, _>("payload")
+                    .0
+            })
+            .filter(|item| {
+                upload_batch_ids.contains(&item.batch_id)
+                    || delivery_ids.contains(&item.delivery_id)
+            })
+            .collect::<Vec<_>>();
+
+        Ok(DeliveryOperationsRecords {
+            deliveries,
+            codes,
+            entitlements,
+            artifacts,
+            activations,
+            download_grants,
+            service_segments,
+            lifecycle_events,
+            upload_batches,
+            upload_items,
+        })
+    }
+
+    async fn reconcile_delivery_lifecycle(
+        &self,
+        entitlement_id: &str,
+        actor_id: &str,
+    ) -> Result<DeliveryLifecycleResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(entitlement_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_entitlements
+              WHERE entitlement_id = $1
+              FOR UPDATE",
+        )
+        .bind(entitlement_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(DeliveryLifecycleResult::EntitlementNotFound);
+        };
+        let mut entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        let mut new_segments = Vec::<DeliveryServiceSegmentRecord>::new();
+        let mut new_events = Vec::<DeliveryLifecycleEventRecord>::new();
+
+        if timestamp_is_expired(&entitlement.ends_at)
+            && entitlement.status != DELIVERY_STATUS_EXPIRED
+            && entitlement.status != DELIVERY_ENTITLEMENT_STATUS_REVOKED
+        {
+            entitlement.status = DELIVERY_STATUS_EXPIRED.to_string();
+            entitlement.updated_at = now_rfc3339();
+            entitlement.version = entitlement.version.saturating_add(1);
+            new_events.push(postgres_lifecycle_event_record(
+                &entitlement.entitlement_id,
+                None,
+                DELIVERY_LIFECYCLE_EVENT_EXPIRED,
+                DELIVERY_STATUS_EXPIRED,
+                Some("entitlement service window ended".to_string()),
+                actor_id,
+                BTreeMap::new(),
+            ));
+        } else if !matches!(
+            entitlement.status.as_str(),
+            DELIVERY_ENTITLEMENT_STATUS_REVOKED | DELIVERY_ENTITLEMENT_STATUS_SUSPENDED
+        ) {
+            let activation = sqlx::query(
+                "SELECT payload
+                   FROM delivery_activations
+                  WHERE entitlement_id = $1 AND status = $2
+                  ORDER BY activated_at
+                  LIMIT 1
+                  FOR UPDATE",
+            )
+            .bind(&entitlement.entitlement_id)
+            .bind(DELIVERY_ACTIVATION_STATUS_ACTIVATED)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Json<DeliveryActivationRecord>, _>("payload").0);
+
+            let segment_rows = sqlx::query(
+                "SELECT payload
+                   FROM delivery_service_segments
+                  WHERE entitlement_id = $1
+                  FOR UPDATE",
+            )
+            .bind(&entitlement.entitlement_id)
+            .fetch_all(&mut *tx)
+            .await?;
+            let segments = segment_rows
+                .into_iter()
+                .map(|row| {
+                    row.get::<Json<DeliveryServiceSegmentRecord>, _>("payload")
+                        .0
+                })
+                .collect::<Vec<_>>();
+
+            let Some(activation) = activation else {
+                if entitlement.status != DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+                    entitlement.status =
+                        DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY.to_string();
+                    entitlement.updated_at = now_rfc3339();
+                    entitlement.version = entitlement.version.saturating_add(1);
+                    new_events.push(postgres_lifecycle_event_record(
+                        &entitlement.entitlement_id,
+                        None,
+                        DELIVERY_LIFECYCLE_EVENT_NEEDS_MANUAL_SUPPLY,
+                        DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY,
+                        Some("activation_missing".to_string()),
+                        actor_id,
+                        BTreeMap::new(),
+                    ));
+                }
+                update_postgres_entitlement(&mut tx, &entitlement).await?;
+                insert_postgres_lifecycle_events(&mut tx, &new_events).await?;
+                tx.commit().await?;
+                return self
+                    .delivery_lifecycle_response(&entitlement.entitlement_id)
+                    .await
+                    .map(|response| DeliveryLifecycleResult::Applied(Box::new(response)));
+            };
+
+            let coverage_until = segments
+                .iter()
+                .filter(|segment| segment.status != DELIVERY_SERVICE_SEGMENT_STATUS_REVOKED)
+                .map(|segment| segment.effective_until.clone())
+                .max()
+                .unwrap_or_else(|| entitlement.starts_at.clone());
+            if timestamp_after(&entitlement.ends_at, &coverage_until) {
+                let used_artifact_ids = segments
+                    .iter()
+                    .map(|segment| segment.artifact_id.clone())
+                    .collect::<HashSet<_>>();
+                let artifact_rows = sqlx::query(
+                    "SELECT payload
+                       FROM delivery_artifacts
+                      WHERE tenant_id = $1 AND project_id = $2 AND status = $3
+                      FOR UPDATE",
+                )
+                .bind(activation.tenant_id.as_str())
+                .bind(activation.project_id.as_str())
+                .bind(DELIVERY_ARTIFACT_STATUS_ACTIVE)
+                .fetch_all(&mut *tx)
+                .await?;
+                let candidate = artifact_rows
+                    .into_iter()
+                    .map(|row| row.get::<Json<DeliveryArtifactRecord>, _>("payload").0)
+                    .filter(|artifact| {
+                        artifact.provider == activation.provider
+                            && !used_artifact_ids.contains(&artifact.artifact_id)
+                            && artifact
+                                .carrier_valid_until
+                                .as_deref()
+                                .is_some_and(|value| timestamp_after(value, &coverage_until))
+                    })
+                    .max_by(|left, right| left.version.cmp(&right.version));
+                if let Some(artifact) = candidate {
+                    if let Some(segment) = build_postgres_service_segment_record(
+                        &segments,
+                        &new_segments,
+                        &entitlement,
+                        &activation,
+                        &artifact,
+                        coverage_until,
+                        actor_id,
+                    ) {
+                        new_events.push(postgres_lifecycle_event_record(
+                            &entitlement.entitlement_id,
+                            Some(segment.segment_id.clone()),
+                            DELIVERY_LIFECYCLE_EVENT_SEGMENT_CREATED,
+                            segment.status.as_str(),
+                            Some("continuation_artifact_matched".to_string()),
+                            actor_id,
+                            BTreeMap::from([(
+                                "artifact_id".to_string(),
+                                artifact.artifact_id.clone(),
+                            )]),
+                        ));
+                        new_segments.push(segment);
+                        if entitlement.status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+                            entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+                            entitlement.updated_at = now_rfc3339();
+                            entitlement.version = entitlement.version.saturating_add(1);
+                        }
+                    }
+                } else if entitlement.status != DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+                    entitlement.status =
+                        DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY.to_string();
+                    entitlement.updated_at = now_rfc3339();
+                    entitlement.version = entitlement.version.saturating_add(1);
+                    new_events.push(postgres_lifecycle_event_record(
+                        &entitlement.entitlement_id,
+                        None,
+                        DELIVERY_LIFECYCLE_EVENT_NEEDS_MANUAL_SUPPLY,
+                        DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY,
+                        Some("continuation_artifact_missing".to_string()),
+                        actor_id,
+                        BTreeMap::new(),
+                    ));
+                }
+            } else if entitlement.status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+                entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+                entitlement.updated_at = now_rfc3339();
+                entitlement.version = entitlement.version.saturating_add(1);
+            }
+        }
+
+        update_postgres_entitlement(&mut tx, &entitlement).await?;
+        insert_postgres_service_segments(&mut tx, &new_segments).await?;
+        insert_postgres_lifecycle_events(&mut tx, &new_events).await?;
+        tx.commit().await?;
+        self.delivery_lifecycle_response(&entitlement.entitlement_id)
+            .await
+            .map(|response| DeliveryLifecycleResult::Applied(Box::new(response)))
+    }
+
+    async fn extend_delivery_entitlement(
+        &self,
+        draft: DeliveryEntitlementExtendDraft,
+    ) -> Result<ConcurrencyResult<DeliveryLifecycleResponse>> {
+        let mut tx = self.pool.begin().await?;
+        let Some(row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_entitlements
+              WHERE entitlement_id = $1
+              FOR UPDATE",
+        )
+        .bind(&draft.entitlement_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let mut entitlement = row.get::<Json<DeliveryEntitlementRecord>, _>("payload").0;
+        if entitlement.version != draft.expected_version {
+            tx.commit().await?;
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let old_ends_at = entitlement.ends_at.clone();
+        entitlement.ends_at = timestamp_plus_days(&entitlement.ends_at, draft.extend_days)
+            .unwrap_or_else(|| expires_at(u64::from(draft.extend_days) * 86_400));
+        entitlement.service_days = entitlement.service_days.saturating_add(draft.extend_days);
+        if entitlement.status != DELIVERY_ENTITLEMENT_STATUS_REVOKED
+            && entitlement.status != DELIVERY_ENTITLEMENT_STATUS_SUSPENDED
+            && !timestamp_is_expired(&entitlement.ends_at)
+            && entitlement.activated_at.is_some()
+        {
+            entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+        }
+        entitlement.updated_at = now_rfc3339();
+        entitlement.version = entitlement.version.saturating_add(1);
+        let event = postgres_lifecycle_event_record(
+            &entitlement.entitlement_id,
+            None,
+            DELIVERY_LIFECYCLE_EVENT_RENEWED,
+            entitlement.status.as_str(),
+            draft.reason.clone(),
+            &draft.actor_id,
+            BTreeMap::from([
+                ("old_service_ends_at".to_string(), old_ends_at),
+                (
+                    "new_service_ends_at".to_string(),
+                    entitlement.ends_at.clone(),
+                ),
+                ("extend_days".to_string(), draft.extend_days.to_string()),
+            ]),
+        );
+        update_postgres_entitlement(&mut tx, &entitlement).await?;
+        insert_postgres_lifecycle_events(&mut tx, &[event]).await?;
+        tx.commit().await?;
+        match self
+            .reconcile_delivery_lifecycle(&entitlement.entitlement_id, &draft.actor_id)
+            .await?
+        {
+            DeliveryLifecycleResult::Applied(response) => Ok(ConcurrencyResult::Applied(*response)),
+            DeliveryLifecycleResult::EntitlementNotFound => Ok(ConcurrencyResult::NotFound),
+        }
+    }
+
+    async fn delivery_lifecycle_response(
+        &self,
+        entitlement_id: &str,
+    ) -> Result<DeliveryLifecycleResponse> {
+        let entitlement = sqlx::query(
+            "SELECT payload
+               FROM delivery_entitlements
+              WHERE entitlement_id = $1",
+        )
+        .bind(entitlement_id)
+        .fetch_one(&self.pool)
+        .await?
+        .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+        .0;
+        let segments = self
+            .list_delivery_service_segments(entitlement_id)
+            .await?
+            .data;
+        let events = self
+            .list_delivery_lifecycle_events(entitlement_id)
+            .await?
+            .data;
+        Ok(DeliveryLifecycleResponse {
+            entitlement: entitlement.public_view(),
+            segments,
+            events,
+        })
+    }
+
+    async fn issue_delivery_download_grant(
+        &self,
+        draft: DeliveryDownloadGrantDraft,
+    ) -> Result<DeliveryDownloadGrantIssueResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(activation_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_activations
+              WHERE activation_id = $1
+              FOR UPDATE",
+        )
+        .bind(&draft.activation_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadGrantIssueResult::ActivationNotFound);
+        };
+        let activation = activation_row
+            .get::<Json<DeliveryActivationRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_activation_issue_result(&activation) {
+            return Ok(result);
+        }
+
+        let Some(entitlement_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_entitlements
+              WHERE entitlement_id = $1
+              FOR UPDATE",
+        )
+        .bind(&activation.entitlement_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadGrantIssueResult::EntitlementNotFound);
+        };
+        let entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_entitlement_issue_result(&entitlement) {
+            return Ok(result);
+        }
+
+        let segment_rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_service_segments
+              WHERE entitlement_id = $1 AND activation_id = $2
+              FOR UPDATE",
+        )
+        .bind(&entitlement.entitlement_id)
+        .bind(&activation.activation_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let segments = segment_rows
+            .into_iter()
+            .map(|row| {
+                row.get::<Json<DeliveryServiceSegmentRecord>, _>("payload")
+                    .0
+            })
+            .collect::<Vec<_>>();
+        let Some(segment) = current_segment_for_entitlement(
+            &segments,
+            &entitlement.entitlement_id,
+            &activation.activation_id,
+        )
+        .cloned() else {
+            return Ok(DeliveryDownloadGrantIssueResult::SegmentMissing);
+        };
+
+        let Some(artifact_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_artifacts
+              WHERE delivery_id = $1 AND artifact_id = $2
+              FOR UPDATE",
+        )
+        .bind(&activation.delivery_id)
+        .bind(&segment.artifact_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadGrantIssueResult::ArtifactMissing);
+        };
+        let artifact = artifact_row
+            .get::<Json<DeliveryArtifactRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_artifact_issue_result(&artifact) {
+            return Ok(result);
+        }
+
+        let grant = build_delivery_download_grant_record(&draft, &activation, &artifact);
+        sqlx::query(
+            "INSERT INTO delivery_download_grants
+                (grant_id, activation_id, delivery_id, artifact_id, entitlement_id, tenant_id, project_id, status, token_hash, expires_at, use_count, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        )
+        .bind(&grant.grant_id)
+        .bind(&grant.activation_id)
+        .bind(&grant.delivery_id)
+        .bind(&grant.artifact_id)
+        .bind(&grant.entitlement_id)
+        .bind(grant.tenant_id.as_str())
+        .bind(grant.project_id.as_str())
+        .bind(&grant.status)
+        .bind(&grant.token_hash)
+        .bind(&grant.expires_at)
+        .bind(i64::from(grant.use_count))
+        .bind(Json(&grant))
+        .bind(&grant.created_at)
+        .bind(&grant.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(DeliveryDownloadGrantIssueResult::Issued(Box::new(
+            DeliveryDownloadGrantIssueResponse {
+                data: grant.public_view(),
+                download_token: draft.token_plaintext,
+            },
+        )))
+    }
+
+    async fn get_delivery_download_grant(
+        &self,
+        grant_id: &str,
+    ) -> Result<Option<DeliveryDownloadGrantResponse>> {
+        let row = sqlx::query(
+            "SELECT payload
+               FROM delivery_download_grants
+              WHERE grant_id = $1",
+        )
+        .bind(grant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| DeliveryDownloadGrantResponse {
+            data: row
+                .get::<Json<DeliveryDownloadGrantRecord>, _>("payload")
+                .0
+                .public_view(),
+        }))
+    }
+
+    async fn revoke_delivery_download_grant(
+        &self,
+        grant_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+        revoke_reason: Option<String>,
+    ) -> Result<ConcurrencyResult<DeliveryDownloadGrantResponse>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT payload
+               FROM delivery_download_grants
+              WHERE grant_id = $1
+              FOR UPDATE",
+        )
+        .bind(grant_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let mut grant = row.get::<Json<DeliveryDownloadGrantRecord>, _>("payload").0;
+        if grant.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let now = now_rfc3339();
+        grant.status = DELIVERY_DOWNLOAD_GRANT_STATUS_REVOKED.to_string();
+        grant.revoked_at = Some(now.clone());
+        grant.revoked_by = Some(revoked_by.to_string());
+        grant.revoke_reason = revoke_reason;
+        grant.updated_at = now;
+        grant.version = grant.version.saturating_add(1);
+        sqlx::query(
+            "UPDATE delivery_download_grants
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE grant_id = $1",
+        )
+        .bind(&grant.grant_id)
+        .bind(&grant.status)
+        .bind(Json(&grant))
+        .bind(&grant.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(ConcurrencyResult::Applied(DeliveryDownloadGrantResponse {
+            data: grant.public_view(),
+        }))
+    }
+
+    async fn consume_delivery_download_grant(
+        &self,
+        token_hash: &str,
+    ) -> Result<DeliveryDownloadConsumeResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(grant_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_download_grants
+              WHERE token_hash = $1
+              FOR UPDATE",
+        )
+        .bind(token_hash)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadConsumeResult::GrantNotFound);
+        };
+        let mut grant = grant_row
+            .get::<Json<DeliveryDownloadGrantRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_grant_consume_result(&mut grant) {
+            if grant.status == DELIVERY_DOWNLOAD_GRANT_STATUS_EXPIRED {
+                sqlx::query(
+                    "UPDATE delivery_download_grants
+                        SET status = $2, payload = $3, updated_at = $4
+                      WHERE grant_id = $1",
+                )
+                .bind(&grant.grant_id)
+                .bind(&grant.status)
+                .bind(Json(&grant))
+                .bind(&grant.updated_at)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+            }
+            return Ok(result);
+        }
+
+        let Some(activation_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_activations
+              WHERE activation_id = $1
+              FOR UPDATE",
+        )
+        .bind(&grant.activation_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadConsumeResult::ActivationNotFound);
+        };
+        let activation = activation_row
+            .get::<Json<DeliveryActivationRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_activation_consume_result(&activation) {
+            return Ok(result);
+        }
+
+        let Some(entitlement_row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_entitlements
+              WHERE entitlement_id = $1
+              FOR UPDATE",
+        )
+        .bind(&grant.entitlement_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadConsumeResult::EntitlementNotFound);
+        };
+        let entitlement = entitlement_row
+            .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_entitlement_consume_result(&entitlement) {
+            return Ok(result);
+        }
+
+        let segment_rows = sqlx::query(
+            "SELECT payload
+               FROM delivery_service_segments
+              WHERE entitlement_id = $1 AND activation_id = $2
+              FOR UPDATE",
+        )
+        .bind(&grant.entitlement_id)
+        .bind(&grant.activation_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let segments = segment_rows
+            .into_iter()
+            .map(|row| {
+                row.get::<Json<DeliveryServiceSegmentRecord>, _>("payload")
+                    .0
+            })
+            .collect::<Vec<_>>();
+        if active_segment_for_artifact(
+            &segments,
+            &grant.entitlement_id,
+            &grant.activation_id,
+            &grant.artifact_id,
+        )
+        .is_none()
+        {
+            return Ok(DeliveryDownloadConsumeResult::SegmentMissing);
+        }
+
+        let Some(artifact_row) = sqlx::query(
+            "SELECT payload, ciphertext
+               FROM delivery_artifacts
+              WHERE delivery_id = $1 AND artifact_id = $2
+              FOR UPDATE",
+        )
+        .bind(&grant.delivery_id)
+        .bind(&grant.artifact_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(DeliveryDownloadConsumeResult::ArtifactMissing);
+        };
+        let artifact = artifact_row
+            .get::<Json<DeliveryArtifactRecord>, _>("payload")
+            .0;
+        if let Some(result) = blocked_download_artifact_consume_result(&artifact) {
+            return Ok(result);
+        }
+        let ciphertext = artifact_row.get::<Vec<u8>, _>("ciphertext");
+        let payload = mark_download_grant_used_and_payload(&mut grant, &artifact, ciphertext);
+        sqlx::query(
+            "UPDATE delivery_download_grants
+                SET status = $2, use_count = $3, payload = $4, updated_at = $5
+              WHERE grant_id = $1",
+        )
+        .bind(&grant.grant_id)
+        .bind(&grant.status)
+        .bind(i64::from(grant.use_count))
+        .bind(Json(&grant))
+        .bind(&grant.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(DeliveryDownloadConsumeResult::Retrieved(Box::new(payload)))
+    }
+
+    async fn create_delivery_producer_authorization(
+        &self,
+        record: &DeliveryProducerAuthorizationRecord,
+    ) -> Result<DeliveryProducerAuthorizationRecord> {
+        let mut tx = self.pool.begin().await?;
+        let old_rows = sqlx::query(
+            "SELECT authorization_id, payload
+               FROM delivery_producer_authorizations
+              WHERE tenant_id = $1
+                AND project_id = $2
+                AND owner_account_id = $3
+                AND provider = $4
+                AND status = $5
+                AND payload->>'service_kind' = $6
+                AND (payload->>'service_days')::int = $7
+              FOR UPDATE",
+        )
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_str())
+        .bind(&record.owner_account_id)
+        .bind(&record.provider)
+        .bind(DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE)
+        .bind(&record.service_kind)
+        .bind(i32::try_from(record.service_days).unwrap_or(i32::MAX))
+        .fetch_all(&mut *tx)
+        .await?;
+        for row in old_rows {
+            let mut authorization = row
+                .get::<Json<DeliveryProducerAuthorizationRecord>, _>("payload")
+                .0;
+            revoke_delivery_producer_authorization_record(
+                &mut authorization,
+                &record.created_by,
+                "rotated",
+            );
+            sqlx::query(
+                "UPDATE delivery_producer_authorizations
+                    SET status = $2, payload = $3, updated_at = $4
+                  WHERE authorization_id = $1",
+            )
+            .bind(&authorization.authorization_id)
+            .bind(&authorization.status)
+            .bind(Json(&authorization))
+            .bind(&authorization.updated_at)
+            .execute(&mut *tx)
+            .await?;
+            let token_rows = sqlx::query(
+                "SELECT token_id, payload
+                   FROM delivery_producer_tokens
+                  WHERE authorization_id = $1
+                    AND status = $2
+                  FOR UPDATE",
+            )
+            .bind(&authorization.authorization_id)
+            .bind(DELIVERY_PRODUCER_TOKEN_STATUS_ACTIVE)
+            .fetch_all(&mut *tx)
+            .await?;
+            for token_row in token_rows {
+                let mut token = token_row
+                    .get::<Json<DeliveryProducerTokenRecord>, _>("payload")
+                    .0;
+                revoke_delivery_producer_token_record(&mut token, &record.created_by, "rotated");
+                sqlx::query(
+                    "UPDATE delivery_producer_tokens
+                        SET status = $2, payload = $3, updated_at = $4
+                      WHERE token_id = $1",
+                )
+                .bind(&token.token_id)
+                .bind(&token.status)
+                .bind(Json(&token))
+                .bind(&token.updated_at)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        sqlx::query(
+            "INSERT INTO delivery_producer_authorizations
+                (authorization_id, tenant_id, project_id, owner_account_id, provider, status, code_hash, expires_at, redeem_count, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(&record.authorization_id)
+        .bind(record.tenant_id.as_str())
+        .bind(record.project_id.as_str())
+        .bind(&record.owner_account_id)
+        .bind(&record.provider)
+        .bind(&record.status)
+        .bind(&record.code_hash)
+        .bind(&record.expires_at)
+        .bind(i64::try_from(record.redeem_count).unwrap_or(i64::MAX))
+        .bind(Json(record))
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(record.clone())
+    }
+
+    async fn redeem_delivery_producer_authorization(
+        &self,
+        authorization_code_hash: &str,
+        draft: DeliveryProducerTokenDraft,
+    ) -> Result<DeliveryProducerAuthorizationRedeemResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_producer_authorizations
+              WHERE code_hash = $1
+              FOR UPDATE",
+        )
+        .bind(authorization_code_hash)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(DeliveryProducerAuthorizationRedeemResult::AuthorizationNotFound);
+        };
+        let mut authorization = row
+            .get::<Json<DeliveryProducerAuthorizationRecord>, _>("payload")
+            .0;
+        if let Some(result) =
+            blocked_delivery_producer_authorization_redeem_result(&mut authorization)
+        {
+            if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_EXPIRED {
+                sqlx::query(
+                    "UPDATE delivery_producer_authorizations
+                        SET status = $2, payload = $3, updated_at = $4
+                      WHERE authorization_id = $1",
+                )
+                .bind(&authorization.authorization_id)
+                .bind(&authorization.status)
+                .bind(Json(&authorization))
+                .bind(&authorization.updated_at)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+            }
+            return Ok(result);
+        }
+        let token = build_delivery_producer_token_record(&draft, &authorization);
+        let now = now_rfc3339();
+        authorization.redeem_count = authorization.redeem_count.saturating_add(1);
+        authorization.last_redeemed_at = Some(now.clone());
+        authorization.updated_at = now;
+        authorization.version = authorization.version.saturating_add(1);
+        sqlx::query(
+            "UPDATE delivery_producer_authorizations
+                SET redeem_count = $2, payload = $3, updated_at = $4
+              WHERE authorization_id = $1",
+        )
+        .bind(&authorization.authorization_id)
+        .bind(i64::try_from(authorization.redeem_count).unwrap_or(i64::MAX))
+        .bind(Json(&authorization))
+        .bind(&authorization.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO delivery_producer_tokens
+                (token_id, authorization_id, tenant_id, project_id, owner_account_id, provider, status, token_hash, expires_at, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(&token.token_id)
+        .bind(&token.authorization_id)
+        .bind(token.tenant_id.as_str())
+        .bind(token.project_id.as_str())
+        .bind(&token.owner_account_id)
+        .bind(&token.provider)
+        .bind(&token.status)
+        .bind(&token.token_hash)
+        .bind(&token.expires_at)
+        .bind(Json(&token))
+        .bind(&token.created_at)
+        .bind(&token.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(DeliveryProducerAuthorizationRedeemResult::Redeemed(
+            Box::new(token),
+        ))
+    }
+
+    async fn resolve_delivery_producer_token(
+        &self,
+        token_hash: &str,
+    ) -> Result<DeliveryProducerTokenResolveResult> {
+        let mut tx = self.pool.begin().await?;
+        let Some(row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_producer_tokens
+              WHERE token_hash = $1
+              FOR UPDATE",
+        )
+        .bind(token_hash)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(DeliveryProducerTokenResolveResult::TokenNotFound);
+        };
+        let mut token = row.get::<Json<DeliveryProducerTokenRecord>, _>("payload").0;
+        if let Some(result) = blocked_delivery_producer_token_resolve_result(&mut token) {
+            if token.status == DELIVERY_PRODUCER_TOKEN_STATUS_EXPIRED {
+                sqlx::query(
+                    "UPDATE delivery_producer_tokens
+                        SET status = $2, payload = $3, updated_at = $4
+                      WHERE token_id = $1",
+                )
+                .bind(&token.token_id)
+                .bind(&token.status)
+                .bind(Json(&token))
+                .bind(&token.updated_at)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            return Ok(result);
+        }
+        let Some(row) = sqlx::query(
+            "SELECT payload
+               FROM delivery_producer_authorizations
+              WHERE authorization_id = $1
+              FOR UPDATE",
+        )
+        .bind(&token.authorization_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            revoke_delivery_producer_token_record(&mut token, "system", "authorization_missing");
+            sqlx::query(
+                "UPDATE delivery_producer_tokens
+                    SET status = $2, payload = $3, updated_at = $4
+                  WHERE token_id = $1",
+            )
+            .bind(&token.token_id)
+            .bind(&token.status)
+            .bind(Json(&token))
+            .bind(&token.updated_at)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(DeliveryProducerTokenResolveResult::AuthorizationRevoked);
+        };
+        let mut authorization = row
+            .get::<Json<DeliveryProducerAuthorizationRecord>, _>("payload")
+            .0;
+        if let Some(result) =
+            blocked_delivery_producer_authorization_token_resolve_result(&mut authorization)
+        {
+            if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_EXPIRED {
+                sqlx::query(
+                    "UPDATE delivery_producer_authorizations
+                        SET status = $2, payload = $3, updated_at = $4
+                      WHERE authorization_id = $1",
+                )
+                .bind(&authorization.authorization_id)
+                .bind(&authorization.status)
+                .bind(Json(&authorization))
+                .bind(&authorization.updated_at)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            return Ok(result);
+        }
+        tx.commit().await?;
+        Ok(DeliveryProducerTokenResolveResult::Resolved(Box::new(
+            token,
+        )))
+    }
+
     async fn list_codex_auth_accounts(&self) -> Result<CodexAuthAccountsResponse> {
         let rows = sqlx::query("SELECT payload FROM codex_auth_accounts ORDER BY codex_account_id")
             .fetch_all(&self.pool)
@@ -4169,8 +8449,10 @@ impl PostgresStore {
                 .await?,
             oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
                 .await?,
+            oauth_sharing_audit_events: load_oauth_sharing_audit_records_from_tx(&mut tx).await?,
             ..MemoryStore::default()
         };
+        let audit_len = memory.oauth_sharing_audit_events.len();
         let result = heartbeat_memory_runtime_lease(&mut memory, runtime_lease_id);
         for account in &memory.codex_auth_accounts {
             persist_codex_auth_account_tx(&mut tx, account).await?;
@@ -4180,6 +8462,9 @@ impl PostgresStore {
         }
         for binding in &memory.oauth_pool_session_bindings {
             upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+        for event in memory.oauth_sharing_audit_events.iter().skip(audit_len) {
+            insert_oauth_sharing_audit_event_tx(&mut tx, event).await?;
         }
         tx.commit().await?;
         Ok(result)
@@ -4196,8 +8481,10 @@ impl PostgresStore {
                 .await?,
             oauth_pool_session_bindings: load_oauth_pool_session_binding_records_from_tx(&mut tx)
                 .await?,
+            oauth_sharing_audit_events: load_oauth_sharing_audit_records_from_tx(&mut tx).await?,
             ..MemoryStore::default()
         };
+        let audit_len = memory.oauth_sharing_audit_events.len();
         let result = release_memory_runtime_lease(&mut memory, runtime_lease_id);
         for account in &memory.codex_auth_accounts {
             persist_codex_auth_account_tx(&mut tx, account).await?;
@@ -4207,6 +8494,9 @@ impl PostgresStore {
         }
         for binding in &memory.oauth_pool_session_bindings {
             upsert_oauth_pool_session_binding_tx(&mut tx, binding).await?;
+        }
+        for event in memory.oauth_sharing_audit_events.iter().skip(audit_len) {
+            insert_oauth_sharing_audit_event_tx(&mut tx, event).await?;
         }
         tx.commit().await?;
         Ok(result)
@@ -4340,7 +8630,58 @@ impl PostgresStore {
         }))
     }
 
+    async fn revoke_opening_grant(
+        &self,
+        grant_id: &str,
+        expected_version: u64,
+        revoked_by: &str,
+    ) -> Result<ConcurrencyResult<OpeningGrant>> {
+        let row = sqlx::query("SELECT payload FROM opening_grants WHERE grant_id = $1")
+            .bind(grant_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Ok(ConcurrencyResult::NotFound);
+        };
+        let mut record = row.get::<Json<OpeningGrantRecord>, _>("payload").0;
+        if record.version != expected_version {
+            return Ok(ConcurrencyResult::VersionConflict);
+        }
+        let now = now_rfc3339();
+        record.status = "revoked".to_string();
+        record.revoked_at = Some(now.clone());
+        record.revoked_by = Some(revoked_by.to_string());
+        record.updated_at = now;
+        record.version = record.version.saturating_add(1);
+        sqlx::query(
+            "UPDATE opening_grants
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE grant_id = $1",
+        )
+        .bind(&record.grant_id)
+        .bind(&record.status)
+        .bind(Json(&record))
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(ConcurrencyResult::Applied(record.public_view()))
+    }
+
     async fn resolve_api_key(&self, hash: &str) -> Result<Option<ResolvedApiKey>> {
+        let grant_row = sqlx::query(
+            "SELECT payload
+               FROM opening_grants
+              WHERE credential_hash = $1
+              LIMIT 1",
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(row) = grant_row {
+            let grant = row.get::<Json<OpeningGrantRecord>, _>("payload").0;
+            return Ok(Some(grant.to_resolved()));
+        }
+
         let row = sqlx::query(
             "SELECT ak.api_key_id, ak.provider_resource_id, ak.is_active, ak.version, ak.created_at, ak.updated_at,
                     pr.tenant_id, pr.project_id
@@ -4357,6 +8698,8 @@ impl PostgresStore {
         };
         Ok(Some(ResolvedApiKey {
             api_key_id: row.get::<String, _>("api_key_id"),
+            grant_id: None,
+            owner_account_id: None,
             tenant_id: TenantId::parse(row.get::<String, _>("tenant_id"))
                 .context("invalid tenant id for api key")?,
             project_id: row
@@ -4366,6 +8709,15 @@ impl PostgresStore {
                 .ok()
                 .flatten(),
             is_active: row.get::<bool, _>("is_active"),
+            status: if row.get::<bool, _>("is_active") {
+                "active".to_string()
+            } else {
+                "revoked".to_string()
+            },
+            config_snapshot_id: None,
+            route_policy_id: None,
+            scopes: Vec::new(),
+            expires_at: None,
         }))
     }
 
@@ -4616,6 +8968,7 @@ impl PostgresStore {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
     ) -> Result<UsageSummaryResponse> {
@@ -4624,22 +8977,24 @@ impl PostgresStore {
         let row = sqlx::query(
             r#"
             SELECT
-                COALESCE(SUM(event_count), 0) AS event_count,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(provider_cost_micros), 0) AS provider_cost_micros,
-                COALESCE(SUM(billable_cost_micros), 0) AS billable_cost_micros,
+                COALESCE(SUM(event_count), 0)::BIGINT AS event_count,
+                COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
+                COALESCE(SUM(cached_input_tokens), 0)::BIGINT AS cached_input_tokens,
+                COALESCE(SUM(provider_cost_micros), 0)::BIGINT AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0)::BIGINT AS billable_cost_micros,
                 COALESCE(MIN(currency), 'USD') AS currency
             FROM usage_daily_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
-              AND usage_date >= DATE($3::timestamptz)
-              AND usage_date <= DATE($4::timestamptz)
+              AND ($3::text IS NULL OR owner_account_id = $3)
+              AND usage_date >= DATE($4::timestamptz)
+              AND usage_date <= DATE($5::timestamptz)
             "#,
         )
         .bind(tenant_id)
         .bind(project_id.as_deref())
+        .bind(owner_account_id.as_deref())
         .bind(&window_start_value)
         .bind(&window_end_value)
         .fetch_one(&self.pool)
@@ -4650,6 +9005,7 @@ impl PostgresStore {
             data: UsageSummary {
                 tenant_id: TenantId::parse(tenant_id.to_string())?,
                 project_id: project_id.map(ProjectId::parse).transpose()?,
+                owner_account_id,
                 window_start: window_start_value,
                 window_end: window_end_value,
                 currency: currency.clone(),
@@ -4675,6 +9031,7 @@ impl PostgresStore {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
         window_start: Option<String>,
         window_end: Option<String>,
         group_by: UsageBreakdownGroupBy,
@@ -4711,25 +9068,27 @@ impl PostgresStore {
                 {bucket_select},
                 {provider_select},
                 {model_select},
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(provider_cost_micros), 0) AS provider_cost_micros,
-                COALESCE(SUM(billable_cost_micros), 0) AS billable_cost_micros,
+                COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
+                COALESCE(SUM(cached_input_tokens), 0)::BIGINT AS cached_input_tokens,
+                COALESCE(SUM(provider_cost_micros), 0)::BIGINT AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0)::BIGINT AS billable_cost_micros,
                 COALESCE(MIN(currency), 'USD') AS currency
             FROM usage_daily_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
-              AND usage_date >= DATE($3::timestamptz)
-              AND usage_date <= DATE($4::timestamptz)
+              AND ($3::text IS NULL OR owner_account_id = $3)
+              AND usage_date >= DATE($4::timestamptz)
+              AND usage_date <= DATE($5::timestamptz)
             GROUP BY {group_expr}
             ORDER BY {group_expr}
-            OFFSET $5 LIMIT $6
+            OFFSET $6 LIMIT $7
             "#
         );
         let rows = sqlx::query(&sql)
             .bind(tenant_id)
             .bind(project_id.as_deref())
+            .bind(owner_account_id.as_deref())
             .bind(&window_start_value)
             .bind(&window_end_value)
             .bind(i64::try_from(offset).unwrap_or(i64::MAX))
@@ -4792,26 +9151,37 @@ impl PostgresStore {
         &self,
         tenant_id: &str,
         project_id: Option<String>,
+        owner_account_id: Option<String>,
     ) -> Result<BalanceProjectionResponse> {
         let row = sqlx::query(
             r#"
             SELECT
                 currency,
-                provider_cost_micros,
-                billable_cost_micros,
-                configured_budget_micros,
-                remaining_budget_micros,
-                threshold_status,
-                last_projected_at::text AS last_projected_at
+                COALESCE(SUM(provider_cost_micros), 0)::BIGINT AS provider_cost_micros,
+                COALESCE(SUM(billable_cost_micros), 0)::BIGINT AS billable_cost_micros,
+                COALESCE(SUM(configured_budget_micros), 0)::BIGINT AS configured_budget_micros,
+                COALESCE(SUM(remaining_budget_micros), 0)::BIGINT AS remaining_budget_micros,
+                CASE
+                    WHEN BOOL_OR(threshold_status = 'exceeded') THEN 'exceeded'
+                    WHEN BOOL_OR(threshold_status = 'warning') THEN 'warning'
+                    ELSE 'ok'
+                END AS threshold_status,
+                to_char(
+                    MAX(last_projected_at) AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                ) AS last_projected_at
             FROM balance_projections
             WHERE tenant_id = $1
               AND ($2::text IS NULL OR project_id = $2)
-            ORDER BY last_projected_at DESC
+              AND ($3::text IS NULL OR owner_account_id = $3)
+            GROUP BY currency
+            ORDER BY MAX(last_projected_at) DESC
             LIMIT 1
             "#,
         )
         .bind(tenant_id)
         .bind(project_id.as_deref())
+        .bind(owner_account_id.as_deref())
         .fetch_optional(&self.pool)
         .await?;
 
@@ -4823,6 +9193,7 @@ impl PostgresStore {
                 data: BalanceProjection {
                     tenant_id: TenantId::parse(tenant_id.to_string())?,
                     project_id: project_id.map(ProjectId::parse).transpose()?,
+                    owner_account_id,
                     currency: currency.clone(),
                     provider_cost_total: format_monetary_amount(
                         &currency,
@@ -4847,12 +9218,16 @@ impl PostgresStore {
             })
         } else {
             let currency = "USD".to_string();
-            let configured_budget_micros =
-                default_budget_micros(tenant_id, project_id.as_deref().unwrap_or("project"));
+            let configured_budget_micros = default_budget_micros_for_scope(
+                tenant_id,
+                project_id.as_deref().unwrap_or("project"),
+                owner_account_id.as_deref(),
+            );
             Ok(BalanceProjectionResponse {
                 data: BalanceProjection {
                     tenant_id: TenantId::parse(tenant_id.to_string())?,
                     project_id: project_id.map(ProjectId::parse).transpose()?,
+                    owner_account_id,
                     currency: currency.clone(),
                     provider_cost_total: format_monetary_amount(&currency, 0),
                     billable_total: format_monetary_amount(&currency, 0),
@@ -5132,6 +9507,93 @@ impl PostgresStore {
         .await?;
 
         Ok(WechatPaymentOrderResponse { data: record })
+    }
+
+    async fn create_renewal_intent(
+        &self,
+        draft: RenewalIntentDraft,
+    ) -> Result<RenewalIntentCreateResult> {
+        let mut tx = self.pool.begin().await?;
+        let order_row = sqlx::query(
+            "SELECT payload FROM wechat_payment_orders WHERE out_trade_no = $1 FOR UPDATE",
+        )
+        .bind(&draft.out_trade_no)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(order_row) = order_row else {
+            tx.commit().await?;
+            return Ok(RenewalIntentCreateResult::OrderNotFound);
+        };
+        let order = order_row
+            .get::<Json<WechatPaymentOrderRecord>, _>("payload")
+            .0;
+
+        let grant_row =
+            sqlx::query("SELECT payload FROM opening_grants WHERE grant_id = $1 FOR UPDATE")
+                .bind(&draft.grant_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some(grant_row) = grant_row else {
+            tx.commit().await?;
+            return Ok(RenewalIntentCreateResult::GrantNotFound);
+        };
+        let mut grant = grant_row.get::<Json<OpeningGrantRecord>, _>("payload").0;
+        if !renewal_order_matches_grant(&order, &grant) {
+            tx.commit().await?;
+            return Ok(RenewalIntentCreateResult::GrantMismatch);
+        }
+
+        let intent = build_renewal_intent(&draft, &order, &mut grant);
+        if intent.status == "renewed" {
+            sqlx::query(
+                "UPDATE opening_grants
+                    SET status = $2, expires_at = $3, payload = $4, updated_at = $5
+                  WHERE grant_id = $1",
+            )
+            .bind(&grant.grant_id)
+            .bind(&grant.status)
+            .bind(&grant.expires_at)
+            .bind(Json(&grant))
+            .bind(&grant.updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "INSERT INTO billing_renewal_intents
+                (renewal_intent_id, out_trade_no, grant_id, tenant_id, project_id, status, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(&intent.renewal_intent_id)
+        .bind(&intent.out_trade_no)
+        .bind(&intent.grant_id)
+        .bind(intent.tenant_id.as_str())
+        .bind(intent.project_id.as_str())
+        .bind(&intent.status)
+        .bind(Json(&intent))
+        .bind(&intent.created_at)
+        .bind(&intent.updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(RenewalIntentCreateResult::Created(intent))
+    }
+
+    async fn list_renewal_intents(
+        &self,
+        filters: RenewalIntentFilters,
+    ) -> Result<RenewalIntentsResponse> {
+        let rows =
+            sqlx::query("SELECT payload FROM billing_renewal_intents ORDER BY created_at DESC")
+                .fetch_all(&self.pool)
+                .await?;
+        let intents = rows
+            .into_iter()
+            .map(|row| row.get::<Json<RenewalIntent>, _>("payload").0)
+            .collect::<Vec<_>>();
+        Ok(RenewalIntentsResponse {
+            data: filter_renewal_intents(intents, &filters),
+        })
     }
 
     async fn lookup_user(&self, identity_key: &IdentityLookup) -> Result<Option<UserIdentity>> {
@@ -5703,6 +10165,28 @@ fn disable_memory_provider_resource(
     ConcurrencyResult::Applied(disabled)
 }
 
+fn fail_close_new_provider_resource(provider_resource: &mut ProviderResource) {
+    if provider_resource.status != ProviderResourceStatus::Active {
+        return;
+    }
+
+    if matches!(
+        provider_resource.health_state,
+        HealthState::Healthy | HealthState::Degraded
+    ) {
+        provider_resource.health_state = HealthState::Quarantined;
+    }
+
+    if provider_resource.health_state == HealthState::Quarantined {
+        provider_resource
+            .quarantine_reason
+            .get_or_insert_with(|| PROVIDER_RESOURCE_INTAKE_PENDING_PROBE.to_string());
+        provider_resource
+            .health_message
+            .get_or_insert_with(|| PROVIDER_RESOURCE_INTAKE_PENDING_MESSAGE.to_string());
+    }
+}
+
 fn update_memory_route_policy(
     store: &mut MemoryStore,
     route_policy: &RoutePolicy,
@@ -5813,6 +10297,3347 @@ fn revoke_memory_api_key(
         updated.updated_at = now_rfc3339();
         store.api_keys[index] = updated.clone();
         ConcurrencyResult::Applied(updated.public_view())
+    }
+}
+
+fn revoke_memory_opening_grant(
+    store: &mut MemoryStore,
+    grant_id: &str,
+    expected_version: u64,
+    revoked_by: &str,
+) -> ConcurrencyResult<OpeningGrant> {
+    let index = store
+        .opening_grants
+        .iter()
+        .position(|item| item.grant_id == grant_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .opening_grants
+        .get(index)
+        .expect("indexed opening grant should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+
+    let now = now_rfc3339();
+    let mut updated = current.clone();
+    updated.status = "revoked".to_string();
+    updated.revoked_at = Some(now.clone());
+    updated.revoked_by = Some(revoked_by.to_string());
+    updated.updated_at = now;
+    updated.version = expected_version.saturating_add(1);
+    store.opening_grants[index] = updated.clone();
+    ConcurrencyResult::Applied(updated.public_view())
+}
+
+fn prepare_delivery_records(
+    draft: DeliveryPrepareDraft,
+    redemption_code: &str,
+    browser_file_unlock_code: &str,
+) -> PreparedDeliveryRecords {
+    let now = now_rfc3339();
+    let delivery = DeliveryRecord {
+        delivery_id: draft.delivery_id.clone(),
+        tenant_id: draft.tenant_id,
+        project_id: draft.project_id,
+        owner_account_id: draft.owner_account_id,
+        redemption_batch_id: draft.redemption_batch_id,
+        provider: draft.provider,
+        status: DELIVERY_STATUS_PREPARED.to_string(),
+        operator_id: draft.operator_id,
+        customer_label: draft.customer_label,
+        source: DELIVERY_SOURCE_MANUAL_OPERATOR.to_string(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        version: 1,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+    };
+    let codes = vec![
+        DeliveryCodeRecord {
+            code_id: format!("dlvcode_{}_redemption", draft.delivery_id),
+            delivery_id: draft.delivery_id.clone(),
+            code_type: DELIVERY_CODE_TYPE_REDEMPTION.to_string(),
+            code_hash: hash_api_key(redemption_code),
+            code_prefix: delivery_code_prefix(redemption_code),
+            code_last_four: credential_last_four(redemption_code),
+            format_version: DELIVERY_CODE_FORMAT_REDEMPTION_V2.to_string(),
+            status: "active".to_string(),
+            expires_at: draft.code_expires_at.clone(),
+            used_at: None,
+            revoked_at: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            version: 1,
+        },
+        DeliveryCodeRecord {
+            code_id: format!("dlvcode_{}_browser_unlock", draft.delivery_id),
+            delivery_id: draft.delivery_id.clone(),
+            code_type: DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK.to_string(),
+            code_hash: hash_api_key(browser_file_unlock_code),
+            code_prefix: delivery_code_prefix(browser_file_unlock_code),
+            code_last_four: credential_last_four(browser_file_unlock_code),
+            format_version: DELIVERY_CODE_FORMAT_BROWSER_FILE_UNLOCK_V2.to_string(),
+            status: "active".to_string(),
+            expires_at: draft.code_expires_at,
+            used_at: None,
+            revoked_at: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            version: 1,
+        },
+    ];
+    let entitlement = DeliveryEntitlementRecord {
+        entitlement_id: format!("dlvent_{}", draft.delivery_id),
+        delivery_id: draft.delivery_id,
+        service_kind: draft.service_kind,
+        service_days: draft.service_days,
+        starts_at: draft.starts_at,
+        ends_at: draft.ends_at,
+        status: DELIVERY_ENTITLEMENT_STATUS_PENDING_ACTIVATION.to_string(),
+        activated_at: None,
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    };
+    PreparedDeliveryRecords {
+        delivery,
+        codes,
+        entitlement,
+        enforce_owner_redemption_capacity: draft.enforce_owner_redemption_capacity,
+    }
+}
+
+pub fn build_prepared_delivery_records(
+    draft: DeliveryPrepareDraft,
+    redemption_code: &str,
+    browser_file_unlock_code: &str,
+) -> PreparedDeliveryRecords {
+    prepare_delivery_records(draft, redemption_code, browser_file_unlock_code)
+}
+
+fn delivery_projection(
+    delivery: &DeliveryRecord,
+    codes: &[DeliveryCodeRecord],
+    entitlement: &DeliveryEntitlementRecord,
+) -> DeliveryProjection {
+    let mut codes = codes
+        .iter()
+        .map(DeliveryCodeRecord::public_view)
+        .collect::<Vec<_>>();
+    codes.sort_by(|left, right| left.code_type.cmp(&right.code_type));
+    DeliveryProjection {
+        delivery: delivery.public_view(entitlement),
+        codes,
+        entitlement: entitlement.public_view(),
+    }
+}
+
+fn memory_delivery_projection(
+    store: &MemoryStore,
+    delivery_id: &str,
+) -> Option<DeliveryProjection> {
+    let delivery = store
+        .deliveries
+        .iter()
+        .find(|item| item.delivery_id == delivery_id)?;
+    let entitlement = store
+        .delivery_entitlements
+        .iter()
+        .find(|item| item.delivery_id == delivery_id)?;
+    let codes = store
+        .delivery_codes
+        .iter()
+        .filter(|item| item.delivery_id == delivery_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    Some(delivery_projection(delivery, &codes, entitlement))
+}
+
+#[derive(Debug, Clone, Default)]
+struct DeliveryOperationsRecords {
+    deliveries: Vec<DeliveryRecord>,
+    codes: Vec<DeliveryCodeRecord>,
+    entitlements: Vec<DeliveryEntitlementRecord>,
+    artifacts: Vec<DeliveryArtifactRecord>,
+    activations: Vec<DeliveryActivationRecord>,
+    download_grants: Vec<DeliveryDownloadGrantRecord>,
+    service_segments: Vec<DeliveryServiceSegmentRecord>,
+    lifecycle_events: Vec<DeliveryLifecycleEventRecord>,
+    upload_batches: Vec<DeliveryUploadBatchRecord>,
+    upload_items: Vec<DeliveryUploadBatchItemRecord>,
+}
+
+fn delivery_operations_records_from_memory(store: &MemoryStore) -> DeliveryOperationsRecords {
+    DeliveryOperationsRecords {
+        deliveries: store.deliveries.clone(),
+        codes: store.delivery_codes.clone(),
+        entitlements: store.delivery_entitlements.clone(),
+        artifacts: store.delivery_artifacts.clone(),
+        activations: store.delivery_activations.clone(),
+        download_grants: store.delivery_download_grants.clone(),
+        service_segments: store.delivery_service_segments.clone(),
+        lifecycle_events: store.delivery_lifecycle_events.clone(),
+        upload_batches: store.delivery_upload_batches.clone(),
+        upload_items: store.delivery_upload_batch_items.clone(),
+    }
+}
+
+fn delivery_operations_overview(
+    records: DeliveryOperationsRecords,
+    scope: DeliveryOperationsScope,
+) -> DeliveryOperationsOverviewResponse {
+    let mut status_counts = BTreeMap::<(String, String), u64>::new();
+    let deliveries = records
+        .deliveries
+        .iter()
+        .filter(|delivery| delivery_matches_scope(delivery, &scope))
+        .collect::<Vec<_>>();
+    let window_delivery_ids = deliveries
+        .iter()
+        .filter(|delivery| timestamp_in_window(&delivery.created_at, &scope))
+        .map(|delivery| delivery.delivery_id.clone())
+        .collect::<HashSet<_>>();
+    let scope_delivery_ids = deliveries
+        .iter()
+        .map(|delivery| delivery.delivery_id.clone())
+        .collect::<HashSet<_>>();
+    let scope_entitlement_ids = records
+        .entitlements
+        .iter()
+        .filter(|entitlement| scope_delivery_ids.contains(&entitlement.delivery_id))
+        .map(|entitlement| entitlement.entitlement_id.clone())
+        .collect::<HashSet<_>>();
+
+    let delivery_count = count_delivery_statuses(&records, &scope, &mut status_counts);
+    let entitlement_count = count_entitlement_statuses(&records, &scope, &mut status_counts);
+    let artifact_count = count_artifact_statuses(&records, &scope, &mut status_counts);
+    let upload_batch_count = count_upload_batch_statuses(&records, &scope, &mut status_counts);
+    let upload_item_count = count_upload_item_statuses(&records, &scope, &mut status_counts);
+    let activation_count = count_activation_statuses(&records, &scope, &mut status_counts);
+    let download_grant_count = count_download_grant_statuses(&records, &scope, &mut status_counts);
+    let service_segment_count =
+        count_service_segment_statuses(&records, &scope, &mut status_counts);
+    let lifecycle_event_count = records
+        .lifecycle_events
+        .iter()
+        .filter(|event| {
+            scope_entitlement_ids.contains(&event.entitlement_id)
+                && timestamp_in_window(&event.created_at, &scope)
+        })
+        .count() as u64;
+    if lifecycle_event_count > 0 {
+        status_counts.insert(
+            ("lifecycle_event".to_string(), "recorded".to_string()),
+            lifecycle_event_count,
+        );
+    }
+
+    let mut recent_events = records
+        .deliveries
+        .iter()
+        .filter(|delivery| scope_delivery_ids.contains(&delivery.delivery_id))
+        .flat_map(|delivery| {
+            delivery_operations_timeline_events_for_delivery(&records, &delivery.delivery_id)
+        })
+        .filter(|event| {
+            window_delivery_ids.contains(event.delivery_id.as_deref().unwrap_or_default())
+                || timestamp_in_window(&event.occurred_at, &scope)
+        })
+        .collect::<Vec<_>>();
+    sort_timeline_events_desc(&mut recent_events);
+    recent_events.truncate(scope.limit);
+
+    let exceptions = delivery_operations_exception_list(
+        &records,
+        &DeliveryOperationsExceptionFilters {
+            scope: scope.clone(),
+            status: None,
+            exception_type: None,
+        },
+    );
+
+    let mut status_counts = status_counts
+        .into_iter()
+        .map(|((domain, status), count)| DeliveryOperationsStatusCount {
+            domain,
+            status,
+            count,
+        })
+        .collect::<Vec<_>>();
+    status_counts.sort_by(|left, right| {
+        left.domain
+            .cmp(&right.domain)
+            .then_with(|| left.status.cmp(&right.status))
+    });
+
+    DeliveryOperationsOverviewResponse {
+        data: DeliveryOperationsOverview {
+            tenant_id: scope.tenant_id,
+            project_id: scope.project_id,
+            window_start: scope.window_start,
+            window_end: scope.window_end,
+            totals: DeliveryOperationsTotals {
+                deliveries: delivery_count,
+                artifacts: artifact_count,
+                upload_batches: upload_batch_count,
+                upload_items: upload_item_count,
+                activations: activation_count,
+                download_grants: download_grant_count,
+                entitlements: entitlement_count,
+                service_segments: service_segment_count,
+                lifecycle_events: lifecycle_event_count,
+                exceptions: exceptions.len() as u64,
+            },
+            status_counts,
+            recent_events,
+            exceptions,
+        },
+    }
+}
+
+fn delivery_operations_timeline(
+    records: DeliveryOperationsRecords,
+    filters: DeliveryOperationsObjectFilters,
+) -> Option<DeliveryOperationsTimelineResponse> {
+    let delivery_id = delivery_operations_target_delivery_id(&records, &filters)?;
+    let mut data = delivery_operations_timeline_events_for_delivery(&records, &delivery_id)
+        .into_iter()
+        .filter(|event| timestamp_in_window(&event.occurred_at, &filters.scope))
+        .collect::<Vec<_>>();
+    sort_timeline_events(&mut data);
+    data.truncate(filters.scope.limit);
+    Some(DeliveryOperationsTimelineResponse { data })
+}
+
+fn delivery_operations_exceptions(
+    records: DeliveryOperationsRecords,
+    filters: DeliveryOperationsExceptionFilters,
+) -> DeliveryOperationsExceptionsResponse {
+    DeliveryOperationsExceptionsResponse {
+        data: delivery_operations_exception_list(&records, &filters),
+    }
+}
+
+fn delivery_operations_detail(
+    records: DeliveryOperationsRecords,
+    filters: DeliveryOperationsObjectFilters,
+) -> Option<DeliveryOperationsDetailResponse> {
+    let delivery_id = delivery_operations_target_delivery_id(&records, &filters)?;
+    let delivery = records
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.delivery_id == delivery_id)?;
+    let entitlement = records
+        .entitlements
+        .iter()
+        .find(|entitlement| entitlement.delivery_id == delivery_id)?;
+    let codes = records
+        .codes
+        .iter()
+        .filter(|code| code.delivery_id == delivery_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let delivery = delivery_projection(delivery, &codes, entitlement);
+    let artifacts = records
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.delivery_id == delivery_id)
+        .map(DeliveryArtifactRecord::public_view)
+        .collect::<Vec<_>>();
+    let upload_items = records
+        .upload_items
+        .iter()
+        .filter(|item| item.delivery_id == delivery_id)
+        .map(DeliveryUploadBatchItemRecord::public_view)
+        .collect::<Vec<_>>();
+    let activations = records
+        .activations
+        .iter()
+        .filter(|activation| activation.delivery_id == delivery_id)
+        .map(DeliveryActivationRecord::public_view)
+        .collect::<Vec<_>>();
+    let download_grants = records
+        .download_grants
+        .iter()
+        .filter(|grant| grant.delivery_id == delivery_id)
+        .map(DeliveryDownloadGrantRecord::public_view)
+        .collect::<Vec<_>>();
+    let service_segments = records
+        .service_segments
+        .iter()
+        .filter(|segment| segment.delivery_id == delivery_id)
+        .map(DeliveryServiceSegmentRecord::public_view)
+        .collect::<Vec<_>>();
+    let entitlement_ids = records
+        .entitlements
+        .iter()
+        .filter(|entitlement| entitlement.delivery_id == delivery_id)
+        .map(|entitlement| entitlement.entitlement_id.as_str())
+        .collect::<HashSet<_>>();
+    let lifecycle_events = records
+        .lifecycle_events
+        .iter()
+        .filter(|event| entitlement_ids.contains(event.entitlement_id.as_str()))
+        .map(DeliveryLifecycleEventRecord::public_view)
+        .collect::<Vec<_>>();
+    let mut timeline = delivery_operations_timeline_events_for_delivery(&records, &delivery_id)
+        .into_iter()
+        .filter(|event| timestamp_in_window(&event.occurred_at, &filters.scope))
+        .collect::<Vec<_>>();
+    sort_timeline_events(&mut timeline);
+    timeline.truncate(filters.scope.limit);
+    let exceptions = delivery_operations_exception_list(
+        &records,
+        &DeliveryOperationsExceptionFilters {
+            scope: filters.scope,
+            status: None,
+            exception_type: None,
+        },
+    )
+    .into_iter()
+    .filter(|exception| exception.delivery_id.as_deref() == Some(delivery_id.as_str()))
+    .collect::<Vec<_>>();
+    Some(DeliveryOperationsDetailResponse {
+        data: DeliveryOperationsDetail {
+            delivery,
+            artifacts,
+            upload_items,
+            activations,
+            download_grants,
+            service_segments,
+            lifecycle_events,
+            timeline,
+            exceptions,
+        },
+    })
+}
+
+fn delivery_operations_target_delivery_id(
+    records: &DeliveryOperationsRecords,
+    filters: &DeliveryOperationsObjectFilters,
+) -> Option<String> {
+    let delivery_id = match &filters.object_ref {
+        DeliveryOperationsObjectRef::Delivery(delivery_id) => records
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_id == *delivery_id)
+            .map(|delivery| delivery.delivery_id.clone()),
+        DeliveryOperationsObjectRef::Entitlement(entitlement_id) => records
+            .entitlements
+            .iter()
+            .find(|entitlement| entitlement.entitlement_id == *entitlement_id)
+            .map(|entitlement| entitlement.delivery_id.clone()),
+        DeliveryOperationsObjectRef::Activation(activation_id) => records
+            .activations
+            .iter()
+            .find(|activation| activation.activation_id == *activation_id)
+            .map(|activation| activation.delivery_id.clone()),
+        DeliveryOperationsObjectRef::Artifact(artifact_id) => records
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.artifact_id == *artifact_id)
+            .map(|artifact| artifact.delivery_id.clone()),
+        DeliveryOperationsObjectRef::DownloadGrant(grant_id) => records
+            .download_grants
+            .iter()
+            .find(|grant| grant.grant_id == *grant_id)
+            .map(|grant| grant.delivery_id.clone()),
+        DeliveryOperationsObjectRef::ServiceSegment(segment_id) => records
+            .service_segments
+            .iter()
+            .find(|segment| segment.segment_id == *segment_id)
+            .map(|segment| segment.delivery_id.clone()),
+    }?;
+    let delivery = records
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.delivery_id == delivery_id)?;
+    if delivery_matches_scope(delivery, &filters.scope) {
+        Some(delivery_id)
+    } else {
+        None
+    }
+}
+
+fn delivery_operations_timeline_events_for_delivery(
+    records: &DeliveryOperationsRecords,
+    delivery_id: &str,
+) -> Vec<DeliveryOperationsTimelineEvent> {
+    let Some(delivery) = records
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.delivery_id == delivery_id)
+    else {
+        return Vec::new();
+    };
+    let mut events = vec![timeline_event(
+        "delivery_created",
+        "delivery",
+        &delivery.delivery_id,
+        &delivery.tenant_id,
+        &delivery.project_id,
+        Some(&delivery.delivery_id),
+        None,
+        None,
+        None,
+        None,
+        None,
+        &delivery.status,
+        &delivery.created_at,
+        "Delivery fact created",
+    )];
+    if let Some(revoked_at) = delivery.revoked_at.as_deref() {
+        events.push(timeline_event(
+            "delivery_revoked",
+            "delivery",
+            &delivery.delivery_id,
+            &delivery.tenant_id,
+            &delivery.project_id,
+            Some(&delivery.delivery_id),
+            None,
+            None,
+            None,
+            None,
+            None,
+            DELIVERY_STATUS_REVOKED,
+            revoked_at,
+            "Delivery was revoked",
+        ));
+    }
+
+    records
+        .codes
+        .iter()
+        .filter(|code| code.delivery_id == delivery_id)
+        .for_each(|code| {
+            events.push(timeline_event(
+                "delivery_code_created",
+                "delivery_code",
+                &code.code_id,
+                &delivery.tenant_id,
+                &delivery.project_id,
+                Some(&code.delivery_id),
+                None,
+                None,
+                None,
+                None,
+                None,
+                &code.effective_status(),
+                &code.created_at,
+                &format!("{} code created", code.code_type),
+            ));
+            if let Some(used_at) = code.used_at.as_deref() {
+                events.push(timeline_event(
+                    "delivery_code_used",
+                    "delivery_code",
+                    &code.code_id,
+                    &delivery.tenant_id,
+                    &delivery.project_id,
+                    Some(&code.delivery_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    DELIVERY_CODE_STATUS_USED,
+                    used_at,
+                    &format!("{} code used", code.code_type),
+                ));
+            }
+        });
+
+    records
+        .entitlements
+        .iter()
+        .filter(|entitlement| entitlement.delivery_id == delivery_id)
+        .for_each(|entitlement| {
+            events.push(timeline_event(
+                "delivery_entitlement_created",
+                "delivery_entitlement",
+                &entitlement.entitlement_id,
+                &delivery.tenant_id,
+                &delivery.project_id,
+                Some(&entitlement.delivery_id),
+                Some(&entitlement.entitlement_id),
+                None,
+                None,
+                None,
+                None,
+                &entitlement.effective_status(),
+                &entitlement.created_at,
+                "Entitlement fact created",
+            ));
+            if let Some(activated_at) = entitlement.activated_at.as_deref() {
+                events.push(timeline_event(
+                    "delivery_entitlement_activated",
+                    "delivery_entitlement",
+                    &entitlement.entitlement_id,
+                    &delivery.tenant_id,
+                    &delivery.project_id,
+                    Some(&entitlement.delivery_id),
+                    Some(&entitlement.entitlement_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    DELIVERY_ENTITLEMENT_STATUS_ACTIVE,
+                    activated_at,
+                    "Entitlement service window activated",
+                ));
+            }
+        });
+
+    records
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.delivery_id == delivery_id)
+        .for_each(|artifact| {
+            events.push(timeline_event(
+                "delivery_artifact_uploaded",
+                "delivery_artifact",
+                &artifact.artifact_id,
+                &artifact.tenant_id,
+                &artifact.project_id,
+                Some(&artifact.delivery_id),
+                None,
+                None,
+                Some(&artifact.artifact_id),
+                None,
+                None,
+                &artifact.status,
+                &artifact.created_at,
+                "Encrypted delivery artifact uploaded",
+            ));
+            if let Some(superseded_at) = artifact.superseded_at.as_deref() {
+                events.push(timeline_event(
+                    "delivery_artifact_superseded",
+                    "delivery_artifact",
+                    &artifact.artifact_id,
+                    &artifact.tenant_id,
+                    &artifact.project_id,
+                    Some(&artifact.delivery_id),
+                    None,
+                    None,
+                    Some(&artifact.artifact_id),
+                    None,
+                    None,
+                    DELIVERY_ARTIFACT_STATUS_SUPERSEDED,
+                    superseded_at,
+                    "Artifact was superseded",
+                ));
+            }
+        });
+
+    records
+        .upload_items
+        .iter()
+        .filter(|item| item.delivery_id == delivery_id)
+        .for_each(|item| {
+            events.push(upload_timeline_event(
+                "delivery_upload_item_recorded",
+                item,
+                &item.status,
+                &item.created_at,
+                "Delivery upload item staged",
+            ));
+            if item.status != DELIVERY_UPLOAD_ITEM_STATUS_PENDING {
+                events.push(upload_timeline_event(
+                    "delivery_upload_item_processed",
+                    item,
+                    &item.status,
+                    &item.updated_at,
+                    item.error_message
+                        .as_deref()
+                        .unwrap_or("Delivery upload item processed"),
+                ));
+            }
+        });
+
+    records
+        .activations
+        .iter()
+        .filter(|activation| activation.delivery_id == delivery_id)
+        .for_each(|activation| {
+            events.push(timeline_event(
+                "delivery_activated",
+                "delivery_activation",
+                &activation.activation_id,
+                &activation.tenant_id,
+                &activation.project_id,
+                Some(&activation.delivery_id),
+                Some(&activation.entitlement_id),
+                Some(&activation.activation_id),
+                Some(&activation.artifact_id),
+                None,
+                None,
+                &activation.status,
+                &activation.activated_at,
+                "Delivery redeemed and activated",
+            ));
+        });
+
+    records
+        .download_grants
+        .iter()
+        .filter(|grant| grant.delivery_id == delivery_id)
+        .for_each(|grant| {
+            events.push(timeline_event(
+                "delivery_download_grant_issued",
+                "delivery_download_grant",
+                &grant.grant_id,
+                &grant.tenant_id,
+                &grant.project_id,
+                Some(&grant.delivery_id),
+                Some(&grant.entitlement_id),
+                Some(&grant.activation_id),
+                Some(&grant.artifact_id),
+                Some(&grant.grant_id),
+                None,
+                &grant.effective_status(),
+                &grant.created_at,
+                "Download grant issued",
+            ));
+            if let Some(used_at) = grant.used_at.as_deref() {
+                events.push(timeline_event(
+                    "delivery_download_grant_used",
+                    "delivery_download_grant",
+                    &grant.grant_id,
+                    &grant.tenant_id,
+                    &grant.project_id,
+                    Some(&grant.delivery_id),
+                    Some(&grant.entitlement_id),
+                    Some(&grant.activation_id),
+                    Some(&grant.artifact_id),
+                    Some(&grant.grant_id),
+                    None,
+                    DELIVERY_DOWNLOAD_GRANT_STATUS_USED,
+                    used_at,
+                    "Download grant consumed",
+                ));
+            }
+            if let Some(revoked_at) = grant.revoked_at.as_deref() {
+                events.push(timeline_event(
+                    "delivery_download_grant_revoked",
+                    "delivery_download_grant",
+                    &grant.grant_id,
+                    &grant.tenant_id,
+                    &grant.project_id,
+                    Some(&grant.delivery_id),
+                    Some(&grant.entitlement_id),
+                    Some(&grant.activation_id),
+                    Some(&grant.artifact_id),
+                    Some(&grant.grant_id),
+                    None,
+                    DELIVERY_DOWNLOAD_GRANT_STATUS_REVOKED,
+                    revoked_at,
+                    "Download grant revoked",
+                ));
+            }
+        });
+
+    records
+        .service_segments
+        .iter()
+        .filter(|segment| segment.delivery_id == delivery_id)
+        .for_each(|segment| {
+            events.push(timeline_event(
+                "delivery_service_segment_created",
+                "delivery_service_segment",
+                &segment.segment_id,
+                &segment.tenant_id,
+                &segment.project_id,
+                Some(&segment.delivery_id),
+                Some(&segment.entitlement_id),
+                Some(&segment.activation_id),
+                Some(&segment.artifact_id),
+                None,
+                Some(&segment.segment_id),
+                &segment.effective_status(),
+                &segment.created_at,
+                "Delivery service segment created",
+            ));
+        });
+
+    let delivery_entitlement_ids = records
+        .entitlements
+        .iter()
+        .filter(|entitlement| entitlement.delivery_id == delivery_id)
+        .map(|entitlement| entitlement.entitlement_id.as_str())
+        .collect::<HashSet<_>>();
+    records
+        .lifecycle_events
+        .iter()
+        .filter(|event| delivery_entitlement_ids.contains(event.entitlement_id.as_str()))
+        .for_each(|event| {
+            events.push(timeline_event(
+                &event.event_type,
+                "delivery_lifecycle_event",
+                &event.event_id,
+                &delivery.tenant_id,
+                &delivery.project_id,
+                Some(delivery_id),
+                Some(&event.entitlement_id),
+                None,
+                event.payload.get("artifact_id").map(String::as_str),
+                None,
+                event.segment_id.as_deref(),
+                &event.status,
+                &event.created_at,
+                event
+                    .reason
+                    .as_deref()
+                    .unwrap_or("Lifecycle event recorded"),
+            ));
+        });
+
+    sort_timeline_events(&mut events);
+    events
+}
+
+fn upload_timeline_event(
+    event_type: &str,
+    item: &DeliveryUploadBatchItemRecord,
+    status: &str,
+    occurred_at: &str,
+    summary: &str,
+) -> DeliveryOperationsTimelineEvent {
+    DeliveryOperationsTimelineEvent {
+        event_id: format!("{event_type}:{}:{occurred_at}", item.item_id),
+        event_type: event_type.to_string(),
+        object_type: "delivery_upload_item".to_string(),
+        object_id: item.item_id.clone(),
+        tenant_id: item.tenant_id.clone(),
+        project_id: item.project_id.clone(),
+        delivery_id: Some(item.delivery_id.clone()),
+        entitlement_id: None,
+        activation_id: None,
+        artifact_id: item.artifact_id.clone(),
+        grant_id: None,
+        segment_id: None,
+        upload_batch_id: Some(item.batch_id.clone()),
+        upload_item_id: Some(item.item_id.clone()),
+        status: status.to_string(),
+        occurred_at: occurred_at.to_string(),
+        summary: summary.to_string(),
+    }
+}
+
+fn timeline_event(
+    event_type: &str,
+    object_type: &str,
+    object_id: &str,
+    tenant_id: &TenantId,
+    project_id: &ProjectId,
+    delivery_id: Option<&str>,
+    entitlement_id: Option<&str>,
+    activation_id: Option<&str>,
+    artifact_id: Option<&str>,
+    grant_id: Option<&str>,
+    segment_id: Option<&str>,
+    status: &str,
+    occurred_at: &str,
+    summary: &str,
+) -> DeliveryOperationsTimelineEvent {
+    DeliveryOperationsTimelineEvent {
+        event_id: format!("{event_type}:{object_id}:{occurred_at}"),
+        event_type: event_type.to_string(),
+        object_type: object_type.to_string(),
+        object_id: object_id.to_string(),
+        tenant_id: tenant_id.clone(),
+        project_id: project_id.clone(),
+        delivery_id: delivery_id.map(str::to_string),
+        entitlement_id: entitlement_id.map(str::to_string),
+        activation_id: activation_id.map(str::to_string),
+        artifact_id: artifact_id.map(str::to_string),
+        grant_id: grant_id.map(str::to_string),
+        segment_id: segment_id.map(str::to_string),
+        upload_batch_id: None,
+        upload_item_id: None,
+        status: status.to_string(),
+        occurred_at: occurred_at.to_string(),
+        summary: summary.to_string(),
+    }
+}
+
+fn delivery_operations_exception_list(
+    records: &DeliveryOperationsRecords,
+    filters: &DeliveryOperationsExceptionFilters,
+) -> Vec<DeliveryOperationsException> {
+    let mut exceptions = Vec::new();
+    records
+        .deliveries
+        .iter()
+        .filter(|delivery| delivery_matches_scope(delivery, &filters.scope))
+        .for_each(|delivery| {
+            let has_delivery_artifact = records
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.delivery_id == delivery.delivery_id);
+            if !has_delivery_artifact {
+                exceptions.push(delivery_exception(
+                    "missing_artifact",
+                    "warning",
+                    delivery,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    "missing_artifact",
+                    Some("delivery has no uploaded artifact"),
+                    &delivery.created_at,
+                    "Delivery has no encrypted artifact uploaded",
+                ));
+            }
+            if delivery.status == DELIVERY_STATUS_REVOKED {
+                exceptions.push(delivery_exception(
+                    "delivery_revoked",
+                    "warning",
+                    delivery,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    DELIVERY_STATUS_REVOKED,
+                    delivery.revoke_reason.as_deref(),
+                    delivery
+                        .revoked_at
+                        .as_deref()
+                        .unwrap_or(&delivery.updated_at),
+                    "Delivery was revoked",
+                ));
+            }
+        });
+
+    records
+        .entitlements
+        .iter()
+        .filter_map(|entitlement| {
+            let delivery = records
+                .deliveries
+                .iter()
+                .find(|delivery| delivery.delivery_id == entitlement.delivery_id)?;
+            if delivery_matches_scope(delivery, &filters.scope) {
+                Some((delivery, entitlement))
+            } else {
+                None
+            }
+        })
+        .for_each(|(delivery, entitlement)| {
+            let status = entitlement.effective_status();
+            if matches!(
+                status.as_str(),
+                DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY
+                    | DELIVERY_STATUS_EXPIRED
+                    | DELIVERY_ENTITLEMENT_STATUS_REVOKED
+                    | DELIVERY_ENTITLEMENT_STATUS_SUSPENDED
+            ) {
+                exceptions.push(delivery_exception(
+                    &format!("entitlement_{status}"),
+                    if status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+                        "critical"
+                    } else {
+                        "warning"
+                    },
+                    delivery,
+                    Some(&entitlement.entitlement_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    &status,
+                    None,
+                    if status == DELIVERY_STATUS_EXPIRED {
+                        &entitlement.ends_at
+                    } else {
+                        &entitlement.updated_at
+                    },
+                    "Delivery entitlement requires operator attention",
+                ));
+            }
+        });
+
+    records
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact_matches_scope(artifact, &filters.scope))
+        .filter(|artifact| artifact.status == DELIVERY_ARTIFACT_STATUS_REVOKED)
+        .for_each(|artifact| {
+            exceptions.push(object_exception(
+                "artifact_revoked",
+                "warning",
+                &artifact.tenant_id,
+                &artifact.project_id,
+                Some(&artifact.delivery_id),
+                None,
+                None,
+                Some(&artifact.artifact_id),
+                None,
+                None,
+                &artifact.status,
+                artifact.revoke_reason.as_deref(),
+                artifact
+                    .revoked_at
+                    .as_deref()
+                    .unwrap_or(&artifact.updated_at),
+                "Encrypted artifact was revoked",
+            ));
+        });
+
+    records
+        .download_grants
+        .iter()
+        .filter(|grant| grant_matches_scope(grant, &filters.scope))
+        .for_each(|grant| {
+            let status = grant.effective_status();
+            if matches!(
+                status.as_str(),
+                DELIVERY_DOWNLOAD_GRANT_STATUS_EXPIRED | DELIVERY_DOWNLOAD_GRANT_STATUS_REVOKED
+            ) {
+                exceptions.push(object_exception(
+                    &format!("download_grant_{status}"),
+                    "info",
+                    &grant.tenant_id,
+                    &grant.project_id,
+                    Some(&grant.delivery_id),
+                    Some(&grant.entitlement_id),
+                    Some(&grant.activation_id),
+                    Some(&grant.artifact_id),
+                    Some(&grant.grant_id),
+                    None,
+                    &status,
+                    grant.revoke_reason.as_deref(),
+                    grant.revoked_at.as_deref().unwrap_or(&grant.updated_at),
+                    "Download grant is no longer usable",
+                ));
+            }
+            if records
+                .entitlements
+                .iter()
+                .find(|entitlement| entitlement.entitlement_id == grant.entitlement_id)
+                .is_some_and(|entitlement| {
+                    entitlement.effective_status() != DELIVERY_ENTITLEMENT_STATUS_ACTIVE
+                })
+                && status == DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE
+            {
+                exceptions.push(object_exception(
+                    "download_blocked_entitlement",
+                    "critical",
+                    &grant.tenant_id,
+                    &grant.project_id,
+                    Some(&grant.delivery_id),
+                    Some(&grant.entitlement_id),
+                    Some(&grant.activation_id),
+                    Some(&grant.artifact_id),
+                    Some(&grant.grant_id),
+                    None,
+                    "blocked",
+                    Some("entitlement is not active"),
+                    &grant.updated_at,
+                    "Active download grant is blocked by entitlement state",
+                ));
+            }
+        });
+
+    records
+        .service_segments
+        .iter()
+        .filter(|segment| segment_matches_scope(segment, &filters.scope))
+        .for_each(|segment| {
+            let status = segment.effective_status();
+            if matches!(
+                status.as_str(),
+                DELIVERY_SERVICE_SEGMENT_STATUS_EXPIRED | DELIVERY_SERVICE_SEGMENT_STATUS_REVOKED
+            ) {
+                exceptions.push(object_exception(
+                    &format!("service_segment_{status}"),
+                    "warning",
+                    &segment.tenant_id,
+                    &segment.project_id,
+                    Some(&segment.delivery_id),
+                    Some(&segment.entitlement_id),
+                    Some(&segment.activation_id),
+                    Some(&segment.artifact_id),
+                    None,
+                    Some(&segment.segment_id),
+                    &status,
+                    None,
+                    if status == DELIVERY_SERVICE_SEGMENT_STATUS_EXPIRED {
+                        &segment.effective_until
+                    } else {
+                        &segment.updated_at
+                    },
+                    "Service segment is not currently active",
+                ));
+            }
+        });
+
+    records
+        .lifecycle_events
+        .iter()
+        .filter_map(|event| {
+            let entitlement = records
+                .entitlements
+                .iter()
+                .find(|entitlement| entitlement.entitlement_id == event.entitlement_id)?;
+            let delivery = records
+                .deliveries
+                .iter()
+                .find(|delivery| delivery.delivery_id == entitlement.delivery_id)?;
+            if delivery_matches_scope(delivery, &filters.scope) {
+                Some((delivery, event))
+            } else {
+                None
+            }
+        })
+        .for_each(|(delivery, event)| {
+            let is_exception = event.status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY
+                || event
+                    .reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("missing"));
+            if is_exception {
+                exceptions.push(delivery_exception(
+                    &format!("lifecycle_{}", event.event_type),
+                    "critical",
+                    delivery,
+                    Some(&event.entitlement_id),
+                    None,
+                    event.payload.get("artifact_id").map(String::as_str),
+                    None,
+                    event.segment_id.as_deref(),
+                    &event.status,
+                    event.reason.as_deref(),
+                    &event.created_at,
+                    "Lifecycle event requires operator attention",
+                ));
+            }
+        });
+
+    records
+        .upload_items
+        .iter()
+        .filter(|item| upload_item_matches_scope(item, &filters.scope))
+        .filter(|item| {
+            matches!(
+                item.status.as_str(),
+                DELIVERY_UPLOAD_ITEM_STATUS_REJECTED | DELIVERY_UPLOAD_ITEM_STATUS_FAILED
+            )
+        })
+        .for_each(|item| {
+            exceptions.push(upload_item_exception(
+                item,
+                if item.status == DELIVERY_UPLOAD_ITEM_STATUS_FAILED {
+                    "critical"
+                } else {
+                    "warning"
+                },
+            ));
+        });
+
+    exceptions.retain(|exception| {
+        timestamp_in_window(&exception.occurred_at, &filters.scope)
+            && filters
+                .status
+                .as_deref()
+                .is_none_or(|status| exception.status == status)
+            && filters
+                .exception_type
+                .as_deref()
+                .is_none_or(|exception_type| exception.exception_type == exception_type)
+    });
+    exceptions.sort_by(|left, right| {
+        right
+            .occurred_at
+            .cmp(&left.occurred_at)
+            .then_with(|| left.exception_id.cmp(&right.exception_id))
+    });
+    exceptions.truncate(filters.scope.limit);
+    exceptions
+}
+
+fn upload_item_exception(
+    item: &DeliveryUploadBatchItemRecord,
+    severity: &str,
+) -> DeliveryOperationsException {
+    DeliveryOperationsException {
+        exception_id: format!(
+            "delivery_upload_item_{}:{}:{}",
+            item.status, item.item_id, item.updated_at
+        ),
+        exception_type: format!("delivery_upload_item_{}", item.status),
+        severity: severity.to_string(),
+        tenant_id: item.tenant_id.clone(),
+        project_id: item.project_id.clone(),
+        delivery_id: Some(item.delivery_id.clone()),
+        entitlement_id: None,
+        activation_id: None,
+        artifact_id: item.artifact_id.clone(),
+        grant_id: None,
+        segment_id: None,
+        upload_batch_id: Some(item.batch_id.clone()),
+        upload_item_id: Some(item.item_id.clone()),
+        status: item.status.clone(),
+        reason: item.error_code.clone(),
+        occurred_at: item.updated_at.clone(),
+        summary: item
+            .error_message
+            .clone()
+            .unwrap_or_else(|| "Delivery upload item requires operator attention".to_string()),
+    }
+}
+
+fn delivery_exception(
+    exception_type: &str,
+    severity: &str,
+    delivery: &DeliveryRecord,
+    entitlement_id: Option<&str>,
+    activation_id: Option<&str>,
+    artifact_id: Option<&str>,
+    grant_id: Option<&str>,
+    segment_id: Option<&str>,
+    status: &str,
+    reason: Option<&str>,
+    occurred_at: &str,
+    summary: &str,
+) -> DeliveryOperationsException {
+    object_exception(
+        exception_type,
+        severity,
+        &delivery.tenant_id,
+        &delivery.project_id,
+        Some(&delivery.delivery_id),
+        entitlement_id,
+        activation_id,
+        artifact_id,
+        grant_id,
+        segment_id,
+        status,
+        reason,
+        occurred_at,
+        summary,
+    )
+}
+
+fn object_exception(
+    exception_type: &str,
+    severity: &str,
+    tenant_id: &TenantId,
+    project_id: &ProjectId,
+    delivery_id: Option<&str>,
+    entitlement_id: Option<&str>,
+    activation_id: Option<&str>,
+    artifact_id: Option<&str>,
+    grant_id: Option<&str>,
+    segment_id: Option<&str>,
+    status: &str,
+    reason: Option<&str>,
+    occurred_at: &str,
+    summary: &str,
+) -> DeliveryOperationsException {
+    let object_id = grant_id
+        .or(segment_id)
+        .or(activation_id)
+        .or(artifact_id)
+        .or(entitlement_id)
+        .or(delivery_id)
+        .unwrap_or("unknown");
+    DeliveryOperationsException {
+        exception_id: format!("{exception_type}:{object_id}:{occurred_at}"),
+        exception_type: exception_type.to_string(),
+        severity: severity.to_string(),
+        tenant_id: tenant_id.clone(),
+        project_id: project_id.clone(),
+        delivery_id: delivery_id.map(str::to_string),
+        entitlement_id: entitlement_id.map(str::to_string),
+        activation_id: activation_id.map(str::to_string),
+        artifact_id: artifact_id.map(str::to_string),
+        grant_id: grant_id.map(str::to_string),
+        segment_id: segment_id.map(str::to_string),
+        upload_batch_id: None,
+        upload_item_id: None,
+        status: status.to_string(),
+        reason: reason.map(str::to_string),
+        occurred_at: occurred_at.to_string(),
+        summary: summary.to_string(),
+    }
+}
+
+fn count_delivery_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .deliveries
+        .iter()
+        .filter(|delivery| {
+            delivery_matches_scope(delivery, scope)
+                && timestamp_in_window(&delivery.created_at, scope)
+        })
+        .for_each(|delivery| {
+            total = total.saturating_add(1);
+            let status = records
+                .entitlements
+                .iter()
+                .find(|entitlement| entitlement.delivery_id == delivery.delivery_id)
+                .map_or_else(
+                    || delivery.status.clone(),
+                    |entitlement| delivery.effective_status(entitlement),
+                );
+            increment_status_count(counts, "delivery", &status);
+        });
+    total
+}
+
+fn count_entitlement_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .entitlements
+        .iter()
+        .filter_map(|entitlement| {
+            let delivery = records
+                .deliveries
+                .iter()
+                .find(|delivery| delivery.delivery_id == entitlement.delivery_id)?;
+            Some((delivery, entitlement))
+        })
+        .filter(|(delivery, entitlement)| {
+            delivery_matches_scope(delivery, scope)
+                && timestamp_in_window(&entitlement.created_at, scope)
+        })
+        .for_each(|(_, entitlement)| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "entitlement", &entitlement.effective_status());
+        });
+    total
+}
+
+fn count_artifact_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact_matches_scope(artifact, scope)
+                && timestamp_in_window(&artifact.created_at, scope)
+        })
+        .for_each(|artifact| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "artifact", &artifact.status);
+        });
+    total
+}
+
+fn count_upload_batch_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .upload_batches
+        .iter()
+        .filter(|batch| {
+            upload_batch_matches_scope(batch, scope)
+                && timestamp_in_window(&batch.created_at, scope)
+        })
+        .for_each(|batch| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "delivery_upload_batch", &batch.status);
+        });
+    total
+}
+
+fn count_upload_item_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .upload_items
+        .iter()
+        .filter(|item| {
+            upload_item_matches_scope(item, scope) && timestamp_in_window(&item.created_at, scope)
+        })
+        .for_each(|item| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "delivery_upload_item", &item.status);
+        });
+    total
+}
+
+fn count_activation_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .activations
+        .iter()
+        .filter(|activation| {
+            activation_matches_scope(activation, scope)
+                && timestamp_in_window(&activation.created_at, scope)
+        })
+        .for_each(|activation| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "activation", &activation.status);
+        });
+    total
+}
+
+fn count_download_grant_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .download_grants
+        .iter()
+        .filter(|grant| {
+            grant_matches_scope(grant, scope) && timestamp_in_window(&grant.created_at, scope)
+        })
+        .for_each(|grant| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "download_grant", &grant.effective_status());
+        });
+    total
+}
+
+fn count_service_segment_statuses(
+    records: &DeliveryOperationsRecords,
+    scope: &DeliveryOperationsScope,
+    counts: &mut BTreeMap<(String, String), u64>,
+) -> u64 {
+    let mut total = 0_u64;
+    records
+        .service_segments
+        .iter()
+        .filter(|segment| {
+            segment_matches_scope(segment, scope) && timestamp_in_window(&segment.created_at, scope)
+        })
+        .for_each(|segment| {
+            total = total.saturating_add(1);
+            increment_status_count(counts, "service_segment", &segment.effective_status());
+        });
+    total
+}
+
+fn increment_status_count(
+    counts: &mut BTreeMap<(String, String), u64>,
+    domain: &str,
+    status: &str,
+) {
+    *counts
+        .entry((domain.to_string(), status.to_string()))
+        .or_insert(0) += 1;
+}
+
+fn delivery_matches_scope(delivery: &DeliveryRecord, scope: &DeliveryOperationsScope) -> bool {
+    delivery.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| delivery.project_id == *project_id)
+}
+
+fn artifact_matches_scope(
+    artifact: &DeliveryArtifactRecord,
+    scope: &DeliveryOperationsScope,
+) -> bool {
+    artifact.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| artifact.project_id == *project_id)
+}
+
+fn upload_batch_matches_scope(
+    batch: &DeliveryUploadBatchRecord,
+    scope: &DeliveryOperationsScope,
+) -> bool {
+    batch.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| batch.project_id == *project_id)
+}
+
+fn upload_item_matches_scope(
+    item: &DeliveryUploadBatchItemRecord,
+    scope: &DeliveryOperationsScope,
+) -> bool {
+    item.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| item.project_id == *project_id)
+}
+
+fn activation_matches_scope(
+    activation: &DeliveryActivationRecord,
+    scope: &DeliveryOperationsScope,
+) -> bool {
+    activation.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| activation.project_id == *project_id)
+}
+
+fn grant_matches_scope(
+    grant: &DeliveryDownloadGrantRecord,
+    scope: &DeliveryOperationsScope,
+) -> bool {
+    grant.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| grant.project_id == *project_id)
+}
+
+fn segment_matches_scope(
+    segment: &DeliveryServiceSegmentRecord,
+    scope: &DeliveryOperationsScope,
+) -> bool {
+    segment.tenant_id == scope.tenant_id
+        && scope
+            .project_id
+            .as_ref()
+            .is_none_or(|project_id| segment.project_id == *project_id)
+}
+
+fn timestamp_in_window(value: &str, scope: &DeliveryOperationsScope) -> bool {
+    let Ok(value) = OffsetDateTime::parse(value, &Rfc3339) else {
+        return false;
+    };
+    let Ok(window_start) = OffsetDateTime::parse(&scope.window_start, &Rfc3339) else {
+        return false;
+    };
+    let Ok(window_end) = OffsetDateTime::parse(&scope.window_end, &Rfc3339) else {
+        return false;
+    };
+    value >= window_start && value <= window_end
+}
+
+fn sort_timeline_events(events: &mut [DeliveryOperationsTimelineEvent]) {
+    events.sort_by(|left, right| {
+        left.occurred_at
+            .cmp(&right.occurred_at)
+            .then_with(|| left.event_id.cmp(&right.event_id))
+    });
+}
+
+fn sort_timeline_events_desc(events: &mut [DeliveryOperationsTimelineEvent]) {
+    events.sort_by(|left, right| {
+        right
+            .occurred_at
+            .cmp(&left.occurred_at)
+            .then_with(|| left.event_id.cmp(&right.event_id))
+    });
+}
+
+fn revoke_memory_delivery(
+    store: &mut MemoryStore,
+    delivery_id: &str,
+    expected_version: u64,
+    revoked_by: &str,
+    revoke_reason: Option<String>,
+) -> ConcurrencyResult<DeliveryResponse> {
+    let index = store
+        .deliveries
+        .iter()
+        .position(|item| item.delivery_id == delivery_id);
+    let Some(index) = index else {
+        return ConcurrencyResult::NotFound;
+    };
+    let current = store
+        .deliveries
+        .get(index)
+        .expect("indexed delivery should exist");
+    if current.version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+
+    let now = now_rfc3339();
+    let mut delivery = current.clone();
+    delivery.status = DELIVERY_STATUS_REVOKED.to_string();
+    delivery.revoked_at = Some(now.clone());
+    delivery.revoked_by = Some(revoked_by.to_string());
+    delivery.revoke_reason = revoke_reason;
+    delivery.updated_at = now.clone();
+    delivery.version = delivery.version.saturating_add(1);
+    store.deliveries[index] = delivery;
+
+    for code in store
+        .delivery_codes
+        .iter_mut()
+        .filter(|code| code.delivery_id == delivery_id)
+    {
+        code.status = DELIVERY_STATUS_REVOKED.to_string();
+        code.revoked_at = Some(now.clone());
+        code.updated_at = now.clone();
+        code.version = code.version.saturating_add(1);
+    }
+
+    for entitlement in store
+        .delivery_entitlements
+        .iter_mut()
+        .filter(|entitlement| entitlement.delivery_id == delivery_id)
+    {
+        entitlement.status = DELIVERY_ENTITLEMENT_STATUS_REVOKED.to_string();
+        entitlement.updated_at = now.clone();
+    }
+
+    let Some(data) = memory_delivery_projection(store, delivery_id) else {
+        return ConcurrencyResult::NotFound;
+    };
+    ConcurrencyResult::Applied(DeliveryResponse { data })
+}
+
+fn delivery_code_prefix(code: &str) -> String {
+    if code.len() <= 18 {
+        code.to_string()
+    } else {
+        format!("{}...", &code[..18])
+    }
+}
+
+fn delivery_secret_key(delivery_id: &str, code_type: &str) -> String {
+    format!("{delivery_id}:{code_type}")
+}
+
+fn insert_memory_delivery_artifact(
+    store: &mut MemoryStore,
+    draft: DeliveryArtifactDraft,
+) -> DeliveryArtifactRecord {
+    let existing = store
+        .delivery_artifacts
+        .iter()
+        .filter(|artifact| artifact.delivery_id == draft.delivery_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let artifact = build_delivery_artifact_record(&draft, &existing);
+    for item in store.delivery_artifacts.iter_mut().filter(|artifact| {
+        artifact.delivery_id == draft.delivery_id
+            && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+    }) {
+        item.status = DELIVERY_ARTIFACT_STATUS_SUPERSEDED.to_string();
+        item.superseded_at = Some(artifact.created_at.clone());
+        item.superseded_by = Some(artifact.artifact_id.clone());
+        item.updated_at = artifact.created_at.clone();
+    }
+    store.delivery_artifacts.push(artifact.clone());
+    artifact
+}
+
+fn build_delivery_artifact_record(
+    draft: &DeliveryArtifactDraft,
+    existing: &[DeliveryArtifactRecord],
+) -> DeliveryArtifactRecord {
+    let now = now_rfc3339();
+    let version = existing
+        .iter()
+        .filter(|artifact| artifact.delivery_id == draft.delivery_id)
+        .map(|artifact| artifact.version)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    DeliveryArtifactRecord {
+        artifact_id: draft.artifact_id.clone(),
+        delivery_id: draft.delivery_id.clone(),
+        tenant_id: draft.tenant_id.clone(),
+        project_id: draft.project_id.clone(),
+        artifact_kind: draft.artifact_kind.clone(),
+        provider: draft.provider.clone(),
+        status: DELIVERY_ARTIFACT_STATUS_ACTIVE.to_string(),
+        version,
+        file_name: draft.file_name.clone(),
+        content_type: draft.content_type.clone(),
+        size_bytes: u64::try_from(draft.ciphertext.len()).unwrap_or(u64::MAX),
+        sha256: artifact_sha256(&draft.ciphertext),
+        storage_backend: DELIVERY_ARTIFACT_STORAGE_BACKEND_DB_INLINE.to_string(),
+        storage_ref: draft.artifact_id.clone(),
+        carrier_valid_until: draft.carrier_valid_until.clone(),
+        encryption_protocol: draft.encryption_protocol.clone(),
+        encryption_version: draft.encryption_version.clone(),
+        secret_kind: draft.secret_kind.clone(),
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        superseded_at: None,
+        superseded_by: None,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+        ciphertext: draft.ciphertext.clone(),
+    }
+}
+
+fn artifact_sha256(payload: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(payload);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn insert_memory_delivery_upload_batch(
+    store: &mut MemoryStore,
+    draft: DeliveryUploadBatchDraft,
+) -> DeliveryUploadBatchRecord {
+    if let Some(existing) = find_existing_upload_batch(
+        &store.delivery_upload_batches,
+        &draft.tenant_id,
+        &draft.project_id,
+        draft.idempotency_key.as_deref(),
+        &draft.source_file_sha256,
+    ) {
+        return existing.clone();
+    }
+    let batch = build_delivery_upload_batch_record(&draft);
+    let items = build_delivery_upload_batch_item_records(&draft, &batch);
+    store.delivery_upload_batches.push(batch.clone());
+    store.delivery_upload_batch_items.extend(items);
+    batch
+}
+
+fn build_delivery_upload_batch_record(
+    draft: &DeliveryUploadBatchDraft,
+) -> DeliveryUploadBatchRecord {
+    let now = now_rfc3339();
+    DeliveryUploadBatchRecord {
+        batch_id: draft.batch_id.clone(),
+        tenant_id: draft.tenant_id.clone(),
+        project_id: draft.project_id.clone(),
+        provider: draft.provider.clone(),
+        status: DELIVERY_UPLOAD_BATCH_STATUS_QUEUED.to_string(),
+        source_file_name: draft.source_file_name.clone(),
+        source_file_sha256: draft.source_file_sha256.clone(),
+        idempotency_key: draft.idempotency_key.clone(),
+        total_count: u32::try_from(draft.items.len()).unwrap_or(u32::MAX),
+        success_count: 0,
+        failed_count: 0,
+        duplicate_count: 0,
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        started_at: None,
+        finished_at: None,
+        error_summary: None,
+        version: 1,
+    }
+}
+
+fn build_delivery_upload_batch_item_records(
+    draft: &DeliveryUploadBatchDraft,
+    batch: &DeliveryUploadBatchRecord,
+) -> Vec<DeliveryUploadBatchItemRecord> {
+    let now = batch.created_at.clone();
+    draft
+        .items
+        .iter()
+        .map(|item| DeliveryUploadBatchItemRecord {
+            item_id: item.item_id.clone(),
+            batch_id: batch.batch_id.clone(),
+            row_index: item.row_index,
+            tenant_id: batch.tenant_id.clone(),
+            project_id: batch.project_id.clone(),
+            delivery_id: item.delivery_id.clone(),
+            artifact_id: None,
+            status: DELIVERY_UPLOAD_ITEM_STATUS_PENDING.to_string(),
+            artifact_kind: item.artifact_kind.clone(),
+            file_name: item.file_name.clone(),
+            content_type: item.content_type.clone(),
+            carrier_valid_until: item.carrier_valid_until.clone(),
+            encryption_protocol: item.encryption_protocol.clone(),
+            encryption_version: item.encryption_version.clone(),
+            secret_kind: item.secret_kind.clone(),
+            payload_sha256: artifact_sha256(&item.ciphertext),
+            size_bytes: u64::try_from(item.ciphertext.len()).unwrap_or(u64::MAX),
+            error_code: None,
+            error_message: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            version: 1,
+            ciphertext: item.ciphertext.clone(),
+        })
+        .collect()
+}
+
+fn find_existing_upload_batch<'a>(
+    batches: &'a [DeliveryUploadBatchRecord],
+    tenant_id: &TenantId,
+    project_id: &ProjectId,
+    idempotency_key: Option<&str>,
+    source_file_sha256: &str,
+) -> Option<&'a DeliveryUploadBatchRecord> {
+    batches.iter().find(|batch| {
+        batch.tenant_id == *tenant_id
+            && batch.project_id == *project_id
+            && (batch.source_file_sha256 == source_file_sha256
+                || idempotency_key
+                    .zip(batch.idempotency_key.as_deref())
+                    .is_some_and(|(left, right)| left == right))
+    })
+}
+
+fn process_memory_delivery_upload_batch(
+    store: &mut MemoryStore,
+    batch_id: &str,
+    actor_id: &str,
+) -> DeliveryUploadProcessResult {
+    let Some(batch_index) = store
+        .delivery_upload_batches
+        .iter()
+        .position(|batch| batch.batch_id == batch_id)
+    else {
+        return DeliveryUploadProcessResult::BatchNotFound;
+    };
+    let batch = store.delivery_upload_batches[batch_index].clone();
+    if delivery_upload_batch_is_terminal(&batch.status) {
+        return DeliveryUploadProcessResult::Processed(Box::new(batch.public_response()));
+    }
+    if batch.status == DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING {
+        return DeliveryUploadProcessResult::BatchAlreadyProcessing;
+    }
+    if store.delivery_upload_batches.iter().any(|candidate| {
+        candidate.batch_id != batch.batch_id
+            && candidate.tenant_id == batch.tenant_id
+            && candidate.project_id == batch.project_id
+            && candidate.status == DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING
+    }) {
+        return DeliveryUploadProcessResult::ScopeBusy;
+    }
+
+    let now = now_rfc3339();
+    {
+        let batch = &mut store.delivery_upload_batches[batch_index];
+        batch.status = DELIVERY_UPLOAD_BATCH_STATUS_PROCESSING.to_string();
+        batch.started_at = Some(now.clone());
+        batch.updated_at = now;
+        batch.version = batch.version.saturating_add(1);
+    }
+
+    let item_indexes = store
+        .delivery_upload_batch_items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| (item.batch_id == batch_id).then_some(index))
+        .collect::<Vec<_>>();
+    for item_index in item_indexes {
+        if store.delivery_upload_batch_items[item_index].status
+            != DELIVERY_UPLOAD_ITEM_STATUS_PENDING
+        {
+            continue;
+        }
+        process_memory_delivery_upload_item(store, item_index, actor_id);
+    }
+
+    finalize_memory_delivery_upload_batch(store, batch_index);
+    let batch = store.delivery_upload_batches[batch_index].clone();
+    DeliveryUploadProcessResult::Processed(Box::new(batch.public_response()))
+}
+
+fn process_memory_delivery_upload_item(store: &mut MemoryStore, item_index: usize, actor_id: &str) {
+    let item = store.delivery_upload_batch_items[item_index].clone();
+    let outcome = delivery_upload_item_outcome_for_memory(store, &item, actor_id);
+    apply_delivery_upload_item_outcome(&mut store.delivery_upload_batch_items[item_index], outcome);
+}
+
+fn delivery_upload_item_outcome_for_memory(
+    store: &mut MemoryStore,
+    item: &DeliveryUploadBatchItemRecord,
+    actor_id: &str,
+) -> DeliveryUploadItemOutcome {
+    let Some(delivery) = store
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.delivery_id == item.delivery_id)
+        .cloned()
+    else {
+        return DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_not_found",
+            message: format!("delivery `{}` was not found", item.delivery_id),
+        };
+    };
+    if delivery.tenant_id != item.tenant_id || delivery.project_id != item.project_id {
+        return DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_scope_mismatch",
+            message: "delivery does not belong to the upload batch tenant/project".to_string(),
+        };
+    }
+    let Some(entitlement) = store
+        .delivery_entitlements
+        .iter()
+        .find(|entitlement| entitlement.delivery_id == delivery.delivery_id)
+        .cloned()
+    else {
+        return DeliveryUploadItemOutcome::Failed {
+            code: "delivery_entitlement_missing",
+            message: "delivery entitlement is missing".to_string(),
+        };
+    };
+    if delivery.effective_status(&entitlement) != DELIVERY_STATUS_PREPARED {
+        return DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_not_artifact_ready",
+            message: format!(
+                "delivery `{}` status `{}` cannot accept artifacts",
+                delivery.delivery_id,
+                delivery.effective_status(&entitlement)
+            ),
+        };
+    }
+    if delivery.provider != upload_batch_provider_for_item(store, item).unwrap_or_default() {
+        return DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_provider_mismatch",
+            message: "delivery provider does not match upload batch provider".to_string(),
+        };
+    }
+    if let Some(existing) = store.delivery_artifacts.iter().find(|artifact| {
+        artifact.delivery_id == item.delivery_id
+            && upload_item_matches_existing_artifact_payload(item, artifact)
+            && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+    }) {
+        return DeliveryUploadItemOutcome::Duplicate {
+            artifact_id: existing.artifact_id.clone(),
+        };
+    }
+
+    let artifact = insert_memory_delivery_artifact(
+        store,
+        delivery_upload_item_artifact_draft(item, &delivery, actor_id),
+    );
+    DeliveryUploadItemOutcome::Accepted {
+        artifact_id: artifact.artifact_id,
+    }
+}
+
+fn upload_item_matches_existing_artifact_payload(
+    item: &DeliveryUploadBatchItemRecord,
+    artifact: &DeliveryArtifactRecord,
+) -> bool {
+    artifact.sha256 == item.payload_sha256
+}
+
+fn upload_batch_provider_for_item(
+    store: &MemoryStore,
+    item: &DeliveryUploadBatchItemRecord,
+) -> Option<String> {
+    store
+        .delivery_upload_batches
+        .iter()
+        .find(|batch| batch.batch_id == item.batch_id)
+        .map(|batch| batch.provider.clone())
+}
+
+fn delivery_upload_item_artifact_draft(
+    item: &DeliveryUploadBatchItemRecord,
+    delivery: &DeliveryRecord,
+    actor_id: &str,
+) -> DeliveryArtifactDraft {
+    DeliveryArtifactDraft {
+        artifact_id: format!("artifact_{}_{}", item.batch_id, item.row_index),
+        delivery_id: item.delivery_id.clone(),
+        tenant_id: item.tenant_id.clone(),
+        project_id: item.project_id.clone(),
+        artifact_kind: item.artifact_kind.clone(),
+        provider: delivery.provider.clone(),
+        file_name: item.file_name.clone(),
+        content_type: item.content_type.clone(),
+        carrier_valid_until: item.carrier_valid_until.clone(),
+        encryption_protocol: item.encryption_protocol.clone(),
+        encryption_version: item.encryption_version.clone(),
+        secret_kind: item.secret_kind.clone(),
+        ciphertext: item.ciphertext.clone(),
+        created_by: actor_id.to_string(),
+    }
+}
+
+#[derive(Debug, Clone)]
+enum DeliveryUploadItemOutcome {
+    Accepted { artifact_id: String },
+    Duplicate { artifact_id: String },
+    Rejected { code: &'static str, message: String },
+    Failed { code: &'static str, message: String },
+}
+
+fn apply_delivery_upload_item_outcome(
+    item: &mut DeliveryUploadBatchItemRecord,
+    outcome: DeliveryUploadItemOutcome,
+) {
+    let now = now_rfc3339();
+    match outcome {
+        DeliveryUploadItemOutcome::Accepted { artifact_id } => {
+            item.status = DELIVERY_UPLOAD_ITEM_STATUS_ACCEPTED.to_string();
+            item.artifact_id = Some(artifact_id);
+            item.error_code = None;
+            item.error_message = None;
+        }
+        DeliveryUploadItemOutcome::Duplicate { artifact_id } => {
+            item.status = DELIVERY_UPLOAD_ITEM_STATUS_DUPLICATE.to_string();
+            item.artifact_id = Some(artifact_id);
+            item.error_code = Some("artifact_duplicate".to_string());
+            item.error_message =
+                Some("an active artifact with the same payload already exists".to_string());
+        }
+        DeliveryUploadItemOutcome::Rejected { code, message } => {
+            item.status = DELIVERY_UPLOAD_ITEM_STATUS_REJECTED.to_string();
+            item.error_code = Some(code.to_string());
+            item.error_message = Some(message);
+        }
+        DeliveryUploadItemOutcome::Failed { code, message } => {
+            item.status = DELIVERY_UPLOAD_ITEM_STATUS_FAILED.to_string();
+            item.error_code = Some(code.to_string());
+            item.error_message = Some(message);
+        }
+    }
+    item.updated_at = now;
+    item.version = item.version.saturating_add(1);
+}
+
+fn finalize_memory_delivery_upload_batch(store: &mut MemoryStore, batch_index: usize) {
+    let batch_id = store.delivery_upload_batches[batch_index].batch_id.clone();
+    let items = store
+        .delivery_upload_batch_items
+        .iter()
+        .filter(|item| item.batch_id == batch_id)
+        .collect::<Vec<_>>();
+    let total_count = u32::try_from(items.len()).unwrap_or(u32::MAX);
+    let success_count = count_upload_items(&items, DELIVERY_UPLOAD_ITEM_STATUS_ACCEPTED);
+    let duplicate_count = count_upload_items(&items, DELIVERY_UPLOAD_ITEM_STATUS_DUPLICATE);
+    let failed_count = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.status.as_str(),
+                DELIVERY_UPLOAD_ITEM_STATUS_REJECTED | DELIVERY_UPLOAD_ITEM_STATUS_FAILED
+            )
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    let status =
+        final_upload_batch_status(total_count, success_count, duplicate_count, failed_count);
+    let error_summary = first_upload_error_summary(&items);
+    let now = now_rfc3339();
+    let batch = &mut store.delivery_upload_batches[batch_index];
+    batch.status = status;
+    batch.total_count = total_count;
+    batch.success_count = success_count;
+    batch.duplicate_count = duplicate_count;
+    batch.failed_count = failed_count;
+    batch.error_summary = error_summary;
+    batch.finished_at = Some(now.clone());
+    batch.updated_at = now;
+    batch.version = batch.version.saturating_add(1);
+}
+
+fn count_upload_items(items: &[&DeliveryUploadBatchItemRecord], status: &str) -> u32 {
+    items
+        .iter()
+        .filter(|item| item.status == status)
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
+fn final_upload_batch_status(
+    total_count: u32,
+    success_count: u32,
+    duplicate_count: u32,
+    failed_count: u32,
+) -> String {
+    if failed_count == 0 && success_count.saturating_add(duplicate_count) == total_count {
+        DELIVERY_UPLOAD_BATCH_STATUS_SUCCEEDED.to_string()
+    } else if success_count > 0 || duplicate_count > 0 {
+        DELIVERY_UPLOAD_BATCH_STATUS_PARTIALLY_FAILED.to_string()
+    } else {
+        DELIVERY_UPLOAD_BATCH_STATUS_FAILED.to_string()
+    }
+}
+
+fn first_upload_error_summary(items: &[&DeliveryUploadBatchItemRecord]) -> Option<String> {
+    items.iter().find_map(|item| {
+        item.error_message
+            .clone()
+            .or_else(|| item.error_code.clone())
+    })
+}
+
+fn delivery_upload_batch_is_terminal(status: &str) -> bool {
+    matches!(
+        status,
+        DELIVERY_UPLOAD_BATCH_STATUS_SUCCEEDED
+            | DELIVERY_UPLOAD_BATCH_STATUS_PARTIALLY_FAILED
+            | DELIVERY_UPLOAD_BATCH_STATUS_FAILED
+    )
+}
+
+fn activate_delivery_entitlement(
+    entitlement: &mut DeliveryEntitlementRecord,
+    activated_at: Option<String>,
+) {
+    let activated_at = activated_at.unwrap_or_else(now_rfc3339);
+    entitlement.starts_at = activated_at.clone();
+    entitlement.ends_at = timestamp_plus_days(&activated_at, entitlement.service_days)
+        .unwrap_or_else(|| expires_at(u64::from(entitlement.service_days) * 86_400));
+    entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+    entitlement.activated_at = Some(activated_at);
+    entitlement.updated_at = now_rfc3339();
+    entitlement.version = entitlement.version.saturating_add(1);
+}
+
+fn apply_segment_for_artifact(
+    store: &mut MemoryStore,
+    entitlement: &mut DeliveryEntitlementRecord,
+    activation: &DeliveryActivationRecord,
+    artifact: &DeliveryArtifactRecord,
+    actor_id: &str,
+    reason: &str,
+) {
+    match build_service_segment_record(
+        store,
+        entitlement,
+        activation,
+        artifact,
+        activation.activated_at.clone(),
+        actor_id,
+    ) {
+        Some(segment) => {
+            let event = lifecycle_event_record(
+                store,
+                &entitlement.entitlement_id,
+                Some(segment.segment_id.clone()),
+                DELIVERY_LIFECYCLE_EVENT_SEGMENT_CREATED,
+                DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE,
+                Some(reason.to_string()),
+                actor_id,
+                BTreeMap::from([
+                    ("artifact_id".to_string(), artifact.artifact_id.clone()),
+                    (
+                        "effective_until".to_string(),
+                        segment.effective_until.clone(),
+                    ),
+                ]),
+            );
+            store.delivery_service_segments.push(segment);
+            store.delivery_lifecycle_events.push(event);
+        }
+        None => {
+            mark_entitlement_needs_manual_supply(store, entitlement, actor_id, reason);
+        }
+    }
+}
+
+fn build_service_segment_record(
+    store: &MemoryStore,
+    entitlement: &DeliveryEntitlementRecord,
+    activation: &DeliveryActivationRecord,
+    artifact: &DeliveryArtifactRecord,
+    effective_from: String,
+    actor_id: &str,
+) -> Option<DeliveryServiceSegmentRecord> {
+    let carrier_valid_until = artifact.carrier_valid_until.clone()?;
+    if !timestamp_after(&carrier_valid_until, &effective_from) {
+        return None;
+    }
+    let effective_until = min_timestamp(&carrier_valid_until, &entitlement.ends_at)?;
+    if !timestamp_after(&effective_until, &effective_from) {
+        return None;
+    }
+    let segment_index = next_segment_index(
+        &store.delivery_service_segments,
+        &entitlement.entitlement_id,
+    );
+    let now = now_rfc3339();
+    Some(DeliveryServiceSegmentRecord {
+        segment_id: format!("dlvseg_{}_{}", entitlement.entitlement_id, segment_index),
+        entitlement_id: entitlement.entitlement_id.clone(),
+        activation_id: activation.activation_id.clone(),
+        delivery_id: artifact.delivery_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        tenant_id: artifact.tenant_id.clone(),
+        project_id: artifact.project_id.clone(),
+        provider: artifact.provider.clone(),
+        status: if timestamp_is_future(&effective_from) {
+            DELIVERY_SERVICE_SEGMENT_STATUS_SCHEDULED.to_string()
+        } else {
+            DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE.to_string()
+        },
+        segment_index,
+        effective_from,
+        effective_until,
+        carrier_valid_until,
+        created_by: actor_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    })
+}
+
+fn next_segment_index(segments: &[DeliveryServiceSegmentRecord], entitlement_id: &str) -> u32 {
+    segments
+        .iter()
+        .filter(|segment| segment.entitlement_id == entitlement_id)
+        .map(|segment| segment.segment_index)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+fn mark_entitlement_needs_manual_supply(
+    store: &mut MemoryStore,
+    entitlement: &mut DeliveryEntitlementRecord,
+    actor_id: &str,
+    reason: &str,
+) {
+    let already_blocked = entitlement.status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY;
+    entitlement.status = DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY.to_string();
+    entitlement.updated_at = now_rfc3339();
+    if !already_blocked {
+        entitlement.version = entitlement.version.saturating_add(1);
+    }
+    if already_blocked {
+        return;
+    }
+    let event = lifecycle_event_record(
+        store,
+        &entitlement.entitlement_id,
+        None,
+        DELIVERY_LIFECYCLE_EVENT_NEEDS_MANUAL_SUPPLY,
+        DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY,
+        Some(reason.to_string()),
+        actor_id,
+        BTreeMap::new(),
+    );
+    store.delivery_lifecycle_events.push(event);
+}
+
+fn lifecycle_event_record(
+    store: &MemoryStore,
+    entitlement_id: &str,
+    segment_id: Option<String>,
+    event_type: &str,
+    status: &str,
+    reason: Option<String>,
+    actor_id: &str,
+    payload: BTreeMap<String, String>,
+) -> DeliveryLifecycleEventRecord {
+    DeliveryLifecycleEventRecord {
+        event_id: format!(
+            "dlvevt_{}_{}",
+            entitlement_id,
+            store.delivery_lifecycle_events.len().saturating_add(1)
+        ),
+        entitlement_id: entitlement_id.to_string(),
+        segment_id,
+        event_type: event_type.to_string(),
+        status: status.to_string(),
+        reason,
+        created_by: actor_id.to_string(),
+        created_at: now_rfc3339(),
+        payload,
+    }
+}
+
+fn postgres_lifecycle_event_record(
+    entitlement_id: &str,
+    segment_id: Option<String>,
+    event_type: &str,
+    status: &str,
+    reason: Option<String>,
+    actor_id: &str,
+    payload: BTreeMap<String, String>,
+) -> DeliveryLifecycleEventRecord {
+    DeliveryLifecycleEventRecord {
+        event_id: format!("dlvevt_{}_{}", entitlement_id, next_id_suffix()),
+        entitlement_id: entitlement_id.to_string(),
+        segment_id,
+        event_type: event_type.to_string(),
+        status: status.to_string(),
+        reason,
+        created_by: actor_id.to_string(),
+        created_at: now_rfc3339(),
+        payload,
+    }
+}
+
+fn build_postgres_service_segment_record(
+    existing_segments: &[DeliveryServiceSegmentRecord],
+    new_segments: &[DeliveryServiceSegmentRecord],
+    entitlement: &DeliveryEntitlementRecord,
+    activation: &DeliveryActivationRecord,
+    artifact: &DeliveryArtifactRecord,
+    effective_from: String,
+    actor_id: &str,
+) -> Option<DeliveryServiceSegmentRecord> {
+    let carrier_valid_until = artifact.carrier_valid_until.clone()?;
+    if !timestamp_after(&carrier_valid_until, &effective_from) {
+        return None;
+    }
+    let effective_until = min_timestamp(&carrier_valid_until, &entitlement.ends_at)?;
+    if !timestamp_after(&effective_until, &effective_from) {
+        return None;
+    }
+    let segment_index = existing_segments
+        .iter()
+        .chain(new_segments.iter())
+        .filter(|segment| segment.entitlement_id == entitlement.entitlement_id)
+        .map(|segment| segment.segment_index)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let now = now_rfc3339();
+    Some(DeliveryServiceSegmentRecord {
+        segment_id: format!("dlvseg_{}_{}", entitlement.entitlement_id, segment_index),
+        entitlement_id: entitlement.entitlement_id.clone(),
+        activation_id: activation.activation_id.clone(),
+        delivery_id: artifact.delivery_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        tenant_id: artifact.tenant_id.clone(),
+        project_id: artifact.project_id.clone(),
+        provider: artifact.provider.clone(),
+        status: if timestamp_is_future(&effective_from) {
+            DELIVERY_SERVICE_SEGMENT_STATUS_SCHEDULED.to_string()
+        } else {
+            DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE.to_string()
+        },
+        segment_index,
+        effective_from,
+        effective_until,
+        carrier_valid_until,
+        created_by: actor_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    })
+}
+
+fn active_segment_for_artifact<'a>(
+    segments: &'a [DeliveryServiceSegmentRecord],
+    entitlement_id: &str,
+    activation_id: &str,
+    artifact_id: &str,
+) -> Option<&'a DeliveryServiceSegmentRecord> {
+    segments
+        .iter()
+        .filter(|segment| {
+            segment.entitlement_id == entitlement_id
+                && segment.activation_id == activation_id
+                && segment.artifact_id == artifact_id
+                && segment.effective_status() == DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE
+                && !timestamp_is_future(&segment.effective_from)
+                && !timestamp_is_expired(&segment.effective_until)
+        })
+        .max_by(|left, right| left.segment_index.cmp(&right.segment_index))
+}
+
+fn current_segment_for_entitlement<'a>(
+    segments: &'a [DeliveryServiceSegmentRecord],
+    entitlement_id: &str,
+    activation_id: &str,
+) -> Option<&'a DeliveryServiceSegmentRecord> {
+    segments
+        .iter()
+        .filter(|segment| {
+            segment.entitlement_id == entitlement_id
+                && segment.activation_id == activation_id
+                && segment.effective_status() == DELIVERY_SERVICE_SEGMENT_STATUS_ACTIVE
+                && !timestamp_is_future(&segment.effective_from)
+                && !timestamp_is_expired(&segment.effective_until)
+        })
+        .max_by(|left, right| {
+            left.effective_from
+                .cmp(&right.effective_from)
+                .then_with(|| left.segment_index.cmp(&right.segment_index))
+        })
+}
+
+fn lifecycle_response_for_entitlement(
+    store: &MemoryStore,
+    entitlement: &DeliveryEntitlementRecord,
+) -> DeliveryLifecycleResponse {
+    let mut segments = store
+        .delivery_service_segments
+        .iter()
+        .filter(|segment| segment.entitlement_id == entitlement.entitlement_id)
+        .map(DeliveryServiceSegmentRecord::public_view)
+        .collect::<Vec<_>>();
+    segments.sort_by(|left, right| left.segment_index.cmp(&right.segment_index));
+    let mut events = store
+        .delivery_lifecycle_events
+        .iter()
+        .filter(|event| event.entitlement_id == entitlement.entitlement_id)
+        .map(DeliveryLifecycleEventRecord::public_view)
+        .collect::<Vec<_>>();
+    events.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    DeliveryLifecycleResponse {
+        entitlement: entitlement.public_view(),
+        segments,
+        events,
+    }
+}
+
+fn reconcile_memory_delivery_lifecycle(
+    store: &mut MemoryStore,
+    entitlement_id: &str,
+    actor_id: &str,
+) -> DeliveryLifecycleResult {
+    let Some(entitlement_index) = store
+        .delivery_entitlements
+        .iter()
+        .position(|entitlement| entitlement.entitlement_id == entitlement_id)
+    else {
+        return DeliveryLifecycleResult::EntitlementNotFound;
+    };
+    let mut entitlement = store.delivery_entitlements[entitlement_index].clone();
+    if entitlement.status == DELIVERY_ENTITLEMENT_STATUS_REVOKED
+        || entitlement.status == DELIVERY_ENTITLEMENT_STATUS_SUSPENDED
+    {
+        return DeliveryLifecycleResult::Applied(Box::new(lifecycle_response_for_entitlement(
+            store,
+            &entitlement,
+        )));
+    }
+
+    if timestamp_is_expired(&entitlement.ends_at) {
+        if entitlement.status != DELIVERY_STATUS_EXPIRED {
+            entitlement.status = DELIVERY_STATUS_EXPIRED.to_string();
+            entitlement.updated_at = now_rfc3339();
+            entitlement.version = entitlement.version.saturating_add(1);
+            let event = lifecycle_event_record(
+                store,
+                &entitlement.entitlement_id,
+                None,
+                DELIVERY_LIFECYCLE_EVENT_EXPIRED,
+                DELIVERY_STATUS_EXPIRED,
+                Some("entitlement service window ended".to_string()),
+                actor_id,
+                BTreeMap::new(),
+            );
+            store.delivery_lifecycle_events.push(event);
+        }
+        store.delivery_entitlements[entitlement_index] = entitlement.clone();
+        return DeliveryLifecycleResult::Applied(Box::new(lifecycle_response_for_entitlement(
+            store,
+            &entitlement,
+        )));
+    }
+
+    let Some(activation) = store
+        .delivery_activations
+        .iter()
+        .find(|activation| {
+            activation.entitlement_id == entitlement.entitlement_id
+                && activation.status == DELIVERY_ACTIVATION_STATUS_ACTIVATED
+        })
+        .cloned()
+    else {
+        mark_entitlement_needs_manual_supply(
+            store,
+            &mut entitlement,
+            actor_id,
+            "activation_missing",
+        );
+        store.delivery_entitlements[entitlement_index] = entitlement.clone();
+        return DeliveryLifecycleResult::Applied(Box::new(lifecycle_response_for_entitlement(
+            store,
+            &entitlement,
+        )));
+    };
+
+    let coverage_until = store
+        .delivery_service_segments
+        .iter()
+        .filter(|segment| {
+            segment.entitlement_id == entitlement.entitlement_id
+                && segment.status != DELIVERY_SERVICE_SEGMENT_STATUS_REVOKED
+        })
+        .map(|segment| segment.effective_until.clone())
+        .max()
+        .unwrap_or_else(|| entitlement.starts_at.clone());
+
+    if !timestamp_after(&entitlement.ends_at, &coverage_until) {
+        if entitlement.status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+            entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+            entitlement.updated_at = now_rfc3339();
+            entitlement.version = entitlement.version.saturating_add(1);
+        }
+        store.delivery_entitlements[entitlement_index] = entitlement.clone();
+        return DeliveryLifecycleResult::Applied(Box::new(lifecycle_response_for_entitlement(
+            store,
+            &entitlement,
+        )));
+    }
+
+    let used_artifact_ids = store
+        .delivery_service_segments
+        .iter()
+        .map(|segment| segment.artifact_id.clone())
+        .collect::<HashSet<_>>();
+    let candidate = store
+        .delivery_artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.tenant_id == activation.tenant_id
+                && artifact.project_id == activation.project_id
+                && artifact.provider == activation.provider
+                && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+                && !used_artifact_ids.contains(&artifact.artifact_id)
+                && artifact
+                    .carrier_valid_until
+                    .as_deref()
+                    .is_some_and(|value| timestamp_after(value, &coverage_until))
+        })
+        .max_by(|left, right| left.version.cmp(&right.version))
+        .cloned();
+    let Some(artifact) = candidate else {
+        mark_entitlement_needs_manual_supply(
+            store,
+            &mut entitlement,
+            actor_id,
+            "continuation_artifact_missing",
+        );
+        store.delivery_entitlements[entitlement_index] = entitlement.clone();
+        return DeliveryLifecycleResult::Applied(Box::new(lifecycle_response_for_entitlement(
+            store,
+            &entitlement,
+        )));
+    };
+
+    if let Some(segment) = build_service_segment_record(
+        store,
+        &entitlement,
+        &activation,
+        &artifact,
+        coverage_until,
+        actor_id,
+    ) {
+        let event = lifecycle_event_record(
+            store,
+            &entitlement.entitlement_id,
+            Some(segment.segment_id.clone()),
+            DELIVERY_LIFECYCLE_EVENT_SEGMENT_CREATED,
+            segment.status.as_str(),
+            Some("continuation_artifact_matched".to_string()),
+            actor_id,
+            BTreeMap::from([("artifact_id".to_string(), artifact.artifact_id.clone())]),
+        );
+        store.delivery_service_segments.push(segment);
+        store.delivery_lifecycle_events.push(event);
+        if entitlement.status == DELIVERY_ENTITLEMENT_STATUS_NEEDS_MANUAL_SUPPLY {
+            entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+            entitlement.updated_at = now_rfc3339();
+            entitlement.version = entitlement.version.saturating_add(1);
+        }
+    } else {
+        mark_entitlement_needs_manual_supply(
+            store,
+            &mut entitlement,
+            actor_id,
+            "continuation_artifact_invalid_carrier_window",
+        );
+    }
+    store.delivery_entitlements[entitlement_index] = entitlement.clone();
+    DeliveryLifecycleResult::Applied(Box::new(lifecycle_response_for_entitlement(
+        store,
+        &entitlement,
+    )))
+}
+
+fn extend_memory_delivery_entitlement(
+    store: &mut MemoryStore,
+    draft: DeliveryEntitlementExtendDraft,
+) -> ConcurrencyResult<DeliveryLifecycleResponse> {
+    let Some(entitlement_index) = store
+        .delivery_entitlements
+        .iter()
+        .position(|entitlement| entitlement.entitlement_id == draft.entitlement_id)
+    else {
+        return ConcurrencyResult::NotFound;
+    };
+    let mut entitlement = store.delivery_entitlements[entitlement_index].clone();
+    if entitlement.version != draft.expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    let old_ends_at = entitlement.ends_at.clone();
+    entitlement.ends_at = timestamp_plus_days(&entitlement.ends_at, draft.extend_days)
+        .unwrap_or_else(|| expires_at(u64::from(draft.extend_days) * 86_400));
+    entitlement.service_days = entitlement.service_days.saturating_add(draft.extend_days);
+    if entitlement.status != DELIVERY_ENTITLEMENT_STATUS_REVOKED
+        && entitlement.status != DELIVERY_ENTITLEMENT_STATUS_SUSPENDED
+        && !timestamp_is_expired(&entitlement.ends_at)
+        && entitlement.activated_at.is_some()
+    {
+        entitlement.status = DELIVERY_ENTITLEMENT_STATUS_ACTIVE.to_string();
+    }
+    entitlement.updated_at = now_rfc3339();
+    entitlement.version = entitlement.version.saturating_add(1);
+    let event = lifecycle_event_record(
+        store,
+        &entitlement.entitlement_id,
+        None,
+        DELIVERY_LIFECYCLE_EVENT_RENEWED,
+        entitlement.status.as_str(),
+        draft.reason.clone(),
+        &draft.actor_id,
+        BTreeMap::from([
+            ("old_service_ends_at".to_string(), old_ends_at),
+            (
+                "new_service_ends_at".to_string(),
+                entitlement.ends_at.clone(),
+            ),
+            ("extend_days".to_string(), draft.extend_days.to_string()),
+        ]),
+    );
+    store.delivery_lifecycle_events.push(event);
+    store.delivery_entitlements[entitlement_index] = entitlement.clone();
+    let _ =
+        reconcile_memory_delivery_lifecycle(store, &entitlement.entitlement_id, &draft.actor_id);
+    let entitlement = store.delivery_entitlements[entitlement_index].clone();
+    ConcurrencyResult::Applied(lifecycle_response_for_entitlement(store, &entitlement))
+}
+
+fn redeem_memory_delivery_activation(
+    store: &mut MemoryStore,
+    code_hash: &str,
+    activation_id: String,
+    activated_by: &str,
+) -> DeliveryRedeemResult {
+    let Some(code_index) = store.delivery_codes.iter().position(|code| {
+        code.code_type == DELIVERY_CODE_TYPE_REDEMPTION && code.code_hash == code_hash
+    }) else {
+        return DeliveryRedeemResult::RedemptionCodeNotFound;
+    };
+    let mut code = store.delivery_codes[code_index].clone();
+    if let Some(result) = blocked_redemption_code_result(&code) {
+        return result;
+    }
+
+    let Some(delivery) = store
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.delivery_id == code.delivery_id)
+        .cloned()
+    else {
+        return DeliveryRedeemResult::DeliveryNotFound;
+    };
+    let Some(entitlement_index) = store
+        .delivery_entitlements
+        .iter()
+        .position(|entitlement| entitlement.delivery_id == code.delivery_id)
+    else {
+        return DeliveryRedeemResult::EntitlementNotFound;
+    };
+    let entitlement = store.delivery_entitlements[entitlement_index].clone();
+    if let Some(result) = blocked_delivery_activation_result(&delivery, &entitlement) {
+        return result;
+    }
+
+    let Some(artifact) = store
+        .delivery_artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.delivery_id == code.delivery_id
+                && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+        })
+        .max_by(|left, right| left.version.cmp(&right.version))
+        .cloned()
+    else {
+        return DeliveryRedeemResult::ArtifactMissing;
+    };
+
+    let mut entitlement = entitlement;
+    activate_delivery_entitlement(&mut entitlement, None);
+    let activation = build_delivery_activation_record(
+        &activation_id,
+        &delivery,
+        &mut code,
+        &entitlement,
+        &artifact,
+    );
+    apply_segment_for_artifact(
+        store,
+        &mut entitlement,
+        &activation,
+        &artifact,
+        activated_by,
+        "activation_segment",
+    );
+    store.delivery_codes[code_index] = code;
+    store.delivery_entitlements[entitlement_index] = entitlement;
+    store.delivery_activations.push(activation.clone());
+    DeliveryRedeemResult::Activated(Box::new(DeliveryActivationResponse {
+        data: activation.public_view(),
+    }))
+}
+
+fn blocked_redemption_code_result(code: &DeliveryCodeRecord) -> Option<DeliveryRedeemResult> {
+    if code.status == DELIVERY_CODE_STATUS_USED || code.used_at.is_some() {
+        Some(DeliveryRedeemResult::RedemptionCodeUsed)
+    } else if code.status == DELIVERY_STATUS_REVOKED {
+        Some(DeliveryRedeemResult::RedemptionCodeRevoked)
+    } else if code.status == DELIVERY_CODE_STATUS_ACTIVE && timestamp_is_expired(&code.expires_at) {
+        Some(DeliveryRedeemResult::RedemptionCodeExpired)
+    } else if code.status != DELIVERY_CODE_STATUS_ACTIVE {
+        Some(DeliveryRedeemResult::RedemptionCodeNotActive(
+            code.status.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn blocked_delivery_activation_result(
+    delivery: &DeliveryRecord,
+    entitlement: &DeliveryEntitlementRecord,
+) -> Option<DeliveryRedeemResult> {
+    let delivery_status = delivery.effective_status(entitlement);
+    if delivery_status != DELIVERY_STATUS_PREPARED {
+        return Some(DeliveryRedeemResult::DeliveryNotActive(delivery_status));
+    }
+    let entitlement_status = entitlement.effective_status();
+    if !matches!(
+        entitlement_status.as_str(),
+        DELIVERY_ENTITLEMENT_STATUS_ACTIVE | DELIVERY_ENTITLEMENT_STATUS_PENDING_ACTIVATION
+    ) {
+        return Some(DeliveryRedeemResult::EntitlementNotActive(
+            entitlement_status,
+        ));
+    }
+    None
+}
+
+fn build_delivery_activation_record(
+    activation_id: &str,
+    delivery: &DeliveryRecord,
+    code: &mut DeliveryCodeRecord,
+    entitlement: &DeliveryEntitlementRecord,
+    artifact: &DeliveryArtifactRecord,
+) -> DeliveryActivationRecord {
+    let now = entitlement.activated_at.clone().unwrap_or_else(now_rfc3339);
+    code.status = DELIVERY_CODE_STATUS_USED.to_string();
+    code.used_at = Some(now.clone());
+    code.updated_at = now.clone();
+    code.version = code.version.saturating_add(1);
+    DeliveryActivationRecord {
+        activation_id: activation_id.to_string(),
+        delivery_id: delivery.delivery_id.clone(),
+        code_id: code.code_id.clone(),
+        entitlement_id: entitlement.entitlement_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        tenant_id: delivery.tenant_id.clone(),
+        project_id: delivery.project_id.clone(),
+        provider: delivery.provider.clone(),
+        status: DELIVERY_ACTIVATION_STATUS_ACTIVATED.to_string(),
+        activation_source: DELIVERY_ACTIVATION_SOURCE_REDEMPTION_CODE.to_string(),
+        activated_at: now.clone(),
+        entitlement_ends_at: entitlement.ends_at.clone(),
+        artifact: artifact.public_view(),
+        created_at: now.clone(),
+        updated_at: now,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+    }
+}
+
+fn issue_memory_delivery_download_grant(
+    store: &mut MemoryStore,
+    draft: DeliveryDownloadGrantDraft,
+) -> DeliveryDownloadGrantIssueResult {
+    let Some(activation) = store
+        .delivery_activations
+        .iter()
+        .find(|activation| activation.activation_id == draft.activation_id)
+        .cloned()
+    else {
+        return DeliveryDownloadGrantIssueResult::ActivationNotFound;
+    };
+    if let Some(result) = blocked_download_activation_issue_result(&activation) {
+        return result;
+    }
+    let Some(entitlement) = store
+        .delivery_entitlements
+        .iter()
+        .find(|entitlement| entitlement.entitlement_id == activation.entitlement_id)
+        .cloned()
+    else {
+        return DeliveryDownloadGrantIssueResult::EntitlementNotFound;
+    };
+    if let Some(result) = blocked_download_entitlement_issue_result(&entitlement) {
+        return result;
+    }
+    let Some(segment) = current_segment_for_entitlement(
+        &store.delivery_service_segments,
+        &entitlement.entitlement_id,
+        &activation.activation_id,
+    )
+    .cloned() else {
+        return DeliveryDownloadGrantIssueResult::SegmentMissing;
+    };
+    let Some(artifact) = store
+        .delivery_artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.delivery_id == activation.delivery_id
+                && artifact.artifact_id == segment.artifact_id
+        })
+        .cloned()
+    else {
+        return DeliveryDownloadGrantIssueResult::ArtifactMissing;
+    };
+    if let Some(result) = blocked_download_artifact_issue_result(&artifact) {
+        return result;
+    }
+
+    let grant = build_delivery_download_grant_record(&draft, &activation, &artifact);
+    store.delivery_download_grants.push(grant.clone());
+    DeliveryDownloadGrantIssueResult::Issued(Box::new(DeliveryDownloadGrantIssueResponse {
+        data: grant.public_view(),
+        download_token: draft.token_plaintext,
+    }))
+}
+
+fn revoke_memory_delivery_download_grant(
+    store: &mut MemoryStore,
+    grant_id: &str,
+    expected_version: u64,
+    revoked_by: &str,
+    revoke_reason: Option<String>,
+) -> ConcurrencyResult<DeliveryDownloadGrantResponse> {
+    let Some(index) = store
+        .delivery_download_grants
+        .iter()
+        .position(|grant| grant.grant_id == grant_id)
+    else {
+        return ConcurrencyResult::NotFound;
+    };
+    if store.delivery_download_grants[index].version != expected_version {
+        return ConcurrencyResult::VersionConflict;
+    }
+    let now = now_rfc3339();
+    let grant = &mut store.delivery_download_grants[index];
+    grant.status = DELIVERY_DOWNLOAD_GRANT_STATUS_REVOKED.to_string();
+    grant.revoked_at = Some(now.clone());
+    grant.revoked_by = Some(revoked_by.to_string());
+    grant.revoke_reason = revoke_reason;
+    grant.updated_at = now;
+    grant.version = grant.version.saturating_add(1);
+    ConcurrencyResult::Applied(DeliveryDownloadGrantResponse {
+        data: grant.public_view(),
+    })
+}
+
+fn consume_memory_delivery_download_grant(
+    store: &mut MemoryStore,
+    token_hash: &str,
+) -> DeliveryDownloadConsumeResult {
+    let Some(grant_index) = store
+        .delivery_download_grants
+        .iter()
+        .position(|grant| grant.token_hash == token_hash)
+    else {
+        return DeliveryDownloadConsumeResult::GrantNotFound;
+    };
+    let mut grant = store.delivery_download_grants[grant_index].clone();
+    if let Some(result) = blocked_download_grant_consume_result(&mut grant) {
+        store.delivery_download_grants[grant_index] = grant;
+        return result;
+    }
+    let Some(activation) = store
+        .delivery_activations
+        .iter()
+        .find(|activation| activation.activation_id == grant.activation_id)
+    else {
+        return DeliveryDownloadConsumeResult::ActivationNotFound;
+    };
+    if let Some(result) = blocked_download_activation_consume_result(activation) {
+        return result;
+    }
+    let Some(entitlement) = store
+        .delivery_entitlements
+        .iter()
+        .find(|entitlement| entitlement.entitlement_id == grant.entitlement_id)
+    else {
+        return DeliveryDownloadConsumeResult::EntitlementNotFound;
+    };
+    if let Some(result) = blocked_download_entitlement_consume_result(entitlement) {
+        return result;
+    }
+    if active_segment_for_artifact(
+        &store.delivery_service_segments,
+        &grant.entitlement_id,
+        &grant.activation_id,
+        &grant.artifact_id,
+    )
+    .is_none()
+    {
+        return DeliveryDownloadConsumeResult::SegmentMissing;
+    }
+    let Some(artifact) = store.delivery_artifacts.iter().find(|artifact| {
+        artifact.delivery_id == grant.delivery_id && artifact.artifact_id == grant.artifact_id
+    }) else {
+        return DeliveryDownloadConsumeResult::ArtifactMissing;
+    };
+    if let Some(result) = blocked_download_artifact_consume_result(artifact) {
+        return result;
+    }
+    let payload =
+        mark_download_grant_used_and_payload(&mut grant, artifact, artifact.ciphertext.clone());
+    store.delivery_download_grants[grant_index] = grant;
+    DeliveryDownloadConsumeResult::Retrieved(Box::new(payload))
+}
+
+fn build_delivery_download_grant_record(
+    draft: &DeliveryDownloadGrantDraft,
+    activation: &DeliveryActivationRecord,
+    artifact: &DeliveryArtifactRecord,
+) -> DeliveryDownloadGrantRecord {
+    let now = now_rfc3339();
+    DeliveryDownloadGrantRecord {
+        grant_id: draft.grant_id.clone(),
+        activation_id: activation.activation_id.clone(),
+        delivery_id: artifact.delivery_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        entitlement_id: activation.entitlement_id.clone(),
+        tenant_id: activation.tenant_id.clone(),
+        project_id: activation.project_id.clone(),
+        provider: activation.provider.clone(),
+        status: DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE.to_string(),
+        token_hash: hash_api_key(&draft.token_plaintext),
+        token_prefix: download_token_prefix(&draft.token_plaintext),
+        token_last_four: credential_last_four(&draft.token_plaintext),
+        expires_at: expires_at(DELIVERY_DOWNLOAD_GRANT_TTL_SECONDS),
+        max_uses: DELIVERY_DOWNLOAD_GRANT_MAX_USES,
+        use_count: 0,
+        artifact: artifact.public_view(),
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        used_at: None,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+    }
+}
+
+fn blocked_download_activation_issue_result(
+    activation: &DeliveryActivationRecord,
+) -> Option<DeliveryDownloadGrantIssueResult> {
+    if activation.status != DELIVERY_ACTIVATION_STATUS_ACTIVATED || activation.revoked_at.is_some()
+    {
+        Some(DeliveryDownloadGrantIssueResult::ActivationNotActive(
+            activation.status.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn blocked_download_activation_consume_result(
+    activation: &DeliveryActivationRecord,
+) -> Option<DeliveryDownloadConsumeResult> {
+    if activation.status != DELIVERY_ACTIVATION_STATUS_ACTIVATED || activation.revoked_at.is_some()
+    {
+        Some(DeliveryDownloadConsumeResult::ActivationNotActive(
+            activation.status.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn blocked_download_entitlement_issue_result(
+    entitlement: &DeliveryEntitlementRecord,
+) -> Option<DeliveryDownloadGrantIssueResult> {
+    let status = entitlement.effective_status();
+    if status == DELIVERY_ENTITLEMENT_STATUS_ACTIVE {
+        None
+    } else {
+        Some(DeliveryDownloadGrantIssueResult::EntitlementNotActive(
+            status,
+        ))
+    }
+}
+
+fn blocked_download_entitlement_consume_result(
+    entitlement: &DeliveryEntitlementRecord,
+) -> Option<DeliveryDownloadConsumeResult> {
+    let status = entitlement.effective_status();
+    if status == DELIVERY_ENTITLEMENT_STATUS_ACTIVE {
+        None
+    } else {
+        Some(DeliveryDownloadConsumeResult::EntitlementNotActive(status))
+    }
+}
+
+fn blocked_download_artifact_issue_result(
+    artifact: &DeliveryArtifactRecord,
+) -> Option<DeliveryDownloadGrantIssueResult> {
+    if artifact.status == DELIVERY_ARTIFACT_STATUS_REVOKED {
+        Some(DeliveryDownloadGrantIssueResult::ArtifactNotAvailable(
+            artifact.status.clone(),
+        ))
+    } else if matches!(
+        artifact.status.as_str(),
+        DELIVERY_ARTIFACT_STATUS_ACTIVE | DELIVERY_ARTIFACT_STATUS_SUPERSEDED
+    ) {
+        None
+    } else {
+        Some(DeliveryDownloadGrantIssueResult::ArtifactNotAvailable(
+            artifact.status.clone(),
+        ))
+    }
+}
+
+fn blocked_download_artifact_consume_result(
+    artifact: &DeliveryArtifactRecord,
+) -> Option<DeliveryDownloadConsumeResult> {
+    if artifact.status == DELIVERY_ARTIFACT_STATUS_REVOKED {
+        Some(DeliveryDownloadConsumeResult::ArtifactNotAvailable(
+            artifact.status.clone(),
+        ))
+    } else if matches!(
+        artifact.status.as_str(),
+        DELIVERY_ARTIFACT_STATUS_ACTIVE | DELIVERY_ARTIFACT_STATUS_SUPERSEDED
+    ) {
+        None
+    } else {
+        Some(DeliveryDownloadConsumeResult::ArtifactNotAvailable(
+            artifact.status.clone(),
+        ))
+    }
+}
+
+fn blocked_download_grant_consume_result(
+    grant: &mut DeliveryDownloadGrantRecord,
+) -> Option<DeliveryDownloadConsumeResult> {
+    if grant.status == DELIVERY_DOWNLOAD_GRANT_STATUS_USED || grant.use_count >= grant.max_uses {
+        Some(DeliveryDownloadConsumeResult::GrantUsed)
+    } else if grant.status == DELIVERY_DOWNLOAD_GRANT_STATUS_REVOKED {
+        Some(DeliveryDownloadConsumeResult::GrantRevoked)
+    } else if grant.status == DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE
+        && timestamp_is_expired(&grant.expires_at)
+    {
+        grant.status = DELIVERY_DOWNLOAD_GRANT_STATUS_EXPIRED.to_string();
+        grant.updated_at = now_rfc3339();
+        grant.version = grant.version.saturating_add(1);
+        Some(DeliveryDownloadConsumeResult::GrantExpired)
+    } else if grant.status != DELIVERY_DOWNLOAD_GRANT_STATUS_ACTIVE {
+        Some(DeliveryDownloadConsumeResult::GrantNotActive(
+            grant.status.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn mark_download_grant_used_and_payload(
+    grant: &mut DeliveryDownloadGrantRecord,
+    artifact: &DeliveryArtifactRecord,
+    ciphertext: Vec<u8>,
+) -> DeliveryDownloadArtifactPayload {
+    let now = now_rfc3339();
+    grant.status = DELIVERY_DOWNLOAD_GRANT_STATUS_USED.to_string();
+    grant.use_count = grant.use_count.saturating_add(1);
+    grant.used_at = Some(now.clone());
+    grant.updated_at = now;
+    grant.version = grant.version.saturating_add(1);
+    DeliveryDownloadArtifactPayload {
+        grant: grant.public_view(),
+        file_name: artifact_download_file_name(artifact),
+        content_type: artifact.content_type.clone(),
+        sha256: artifact.sha256.clone(),
+        size_bytes: artifact.size_bytes,
+        ciphertext,
+    }
+}
+
+fn build_delivery_producer_authorization_record(
+    draft: &DeliveryProducerAuthorizationDraft,
+) -> DeliveryProducerAuthorizationRecord {
+    let now = now_rfc3339();
+    DeliveryProducerAuthorizationRecord {
+        authorization_id: draft.authorization_id.clone(),
+        code_hash: hash_api_key(&draft.authorization_code_plaintext),
+        code_prefix: download_token_prefix(&draft.authorization_code_plaintext),
+        code_last_four: credential_last_four(&draft.authorization_code_plaintext),
+        tenant_id: draft.tenant_id.clone(),
+        project_id: draft.project_id.clone(),
+        owner_account_id: draft.owner_account_id.clone(),
+        provider: draft.provider.clone(),
+        service_kind: draft.service_kind.clone(),
+        service_days: draft.service_days,
+        status: DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE.to_string(),
+        expires_at: draft.expires_at.clone(),
+        redeem_count: 0,
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        last_redeemed_at: None,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+        version: 1,
+    }
+}
+
+fn build_delivery_producer_token_record(
+    draft: &DeliveryProducerTokenDraft,
+    authorization: &DeliveryProducerAuthorizationRecord,
+) -> DeliveryProducerTokenRecord {
+    let now = now_rfc3339();
+    let token_expires_at = min_timestamp(
+        &expires_at(DELIVERY_PRODUCER_TOKEN_TTL_SECONDS),
+        &authorization.expires_at,
+    )
+    .unwrap_or_else(|| authorization.expires_at.clone());
+    DeliveryProducerTokenRecord {
+        token_id: draft.token_id.clone(),
+        authorization_id: authorization.authorization_id.clone(),
+        authorization_expires_at: Some(authorization.expires_at.clone()),
+        token_hash: hash_api_key(&draft.token_plaintext),
+        token_prefix: download_token_prefix(&draft.token_plaintext),
+        token_last_four: credential_last_four(&draft.token_plaintext),
+        tenant_id: authorization.tenant_id.clone(),
+        project_id: authorization.project_id.clone(),
+        owner_account_id: authorization.owner_account_id.clone(),
+        provider: authorization.provider.clone(),
+        service_kind: authorization.service_kind.clone(),
+        service_days: authorization.service_days,
+        status: DELIVERY_PRODUCER_TOKEN_STATUS_ACTIVE.to_string(),
+        expires_at: token_expires_at,
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        revoked_at: None,
+        revoked_by: None,
+        revoke_reason: None,
+        version: 1,
+    }
+}
+
+fn redeem_memory_delivery_producer_authorization(
+    store: &mut MemoryStore,
+    authorization_code_hash: &str,
+    draft: DeliveryProducerTokenDraft,
+) -> DeliveryProducerAuthorizationRedeemResult {
+    let Some(index) = store
+        .delivery_producer_authorizations
+        .iter()
+        .position(|record| record.code_hash == authorization_code_hash)
+    else {
+        return DeliveryProducerAuthorizationRedeemResult::AuthorizationNotFound;
+    };
+    let mut authorization = store.delivery_producer_authorizations[index].clone();
+    if let Some(result) = blocked_delivery_producer_authorization_redeem_result(&mut authorization)
+    {
+        store.delivery_producer_authorizations[index] = authorization;
+        return result;
+    }
+    let token = build_delivery_producer_token_record(&draft, &authorization);
+    let now = now_rfc3339();
+    authorization.redeem_count = authorization.redeem_count.saturating_add(1);
+    authorization.last_redeemed_at = Some(now.clone());
+    authorization.updated_at = now;
+    authorization.version = authorization.version.saturating_add(1);
+    store.delivery_producer_authorizations[index] = authorization;
+    store.delivery_producer_tokens.push(token.clone());
+    DeliveryProducerAuthorizationRedeemResult::Redeemed(Box::new(token))
+}
+
+fn revoke_active_memory_delivery_producer_authorizations_for_scope(
+    store: &mut MemoryStore,
+    record: &DeliveryProducerAuthorizationRecord,
+    revoked_by: &str,
+    revoke_reason: &str,
+) {
+    let mut revoked_authorization_ids = Vec::new();
+    for authorization in &mut store.delivery_producer_authorizations {
+        if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE
+            && authorization.tenant_id == record.tenant_id
+            && authorization.project_id == record.project_id
+            && authorization.owner_account_id == record.owner_account_id
+            && authorization.provider == record.provider
+            && authorization.service_kind == record.service_kind
+            && authorization.service_days == record.service_days
+        {
+            revoke_delivery_producer_authorization_record(authorization, revoked_by, revoke_reason);
+            revoked_authorization_ids.push(authorization.authorization_id.clone());
+        }
+    }
+    for token in &mut store.delivery_producer_tokens {
+        if token.status == DELIVERY_PRODUCER_TOKEN_STATUS_ACTIVE
+            && revoked_authorization_ids
+                .iter()
+                .any(|authorization_id| authorization_id == &token.authorization_id)
+        {
+            revoke_delivery_producer_token_record(token, revoked_by, revoke_reason);
+        }
+    }
+}
+
+fn resolve_memory_delivery_producer_token(
+    store: &mut MemoryStore,
+    token_hash: &str,
+) -> DeliveryProducerTokenResolveResult {
+    let Some(index) = store
+        .delivery_producer_tokens
+        .iter()
+        .position(|record| record.token_hash == token_hash)
+    else {
+        return DeliveryProducerTokenResolveResult::TokenNotFound;
+    };
+    let mut token = store.delivery_producer_tokens[index].clone();
+    if let Some(result) = blocked_delivery_producer_token_resolve_result(&mut token) {
+        store.delivery_producer_tokens[index] = token;
+        return result;
+    }
+    let Some(authorization_index) = store
+        .delivery_producer_authorizations
+        .iter()
+        .position(|record| record.authorization_id == token.authorization_id)
+    else {
+        revoke_delivery_producer_token_record(&mut token, "system", "authorization_missing");
+        store.delivery_producer_tokens[index] = token;
+        return DeliveryProducerTokenResolveResult::AuthorizationRevoked;
+    };
+    let mut authorization = store.delivery_producer_authorizations[authorization_index].clone();
+    if let Some(result) =
+        blocked_delivery_producer_authorization_token_resolve_result(&mut authorization)
+    {
+        store.delivery_producer_authorizations[authorization_index] = authorization;
+        return result;
+    }
+    DeliveryProducerTokenResolveResult::Resolved(Box::new(token))
+}
+
+fn revoke_delivery_producer_authorization_record(
+    authorization: &mut DeliveryProducerAuthorizationRecord,
+    revoked_by: &str,
+    revoke_reason: &str,
+) {
+    let now = now_rfc3339();
+    authorization.status = DELIVERY_PRODUCER_AUTHORIZATION_STATUS_REVOKED.to_string();
+    authorization.revoked_at = Some(now.clone());
+    authorization.revoked_by = Some(revoked_by.to_string());
+    authorization.revoke_reason = Some(revoke_reason.to_string());
+    authorization.updated_at = now;
+    authorization.version = authorization.version.saturating_add(1);
+}
+
+fn revoke_delivery_producer_token_record(
+    token: &mut DeliveryProducerTokenRecord,
+    revoked_by: &str,
+    revoke_reason: &str,
+) {
+    let now = now_rfc3339();
+    token.status = DELIVERY_PRODUCER_TOKEN_STATUS_REVOKED.to_string();
+    token.revoked_at = Some(now.clone());
+    token.revoked_by = Some(revoked_by.to_string());
+    token.revoke_reason = Some(revoke_reason.to_string());
+    token.updated_at = now;
+    token.version = token.version.saturating_add(1);
+}
+
+fn blocked_delivery_producer_authorization_redeem_result(
+    authorization: &mut DeliveryProducerAuthorizationRecord,
+) -> Option<DeliveryProducerAuthorizationRedeemResult> {
+    if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_REVOKED {
+        Some(DeliveryProducerAuthorizationRedeemResult::AuthorizationRevoked)
+    } else if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE
+        && timestamp_is_expired(&authorization.expires_at)
+    {
+        authorization.status = DELIVERY_PRODUCER_AUTHORIZATION_STATUS_EXPIRED.to_string();
+        authorization.updated_at = now_rfc3339();
+        authorization.version = authorization.version.saturating_add(1);
+        Some(DeliveryProducerAuthorizationRedeemResult::AuthorizationExpired)
+    } else if authorization.status != DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE {
+        Some(
+            DeliveryProducerAuthorizationRedeemResult::AuthorizationNotActive(
+                authorization.status.clone(),
+            ),
+        )
+    } else {
+        None
+    }
+}
+
+fn blocked_delivery_producer_authorization_token_resolve_result(
+    authorization: &mut DeliveryProducerAuthorizationRecord,
+) -> Option<DeliveryProducerTokenResolveResult> {
+    if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_REVOKED {
+        Some(DeliveryProducerTokenResolveResult::AuthorizationRevoked)
+    } else if authorization.status == DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE
+        && timestamp_is_expired(&authorization.expires_at)
+    {
+        authorization.status = DELIVERY_PRODUCER_AUTHORIZATION_STATUS_EXPIRED.to_string();
+        authorization.updated_at = now_rfc3339();
+        authorization.version = authorization.version.saturating_add(1);
+        Some(DeliveryProducerTokenResolveResult::AuthorizationExpired)
+    } else if authorization.status != DELIVERY_PRODUCER_AUTHORIZATION_STATUS_ACTIVE {
+        Some(DeliveryProducerTokenResolveResult::AuthorizationNotActive(
+            authorization.status.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn blocked_delivery_producer_token_resolve_result(
+    token: &mut DeliveryProducerTokenRecord,
+) -> Option<DeliveryProducerTokenResolveResult> {
+    if token.status == DELIVERY_PRODUCER_TOKEN_STATUS_REVOKED {
+        Some(DeliveryProducerTokenResolveResult::TokenRevoked)
+    } else if token.status == DELIVERY_PRODUCER_TOKEN_STATUS_ACTIVE
+        && timestamp_is_expired(&token.expires_at)
+    {
+        token.status = DELIVERY_PRODUCER_TOKEN_STATUS_EXPIRED.to_string();
+        token.updated_at = now_rfc3339();
+        token.version = token.version.saturating_add(1);
+        Some(DeliveryProducerTokenResolveResult::TokenExpired)
+    } else if token.status != DELIVERY_PRODUCER_TOKEN_STATUS_ACTIVE {
+        Some(DeliveryProducerTokenResolveResult::TokenNotActive(
+            token.status.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn artifact_download_file_name(artifact: &DeliveryArtifactRecord) -> String {
+    artifact
+        .file_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("delivery-artifact.hcbrowser")
+        .to_string()
+}
+
+fn download_token_prefix(token: &str) -> String {
+    if token.len() <= 18 {
+        token.to_string()
+    } else {
+        format!("{}...", &token[..18])
     }
 }
 
@@ -6043,14 +13868,47 @@ fn oauth_audit_event_matches(
             .is_none_or(|value| event.account_id.as_deref() == Some(value))
 }
 
+fn runtime_lease_audit_metadata(runtime_lease: &OAuthPoolRuntimeLeaseRecord) -> serde_json::Value {
+    serde_json::json!({
+        "runtime_lease_id": runtime_lease.runtime_lease_id,
+        "status": runtime_lease.status,
+        "expires_at": runtime_lease.expires_at,
+        "heartbeat_at": runtime_lease.heartbeat_at,
+        "released_at": runtime_lease.released_at,
+        "fencing_token": runtime_lease.fencing_token,
+    })
+}
+
+fn push_runtime_lease_audit_event(
+    store: &mut MemoryStore,
+    event_type: &str,
+    runtime_lease: &OAuthPoolRuntimeLeaseRecord,
+    reason: &str,
+) {
+    push_oauth_audit_event(
+        store,
+        event_type,
+        runtime_lease.provider.as_str(),
+        runtime_lease.lease_id.as_deref(),
+        runtime_lease.carpool_id.as_deref(),
+        runtime_lease.workspace_id.as_deref(),
+        Some(runtime_lease.account_id.as_str()),
+        runtime_lease.pool_id.as_deref(),
+        reason,
+        runtime_lease_audit_metadata(runtime_lease),
+    );
+}
+
 fn cleanup_memory_runtime_leases(store: &mut MemoryStore) {
     let now = now_rfc3339();
     let mut expired_account_ids = Vec::new();
+    let mut expired_runtime_leases = Vec::new();
     for runtime_lease in &mut store.oauth_pool_runtime_leases {
         if runtime_lease.status == "active" && timestamp_is_expired(&runtime_lease.expires_at) {
             runtime_lease.status = "expired".to_string();
             runtime_lease.released_at = Some(now.clone());
             expired_account_ids.push(runtime_lease.account_id.clone());
+            expired_runtime_leases.push(runtime_lease.clone());
         }
     }
 
@@ -6064,6 +13922,15 @@ fn cleanup_memory_runtime_leases(store: &mut MemoryStore) {
             account.updated_at = now.clone();
             account.version = account.version.saturating_add(1);
         }
+    }
+
+    for runtime_lease in expired_runtime_leases {
+        push_runtime_lease_audit_event(
+            store,
+            "runtime_lease_expire",
+            &runtime_lease,
+            "runtime lease expired",
+        );
     }
 
     for binding in &mut store.oauth_pool_session_bindings {
@@ -6753,7 +14620,14 @@ fn heartbeat_memory_runtime_lease(
         return Some(runtime_lease.clone());
     }
     runtime_lease.heartbeat_at = now;
-    Some(runtime_lease.clone())
+    let runtime_lease = runtime_lease.clone();
+    push_runtime_lease_audit_event(
+        store,
+        "runtime_lease_heartbeat",
+        &runtime_lease,
+        "runtime lease heartbeat recorded",
+    );
+    Some(runtime_lease)
 }
 
 fn release_memory_runtime_lease(
@@ -6779,6 +14653,14 @@ fn release_memory_runtime_lease(
             account.updated_at = now.clone();
             account.version = account.version.saturating_add(1);
         }
+        let runtime_lease = runtime_lease.clone();
+        push_runtime_lease_audit_event(
+            store,
+            "runtime_lease_release",
+            &runtime_lease,
+            "runtime lease released",
+        );
+        return Some(runtime_lease);
     }
     Some(runtime_lease.clone())
 }
@@ -6973,6 +14855,15 @@ fn api_key_prefix(api_key: &str) -> String {
     }
 }
 
+fn credential_last_four(credential: &str) -> String {
+    let len = credential.len();
+    if len <= 4 {
+        credential.to_string()
+    } else {
+        credential[len - 4..].to_string()
+    }
+}
+
 fn hash_api_key(api_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(api_key.as_bytes());
@@ -7077,6 +14968,7 @@ fn parse_cursor_offset(cursor: Option<&str>) -> usize {
 fn sample_usage_summary_response(
     tenant_id: &str,
     project_id: Option<&str>,
+    owner_account_id: Option<&str>,
     window_start: Option<&str>,
     window_end: Option<&str>,
 ) -> UsageSummaryResponse {
@@ -7084,6 +14976,7 @@ fn sample_usage_summary_response(
         data: UsageSummary {
             tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
             project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+            owner_account_id: owner_account_id.map(str::to_string),
             window_start: window_start.unwrap_or("2026-04-01T00:00:00Z").to_string(),
             window_end: window_end.unwrap_or("2026-04-30T23:59:59Z").to_string(),
             currency: "USD".to_string(),
@@ -7100,6 +14993,7 @@ fn sample_usage_summary_response(
 fn sample_usage_breakdown_response(
     _tenant_id: &str,
     _project_id: Option<&str>,
+    _owner_account_id: Option<&str>,
     group_by: UsageBreakdownGroupBy,
     cursor: Option<String>,
     limit: Option<u32>,
@@ -7181,13 +15075,19 @@ fn sample_usage_breakdown_response(
 fn sample_balance_projection_response(
     tenant_id: &str,
     project_id: Option<&str>,
+    owner_account_id: Option<&str>,
 ) -> BalanceProjectionResponse {
-    let configured_budget = default_budget_micros(tenant_id, project_id.unwrap_or("project"));
+    let configured_budget = default_budget_micros_for_scope(
+        tenant_id,
+        project_id.unwrap_or("project"),
+        owner_account_id,
+    );
     let billable_total = 1_540_000;
     BalanceProjectionResponse {
         data: BalanceProjection {
             tenant_id: TenantId::parse(tenant_id.to_string()).unwrap(),
             project_id: project_id.map(|value| ProjectId::parse(value.to_string()).unwrap()),
+            owner_account_id: owner_account_id.map(str::to_string),
             currency: "USD".to_string(),
             provider_cost_total: format_monetary_amount("USD", 1_244_000),
             billable_total: format_monetary_amount("USD", billable_total),
@@ -7253,6 +15153,139 @@ fn filter_billing_export_jobs(
     jobs
 }
 
+fn create_memory_renewal_intent(
+    store: &mut MemoryStore,
+    draft: RenewalIntentDraft,
+) -> RenewalIntentCreateResult {
+    let Some(order) = store
+        .wechat_payment_orders
+        .get(&draft.out_trade_no)
+        .cloned()
+    else {
+        return RenewalIntentCreateResult::OrderNotFound;
+    };
+    let Some(grant) = store
+        .opening_grants
+        .iter_mut()
+        .find(|grant| grant.grant_id == draft.grant_id)
+    else {
+        return RenewalIntentCreateResult::GrantNotFound;
+    };
+    if !renewal_order_matches_grant(&order, grant) {
+        return RenewalIntentCreateResult::GrantMismatch;
+    }
+
+    let intent = build_renewal_intent(&draft, &order, grant);
+    store.renewal_intents.push(intent.clone());
+    RenewalIntentCreateResult::Created(intent)
+}
+
+fn renewal_order_matches_grant(
+    order: &WechatPaymentOrderRecord,
+    grant: &OpeningGrantRecord,
+) -> bool {
+    order.tenant_id == grant.tenant_id.as_str()
+        && order.project_id.as_deref() == Some(grant.project_id.as_str())
+}
+
+fn build_renewal_intent(
+    draft: &RenewalIntentDraft,
+    order: &WechatPaymentOrderRecord,
+    grant: &mut OpeningGrantRecord,
+) -> RenewalIntent {
+    let now = now_rfc3339();
+    let previous_grant_status = grant.effective_status();
+    let previous_expires_at = grant.expires_at.clone();
+    let requested_reason = draft
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let (status, reason_code, reason, applied_at) = if order.status != "paid" {
+        (
+            "renewal_blocked",
+            "payment_not_paid",
+            "WeChat Pay order is not paid; future grant state was not restored.",
+            None,
+        )
+    } else if !matches!(previous_grant_status.as_str(), "active" | "expired") {
+        (
+            "manual_review",
+            "node6_state_missing_or_unrecoverable",
+            "Opening grant state is not automatically recoverable; manual review is required.",
+            None,
+        )
+    } else if !timestamp_is_future(&draft.renew_expires_at) {
+        (
+            "renewal_blocked",
+            "renew_expires_at_not_future",
+            "Renewal expiry is not in the future; future grant state was not restored.",
+            None,
+        )
+    } else {
+        grant.status = "active".to_string();
+        grant.expires_at = draft.renew_expires_at.clone();
+        grant.updated_at = now.clone();
+        grant.version = grant.version.saturating_add(1);
+        (
+            "renewed",
+            "payment_paid_grant_recovered",
+            "Paid order matched the opening grant; only future grant state was restored.",
+            Some(now.clone()),
+        )
+    };
+
+    RenewalIntent {
+        renewal_intent_id: draft.renewal_intent_id.clone(),
+        out_trade_no: draft.out_trade_no.clone(),
+        grant_id: draft.grant_id.clone(),
+        tenant_id: grant.tenant_id.clone(),
+        project_id: grant.project_id.clone(),
+        payment_status: order.status.clone(),
+        previous_grant_status,
+        previous_expires_at,
+        renew_expires_at: draft.renew_expires_at.clone(),
+        status: status.to_string(),
+        reason_code: reason_code.to_string(),
+        reason: requested_reason.unwrap_or(reason).to_string(),
+        created_by: draft.created_by.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        applied_at,
+    }
+}
+
+fn filter_renewal_intents(
+    mut intents: Vec<RenewalIntent>,
+    filters: &RenewalIntentFilters,
+) -> Vec<RenewalIntent> {
+    intents.retain(|intent| {
+        if let Some(tenant_id) = filters.tenant_id.as_deref()
+            && intent.tenant_id.as_str() != tenant_id
+        {
+            return false;
+        }
+        if let Some(project_id) = filters.project_id.as_deref()
+            && intent.project_id.as_str() != project_id
+        {
+            return false;
+        }
+        if let Some(grant_id) = filters.grant_id.as_deref()
+            && intent.grant_id != grant_id
+        {
+            return false;
+        }
+        if let Some(out_trade_no) = filters.out_trade_no.as_deref()
+            && intent.out_trade_no != out_trade_no
+        {
+            return false;
+        }
+        true
+    });
+    intents.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    intents
+}
+
 async fn render_billing_export_csv(
     store: &PostgresStore,
     tenant_id: Option<&str>,
@@ -7264,6 +15297,7 @@ async fn render_billing_export_csv(
         .get_usage_breakdown(
             tenant_id.unwrap_or("tenant_acme"),
             project_id.map(str::to_string),
+            None,
             Some(window_start.to_string()),
             Some(window_end.to_string()),
             UsageBreakdownGroupBy::Day,
@@ -7329,6 +15363,281 @@ async fn maybe_complete_postgres_export_job(
             .map(ProjectId::parse)
             .transpose()?,
     })
+}
+
+fn sale_ready_route_simulation(
+    snapshot: &ConfigSnapshot,
+    route_policy: Option<&RoutePolicy>,
+    provider_resources: &[ProviderResource],
+) -> Option<RouteSimulationResponse> {
+    let route_policy = route_policy?;
+    let protocol_family = parse_protocol_family(&route_policy.protocol_family)?;
+    let region = route_policy
+        .preferred_regions
+        .first()
+        .cloned()
+        .or_else(|| {
+            provider_resources
+                .first()
+                .map(|resource| resource.region.clone())
+        })
+        .unwrap_or_else(|| "global".to_string());
+    let request = RouteSimulationRequest {
+        tenant_id: snapshot.tenant_id.clone(),
+        project_id: snapshot.project_id.clone(),
+        credential_scope: core_domain::CredentialId::parse("cred_sale_ready_diagnostics").unwrap(),
+        protocol_family,
+        model_alias: route_policy.model_alias.clone(),
+        required_capabilities: route_policy.required_capabilities.clone(),
+        region,
+        expected_prompt_tokens: 1_000,
+        expected_max_output_tokens: 1_000,
+        traffic_class: "sale_ready_preview".to_string(),
+    };
+
+    build_route_simulation_response(
+        provider_resources,
+        std::slice::from_ref(route_policy),
+        snapshot,
+        &request,
+    )
+    .ok()
+}
+
+fn sale_ready_pricing_request(
+    route_policy: Option<&RoutePolicy>,
+    route_simulation: Option<&RouteSimulationResponse>,
+    provider_resources: &[ProviderResource],
+) -> Option<PricingSimulationRequest> {
+    let route_policy = route_policy?;
+    let selected_resource_id =
+        route_simulation.and_then(|simulation| simulation.selected_target.as_ref());
+    let provider_resource = selected_resource_id
+        .and_then(|provider_resource_id| {
+            provider_resources
+                .iter()
+                .find(|resource| resource.provider_resource_id == *provider_resource_id)
+        })
+        .or_else(|| provider_resources.first())?;
+
+    Some(PricingSimulationRequest {
+        provider_id: provider_resource.provider_id.clone(),
+        model_alias: route_policy.model_alias.clone(),
+        usage: UsageMetrics {
+            input_tokens: 1_000,
+            output_tokens: 1_000,
+            cached_input_tokens: 0,
+        },
+        region: Some(provider_resource.region.clone()),
+        image_generation_units: None,
+        audio_seconds: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_sale_ready_package_response(
+    snapshot: ConfigSnapshot,
+    route_policy: Option<RoutePolicy>,
+    provider_resources: Vec<ProviderResource>,
+    missing_provider_resource_ids: Vec<String>,
+    active_snapshot_id: Option<ConfigSnapshotId>,
+    route_simulation: Option<RouteSimulationResponse>,
+    pricing: Option<PricingSimulationResponse>,
+    budget: Option<BalanceProjection>,
+) -> SaleReadyPackageResponse {
+    let carrier_check = match snapshot.status {
+        ConfigSnapshotStatus::Draft | ConfigSnapshotStatus::Active => sale_ready_check(
+            "carrier",
+            "pass",
+            "carrier_confirmed",
+            "ConfigSnapshot is the sale-ready package carrier.",
+        ),
+        ConfigSnapshotStatus::Superseded => sale_ready_check(
+            "carrier",
+            "blocked",
+            "snapshot_superseded",
+            "Superseded config snapshots cannot be sold.",
+        ),
+    };
+    let route_check = if route_policy.as_ref().is_some_and(|policy| {
+        parse_protocol_family(&policy.protocol_family).is_some()
+            && policy.required_capabilities.iter().all(|capability| {
+                route_capability_supported_by_provider_capabilities(capability.as_str())
+            })
+    }) {
+        sale_ready_check(
+            "route",
+            "pass",
+            "route_policy_valid",
+            "Route policy protocol and capabilities are supported.",
+        )
+    } else {
+        sale_ready_check(
+            "route",
+            "blocked",
+            "blocked_route_policy",
+            "Route policy is missing or contains unsupported protocol/capability requirements.",
+        )
+    };
+    let resource_check = if snapshot.provider_resource_ids.is_empty() {
+        sale_ready_check(
+            "resource",
+            "blocked",
+            "blocked_no_resource",
+            "ConfigSnapshot does not reference any provider resources.",
+        )
+    } else if !missing_provider_resource_ids.is_empty() {
+        sale_ready_check(
+            "resource",
+            "blocked",
+            "blocked_missing_resource",
+            format!(
+                "Missing provider resources: {}.",
+                missing_provider_resource_ids.join(", ")
+            ),
+        )
+    } else if route_simulation
+        .as_ref()
+        .is_some_and(|simulation| simulation.admission_result == AdmissionResult::Admitted)
+    {
+        sale_ready_check(
+            "resource",
+            "pass",
+            "resource_set_routeable",
+            "Provider resource set produces at least one route candidate.",
+        )
+    } else {
+        sale_ready_check(
+            "resource",
+            "blocked",
+            "blocked_no_candidate",
+            "Provider resource set cannot produce a route candidate.",
+        )
+    };
+    let price_check = if pricing
+        .as_ref()
+        .is_some_and(|pricing| !pricing.line_items.is_empty())
+    {
+        sale_ready_check(
+            "price",
+            "pass",
+            "pricing_available",
+            "Pricing simulation produced a billable quote.",
+        )
+    } else {
+        sale_ready_check(
+            "price",
+            "blocked",
+            "blocked_no_price",
+            "Pricing simulation could not produce a billable quote.",
+        )
+    };
+    let budget_check = match budget.as_ref() {
+        Some(budget) if budget.threshold_status != "exceeded" => sale_ready_check(
+            "budget",
+            "pass",
+            "budget_available",
+            "Balance projection can explain budget and remaining threshold.",
+        ),
+        Some(_) => sale_ready_check(
+            "budget",
+            "blocked",
+            "blocked_budget",
+            "Balance projection reports an exceeded threshold.",
+        ),
+        None => sale_ready_check(
+            "budget",
+            "blocked",
+            "blocked_budget_unknown",
+            "Balance projection is not available.",
+        ),
+    };
+    let gateway_check = if active_snapshot_id.as_ref() == Some(&snapshot.config_snapshot_id) {
+        sale_ready_check(
+            "gateway",
+            "pass",
+            "gateway_active_config",
+            "Gateway active config pointer references this snapshot.",
+        )
+    } else {
+        sale_ready_check(
+            "gateway",
+            "blocked",
+            "blocked_gateway_config",
+            "Gateway active config pointer does not reference this snapshot.",
+        )
+    };
+    let boundary_check = sale_ready_check(
+        "boundary",
+        "pass",
+        "customer_key_deferred",
+        "Node 2 does not create customer API keys; Node 3 handles opening.",
+    );
+    let checks = vec![
+        carrier_check,
+        route_check,
+        resource_check,
+        price_check,
+        budget_check,
+        gateway_check,
+        boundary_check,
+    ];
+    let blocking_check = checks
+        .iter()
+        .find(|check| check.status == "blocked" && check.name != "boundary");
+    let readiness = match blocking_check {
+        None => SaleReadiness {
+            status: "sale_ready".to_string(),
+            reason_code: "sale_ready".to_string(),
+            reason: "ConfigSnapshot is ready to hand off to customer opening.".to_string(),
+            checks: checks.clone(),
+        },
+        Some(check) => SaleReadiness {
+            status: match snapshot.status {
+                ConfigSnapshotStatus::Draft => "draft_blocked",
+                ConfigSnapshotStatus::Active | ConfigSnapshotStatus::Superseded => "suspended",
+            }
+            .to_string(),
+            reason_code: check.reason_code.clone(),
+            reason: check.reason.clone(),
+            checks: checks.clone(),
+        },
+    };
+    let handoff = SaleReadyHandoff {
+        tenant_id: snapshot.tenant_id.clone(),
+        project_id: snapshot.project_id.clone(),
+        config_snapshot_id: snapshot.config_snapshot_id.clone(),
+        route_policy_id: snapshot.route_policy_id.clone(),
+        budget_policy_id: snapshot.budget_policy_id.clone(),
+        provider_resource_ids: snapshot.provider_resource_ids.clone(),
+        readiness_status: readiness.status.clone(),
+    };
+
+    SaleReadyPackageResponse {
+        config_snapshot: snapshot,
+        route_policy,
+        provider_resources,
+        route_simulation,
+        pricing,
+        budget,
+        readiness,
+        handoff,
+        creates_customer_api_key: false,
+    }
+}
+
+fn sale_ready_check(
+    name: &str,
+    status: &str,
+    reason_code: &str,
+    reason: impl Into<String>,
+) -> SaleReadyCheck {
+    SaleReadyCheck {
+        name: name.to_string(),
+        status: status.to_string(),
+        reason_code: reason_code.to_string(),
+        reason: reason.into(),
+    }
 }
 
 fn build_route_simulation_response(
@@ -7421,6 +15730,19 @@ const fn protocol_family_slug(protocol_family: &ProtocolFamily) -> &'static str 
         ProtocolFamily::RealtimeWebRtc => "realtime_webrtc",
         ProtocolFamily::AnthropicMessages => "anthropic_messages",
         ProtocolFamily::GeminiGenerateContent => "gemini_generate_content",
+    }
+}
+
+fn parse_protocol_family(protocol_family: &str) -> Option<ProtocolFamily> {
+    match protocol_family {
+        "openai_chat" => Some(ProtocolFamily::OpenAiChat),
+        "openai_responses" => Some(ProtocolFamily::OpenAiResponses),
+        "openai_images" => Some(ProtocolFamily::OpenAiImages),
+        "mcp_streamable_http" => Some(ProtocolFamily::McpStreamableHttp),
+        "realtime_webrtc" => Some(ProtocolFamily::RealtimeWebRtc),
+        "anthropic_messages" => Some(ProtocolFamily::AnthropicMessages),
+        "gemini_generate_content" => Some(ProtocolFamily::GeminiGenerateContent),
+        _ => None,
     }
 }
 
@@ -7679,65 +16001,73 @@ fn build_route_diagnostics_response(
                     .any(|id| id == &provider_resource.provider_resource_id)
             });
 
-            let (decision, reason_code, reason, recent_receipt_reason) = if recent_receipt
-                .and_then(|receipt| receipt.selected_target.as_ref())
-                .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
-            {
-                (
-                    RouteDiagnosticDecision::Selected,
-                    "selected_recent_receipt".to_string(),
-                    "Selected by the most recent route receipt.".to_string(),
-                    None,
-                )
-            } else if let Some(excluded) = recent_exclusion {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    excluded.reason_code.clone(),
-                    excluded.reason.clone(),
-                    Some(excluded.reason.clone()),
-                )
-            } else if !supports_protocol_family {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    "protocol_family_unsupported".to_string(),
-                    format!(
-                        "Provider does not advertise protocol family `{}`.",
-                        route_policy.protocol_family
-                    ),
-                    None,
-                )
-            } else if !capability_gaps.is_empty() {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    format!("capability_gap_{}", capability_gaps[0]),
-                    format!(
-                        "Missing required capabilities: {}.",
-                        capability_gaps.join(", ")
-                    ),
-                    None,
-                )
-            } else if is_health_blocked(provider_resource.health_state) {
-                (
-                    RouteDiagnosticDecision::Excluded,
-                    format!(
-                        "health_{}",
-                        health_state_slug(provider_resource.health_state)
-                    ),
-                    provider_resource
-                        .health_message
-                        .clone()
-                        .unwrap_or_else(|| "Provider health state blocks routing.".to_string()),
-                    None,
-                )
-            } else {
-                (
-                    RouteDiagnosticDecision::Eligible,
-                    "eligible".to_string(),
-                    "Provider satisfies current protocol, capability, and health requirements."
-                        .to_string(),
-                    None,
-                )
-            };
+            let (decision, reason_code, reason, recent_receipt_reason) =
+                if provider_resource.status != ProviderResourceStatus::Active {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        "provider_inactive".to_string(),
+                        format!("Provider status is {:?}.", provider_resource.status),
+                        None,
+                    )
+                } else if !supports_protocol_family {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        "protocol_family_unsupported".to_string(),
+                        format!(
+                            "Provider does not advertise protocol family `{}`.",
+                            route_policy.protocol_family
+                        ),
+                        None,
+                    )
+                } else if !capability_gaps.is_empty() {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        format!("capability_gap_{}", capability_gaps[0]),
+                        format!(
+                            "Missing required capabilities: {}.",
+                            capability_gaps.join(", ")
+                        ),
+                        None,
+                    )
+                } else if is_health_blocked(provider_resource.health_state) {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        format!(
+                            "health_{}",
+                            health_state_slug(provider_resource.health_state)
+                        ),
+                        provider_resource
+                            .health_message
+                            .clone()
+                            .unwrap_or_else(|| "Provider health state blocks routing.".to_string()),
+                        None,
+                    )
+                } else if recent_receipt
+                    .and_then(|receipt| receipt.selected_target.as_ref())
+                    .is_some_and(|selected| selected == &provider_resource.provider_resource_id)
+                {
+                    (
+                        RouteDiagnosticDecision::Selected,
+                        "selected_recent_receipt".to_string(),
+                        "Selected by the most recent route receipt.".to_string(),
+                        None,
+                    )
+                } else if let Some(excluded) = recent_exclusion {
+                    (
+                        RouteDiagnosticDecision::Excluded,
+                        excluded.reason_code.clone(),
+                        excluded.reason.clone(),
+                        Some(excluded.reason.clone()),
+                    )
+                } else {
+                    (
+                        RouteDiagnosticDecision::Eligible,
+                        "eligible".to_string(),
+                        "Provider satisfies current protocol, capability, and health requirements."
+                            .to_string(),
+                        None,
+                    )
+                };
 
             RouteDiagnosticTarget {
                 provider_resource,
@@ -8051,8 +16381,7 @@ fn link(
     can_unlink: bool,
 ) -> AuthProviderLink {
     AuthProviderLink {
-        link_id: core_domain::AuthProviderLinkId::parse(format!("authlink_{provider_subject}"))
-            .unwrap(),
+        link_id: auth_provider_link_id(provider, provider_subject),
         provider,
         provider_subject: provider_subject.to_string(),
         email: email.map(std::string::ToString::to_string),
@@ -8062,14 +16391,38 @@ fn link(
     }
 }
 
+fn auth_provider_link_id(
+    provider: AuthProvider,
+    provider_subject: &str,
+) -> core_domain::AuthProviderLinkId {
+    let digest = Sha256::digest(format!(
+        "{}:{provider_subject}",
+        auth_provider_slug(provider)
+    ));
+    let suffix = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+
+    core_domain::AuthProviderLinkId::parse(format!(
+        "authlink_{}_{suffix}",
+        auth_provider_slug(provider)
+    ))
+    .unwrap()
+}
+
 #[cfg(test)]
 mod parity_tests;
 
 #[cfg(test)]
 mod tests {
+    mod delivery_upload_tests;
+
     use super::{
-        AdmissionResult, ConcurrencyResult, ConfigSnapshotId, ProjectId, ProviderResource,
-        ProviderResourceId, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptFilters,
+        AdmissionResult, ConcurrencyResult, ConfigSnapshot, ConfigSnapshotId, HealthState,
+        ProjectId, ProviderResource, ProviderResourceId, ProviderResourceStatus,
+        RouteDiagnosticDecision, RoutePolicy, RoutePolicyId, RouteReceipt, RouteReceiptFilters,
         StoreMode, TenantId,
     };
     use core_domain::{ExcludedTarget, RouteReceiptId, ScoreBreakdown};
@@ -8159,6 +16512,65 @@ mod tests {
         }
     }
 
+    #[test]
+    fn auth_provider_link_ids_match_shared_schema_character_set() {
+        let link = super::link(
+            core_domain::AuthProvider::Email,
+            "ops@huge-router.dev",
+            Some("ops@huge-router.dev"),
+            false,
+        );
+
+        assert!(link.link_id.as_str().starts_with("authlink_email_"));
+        assert!(
+            link.link_id
+                .as_str()
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric()
+                    || character == '_'
+                    || character == '-')
+        );
+    }
+
+    #[test]
+    fn cleanup_runtime_leases_records_expiration_audit() {
+        let mut store = super::MemoryStore {
+            oauth_pool_runtime_leases: vec![super::OAuthPoolRuntimeLeaseRecord {
+                runtime_lease_id: "opoollease_expired".to_string(),
+                account_id: "codexacct_expired".to_string(),
+                provider: "codex".to_string(),
+                pool_id: Some("prvrsrc_codex_pool".to_string()),
+                lease_id: Some("lease_codex_share".to_string()),
+                carpool_id: None,
+                workspace_id: Some("tenant_acme".to_string()),
+                session_key: Some("session-expired".to_string()),
+                holder_id: Some("gateway-a".to_string()),
+                operation_id: Some("op-expired".to_string()),
+                status: "active".to_string(),
+                expires_at: "2000-01-01T00:00:00Z".to_string(),
+                heartbeat_at: "2000-01-01T00:00:00Z".to_string(),
+                released_at: None,
+                fencing_token: 7,
+                created_at: "2000-01-01T00:00:00Z".to_string(),
+            }],
+            ..super::MemoryStore::default()
+        };
+
+        super::cleanup_memory_runtime_leases(&mut store);
+
+        assert_eq!(store.oauth_pool_runtime_leases[0].status, "expired");
+        let event = store
+            .oauth_sharing_audit_events
+            .iter()
+            .find(|event| event.event_type == "runtime_lease_expire")
+            .expect("runtime lease expiration should be audited");
+        assert_eq!(
+            event.metadata["runtime_lease_id"].as_str(),
+            Some("opoollease_expired")
+        );
+        assert_eq!(event.lease_id.as_deref(), Some("lease_codex_share"));
+    }
+
     #[tokio::test]
     async fn oauth_login_flow_preserves_redirect_target() {
         let store = StoreMode::memory();
@@ -8209,6 +16621,68 @@ mod tests {
             ConcurrencyResult::Applied(resource) => assert_eq!(resource.version, 2),
             _ => panic!("expected applied update"),
         }
+    }
+
+    #[tokio::test]
+    async fn memory_store_fail_closes_new_provider_resources_until_probe() {
+        let store = StoreMode::memory();
+        let mut resource = sample_provider_resource();
+        resource.provider_resource_id =
+            ProviderResourceId::parse("prvrsrc_cp_store_intake").unwrap();
+        resource.health_state = HealthState::Healthy;
+        resource.health_message = None;
+        resource.quarantine_reason = None;
+
+        let created = store.create_provider_resource(resource).await.unwrap();
+
+        assert_eq!(created.status, ProviderResourceStatus::Active);
+        assert_eq!(created.health_state, HealthState::Quarantined);
+        assert_eq!(
+            created.quarantine_reason.as_deref(),
+            Some(super::PROVIDER_RESOURCE_INTAKE_PENDING_PROBE)
+        );
+        assert_eq!(
+            created.health_message.as_deref(),
+            Some(super::PROVIDER_RESOURCE_INTAKE_PENDING_MESSAGE)
+        );
+    }
+
+    #[test]
+    fn route_diagnostics_excludes_non_active_provider_status() {
+        let mut resource = sample_provider_resource();
+        resource.status = ProviderResourceStatus::Disabled;
+        resource.health_state = HealthState::Healthy;
+        let provider_resource_id = resource.provider_resource_id.clone();
+        let route_policy = sample_route_policy();
+        let snapshot = ConfigSnapshot {
+            config_snapshot_id: ConfigSnapshotId::parse("cfgsnap_cp_store").unwrap(),
+            tenant_id: TenantId::parse("tenant_acme").unwrap(),
+            project_id: ProjectId::parse("proj_core").unwrap(),
+            revision: 1,
+            budget_policy_id: core_domain::BudgetPolicyId::parse("budgetpol_default").unwrap(),
+            route_policy_id: route_policy.route_policy_id.clone(),
+            provider_resource_ids: vec![provider_resource_id],
+            status: core_domain::ConfigSnapshotStatus::Active,
+            activated_at: Some("2026-04-22T00:00:00Z".to_string()),
+        };
+
+        let diagnostics = super::build_route_diagnostics_response(
+            &[resource],
+            &[route_policy],
+            &[snapshot],
+            &[],
+            "routepol_cp_store",
+            Some("cfgsnap_cp_store"),
+        )
+        .expect("route diagnostics");
+
+        assert_eq!(diagnostics.targets.len(), 1);
+        assert!(matches!(
+            diagnostics.targets[0].decision,
+            RouteDiagnosticDecision::Excluded
+        ));
+        assert_eq!(diagnostics.targets[0].reason_code, "provider_inactive");
+        assert!(diagnostics.targets[0].reason.contains("Disabled"));
     }
 
     #[tokio::test]
@@ -8506,6 +16980,345 @@ fn timestamp_is_future(value: &str) -> bool {
     OffsetDateTime::parse(value, &Rfc3339)
         .map(|timestamp| timestamp > OffsetDateTime::now_utc())
         .unwrap_or(true)
+}
+
+fn timestamp_after(left: &str, right: &str) -> bool {
+    let Ok(left) = OffsetDateTime::parse(left, &Rfc3339) else {
+        return false;
+    };
+    let Ok(right) = OffsetDateTime::parse(right, &Rfc3339) else {
+        return false;
+    };
+    left > right
+}
+
+fn min_timestamp(left: &str, right: &str) -> Option<String> {
+    let left = OffsetDateTime::parse(left, &Rfc3339).ok()?;
+    let right = OffsetDateTime::parse(right, &Rfc3339).ok()?;
+    let value = if left <= right { left } else { right };
+    value.format(&Rfc3339).ok()
+}
+
+fn timestamp_plus_days(value: &str, days: u32) -> Option<String> {
+    let value = OffsetDateTime::parse(value, &Rfc3339).ok()?;
+    let value = value.checked_add(time::Duration::days(i64::from(days)))?;
+    value.format(&Rfc3339).ok()
+}
+
+const fn default_record_version() -> u64 {
+    1
+}
+
+fn default_delivery_owner_account_id() -> String {
+    DEFAULT_OWNER_ACCOUNT_ID.to_string()
+}
+
+fn default_delivery_account_bundle_encryption_protocol() -> String {
+    DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_PROTOCOL_V2.to_string()
+}
+
+fn default_delivery_account_bundle_encryption_version() -> String {
+    DELIVERY_ACCOUNT_BUNDLE_ENCRYPTION_VERSION_V2.to_string()
+}
+
+fn default_delivery_artifact_secret_kind() -> String {
+    DELIVERY_CODE_TYPE_BROWSER_FILE_UNLOCK.to_string()
+}
+
+fn hydrate_upload_batch_item_ciphertext(
+    mut item: DeliveryUploadBatchItemRecord,
+    ciphertext: Vec<u8>,
+) -> DeliveryUploadBatchItemRecord {
+    item.ciphertext = ciphertext;
+    item
+}
+
+async fn postgres_delivery_upload_item_outcome(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    item: &DeliveryUploadBatchItemRecord,
+    batch: &DeliveryUploadBatchRecord,
+    actor_id: &str,
+) -> Result<DeliveryUploadItemOutcome> {
+    let Some(delivery_row) = sqlx::query(
+        "SELECT payload
+           FROM deliveries
+          WHERE delivery_id = $1
+          FOR UPDATE",
+    )
+    .bind(&item.delivery_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_not_found",
+            message: format!("delivery `{}` was not found", item.delivery_id),
+        });
+    };
+    let delivery = delivery_row.get::<Json<DeliveryRecord>, _>("payload").0;
+    if delivery.tenant_id != batch.tenant_id || delivery.project_id != batch.project_id {
+        return Ok(DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_scope_mismatch",
+            message: "delivery does not belong to the upload batch tenant/project".to_string(),
+        });
+    }
+    if delivery.provider != batch.provider {
+        return Ok(DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_provider_mismatch",
+            message: "delivery provider does not match upload batch provider".to_string(),
+        });
+    }
+    let Some(entitlement_row) = sqlx::query(
+        "SELECT payload
+           FROM delivery_entitlements
+          WHERE delivery_id = $1
+          FOR UPDATE",
+    )
+    .bind(&delivery.delivery_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(DeliveryUploadItemOutcome::Failed {
+            code: "delivery_entitlement_missing",
+            message: "delivery entitlement is missing".to_string(),
+        });
+    };
+    let entitlement = entitlement_row
+        .get::<Json<DeliveryEntitlementRecord>, _>("payload")
+        .0;
+    if delivery.effective_status(&entitlement) != DELIVERY_STATUS_PREPARED {
+        return Ok(DeliveryUploadItemOutcome::Rejected {
+            code: "delivery_not_artifact_ready",
+            message: format!(
+                "delivery `{}` status `{}` cannot accept artifacts",
+                delivery.delivery_id,
+                delivery.effective_status(&entitlement)
+            ),
+        });
+    }
+
+    let existing_rows = sqlx::query(
+        "SELECT payload
+           FROM delivery_artifacts
+          WHERE delivery_id = $1
+          FOR UPDATE",
+    )
+    .bind(&delivery.delivery_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut existing = existing_rows
+        .into_iter()
+        .map(|row| row.get::<Json<DeliveryArtifactRecord>, _>("payload").0)
+        .collect::<Vec<_>>();
+    if let Some(artifact) = existing.iter().find(|artifact| {
+        artifact.sha256 == item.payload_sha256 && artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE
+    }) {
+        return Ok(DeliveryUploadItemOutcome::Duplicate {
+            artifact_id: artifact.artifact_id.clone(),
+        });
+    }
+
+    let artifact = build_delivery_artifact_record(
+        &delivery_upload_item_artifact_draft(item, &delivery, actor_id),
+        &existing,
+    );
+    for existing_artifact in existing
+        .iter_mut()
+        .filter(|artifact| artifact.status == DELIVERY_ARTIFACT_STATUS_ACTIVE)
+    {
+        existing_artifact.status = DELIVERY_ARTIFACT_STATUS_SUPERSEDED.to_string();
+        existing_artifact.superseded_at = Some(artifact.created_at.clone());
+        existing_artifact.superseded_by = Some(artifact.artifact_id.clone());
+        existing_artifact.updated_at = artifact.created_at.clone();
+        sqlx::query(
+            "UPDATE delivery_artifacts
+                SET status = $2, payload = $3, updated_at = $4
+              WHERE artifact_id = $1",
+        )
+        .bind(&existing_artifact.artifact_id)
+        .bind(&existing_artifact.status)
+        .bind(Json(&existing_artifact))
+        .bind(&existing_artifact.updated_at)
+        .execute(&mut **tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO delivery_artifacts
+            (artifact_id, delivery_id, tenant_id, project_id, status, version, sha256, size_bytes, storage_backend, storage_ref, ciphertext, payload, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+    )
+    .bind(&artifact.artifact_id)
+    .bind(&artifact.delivery_id)
+    .bind(artifact.tenant_id.as_str())
+    .bind(artifact.project_id.as_str())
+    .bind(&artifact.status)
+    .bind(i64::try_from(artifact.version).unwrap_or(i64::MAX))
+    .bind(&artifact.sha256)
+    .bind(i64::try_from(artifact.size_bytes).unwrap_or(i64::MAX))
+    .bind(&artifact.storage_backend)
+    .bind(&artifact.storage_ref)
+    .bind(&artifact.ciphertext)
+    .bind(Json(&artifact))
+    .bind(&artifact.created_at)
+    .bind(&artifact.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(DeliveryUploadItemOutcome::Accepted {
+        artifact_id: artifact.artifact_id,
+    })
+}
+
+async fn update_postgres_upload_batch(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    batch: &DeliveryUploadBatchRecord,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE delivery_upload_batches
+            SET status = $2,
+                success_count = $3,
+                failed_count = $4,
+                duplicate_count = $5,
+                payload = $6,
+                updated_at = $7
+          WHERE batch_id = $1",
+    )
+    .bind(&batch.batch_id)
+    .bind(&batch.status)
+    .bind(i64::from(batch.success_count))
+    .bind(i64::from(batch.failed_count))
+    .bind(i64::from(batch.duplicate_count))
+    .bind(Json(batch))
+    .bind(&batch.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn update_postgres_upload_item(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    item: &DeliveryUploadBatchItemRecord,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE delivery_upload_batch_items
+            SET status = $2,
+                artifact_id = $3,
+                payload = $4,
+                updated_at = $5
+          WHERE item_id = $1",
+    )
+    .bind(&item.item_id)
+    .bind(&item.status)
+    .bind(item.artifact_id.as_deref())
+    .bind(Json(item))
+    .bind(&item.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn finalize_postgres_delivery_upload_batch(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    batch: &mut DeliveryUploadBatchRecord,
+    items: &[DeliveryUploadBatchItemRecord],
+) -> Result<()> {
+    let item_refs = items.iter().collect::<Vec<_>>();
+    let total_count = u32::try_from(items.len()).unwrap_or(u32::MAX);
+    let success_count = count_upload_items(&item_refs, DELIVERY_UPLOAD_ITEM_STATUS_ACCEPTED);
+    let duplicate_count = count_upload_items(&item_refs, DELIVERY_UPLOAD_ITEM_STATUS_DUPLICATE);
+    let failed_count = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.status.as_str(),
+                DELIVERY_UPLOAD_ITEM_STATUS_REJECTED | DELIVERY_UPLOAD_ITEM_STATUS_FAILED
+            )
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    batch.status =
+        final_upload_batch_status(total_count, success_count, duplicate_count, failed_count);
+    batch.total_count = total_count;
+    batch.success_count = success_count;
+    batch.duplicate_count = duplicate_count;
+    batch.failed_count = failed_count;
+    batch.error_summary = first_upload_error_summary(&item_refs);
+    let now = now_rfc3339();
+    batch.finished_at = Some(now.clone());
+    batch.updated_at = now;
+    batch.version = batch.version.saturating_add(1);
+    update_postgres_upload_batch(tx, batch).await
+}
+
+async fn update_postgres_entitlement(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    entitlement: &DeliveryEntitlementRecord,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE delivery_entitlements
+            SET status = $2, ends_at = $3, payload = $4, updated_at = $5
+          WHERE entitlement_id = $1",
+    )
+    .bind(&entitlement.entitlement_id)
+    .bind(&entitlement.status)
+    .bind(&entitlement.ends_at)
+    .bind(Json(entitlement))
+    .bind(&entitlement.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn insert_postgres_service_segments(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    segments: &[DeliveryServiceSegmentRecord],
+) -> Result<()> {
+    for segment in segments {
+        sqlx::query(
+            "INSERT INTO delivery_service_segments
+                (segment_id, entitlement_id, activation_id, delivery_id, artifact_id, tenant_id, project_id, status, effective_from, effective_until, carrier_valid_until, payload, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        )
+        .bind(&segment.segment_id)
+        .bind(&segment.entitlement_id)
+        .bind(&segment.activation_id)
+        .bind(&segment.delivery_id)
+        .bind(&segment.artifact_id)
+        .bind(segment.tenant_id.as_str())
+        .bind(segment.project_id.as_str())
+        .bind(&segment.status)
+        .bind(&segment.effective_from)
+        .bind(&segment.effective_until)
+        .bind(&segment.carrier_valid_until)
+        .bind(Json(segment))
+        .bind(&segment.created_at)
+        .bind(&segment.updated_at)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn insert_postgres_lifecycle_events(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    events: &[DeliveryLifecycleEventRecord],
+) -> Result<()> {
+    for event in events {
+        sqlx::query(
+            "INSERT INTO delivery_lifecycle_events
+                (event_id, entitlement_id, segment_id, event_type, status, payload, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(&event.event_id)
+        .bind(&event.entitlement_id)
+        .bind(event.segment_id.as_deref())
+        .bind(&event.event_type)
+        .bind(&event.status)
+        .bind(Json(event))
+        .bind(&event.created_at)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 fn resolve_active_tenant_id(

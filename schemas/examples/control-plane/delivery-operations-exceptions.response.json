@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "exception_id": "entitlement_needs_manual_supply:dlvent_delivery_10001:2026-05-05T10:12:00Z",
+      "exception_type": "entitlement_needs_manual_supply",
+      "severity": "critical",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "delivery_id": "delivery_10001",
+      "entitlement_id": "dlvent_delivery_10001",
+      "upload_batch_id": "dlvup_10004",
+      "upload_item_id": "dlvupitem_10004_1",
+      "status": "needs_manual_supply",
+      "reason": "continuation_artifact_missing",
+      "occurred_at": "2026-05-05T10:12:00Z",
+      "summary": "Delivery entitlement requires operator attention"
+    }
+  ]
+}

@@ -111,11 +111,23 @@
         "estimated_cost": {
           "$ref": "#/definitions/MonetaryAmount"
         },
+        "grant_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "idempotency_key": {
           "type": "string"
         },
         "model_alias": {
           "type": "string"
+        },
+        "owner_account_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "phase": {
           "$ref": "#/definitions/UsagePhase"

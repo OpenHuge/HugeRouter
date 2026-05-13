@@ -48,6 +48,7 @@ Recent priority docs for the source-backed spec deepening pass:
 - [Development Readiness and Bootstrap](runbooks/development-readiness-and-bootstrap.md)
 - [Maintainer Triage](runbooks/maintainer-triage.md)
 - [Monorepo Boundaries and Bootstrap Contracts](runbooks/monorepo-boundaries-and-bootstrap-contracts.md)
+- [服务器部署与更新 Runbook](runbooks/server-deployment-and-update.zh-CN.md)
 
 ## Contributor Operations
 

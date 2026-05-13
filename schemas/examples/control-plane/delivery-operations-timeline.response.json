@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "event_id": "delivery_created:delivery_10001:2026-05-05T10:00:00Z",
+      "event_type": "delivery_created",
+      "object_type": "delivery",
+      "object_id": "delivery_10001",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "delivery_id": "delivery_10001",
+      "upload_batch_id": "dlvup_10004",
+      "status": "active",
+      "occurred_at": "2026-05-05T10:00:00Z",
+      "summary": "Delivery fact created"
+    },
+    {
+      "event_id": "delivery_download_grant_used:dlgrant_10003:2026-05-05T10:11:00Z",
+      "event_type": "delivery_download_grant_used",
+      "object_type": "delivery_download_grant",
+      "object_id": "dlgrant_10003",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "delivery_id": "delivery_10001",
+      "entitlement_id": "dlvent_delivery_10001",
+      "activation_id": "activation_10002",
+      "artifact_id": "artifact_10002",
+      "grant_id": "dlgrant_10003",
+      "upload_batch_id": "dlvup_10004",
+      "upload_item_id": "dlvupitem_10004_1",
+      "status": "used",
+      "occurred_at": "2026-05-05T10:11:00Z",
+      "summary": "Download grant consumed"
+    }
+  ]
+}

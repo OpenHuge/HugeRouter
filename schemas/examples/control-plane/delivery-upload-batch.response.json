@@ -1,0 +1,20 @@
+{
+  "data": {
+    "batch_id": "dlvup_10004",
+    "tenant_id": "tenant_acme",
+    "project_id": "proj_core",
+    "provider": "chatgpt",
+    "status": "queued",
+    "source_file_name": "acme-may-upload.jsonl",
+    "source_file_sha256": "sha256:1f39e082b7322d0386a855f3de726de051ae2bf80d8e8cf869927722d2a9f03f",
+    "idempotency_key": "ops-upload-2026-05-05-acme-001",
+    "total_count": 1,
+    "success_count": 0,
+    "failed_count": 0,
+    "duplicate_count": 0,
+    "created_by": "user_ops_admin",
+    "created_at": "2026-05-05T10:04:00Z",
+    "updated_at": "2026-05-05T10:04:00Z",
+    "version": 1
+  }
+}

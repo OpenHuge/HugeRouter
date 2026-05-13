@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PrepareDeliveryRedemptionUnitsRequest",
+  "type": "object",
+  "required": [
+    "owner_account_id",
+    "project_id",
+    "provider",
+    "service_days",
+    "tenant_id"
+  ],
+  "properties": {
+    "code_expires_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner_account_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "$ref": "#/definitions/ProjectId"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "service_days": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "service_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "starts_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    }
+  },
+  "definitions": {
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

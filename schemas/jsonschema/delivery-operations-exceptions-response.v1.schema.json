@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeliveryOperationsExceptionsResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DeliveryOperationsException"
+      }
+    }
+  },
+  "definitions": {
+    "DeliveryOperationsException": {
+      "type": "object",
+      "required": [
+        "exception_id",
+        "exception_type",
+        "occurred_at",
+        "project_id",
+        "severity",
+        "status",
+        "summary",
+        "tenant_id"
+      ],
+      "properties": {
+        "activation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artifact_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entitlement_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exception_id": {
+          "type": "string"
+        },
+        "exception_type": {
+          "type": "string"
+        },
+        "grant_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "segment_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "upload_batch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upload_item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

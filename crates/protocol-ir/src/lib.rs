@@ -1,6 +1,10 @@
 #![allow(clippy::needless_for_each)]
 
 mod artifacts;
+mod delivery_redemption;
+pub(crate) mod delivery_redemption_examples;
+pub(crate) mod delivery_redemption_openapi;
+mod delivery_upload;
 pub(crate) mod examples;
 pub(crate) mod gateway_examples;
 mod openapi_docs;
@@ -9,6 +13,8 @@ pub use artifacts::{
     ArtifactFile, ContractManifest, collect_contract_artifacts, workspace_root,
     write_contract_artifacts,
 };
+pub use delivery_redemption::*;
+pub use delivery_upload::*;
 pub use openapi_docs::{ControlPlaneApiDoc, GatewayApiDoc};
 
 use core_domain::{
@@ -532,6 +538,8 @@ pub struct UsageSummary {
     pub tenant_id: TenantId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub window_start: String,
     pub window_end: String,
     pub currency: String,
@@ -574,6 +582,8 @@ pub struct BalanceProjection {
     pub tenant_id: TenantId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub currency: String,
     pub provider_cost_total: MonetaryAmount,
     pub billable_total: MonetaryAmount,
@@ -679,6 +689,46 @@ pub struct BillingExportJobsResponse {
     pub data: Vec<BillingExportJob>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateRenewalIntentRequest {
+    pub out_trade_no: String,
+    pub grant_id: String,
+    pub renew_expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RenewalIntent {
+    pub renewal_intent_id: String,
+    pub out_trade_no: String,
+    pub grant_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub payment_status: String,
+    pub previous_grant_status: String,
+    pub previous_expires_at: String,
+    pub renew_expires_at: String,
+    pub status: String,
+    pub reason_code: String,
+    pub reason: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RenewalIntentResponse {
+    pub data: RenewalIntent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RenewalIntentsResponse {
+    pub data: Vec<RenewalIntent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct EligibleCandidate {
     pub provider_resource_id: ProviderResourceId,
@@ -734,6 +784,592 @@ pub struct RoutePoliciesResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ConfigSnapshotResponse {
     pub config_snapshot: ConfigSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadyCheck {
+    pub name: String,
+    pub status: String,
+    pub reason_code: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadiness {
+    pub status: String,
+    pub reason_code: String,
+    pub reason: String,
+    pub checks: Vec<SaleReadyCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadyHandoff {
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub route_policy_id: RoutePolicyId,
+    pub budget_policy_id: core_domain::BudgetPolicyId,
+    pub provider_resource_ids: Vec<ProviderResourceId>,
+    pub readiness_status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct SaleReadyPackageResponse {
+    pub config_snapshot: ConfigSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_policy: Option<RoutePolicy>,
+    pub provider_resources: Vec<ProviderResource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_simulation: Option<RouteSimulationResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<PricingSimulationResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BalanceProjection>,
+    pub readiness: SaleReadiness,
+    pub handoff: SaleReadyHandoff,
+    pub creates_customer_api_key: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateDeliveryRequest {
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_kind: Option<String>,
+    pub service_days: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryRevokeRequest {
+    pub expected_version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct Delivery {
+    pub delivery_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub owner_account_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redemption_batch_id: Option<String>,
+    pub provider: String,
+    pub status: String,
+    pub operator_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_label: Option<String>,
+    pub source: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryCode {
+    pub code_id: String,
+    pub delivery_id: String,
+    pub code_type: String,
+    pub code_prefix: String,
+    pub code_last_four: String,
+    pub format_version: String,
+    pub status: String,
+    pub expires_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryEntitlement {
+    pub entitlement_id: String,
+    pub delivery_id: String,
+    pub service_kind: String,
+    pub service_days: u32,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub service_starts_at: String,
+    pub service_ends_at: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryProjection {
+    pub delivery: Delivery,
+    pub codes: Vec<DeliveryCode>,
+    pub entitlement: DeliveryEntitlement,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOneTimeCodes {
+    pub redemption_code: String,
+    pub browser_file_unlock_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryPrepareResponse {
+    pub data: DeliveryProjection,
+    pub one_time_codes: DeliveryOneTimeCodes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryResponse {
+    pub data: DeliveryProjection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateDeliveryArtifactRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carrier_valid_until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_kind: Option<String>,
+    pub payload_base64: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryArtifact {
+    pub artifact_id: String,
+    pub delivery_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub artifact_kind: String,
+    pub provider: String,
+    pub status: String,
+    pub version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    pub content_type: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+    pub storage_backend: String,
+    pub storage_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carrier_valid_until: Option<String>,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+    pub secret_kind: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryArtifactResponse {
+    pub data: DeliveryArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryArtifactsResponse {
+    pub data: Vec<DeliveryArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryActivationRestoreInfo {
+    pub artifact_import_secret: String,
+    pub secret_kind: String,
+    pub encryption_protocol: String,
+    pub encryption_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_account_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryActivationRedeemResponse {
+    pub data: DeliveryActivation,
+    pub restore: DeliveryActivationRestoreInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct RedeemDeliveryRequest {
+    pub redemption_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryActivation {
+    pub activation_id: String,
+    pub delivery_id: String,
+    pub artifact_id: String,
+    pub entitlement_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub activation_source: String,
+    pub activated_at: String,
+    pub entitlement_ends_at: String,
+    pub artifact: DeliveryArtifact,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryActivationResponse {
+    pub data: DeliveryActivation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateDeliveryDownloadGrantRequest {
+    pub activation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redemption_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryDownloadGrantRevokeRequest {
+    pub expected_version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryDownloadGrant {
+    pub grant_id: String,
+    pub activation_id: String,
+    pub delivery_id: String,
+    pub artifact_id: String,
+    pub entitlement_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub token_prefix: String,
+    pub token_last_four: String,
+    pub expires_at: String,
+    pub max_uses: u32,
+    pub use_count: u32,
+    pub artifact: DeliveryArtifact,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoke_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryDownloadGrantIssueResponse {
+    pub data: DeliveryDownloadGrant,
+    pub download_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryDownloadGrantResponse {
+    pub data: DeliveryDownloadGrant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct ExtendDeliveryEntitlementRequest {
+    pub expected_version: u64,
+    pub extend_days: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryServiceSegment {
+    pub segment_id: String,
+    pub entitlement_id: String,
+    pub activation_id: String,
+    pub delivery_id: String,
+    pub artifact_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub provider: String,
+    pub status: String,
+    pub segment_index: u32,
+    pub effective_from: String,
+    pub effective_until: String,
+    pub carrier_valid_until: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryLifecycleEvent {
+    pub event_id: String,
+    pub entitlement_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_id: Option<String>,
+    pub event_type: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub created_by: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub payload: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryServiceSegmentsResponse {
+    pub data: Vec<DeliveryServiceSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryLifecycleEventsResponse {
+    pub data: Vec<DeliveryLifecycleEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryLifecycleResponse {
+    pub entitlement: DeliveryEntitlement,
+    pub segments: Vec<DeliveryServiceSegment>,
+    pub events: Vec<DeliveryLifecycleEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsTotals {
+    pub deliveries: u64,
+    pub artifacts: u64,
+    pub upload_batches: u64,
+    pub upload_items: u64,
+    pub activations: u64,
+    pub download_grants: u64,
+    pub entitlements: u64,
+    pub service_segments: u64,
+    pub lifecycle_events: u64,
+    pub exceptions: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsStatusCount {
+    pub domain: String,
+    pub status: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsTimelineEvent {
+    pub event_id: String,
+    pub event_type: String,
+    pub object_type: String,
+    pub object_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entitlement_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_batch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_item_id: Option<String>,
+    pub status: String,
+    pub occurred_at: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsException {
+    pub exception_id: String,
+    pub exception_type: String,
+    pub severity: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entitlement_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_batch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_item_id: Option<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub occurred_at: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsOverview {
+    pub tenant_id: TenantId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub window_start: String,
+    pub window_end: String,
+    pub totals: DeliveryOperationsTotals,
+    pub status_counts: Vec<DeliveryOperationsStatusCount>,
+    pub recent_events: Vec<DeliveryOperationsTimelineEvent>,
+    pub exceptions: Vec<DeliveryOperationsException>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsOverviewResponse {
+    pub data: DeliveryOperationsOverview,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsTimelineResponse {
+    pub data: Vec<DeliveryOperationsTimelineEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsExceptionsResponse {
+    pub data: Vec<DeliveryOperationsException>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsDetail {
+    pub delivery: DeliveryProjection,
+    pub artifacts: Vec<DeliveryArtifact>,
+    #[serde(default)]
+    pub upload_items: Vec<DeliveryUploadBatchItem>,
+    pub activations: Vec<DeliveryActivation>,
+    pub download_grants: Vec<DeliveryDownloadGrant>,
+    pub service_segments: Vec<DeliveryServiceSegment>,
+    pub lifecycle_events: Vec<DeliveryLifecycleEvent>,
+    pub timeline: Vec<DeliveryOperationsTimelineEvent>,
+    pub exceptions: Vec<DeliveryOperationsException>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct DeliveryOperationsDetailResponse {
+    pub data: DeliveryOperationsDetail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CreateOpeningGrantRequest {
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub owner_account_id: String,
+    pub grantee_kind: String,
+    pub grantee_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grantee_label: Option<String>,
+    pub expires_at: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrantRevokeRequest {
+    pub expected_version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrant {
+    pub grant_id: String,
+    pub tenant_id: TenantId,
+    pub project_id: ProjectId,
+    pub owner_account_id: String,
+    pub grantee_kind: String,
+    pub grantee_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grantee_label: Option<String>,
+    pub config_snapshot_id: ConfigSnapshotId,
+    pub route_policy_id: RoutePolicyId,
+    pub budget_policy_id: core_domain::BudgetPolicyId,
+    pub provider_resource_ids: Vec<ProviderResourceId>,
+    pub credential_kind: String,
+    pub credential_id: String,
+    pub credential_key_prefix: String,
+    pub credential_last_four: String,
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+    pub status: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningCredential {
+    pub credential_kind: String,
+    pub credential_id: String,
+    pub key_prefix: String,
+    pub last_four: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plaintext: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrantCreateResponse {
+    pub grant: OpeningGrant,
+    pub credential: OpeningCredential,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct OpeningGrantsResponse {
+    pub data: Vec<OpeningGrant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]

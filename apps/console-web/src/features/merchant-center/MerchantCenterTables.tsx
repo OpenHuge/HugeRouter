@@ -130,9 +130,11 @@ export function CardProductTable({
               <UiDataTable.Tr>
                 <UiDataTable.Th>Product</UiDataTable.Th>
                 <UiDataTable.Th>Status</UiDataTable.Th>
+                <UiDataTable.Th>Sale</UiDataTable.Th>
                 <UiDataTable.Th>Inventory</UiDataTable.Th>
                 <UiDataTable.Th>Face Value</UiDataTable.Th>
                 <UiDataTable.Th>Retail Price</UiDataTable.Th>
+                <UiDataTable.Th>CNY Price</UiDataTable.Th>
               </UiDataTable.Tr>
             </UiDataTable.Thead>
             <UiDataTable.Tbody>
@@ -149,9 +151,22 @@ export function CardProductTable({
                       {product.status}
                     </UiChip>
                   </UiDataTable.Td>
+                  <UiDataTable.Td>
+                    <UiChip
+                      color={product.saleEnabled ? "teal" : "gray"}
+                      variant="light"
+                    >
+                      {product.saleEnabled ? "enabled" : "disabled"}
+                    </UiChip>
+                  </UiDataTable.Td>
                   <UiDataTable.Td>{product.inventoryCount}</UiDataTable.Td>
                   <UiDataTable.Td>${product.faceValueUsd}</UiDataTable.Td>
                   <UiDataTable.Td>${product.retailPriceUsd}</UiDataTable.Td>
+                  <UiDataTable.Td>
+                    {product.retailPriceCnyTotal == null
+                      ? "-"
+                      : `¥${(product.retailPriceCnyTotal / 100).toFixed(2)}`}
+                  </UiDataTable.Td>
                 </UiDataTable.Tr>
               ))}
             </UiDataTable.Tbody>

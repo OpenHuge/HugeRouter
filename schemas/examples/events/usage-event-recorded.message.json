@@ -11,6 +11,8 @@
     "usage_event": {
       "usage_event_id": "usageevt_123",
       "route_receipt_id": "routercpt_123",
+      "grant_id": "grant_acme_customer",
+      "owner_account_id": "acct_acme_owner",
       "tenant_id": "tenant_acme",
       "project_id": "proj_core",
       "provider_resource_id": "prvrsrc_openai_primary",

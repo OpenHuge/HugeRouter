@@ -60,6 +60,21 @@ function compatibilityErrorResponse() {
   });
 }
 
+function validationErrorResponse(code: string, message: string) {
+  return jsonResponse(400, {
+    error: {
+      code,
+      message,
+      request_id: "req_test",
+      retryable: false,
+    },
+  });
+}
+
+function isActiveOpeningGrant(grant: { expires_at: string; status: string }) {
+  return grant.status === "active" && Date.parse(grant.expires_at) > Date.parse("2026-04-23T00:00:00Z");
+}
+
 export function handleReadOnlyRequest(
   state: ControlPlaneMockState,
   path: string,
@@ -135,6 +150,10 @@ export function handleReadOnlyRequest(
 
   if (path === "/v1/api-keys") {
     return jsonResponse(200, { data: state.apiKeys });
+  }
+
+  if (path === "/v1/opening-grants") {
+    return jsonResponse(200, { data: state.openingGrants });
   }
 
   if (path === "/v1/oauth-sharing-leases") {
@@ -462,16 +481,206 @@ export function handleMutationRequest(
     const segments = path.split("/");
     const apiKeyId = decodeURIComponent(segments[3] ?? "");
 
-    if (init?.method === "DELETE" || init?.method === "POST") {
-      state.apiKeys = state.apiKeys.map((key) =>
-        key.api_key_id === apiKeyId
-          ? { ...key, is_active: false, version: key.version + 1 }
-          : key,
+    if (init?.method === "POST") {
+      const body = parseRequestBody(init) ?? {};
+      const expectedVersion = Number(body.expected_version ?? 0);
+      const index = state.apiKeys.findIndex(
+        (key) => key.api_key_id === apiKeyId,
       );
-      return emptyResponse(200);
+
+      if (index < 0) {
+        return notFoundResponse("api_key_not_found", "API key not found.");
+      }
+
+      if (state.apiKeys[index]?.version !== expectedVersion) {
+        return staleVersionResponse(
+          "api_key_version_conflict",
+          "API key version is stale.",
+        );
+      }
+
+      const revoked = {
+        ...state.apiKeys[index],
+        is_active: false,
+        version: expectedVersion + 1,
+      };
+      state.apiKeys[index] = revoked;
+      return jsonResponse(200, revoked);
     }
 
     return emptyResponse(405);
+  }
+
+  if (path === "/v1/opening-grants" && init?.method === "POST") {
+    const body = parseRequestBody(init) ?? {};
+    const configSnapshotId =
+      typeof body.config_snapshot_id === "string"
+        ? body.config_snapshot_id
+        : "";
+    const ownerAccountId =
+      typeof body.owner_account_id === "string" ? body.owner_account_id : "";
+    const granteeKind =
+      typeof body.grantee_kind === "string" ? body.grantee_kind : "";
+    const granteeId =
+      typeof body.grantee_id === "string" ? body.grantee_id : "";
+    const granteeLabel =
+      typeof body.grantee_label === "string" && body.grantee_label.length > 0
+        ? body.grantee_label
+        : undefined;
+    const expiresAt =
+      typeof body.expires_at === "string" ? body.expires_at : "";
+    const scopes = Array.isArray(body.scopes)
+      ? body.scopes.map(String).filter(Boolean)
+      : [];
+    const snapshot = state.configSnapshots.find(
+      (candidate) => candidate.config_snapshot_id === configSnapshotId,
+    );
+
+    if (!snapshot) {
+      return notFoundResponse(
+        "config_snapshot_not_found",
+        "Config snapshot not found.",
+      );
+    }
+
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(ownerAccountId)) {
+      return validationErrorResponse(
+        "opening_owner_account_id_invalid",
+        "Owner account id is invalid.",
+      );
+    }
+
+    if (!["user", "workspace", "agent"].includes(granteeKind)) {
+      return validationErrorResponse(
+        "opening_grantee_kind_invalid",
+        "Grantee kind is invalid.",
+      );
+    }
+
+    if (!granteeId) {
+      return validationErrorResponse(
+        "opening_grantee_required",
+        "Grantee id is required.",
+      );
+    }
+
+    if (!expiresAt || Number.isNaN(Date.parse(expiresAt))) {
+      return validationErrorResponse(
+        "opening_expires_at_invalid",
+        "Expiration timestamp is invalid.",
+      );
+    }
+
+    if (scopes.length === 0) {
+      return validationErrorResponse(
+        "opening_scope_invalid",
+        "At least one scope is required.",
+      );
+    }
+
+    const activeOwnerGrants = state.openingGrants.filter(
+      (grant) =>
+        grant.tenant_id === snapshot.tenant_id &&
+        grant.project_id === snapshot.project_id &&
+        grant.owner_account_id === ownerAccountId &&
+        isActiveOpeningGrant(grant),
+    );
+
+    if (activeOwnerGrants.length >= 8) {
+      return staleVersionResponse(
+        "opening_grant_limit_reached",
+        "Owner account already has 8 active child keys.",
+      );
+    }
+
+    if (
+      activeOwnerGrants.some(
+        (grant) =>
+          grant.grantee_kind === granteeKind && grant.grantee_id === granteeId,
+      )
+    ) {
+      return staleVersionResponse(
+        "opening_grant_grantee_active",
+        "Grantee already has an active child key for this owner account.",
+      );
+    }
+
+    const sequence = state.openingGrants.length + 1;
+    const nextGrant = {
+      grant_id: `opengrant_test_${sequence}`,
+      tenant_id: snapshot.tenant_id,
+      project_id: snapshot.project_id,
+      owner_account_id: ownerAccountId,
+      grantee_kind: granteeKind,
+      grantee_id: granteeId,
+      grantee_label: granteeLabel,
+      config_snapshot_id: snapshot.config_snapshot_id,
+      route_policy_id: snapshot.route_policy_id,
+      budget_policy_id: snapshot.budget_policy_id,
+      provider_resource_ids: snapshot.provider_resource_ids,
+      credential_kind: "api_key",
+      credential_id: `cred_opening_test_${sequence}`,
+      credential_key_prefix: `akp-child-${sequence}`,
+      credential_last_four: String(sequence).padStart(4, "0"),
+      scopes,
+      expires_at: expiresAt,
+      status: "active",
+      created_by: "user_test",
+      created_at: "2026-04-23T00:00:00Z",
+      updated_at: "2026-04-23T00:00:00Z",
+      version: 1,
+    };
+
+    state.openingGrants = [...state.openingGrants, nextGrant];
+
+    return jsonResponse(200, {
+      grant: nextGrant,
+      credential: {
+        credential_kind: "api_key",
+        credential_id: nextGrant.credential_id,
+        key_prefix: nextGrant.credential_key_prefix,
+        last_four: nextGrant.credential_last_four,
+        plaintext: "akp_test_child_once",
+      },
+    });
+  }
+
+  if (path.startsWith("/v1/opening-grants/") && path.endsWith("/revoke")) {
+    if (init?.method !== "POST") {
+      return emptyResponse(405);
+    }
+
+    const grantId = decodeURIComponent(path.split("/")[3] ?? "");
+    const body = parseRequestBody(init) ?? {};
+    const expectedVersion = Number(body.expected_version ?? 0);
+    const index = state.openingGrants.findIndex(
+      (grant) => grant.grant_id === grantId,
+    );
+
+    if (index < 0) {
+      return notFoundResponse(
+        "opening_grant_not_found",
+        "Opening grant not found.",
+      );
+    }
+
+    if (state.openingGrants[index]?.version !== expectedVersion) {
+      return staleVersionResponse(
+        "opening_grant_version_conflict",
+        "Opening grant version is stale.",
+      );
+    }
+
+    const revoked = {
+      ...state.openingGrants[index],
+      revoked_at: "2026-04-23T00:00:00Z",
+      revoked_by: "user_test",
+      status: "revoked",
+      updated_at: "2026-04-23T00:00:00Z",
+      version: expectedVersion + 1,
+    };
+    state.openingGrants[index] = revoked;
+    return jsonResponse(200, revoked);
   }
 
   if (path === "/v1/oauth-sharing-leases" && init?.method === "POST") {

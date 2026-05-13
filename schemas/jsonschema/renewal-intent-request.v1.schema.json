@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateRenewalIntentRequest",
+  "type": "object",
+  "required": [
+    "grant_id",
+    "out_trade_no",
+    "renew_expires_at"
+  ],
+  "properties": {
+    "grant_id": {
+      "type": "string"
+    },
+    "out_trade_no": {
+      "type": "string"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "renew_expires_at": {
+      "type": "string"
+    }
+  }
+}

@@ -176,6 +176,40 @@ export type ApiKeyCreateResult = {
   version: number;
 };
 
+export type OpeningGrantView = {
+  budgetPolicyId: string;
+  canRevoke: boolean;
+  configSnapshotId: string;
+  createdAt: string;
+  credentialId: string;
+  credentialKeyPrefix: string;
+  credentialKind: string;
+  credentialLastFour: string;
+  expiresAt: string;
+  grantId: string;
+  granteeId: string;
+  granteeKind: string;
+  granteeLabel?: string;
+  isActive: boolean;
+  ownerAccountId: string;
+  projectId: string;
+  providerResourceIds: string[];
+  routePolicyId: string;
+  scopes: string[];
+  status: string;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+};
+
+export type OpeningGrantCreateResult = {
+  credentialId: string;
+  keyPrefix: string;
+  lastFour: string;
+  plaintext?: string;
+  grant: OpeningGrantView;
+};
+
 export type UsageBreakdownView = {
   billablePriceUsd: string;
   bucket: string;
@@ -219,6 +253,7 @@ export type BillingDashboardData = {
   activeProjectId?: string;
   availableProjects: ProjectSummary[];
   billableTotalUsd: string;
+  canManageBillingExports: boolean;
   configuredBudgetUsd: string;
   exportJobs: BillingExportJobView[];
   lastProjectedAt: string;
@@ -280,17 +315,73 @@ export type MerchantShopView = {
 export type CardProductView = {
   cardProductId: string;
   merchantShopId: string;
+  projectId?: string;
   title: string;
   description: string;
   status: "draft" | "active" | "sold_out";
   inventoryCount: number;
   faceValueUsd: string;
   retailPriceUsd: string;
+  retailPriceCnyTotal?: number;
   deliveryKind: "direct_secret";
   supportsTrial: boolean;
+  saleEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
   version: number;
+};
+
+export type MerchantPublicProductView = {
+  product: CardProductView;
+  availableInventoryCount: number;
+};
+
+export type MerchantPublicShopView = {
+  shop: MerchantShopView;
+  products: MerchantPublicProductView[];
+};
+
+export type MerchantProductOrderView = {
+  orderId: string;
+  tenantId: string;
+  projectId: string;
+  merchantShopId: string;
+  cardProductId: string;
+  inventoryDeliveryId: string;
+  buyerUserId: string;
+  outTradeNo?: string;
+  amountTotal: number;
+  currency: "CNY";
+  channel?: string;
+  status: string;
+  pickupToken?: string;
+  activationId?: string;
+  downloadGrantId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MerchantProductPrepayResult = {
+  appId: string;
+  mchid: string;
+  channel: "native" | "jsapi";
+  outTradeNo: string;
+  codeUrl?: string;
+  codeQrSvg?: string;
+  prepayId?: string;
+  jsapiParams?: {
+    appId: string;
+    timeStamp: string;
+    nonceStr: string;
+    package: string;
+    signType: string;
+    paySign: string;
+  };
+};
+
+export type MerchantPickupView = {
+  order: MerchantProductOrderView;
+  downloadToken: string;
 };
 
 export type TrialConnectionView = {

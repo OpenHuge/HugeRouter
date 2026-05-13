@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateDeliveryUploadBatchRequest",
+  "type": "object",
+  "required": [
+    "items",
+    "project_id",
+    "provider",
+    "source_file_name",
+    "tenant_id"
+  ],
+  "properties": {
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DeliveryUploadBatchItemInput"
+      }
+    },
+    "project_id": {
+      "$ref": "#/definitions/ProjectId"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "source_file_name": {
+      "type": "string"
+    },
+    "tenant_id": {
+      "$ref": "#/definitions/TenantId"
+    }
+  },
+  "definitions": {
+    "DeliveryUploadBatchItemInput": {
+      "type": "object",
+      "required": [
+        "delivery_id",
+        "payload_base64"
+      ],
+      "properties": {
+        "artifact_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "carrier_valid_until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "encryption_protocol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "encryption_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload_base64": {
+          "type": "string"
+        },
+        "row_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "secret_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

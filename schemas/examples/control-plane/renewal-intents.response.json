@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "renewal_intent_id": "renewal_123",
+      "out_trade_no": "wxpay_renew_123",
+      "grant_id": "opengrant_customer_123",
+      "tenant_id": "tenant_acme",
+      "project_id": "proj_core",
+      "payment_status": "paid",
+      "previous_grant_status": "expired",
+      "previous_expires_at": "2026-05-03T00:00:00Z",
+      "renew_expires_at": "2026-06-03T00:00:00Z",
+      "status": "renewed",
+      "reason_code": "payment_paid_grant_recovered",
+      "reason": "Paid order matched the opening grant; only future grant state was restored.",
+      "created_by": "user_ops_admin",
+      "created_at": "2026-05-03T12:00:00Z",
+      "updated_at": "2026-05-03T12:00:00Z",
+      "applied_at": "2026-05-03T12:00:00Z"
+    }
+  ]
+}

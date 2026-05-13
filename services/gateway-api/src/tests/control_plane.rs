@@ -222,7 +222,8 @@ async fn emits_documented_debug_headers_when_enabled() {
 
 #[tokio::test]
 async fn control_plane_config_store_fetches_and_maps_active_config() {
-    let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
+    let (base_url, request_count, _budget_queries, handle) =
+        spawn_control_plane_server(false).await;
     let store = ControlPlaneConfigStore::new(
         base_url,
         "active",
@@ -249,7 +250,8 @@ async fn control_plane_config_store_fetches_and_maps_active_config() {
 
 #[tokio::test]
 async fn control_plane_config_store_uses_ttl_cache() {
-    let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
+    let (base_url, request_count, _budget_queries, handle) =
+        spawn_control_plane_server(false).await;
     let store = ControlPlaneConfigStore::new(
         base_url,
         "active",
@@ -267,7 +269,8 @@ async fn control_plane_config_store_uses_ttl_cache() {
 
 #[tokio::test]
 async fn control_plane_config_store_reports_unavailable_backend() {
-    let (base_url, _request_count, handle) = spawn_control_plane_server(true).await;
+    let (base_url, _request_count, _budget_queries, handle) =
+        spawn_control_plane_server(true).await;
     let store = ControlPlaneConfigStore::new(
         base_url,
         "active",
@@ -284,7 +287,8 @@ async fn control_plane_config_store_reports_unavailable_backend() {
 
 #[tokio::test]
 async fn control_plane_api_key_store_resolves_and_caches_scope() {
-    let (base_url, request_count, handle) = spawn_control_plane_server(false).await;
+    let (base_url, request_count, _budget_queries, handle) =
+        spawn_control_plane_server(false).await;
     let store = ControlPlaneApiKeyStore::new(
         base_url,
         "/internal/gateway/api-keys/resolve",
@@ -296,6 +300,7 @@ async fn control_plane_api_key_store_resolves_and_caches_scope() {
     let second = store.resolve("test").await.unwrap();
 
     assert_eq!(first.credential_id, "cred_gateway_test");
+    assert_eq!(first.owner_account_id.as_deref(), Some("acct_acme_owner"));
     assert_eq!(second.project_id.as_deref(), Some("proj_core"));
     assert_eq!(request_count.load(AtomicOrdering::Relaxed), 2);
 
@@ -303,8 +308,40 @@ async fn control_plane_api_key_store_resolves_and_caches_scope() {
 }
 
 #[tokio::test]
+async fn control_plane_budget_store_sends_owner_account_id() {
+    let (base_url, _request_count, budget_queries, handle) =
+        spawn_control_plane_server(false).await;
+    let store = ControlPlaneBudgetStore::new(
+        base_url,
+        "/internal/gateway/billing-projection",
+        Some("dev-internal-token".to_string()),
+        reqwest::Client::new(),
+    );
+
+    let projection = store
+        .load_budget(&BudgetProjectionScope {
+            tenant: "tenant_acme".to_string(),
+            project: Some("proj_core".to_string()),
+            owner_account: Some("acct_acme_owner".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(projection.data.threshold_status, "ok");
+    let queries = { budget_queries.lock().await.clone() };
+    assert_eq!(queries.len(), 1);
+    assert_eq!(
+        queries[0].get("owner_account_id").map(String::as_str),
+        Some("acct_acme_owner")
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn control_plane_api_key_store_fails_when_internal_token_is_missing() {
-    let (base_url, _request_count, handle) = spawn_control_plane_server(false).await;
+    let (base_url, _request_count, _budget_queries, handle) =
+        spawn_control_plane_server(false).await;
     let store = ControlPlaneApiKeyStore::new(
         base_url,
         "/internal/gateway/api-keys/resolve",

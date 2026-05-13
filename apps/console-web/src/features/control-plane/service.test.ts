@@ -4,6 +4,7 @@ import { useControlPlaneFetchMock } from "../../test/control-plane-fetch";
 import { loadRouteData } from "./loaders";
 import {
   getConsoleDataService,
+  getControlPlaneActionErrorMessage,
   setConsoleDataServiceForTests,
   type ConsoleDataService,
 } from "./service";
@@ -118,6 +119,131 @@ describe("console data service", () => {
     expect(keys.every((key) => key.isActive)).toBe(true);
   });
 
+  it("loads opening grants for the active tenant session", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    const grants = await getConsoleDataService().listOpeningGrants();
+
+    expect(grants).toHaveLength(1);
+    expect(grants[0]?.ownerAccountId).toBe("acct_acme_owner");
+    expect(grants[0]?.granteeId).toBe("user_store_001");
+    expect(grants[0]?.isActive).toBe(true);
+  });
+
+  it("maps opening grant duplicate grantee errors to operator copy", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    let message = "";
+    try {
+      await getConsoleDataService().createOpeningGrant({
+        configSnapshotId: "cfgsnap_gateway_v1",
+        expiresAt: "2026-05-22T00:00:00Z",
+        granteeId: "user_store_001",
+        granteeKind: "user",
+        ownerAccountId: "acct_acme_owner",
+        scopes: ["route:codex"],
+      });
+    } catch (error) {
+      message = getControlPlaneActionErrorMessage(
+        error,
+        "opening-grant-create",
+      );
+    }
+
+    expect(message).toBe(
+      "That grantee already has an active child key for this owner account.",
+    );
+  });
+
+  it("enforces the 8 active child key limit per owner account in the control-plane mock", async () => {
+    signIn({
+      email: "tenant@acme.dev",
+      workspace: "acme-retail",
+    });
+
+    let firstCreatedGrant:
+      | Awaited<ReturnType<ConsoleDataService["createOpeningGrant"]>>["grant"]
+      | null = null;
+
+    for (let index = 2; index <= 8; index += 1) {
+      const created = await getConsoleDataService().createOpeningGrant({
+        configSnapshotId: "cfgsnap_gateway_v1",
+        expiresAt: "2026-05-22T00:00:00Z",
+        granteeId: `user_store_00${index}`,
+        granteeKind: "user",
+        ownerAccountId: "acct_acme_owner",
+        scopes: ["route:codex"],
+      });
+
+      firstCreatedGrant ??= created.grant;
+      expect(created.grant.ownerAccountId).toBe("acct_acme_owner");
+      expect(created.plaintext).toBe("akp_test_child_once");
+    }
+
+    let message = "";
+    try {
+      await getConsoleDataService().createOpeningGrant({
+        configSnapshotId: "cfgsnap_gateway_v1",
+        expiresAt: "2026-05-22T00:00:00Z",
+        granteeId: "user_store_009",
+        granteeKind: "user",
+        ownerAccountId: "acct_acme_owner",
+        scopes: ["route:codex"],
+      });
+    } catch (error) {
+      message = getControlPlaneActionErrorMessage(
+        error,
+        "opening-grant-create",
+      );
+    }
+
+    expect(message).toBe(
+      "This owner account already has 8 active child keys. Revoke or let one expire before creating another.",
+    );
+
+    await expect(
+      getConsoleDataService().createOpeningGrant({
+        configSnapshotId: "cfgsnap_gateway_v1",
+        expiresAt: "2026-05-22T00:00:00Z",
+        granteeId: "user_store_other_owner",
+        granteeKind: "user",
+        ownerAccountId: "acct_acme_other_owner",
+        scopes: ["route:codex"],
+      }),
+    ).resolves.toMatchObject({
+      grant: {
+        ownerAccountId: "acct_acme_other_owner",
+      },
+    });
+
+    expect(firstCreatedGrant).not.toBeNull();
+    await getConsoleDataService().revokeOpeningGrant(
+      firstCreatedGrant?.grantId ?? "",
+      firstCreatedGrant?.version ?? 0,
+    );
+
+    await expect(
+      getConsoleDataService().createOpeningGrant({
+        configSnapshotId: "cfgsnap_gateway_v1",
+        expiresAt: "2026-05-22T00:00:00Z",
+        granteeId: "user_store_009",
+        granteeKind: "user",
+        ownerAccountId: "acct_acme_owner",
+        scopes: ["route:codex"],
+      }),
+    ).resolves.toMatchObject({
+      grant: {
+        ownerAccountId: "acct_acme_owner",
+      },
+    });
+  });
+
   it("loads merchant workspace with replay-backed evaluations", async () => {
     signIn({
       email: "tenant@acme.dev",
@@ -224,6 +350,7 @@ describe("console data service", () => {
           activeProjectId: undefined,
           availableProjects: [],
           billableTotalUsd: "0.000001",
+          canManageBillingExports: true,
           configuredBudgetUsd: "10.000000",
           exportJobs: [],
           lastProjectedAt: "2026-04-22T00:00:00Z",
@@ -276,6 +403,81 @@ describe("console data service", () => {
           cardProducts: [],
           trialConnections: [],
           recentEvaluations: [],
+        });
+      },
+      getPublicShop() {
+        return Promise.resolve({
+          products: [],
+          shop: {
+            createdAt: "2026-04-22T00:00:00Z",
+            displayName: "Override Shop",
+            fulfillmentMode: "auto_card_secret",
+            merchantShopId: "mshop_override",
+            slug: "override-shop",
+            status: "active",
+            updatedAt: "2026-04-22T00:00:00Z",
+            version: 1,
+          },
+        });
+      },
+      createMerchantProductOrder() {
+        return Promise.resolve({
+          amountTotal: 100,
+          buyerUserId: "user_override",
+          cardProductId: "cardprod_override",
+          createdAt: "2026-04-22T00:00:00Z",
+          currency: "CNY",
+          inventoryDeliveryId: "delivery_override",
+          merchantShopId: "mshop_override",
+          orderId: "morder_override",
+          projectId: "proj_core",
+          status: "created",
+          tenantId: "tenant_override",
+          updatedAt: "2026-04-22T00:00:00Z",
+        });
+      },
+      getMerchantProductOrder() {
+        return Promise.resolve({
+          amountTotal: 100,
+          buyerUserId: "user_override",
+          cardProductId: "cardprod_override",
+          createdAt: "2026-04-22T00:00:00Z",
+          currency: "CNY",
+          inventoryDeliveryId: "delivery_override",
+          merchantShopId: "mshop_override",
+          orderId: "morder_override",
+          projectId: "proj_core",
+          status: "created",
+          tenantId: "tenant_override",
+          updatedAt: "2026-04-22T00:00:00Z",
+        });
+      },
+      createMerchantProductOrderWechatPrepay() {
+        return Promise.resolve({
+          appId: "wx_app_override",
+          channel: "native",
+          codeUrl: "weixin://wxpay/bizpayurl?pr=override",
+          mchid: "1900000001",
+          outTradeNo: "hr_override",
+        });
+      },
+      getMerchantPickup() {
+        return Promise.resolve({
+          downloadToken: "dlt_override",
+          order: {
+            amountTotal: 100,
+            buyerUserId: "user_override",
+            cardProductId: "cardprod_override",
+            createdAt: "2026-04-22T00:00:00Z",
+            currency: "CNY",
+            inventoryDeliveryId: "delivery_override",
+            merchantShopId: "mshop_override",
+            orderId: "morder_override",
+            projectId: "proj_core",
+            status: "fulfilled",
+            tenantId: "tenant_override",
+            updatedAt: "2026-04-22T00:00:00Z",
+          },
         });
       },
       getReplayCapsule() {
@@ -385,6 +587,67 @@ describe("console data service", () => {
       },
       listApiKeys() {
         return Promise.resolve([]);
+      },
+      listOpeningGrants() {
+        return Promise.resolve([]);
+      },
+      createOpeningGrant() {
+        return Promise.resolve({
+          credentialId: "cred_opening_override",
+          grant: {
+            budgetPolicyId: "budgetpol_default",
+            canRevoke: true,
+            configSnapshotId: "cfgsnap_override",
+            createdAt: "2026-04-22T00:00:00Z",
+            credentialId: "cred_opening_override",
+            credentialKeyPrefix: "akp-ovr",
+            credentialKind: "api_key",
+            credentialLastFour: "ovr1",
+            expiresAt: "2026-05-22T00:00:00Z",
+            grantId: "opengrant_override",
+            granteeId: "user_override",
+            granteeKind: "user",
+            isActive: true,
+            ownerAccountId: "acct_override",
+            projectId: "proj_core",
+            providerResourceIds: [],
+            routePolicyId: "routepol_openai_chat_default",
+            scopes: ["route:codex"],
+            status: "active",
+            tenantId: "tenant_acme",
+            updatedAt: "2026-04-22T00:00:00Z",
+            version: 1,
+          },
+          keyPrefix: "akp-ovr",
+          lastFour: "ovr1",
+          plaintext: "akp_override_once",
+        });
+      },
+      revokeOpeningGrant() {
+        return Promise.resolve({
+          budgetPolicyId: "budgetpol_default",
+          canRevoke: false,
+          configSnapshotId: "cfgsnap_override",
+          createdAt: "2026-04-22T00:00:00Z",
+          credentialId: "cred_opening_override",
+          credentialKeyPrefix: "akp-ovr",
+          credentialKind: "api_key",
+          credentialLastFour: "ovr1",
+          expiresAt: "2026-05-22T00:00:00Z",
+          grantId: "opengrant_override",
+          granteeId: "user_override",
+          granteeKind: "user",
+          isActive: false,
+          ownerAccountId: "acct_override",
+          projectId: "proj_core",
+          providerResourceIds: [],
+          routePolicyId: "routepol_openai_chat_default",
+          scopes: ["route:codex"],
+          status: "revoked",
+          tenantId: "tenant_acme",
+          updatedAt: "2026-04-22T00:00:00Z",
+          version: 2,
+        });
       },
       createApiKey() {
         return Promise.resolve({

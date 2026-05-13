@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeliveryUploadBatchResponse",
+  "type": "object",
+  "required": [
+    "data"
+  ],
+  "properties": {
+    "data": {
+      "$ref": "#/definitions/DeliveryUploadBatch"
+    }
+  },
+  "definitions": {
+    "DeliveryUploadBatch": {
+      "type": "object",
+      "required": [
+        "batch_id",
+        "created_at",
+        "created_by",
+        "duplicate_count",
+        "failed_count",
+        "project_id",
+        "provider",
+        "source_file_name",
+        "source_file_sha256",
+        "status",
+        "success_count",
+        "tenant_id",
+        "total_count",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "duplicate_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "error_summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failed_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotency_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "source_file_name": {
+          "type": "string"
+        },
+        "source_file_sha256": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "success_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "total_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

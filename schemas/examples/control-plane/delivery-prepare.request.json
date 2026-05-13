@@ -1,0 +1,11 @@
+{
+  "tenant_id": "tenant_acme",
+  "project_id": "proj_core",
+  "provider": "chatgpt",
+  "owner_account_id": "acct_acme_owner",
+  "customer_label": "Acme May browser handoff",
+  "service_kind": "manual_browser_account",
+  "service_days": 30,
+  "starts_at": "2026-05-05T10:00:00Z",
+  "code_expires_at": "2026-06-04T10:00:00Z"
+}

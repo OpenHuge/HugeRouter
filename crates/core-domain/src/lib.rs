@@ -5,6 +5,8 @@ use std::fmt::{self, Display, Formatter};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+pub const DEFAULT_OWNER_ACCOUNT_ID: &str = "tenant_project_default";
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainError {
     #[error("expected id with prefix `{expected_prefix}` but received `{actual}`")]
@@ -852,14 +854,20 @@ pub struct CardProduct {
     pub card_product_id: CardProductId,
     pub tenant_id: TenantId,
     pub merchant_shop_id: MerchantShopId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
     pub title: String,
     pub description: String,
     pub status: CardProductStatus,
     pub inventory_count: u32,
     pub face_value_usd: String,
     pub retail_price_usd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retail_price_cny_total: Option<u32>,
     pub delivery_kind: CardDeliveryKind,
     pub supports_trial: bool,
+    #[serde(default)]
+    pub sale_enabled: bool,
     pub version: u64,
     pub created_at: String,
     pub updated_at: String,
@@ -1048,6 +1056,10 @@ pub struct UsageMetrics {
 pub struct UsageEvent {
     pub usage_event_id: UsageEventId,
     pub route_receipt_id: RouteReceiptId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<String>,
     pub tenant_id: TenantId,
     pub project_id: ProjectId,
     pub provider_resource_id: ProviderResourceId,
@@ -1350,6 +1362,8 @@ mod tests {
         let event = UsageEvent {
             usage_event_id: UsageEventId::parse("usageevt_123").unwrap(),
             route_receipt_id: RouteReceiptId::parse("routercpt_123").unwrap(),
+            grant_id: Some("grant_acme_customer".to_string()),
+            owner_account_id: Some("acct_acme_owner".to_string()),
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             project_id: ProjectId::parse("proj_core").unwrap(),
             provider_resource_id: ProviderResourceId::parse("prvrsrc_123").unwrap(),
@@ -1372,6 +1386,8 @@ mod tests {
         let reparsed: UsageEvent = serde_json::from_value(value.clone()).unwrap();
 
         assert_eq!(reparsed, event);
+        assert_eq!(value["grant_id"], "grant_acme_customer");
+        assert_eq!(value["owner_account_id"], "acct_acme_owner");
         assert_eq!(value["phase"], "final");
         assert_eq!(
             value["usage"],
@@ -1557,14 +1573,17 @@ mod tests {
             card_product_id: CardProductId::parse("cardprod_trial").unwrap(),
             tenant_id: TenantId::parse("tenant_acme").unwrap(),
             merchant_shop_id: MerchantShopId::parse("mshop_acme").unwrap(),
+            project_id: Some(ProjectId::parse("proj_core").unwrap()),
             title: "Trial Claude Card".to_string(),
             description: "Starter inventory".to_string(),
             status: CardProductStatus::Active,
             inventory_count: 10,
             face_value_usd: String::new(),
             retail_price_usd: "0.99".to_string(),
+            retail_price_cny_total: Some(99),
             delivery_kind: CardDeliveryKind::DirectSecret,
             supports_trial: true,
+            sale_enabled: true,
             version: 1,
             created_at: "2026-04-22T00:00:00Z".to_string(),
             updated_at: "2026-04-22T00:00:00Z".to_string(),

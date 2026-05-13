@@ -2,6 +2,7 @@
   "data": {
     "tenant_id": "tenant_acme",
     "project_id": "proj_core",
+    "owner_account_id": "acct_acme_owner",
     "window_start": "2026-04-21T00:00:00Z",
     "window_end": "2026-04-21T23:59:59Z",
     "currency": "USD",

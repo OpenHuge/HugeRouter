@@ -427,6 +427,15 @@ pub fn default_budget_micros(tenant_id: &str, project_id: &str) -> i64 {
 }
 
 #[must_use]
+pub fn default_budget_micros_for_scope(
+    tenant_id: &str,
+    project_id: &str,
+    _owner_account_id: Option<&str>,
+) -> i64 {
+    default_budget_micros(tenant_id, project_id)
+}
+
+#[must_use]
 pub const fn threshold_status(
     billable_cost_micros: i64,
     configured_budget_micros: i64,

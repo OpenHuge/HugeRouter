@@ -1,0 +1,258 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeliveryActivationRedeemResponse",
+  "type": "object",
+  "required": [
+    "data",
+    "restore"
+  ],
+  "properties": {
+    "data": {
+      "$ref": "#/definitions/DeliveryActivation"
+    },
+    "restore": {
+      "$ref": "#/definitions/DeliveryActivationRestoreInfo"
+    }
+  },
+  "definitions": {
+    "DeliveryActivation": {
+      "type": "object",
+      "required": [
+        "activated_at",
+        "activation_id",
+        "activation_source",
+        "artifact",
+        "artifact_id",
+        "created_at",
+        "delivery_id",
+        "entitlement_ends_at",
+        "entitlement_id",
+        "project_id",
+        "provider",
+        "status",
+        "tenant_id",
+        "updated_at"
+      ],
+      "properties": {
+        "activated_at": {
+          "type": "string"
+        },
+        "activation_id": {
+          "type": "string"
+        },
+        "activation_source": {
+          "type": "string"
+        },
+        "artifact": {
+          "$ref": "#/definitions/DeliveryArtifact"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "entitlement_ends_at": {
+          "type": "string"
+        },
+        "entitlement_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "revoke_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revoked_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revoked_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "DeliveryActivationRestoreInfo": {
+      "type": "object",
+      "required": [
+        "artifact_import_secret",
+        "encryption_protocol",
+        "encryption_version",
+        "secret_kind"
+      ],
+      "properties": {
+        "artifact_import_secret": {
+          "type": "string"
+        },
+        "encryption_protocol": {
+          "type": "string"
+        },
+        "encryption_version": {
+          "type": "string"
+        },
+        "secret_kind": {
+          "type": "string"
+        }
+      }
+    },
+    "DeliveryArtifact": {
+      "type": "object",
+      "required": [
+        "artifact_id",
+        "artifact_kind",
+        "content_type",
+        "created_at",
+        "created_by",
+        "delivery_id",
+        "encryption_protocol",
+        "encryption_version",
+        "project_id",
+        "provider",
+        "secret_kind",
+        "sha256",
+        "size_bytes",
+        "status",
+        "storage_backend",
+        "storage_ref",
+        "tenant_id",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "artifact_kind": {
+          "type": "string"
+        },
+        "carrier_valid_until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "encryption_protocol": {
+          "type": "string"
+        },
+        "encryption_version": {
+          "type": "string"
+        },
+        "file_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "$ref": "#/definitions/ProjectId"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "revoke_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revoked_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revoked_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secret_kind": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "status": {
+          "type": "string"
+        },
+        "storage_backend": {
+          "type": "string"
+        },
+        "storage_ref": {
+          "type": "string"
+        },
+        "superseded_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "superseded_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tenant_id": {
+          "$ref": "#/definitions/TenantId"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ProjectId": {
+      "type": "string"
+    },
+    "TenantId": {
+      "type": "string"
+    }
+  }
+}

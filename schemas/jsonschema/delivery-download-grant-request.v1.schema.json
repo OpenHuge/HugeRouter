@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateDeliveryDownloadGrantRequest",
+  "type": "object",
+  "required": [
+    "activation_id"
+  ],
+  "properties": {
+    "activation_id": {
+      "type": "string"
+    },
+    "redemption_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

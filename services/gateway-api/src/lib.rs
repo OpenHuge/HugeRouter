@@ -17,9 +17,9 @@ use axum::{
     routing::{get, post},
 };
 use core_domain::{
-    AdmissionResult, ConfigSnapshot, ConfigSnapshotId, DeploymentScope, ErrorEnvelope,
-    FallbackTransition, NormalizedError, ProviderResource, RoutePolicy, RoutePolicyId,
-    RouteReceipt, RouteReceiptId, ServiceName, UsageEvent, ValidationIssue,
+    AdmissionResult, ConfigSnapshot, ConfigSnapshotId, DEFAULT_OWNER_ACCOUNT_ID, DeploymentScope,
+    ErrorEnvelope, FallbackTransition, NormalizedError, ProviderResource, RoutePolicy,
+    RoutePolicyId, RouteReceipt, RouteReceiptId, ServiceName, UsageEvent, ValidationIssue,
 };
 use protocol_anthropic::{
     AnthropicMessageRequest, AnthropicMessageResponse, AnthropicResponseContentBlock,
@@ -43,10 +43,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs::File,
-    io::Read,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -80,6 +78,7 @@ const REQUIRED_CODEX_ROUTE_SCOPE: &str = "route:codex";
 const PROVIDER_ANY_RELAY_SCOPE: &str = "provider:any-relay";
 const PROVIDER_HUGEROUTER_COMMERCIAL_SCOPE: &str = "provider:hugerouter-commercial";
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1_000);
+static REQUEST_CONTEXT_INSTANCE_ID: OnceLock<String> = OnceLock::new();
 
 pub type GatewayState = Arc<AppState>;
 
@@ -362,6 +361,15 @@ struct ImageExecutionSuccess {
     debug_headers: Option<GatewayDebugHeaders>,
 }
 
+#[derive(Clone)]
+struct RouteExecutionContext {
+    request_context: RequestContext,
+    grant_id: Option<String>,
+    owner_account_id: Option<String>,
+    request_headers: BTreeMap<String, String>,
+    gateway_origin: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewayError {
     pub status: StatusCode,
@@ -406,9 +414,15 @@ struct ActiveGatewayConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyScope {
     credential_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_account_id: Option<String>,
     tenant_id: String,
     project_id: Option<String>,
     status: String,
+    config_snapshot_id: Option<String>,
+    route_policy_id: Option<String>,
     #[serde(default)]
     scopes: Vec<String>,
 }
@@ -752,9 +766,13 @@ async fn process_normalized_request(
         state.clone(),
         route,
         normalized_request,
-        context.clone(),
-        request_headers,
-        gateway_origin,
+        RouteExecutionContext {
+            request_context: context.clone(),
+            grant_id: api_key_scope.grant_id.clone(),
+            owner_account_id: api_key_scope.owner_account_id.clone(),
+            request_headers,
+            gateway_origin,
+        },
     )
     .await;
     match &result {
@@ -888,9 +906,13 @@ async fn process_normalized_image_request(
         route,
         normalized_request,
         image_request,
-        context,
-        request_headers,
-        gateway_origin,
+        RouteExecutionContext {
+            request_context: context,
+            grant_id: api_key_scope.grant_id.clone(),
+            owner_account_id: api_key_scope.owner_account_id.clone(),
+            request_headers,
+            gateway_origin,
+        },
     )
     .await
 }
@@ -953,10 +975,15 @@ async fn execute_image_route(
     route: RouteEvaluation,
     request: NormalizedChatRequest,
     image_request: ProviderImageRequest,
-    context: RequestContext,
-    request_headers: BTreeMap<String, String>,
-    gateway_origin: Option<String>,
+    execution_context: RouteExecutionContext,
 ) -> Result<ImageExecutionSuccess, GatewayError> {
+    let RouteExecutionContext {
+        request_context: context,
+        grant_id,
+        owner_account_id,
+        request_headers,
+        gateway_origin,
+    } = execution_context;
     let mut fallback_transitions = Vec::new();
     let mut provider_attempts = Vec::new();
     let mut last_error = None;
@@ -1099,8 +1126,14 @@ async fn execute_image_route(
                     debug_headers.clone(),
                 )
                 .await?;
-                let usage_event =
-                    build_image_usage_event(&route_receipt, target, &request, &image_response);
+                let usage_event = build_image_usage_event(
+                    &route_receipt,
+                    target,
+                    &request,
+                    &image_response,
+                    grant_id.as_deref(),
+                    owner_account_id.as_deref(),
+                );
                 state
                     .event_sink
                     .publish(&route_receipt, &usage_event, &context)
@@ -1236,10 +1269,15 @@ async fn execute_route(
     state: GatewayState,
     route: RouteEvaluation,
     request: NormalizedChatRequest,
-    context: RequestContext,
-    request_headers: BTreeMap<String, String>,
-    gateway_origin: Option<String>,
+    execution_context: RouteExecutionContext,
 ) -> Result<ExecutionSuccess, GatewayError> {
+    let RouteExecutionContext {
+        request_context: context,
+        grant_id,
+        owner_account_id,
+        request_headers,
+        gateway_origin,
+    } = execution_context;
     let mut fallback_transitions = Vec::new();
     let mut provider_attempts = Vec::new();
     let mut last_error = None;
@@ -1416,8 +1454,14 @@ async fn execute_route(
                     debug_headers.clone(),
                 )
                 .await?;
-                let usage_event =
-                    build_usage_event(&route_receipt, target, &request, &provider_response);
+                let usage_event = build_usage_event(
+                    &route_receipt,
+                    target,
+                    &request,
+                    &provider_response,
+                    grant_id.as_deref(),
+                    owner_account_id.as_deref(),
+                );
                 state
                     .event_sink
                     .publish(&route_receipt, &usage_event, &context)
@@ -1715,6 +1759,38 @@ fn ensure_scope_matches_config(
         ));
     }
 
+    if let Some(config_snapshot_id) = api_key_scope.config_snapshot_id.as_deref()
+        && config_snapshot_id != active_config.config_snapshot.config_snapshot_id.as_str()
+    {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key config snapshot scope does not match the active gateway configuration"
+                    .to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
+    if let Some(route_policy_id) = api_key_scope.route_policy_id.as_deref()
+        && route_policy_id != active_config.route_policy.route_policy_id.as_str()
+    {
+        return Err(GatewayError::new(
+            StatusCode::FORBIDDEN,
+            normalized_error(
+                "auth_forbidden",
+                "API key route policy scope does not match the active gateway configuration"
+                    .to_string(),
+                context,
+                false,
+            ),
+            context,
+        ));
+    }
+
     Ok(())
 }
 
@@ -1724,11 +1800,7 @@ fn ensure_route_token_scope(
     normalized_request: &NormalizedChatRequest,
     context: &RequestContext,
 ) -> Result<(), GatewayError> {
-    if api_key_scope.scopes.is_empty()
-        || !api_key_scope
-            .credential_id
-            .starts_with(ROUTE_TOKEN_CREDENTIAL_SCOPE_PREFIX)
-    {
+    if api_key_scope.scopes.is_empty() {
         return Ok(());
     }
 
@@ -2218,12 +2290,22 @@ fn validation_error(
 
 fn next_request_context() -> RequestContext {
     let sequence = REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let unique_suffix = format!("{}_{}", request_context_instance_id(), sequence);
 
     RequestContext {
-        request_id: format!("req_{sequence}"),
-        trace_id: format!("trace_{sequence}"),
+        request_id: format!("req_{unique_suffix}"),
+        trace_id: format!("trace_{unique_suffix}"),
         sequence,
     }
+}
+
+fn request_context_instance_id() -> &'static str {
+    REQUEST_CONTEXT_INSTANCE_ID.get_or_init(|| {
+        let mut bytes = [0_u8; 16];
+        fill_route_token_entropy(&mut bytes)
+            .expect("OS random source is required for gateway request ids");
+        hex_encode(&bytes)
+    })
 }
 
 fn estimate_prompt_tokens(messages: &[ChatMessage]) -> u32 {
@@ -2266,8 +2348,14 @@ async fn ensure_budget_allows_request(
     let projection = state
         .budget_store
         .load_budget(&BudgetProjectionScope {
-            tenant_id: api_key_scope.tenant_id.clone(),
-            project_id: api_key_scope.project_id.clone(),
+            tenant: api_key_scope.tenant_id.clone(),
+            project: api_key_scope.project_id.clone(),
+            owner_account: Some(
+                api_key_scope
+                    .owner_account_id
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_OWNER_ACCOUNT_ID.to_string()),
+            ),
         })
         .await
         .map_err(|error| {
@@ -2753,6 +2841,14 @@ struct GatewayApiKeyResolveRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct GatewayApiKeyResolveResponse {
     credential_id: String,
+    #[serde(default)]
+    grant_id: Option<String>,
+    #[serde(default)]
+    owner_account_id: Option<String>,
+    #[serde(default)]
+    config_snapshot_id: Option<String>,
+    #[serde(default)]
+    route_policy_id: Option<String>,
     project_id: Option<String>,
     status: String,
     tenant_id: String,
@@ -2762,8 +2858,9 @@ struct GatewayApiKeyResolveResponse {
 
 #[derive(Debug, Clone)]
 struct BudgetProjectionScope {
-    tenant_id: String,
-    project_id: Option<String>,
+    tenant: String,
+    project: Option<String>,
+    owner_account: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -3017,10 +3114,19 @@ fn unix_timestamp_millis() -> u64 {
 
 fn random_route_token() -> Result<String, String> {
     let mut token_bytes = [0_u8; 32];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut token_bytes))
-        .map_err(|error| format!("failed to read route token entropy: {error}"))?;
+    fill_route_token_entropy(&mut token_bytes)?;
     Ok(format!("{ROUTE_TOKEN_PREFIX}{}", hex_encode(&token_bytes)))
+}
+
+#[cfg(not(windows))]
+fn fill_route_token_entropy(dest: &mut [u8]) -> Result<(), String> {
+    getrandom::fill(dest).map_err(|error| format!("failed to read route token entropy: {error}"))
+}
+
+#[cfg(windows)]
+fn fill_route_token_entropy(dest: &mut [u8]) -> Result<(), String> {
+    getrandom02::getrandom(dest)
+        .map_err(|error| format!("failed to read route token entropy: {error}"))
 }
 
 fn route_token_hash(token: &str) -> String {
@@ -3116,9 +3222,13 @@ impl RouteTokenStore for InMemoryRouteTokenStore {
                     .unwrap_or("unknown")
                     .trim_start_matches(ROUTE_TOKEN_ID_PREFIX)
             ),
+            grant_id: None,
+            owner_account_id: None,
             tenant_id: record.tenant_id,
             project_id: record.project_id,
             status: "active".to_string(),
+            config_snapshot_id: None,
+            route_policy_id: None,
             scopes: record.summary.scopes,
         })
     }
@@ -3359,9 +3469,13 @@ impl ControlPlaneApiKeyStore {
             .await
             .map(|payload| GatewayApiKeyScope {
                 credential_id: payload.credential_id,
+                grant_id: payload.grant_id,
+                owner_account_id: payload.owner_account_id,
                 tenant_id: payload.tenant_id,
                 project_id: payload.project_id,
                 status: payload.status,
+                config_snapshot_id: payload.config_snapshot_id,
+                route_policy_id: payload.route_policy_id,
                 scopes: payload.scopes,
             })
             .map_err(|error| format!("failed to decode API key resolution payload: {error}"))
@@ -3419,9 +3533,12 @@ impl ControlPlaneBudgetStore {
             .client
             .get(&url)
             .header(AUTHORIZATION, format!("Bearer {internal_token}"))
-            .query(&[("tenant_id", scope.tenant_id.as_str())]);
-        if let Some(project_id) = scope.project_id.as_deref() {
+            .query(&[("tenant_id", scope.tenant.as_str())]);
+        if let Some(project_id) = scope.project.as_deref() {
             request = request.query(&[("project_id", project_id)]);
+        }
+        if let Some(owner_account_id) = scope.owner_account.as_deref() {
+            request = request.query(&[("owner_account_id", owner_account_id)]);
         }
         let response = request.send().await.map_err(|error| {
             format!("failed to fetch budget projection via control plane: {error}")

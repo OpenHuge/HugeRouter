@@ -49,8 +49,7 @@ pub fn build_route_receipt(
     let failure_reason = normalized_error.as_ref().map(|error| error.message.clone());
 
     RouteReceipt {
-        route_receipt_id: RouteReceiptId::parse(format!("routercpt_{}", context.sequence))
-            .expect("route receipt id should be valid"),
+        route_receipt_id: route_receipt_id_for_context(context),
         tenant_id: route.config_snapshot.tenant_id.clone(),
         project_id: route.config_snapshot.project_id.clone(),
         route_policy_id: route.config_snapshot.route_policy_id.clone(),
@@ -79,11 +78,21 @@ pub fn build_route_receipt(
     }
 }
 
+fn route_receipt_id_for_context(context: &RequestContext) -> RouteReceiptId {
+    let suffix = context
+        .request_id
+        .strip_prefix("req_")
+        .unwrap_or(context.request_id.as_str());
+    RouteReceiptId::parse(format!("routercpt_{suffix}")).expect("route receipt id should be valid")
+}
+
 pub fn build_usage_event(
     route_receipt: &RouteReceipt,
     target: &ProviderTargetRuntime,
     request: &NormalizedChatRequest,
     response: &ProviderResponse,
+    grant_id: Option<&str>,
+    owner_account_id: Option<&str>,
 ) -> UsageEvent {
     let usage = UsageMetrics {
         input_tokens: response.usage.input_tokens,
@@ -94,15 +103,10 @@ pub fn build_usage_event(
     let estimated_cost = (total_tokens / 1_000.0) * target.usd_per_1k_tokens;
 
     UsageEvent {
-        usage_event_id: UsageEventId::parse(format!(
-            "usageevt_{}",
-            route_receipt
-                .route_receipt_id
-                .as_str()
-                .trim_start_matches("routercpt_")
-        ))
-        .expect("usage event id should be valid"),
+        usage_event_id: usage_event_id_for_route_receipt_id(&route_receipt.route_receipt_id),
         route_receipt_id: route_receipt.route_receipt_id.clone(),
+        grant_id: grant_id.map(str::to_string),
+        owner_account_id: owner_account_id.map(str::to_string),
         tenant_id: route_receipt.tenant_id.clone(),
         project_id: route_receipt.project_id.clone(),
         provider_resource_id: target.resource.provider_resource_id.clone(),
@@ -123,6 +127,8 @@ pub fn build_image_usage_event(
     target: &ProviderTargetRuntime,
     request: &NormalizedChatRequest,
     response: &ProviderImageResponse,
+    grant_id: Option<&str>,
+    owner_account_id: Option<&str>,
 ) -> UsageEvent {
     let usage = UsageMetrics {
         input_tokens: response
@@ -140,15 +146,10 @@ pub fn build_image_usage_event(
     );
 
     UsageEvent {
-        usage_event_id: UsageEventId::parse(format!(
-            "usageevt_{}",
-            route_receipt
-                .route_receipt_id
-                .as_str()
-                .trim_start_matches("routercpt_")
-        ))
-        .expect("usage event id should be valid"),
+        usage_event_id: usage_event_id_for_route_receipt_id(&route_receipt.route_receipt_id),
         route_receipt_id: route_receipt.route_receipt_id.clone(),
+        grant_id: grant_id.map(str::to_string),
+        owner_account_id: owner_account_id.map(str::to_string),
         tenant_id: route_receipt.tenant_id.clone(),
         project_id: route_receipt.project_id.clone(),
         provider_resource_id: target.resource.provider_resource_id.clone(),
@@ -162,6 +163,14 @@ pub fn build_image_usage_event(
         },
         recorded_at: now_rfc3339(),
     }
+}
+
+fn usage_event_id_for_route_receipt_id(route_receipt_id: &RouteReceiptId) -> UsageEventId {
+    let suffix = route_receipt_id
+        .as_str()
+        .strip_prefix("routercpt_")
+        .unwrap_or(route_receipt_id.as_str());
+    UsageEventId::parse(format!("usageevt_{suffix}")).expect("usage event id should be valid")
 }
 
 pub fn build_route_receipt_policy_checks(
@@ -325,4 +334,47 @@ pub async fn publish_route_receipt_or_error(
                 debug_headers,
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_receipt_id_uses_request_identity_not_local_sequence_only() {
+        let first = RequestContext {
+            request_id: "req_instance_a_42".to_string(),
+            trace_id: "trace_instance_a_42".to_string(),
+            sequence: 42,
+        };
+        let second = RequestContext {
+            request_id: "req_instance_b_42".to_string(),
+            trace_id: "trace_instance_b_42".to_string(),
+            sequence: 42,
+        };
+
+        assert_eq!(
+            route_receipt_id_for_context(&first).to_string(),
+            "routercpt_instance_a_42"
+        );
+        assert_ne!(
+            route_receipt_id_for_context(&first),
+            route_receipt_id_for_context(&second)
+        );
+    }
+
+    #[test]
+    fn usage_event_id_is_derived_from_route_receipt_identity() {
+        let first = RouteReceiptId::parse("routercpt_instance_a_42").unwrap();
+        let second = RouteReceiptId::parse("routercpt_instance_b_42").unwrap();
+
+        assert_eq!(
+            usage_event_id_for_route_receipt_id(&first).to_string(),
+            "usageevt_instance_a_42"
+        );
+        assert_ne!(
+            usage_event_id_for_route_receipt_id(&first),
+            usage_event_id_for_route_receipt_id(&second)
+        );
+    }
 }

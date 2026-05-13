@@ -44,6 +44,303 @@ CREATE TABLE IF NOT EXISTS api_keys (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS opening_grants (
+    grant_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
+    config_snapshot_id TEXT NOT NULL,
+    grantee_kind TEXT NOT NULL,
+    grantee_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    credential_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS opening_grants_owner_active_idx
+    ON opening_grants (tenant_id, project_id, owner_account_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS opening_grant_owner_locks (
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, project_id, owner_account_id)
+);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
+    redemption_batch_id TEXT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    operator_id TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS deliveries_tenant_project_idx
+    ON deliveries (tenant_id, project_id, created_at);
+
+CREATE INDEX IF NOT EXISTS deliveries_owner_idx
+    ON deliveries (tenant_id, project_id, owner_account_id, created_at);
+
+CREATE TABLE IF NOT EXISTS delivery_redemption_owner_locks (
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, project_id, owner_account_id)
+);
+
+CREATE TABLE IF NOT EXISTS delivery_codes (
+    code_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL,
+    code_type TEXT NOT NULL,
+    code_hash TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_codes_delivery_idx
+    ON delivery_codes (delivery_id, code_type);
+
+CREATE TABLE IF NOT EXISTS delivery_secret_plaintexts (
+    delivery_id TEXT NOT NULL,
+    code_type TEXT NOT NULL,
+    secret_plaintext TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    used_at TEXT NULL,
+    PRIMARY KEY (delivery_id, code_type)
+);
+
+CREATE TABLE IF NOT EXISTS delivery_entitlements (
+    entitlement_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS delivery_artifacts (
+    artifact_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    version BIGINT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    storage_backend TEXT NOT NULL,
+    storage_ref TEXT NOT NULL,
+    ciphertext BYTEA NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_artifacts_delivery_status_idx
+    ON delivery_artifacts (delivery_id, status, version);
+
+CREATE INDEX IF NOT EXISTS delivery_artifacts_tenant_project_idx
+    ON delivery_artifacts (tenant_id, project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS delivery_upload_batches (
+    batch_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    idempotency_key TEXT NULL,
+    source_file_name TEXT NOT NULL,
+    source_file_sha256 TEXT NOT NULL,
+    total_count BIGINT NOT NULL,
+    success_count BIGINT NOT NULL,
+    failed_count BIGINT NOT NULL,
+    duplicate_count BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS delivery_upload_batches_source_sha_uidx
+    ON delivery_upload_batches (tenant_id, project_id, source_file_sha256);
+
+CREATE UNIQUE INDEX IF NOT EXISTS delivery_upload_batches_idempotency_uidx
+    ON delivery_upload_batches (tenant_id, project_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS delivery_upload_batches_scope_status_idx
+    ON delivery_upload_batches (tenant_id, project_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS delivery_upload_batch_items (
+    item_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL,
+    artifact_id TEXT NULL,
+    status TEXT NOT NULL,
+    row_index BIGINT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    ciphertext BYTEA NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS delivery_upload_batch_items_batch_delivery_payload_uidx
+    ON delivery_upload_batch_items (batch_id, delivery_id, payload_sha256);
+
+CREATE INDEX IF NOT EXISTS delivery_upload_batch_items_batch_idx
+    ON delivery_upload_batch_items (batch_id, row_index);
+
+CREATE INDEX IF NOT EXISTS delivery_upload_batch_items_scope_status_idx
+    ON delivery_upload_batch_items (tenant_id, project_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS delivery_activations (
+    activation_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL,
+    code_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    entitlement_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    activated_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS delivery_activations_code_id_uidx
+    ON delivery_activations (code_id);
+
+CREATE INDEX IF NOT EXISTS delivery_activations_delivery_idx
+    ON delivery_activations (delivery_id, activated_at);
+
+CREATE INDEX IF NOT EXISTS delivery_activations_tenant_project_idx
+    ON delivery_activations (tenant_id, project_id, activated_at);
+
+CREATE TABLE IF NOT EXISTS delivery_download_grants (
+    grant_id TEXT PRIMARY KEY,
+    activation_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    entitlement_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    use_count BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_download_grants_activation_idx
+    ON delivery_download_grants (activation_id, created_at);
+
+CREATE INDEX IF NOT EXISTS delivery_download_grants_tenant_project_idx
+    ON delivery_download_grants (tenant_id, project_id, created_at);
+
+CREATE INDEX IF NOT EXISTS delivery_download_grants_status_expires_idx
+    ON delivery_download_grants (status, expires_at);
+
+CREATE TABLE IF NOT EXISTS delivery_producer_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    code_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    redeem_count BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_producer_authorizations_scope_idx
+    ON delivery_producer_authorizations (tenant_id, project_id, owner_account_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS delivery_producer_authorizations_status_expires_idx
+    ON delivery_producer_authorizations (status, expires_at);
+
+CREATE TABLE IF NOT EXISTS delivery_producer_tokens (
+    token_id TEXT PRIMARY KEY,
+    authorization_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_producer_tokens_authorization_idx
+    ON delivery_producer_tokens (authorization_id, created_at);
+
+CREATE INDEX IF NOT EXISTS delivery_producer_tokens_scope_idx
+    ON delivery_producer_tokens (tenant_id, project_id, owner_account_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS delivery_producer_tokens_status_expires_idx
+    ON delivery_producer_tokens (status, expires_at);
+
+CREATE TABLE IF NOT EXISTS delivery_service_segments (
+    segment_id TEXT PRIMARY KEY,
+    entitlement_id TEXT NOT NULL,
+    activation_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    effective_until TEXT NOT NULL,
+    carrier_valid_until TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_service_segments_entitlement_idx
+    ON delivery_service_segments (entitlement_id, effective_from);
+
+CREATE INDEX IF NOT EXISTS delivery_service_segments_artifact_idx
+    ON delivery_service_segments (artifact_id, status);
+
+CREATE TABLE IF NOT EXISTS delivery_lifecycle_events (
+    event_id TEXT PRIMARY KEY,
+    entitlement_id TEXT NOT NULL,
+    segment_id TEXT NULL,
+    event_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS delivery_lifecycle_events_entitlement_idx
+    ON delivery_lifecycle_events (entitlement_id, created_at);
+
 CREATE TABLE IF NOT EXISTS config_snapshots (
     config_snapshot_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -118,6 +415,55 @@ CREATE TABLE IF NOT EXISTS card_products (
     payload JSONB NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS merchant_product_inventory (
+    inventory_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    merchant_shop_id TEXT NOT NULL,
+    card_product_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    reserved_order_id TEXT NULL,
+    sold_order_id TEXT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS merchant_product_inventory_product_status_idx
+    ON merchant_product_inventory (card_product_id, status, updated_at);
+
+CREATE TABLE IF NOT EXISTS merchant_product_orders (
+    order_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    merchant_shop_id TEXT NOT NULL,
+    card_product_id TEXT NOT NULL,
+    inventory_id TEXT NOT NULL,
+    inventory_delivery_id TEXT NOT NULL,
+    buyer_user_id TEXT NOT NULL,
+    out_trade_no TEXT NULL UNIQUE,
+    amount_total BIGINT NOT NULL,
+    currency TEXT NOT NULL,
+    channel TEXT NULL,
+    status TEXT NOT NULL,
+    pickup_token_hash TEXT NULL UNIQUE,
+    activation_id TEXT NULL,
+    download_grant_id TEXT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS merchant_product_orders_buyer_idx
+    ON merchant_product_orders (buyer_user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS wechat_user_openids (
+    user_id TEXT PRIMARY KEY,
+    openid TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS trial_connections (
     trial_connection_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -188,6 +534,18 @@ CREATE TABLE IF NOT EXISTS wechat_payment_orders (
     expires_at TEXT NOT NULL,
     paid_at TEXT NULL,
     payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS billing_renewal_intents (
+    renewal_intent_id TEXT PRIMARY KEY,
+    out_trade_no TEXT NOT NULL,
+    grant_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pricing_catalog_entries (
@@ -307,6 +665,8 @@ CREATE TABLE IF NOT EXISTS oauth_sharing_audit_events (
 CREATE TABLE IF NOT EXISTS ledger_entries (
     ledger_entry_id TEXT PRIMARY KEY,
     usage_event_id TEXT NOT NULL,
+    grant_id TEXT NULL,
+    owner_account_id TEXT NULL,
     usage_phase TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
@@ -325,6 +685,8 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 );
 
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_cost_micros BIGINT;
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS grant_id TEXT;
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS owner_account_id TEXT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS billable_cost_micros BIGINT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_id TEXT;
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS model_alias TEXT;
@@ -335,6 +697,7 @@ ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS cached_input_tokens BIGINT;
 CREATE TABLE IF NOT EXISTS usage_daily_projections (
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
     usage_date DATE NOT NULL,
     provider_id TEXT NOT NULL,
     model_alias TEXT NOT NULL,
@@ -346,12 +709,13 @@ CREATE TABLE IF NOT EXISTS usage_daily_projections (
     billable_cost_micros BIGINT NOT NULL,
     event_count BIGINT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, project_id, usage_date, provider_id, model_alias)
+    PRIMARY KEY (tenant_id, project_id, owner_account_id, usage_date, provider_id, model_alias)
 );
 
 CREATE TABLE IF NOT EXISTS balance_projections (
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
     currency TEXT NOT NULL,
     provider_cost_micros BIGINT NOT NULL,
     billable_cost_micros BIGINT NOT NULL,
@@ -360,18 +724,69 @@ CREATE TABLE IF NOT EXISTS balance_projections (
     threshold_status TEXT NOT NULL,
     threshold_crossed_at TIMESTAMPTZ NULL,
     last_projected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, project_id, currency)
+    PRIMARY KEY (tenant_id, project_id, owner_account_id, currency)
 );
 
 CREATE TABLE IF NOT EXISTS budget_threshold_events (
     budget_threshold_event_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default',
     currency TEXT NOT NULL,
     threshold_status TEXT NOT NULL,
     billable_cost_micros BIGINT NOT NULL,
     configured_budget_micros BIGINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE usage_daily_projections ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default';
+ALTER TABLE balance_projections ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default';
+ALTER TABLE budget_threshold_events ADD COLUMN IF NOT EXISTS owner_account_id TEXT NOT NULL DEFAULT 'tenant_project_default';
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'usage_daily_projections'::regclass
+          AND conname = 'usage_daily_projections_pkey'
+          AND pg_get_constraintdef(oid) NOT LIKE '%owner_account_id%'
+    ) THEN
+        ALTER TABLE usage_daily_projections DROP CONSTRAINT usage_daily_projections_pkey;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'usage_daily_projections'::regclass
+          AND conname = 'usage_daily_projections_pkey'
+    ) THEN
+        ALTER TABLE usage_daily_projections
+            ADD CONSTRAINT usage_daily_projections_pkey
+            PRIMARY KEY (tenant_id, project_id, owner_account_id, usage_date, provider_id, model_alias);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'balance_projections'::regclass
+          AND conname = 'balance_projections_pkey'
+          AND pg_get_constraintdef(oid) NOT LIKE '%owner_account_id%'
+    ) THEN
+        ALTER TABLE balance_projections DROP CONSTRAINT balance_projections_pkey;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'balance_projections'::regclass
+          AND conname = 'balance_projections_pkey'
+    ) THEN
+        ALTER TABLE balance_projections
+            ADD CONSTRAINT balance_projections_pkey
+            PRIMARY KEY (tenant_id, project_id, owner_account_id, currency);
+    END IF;
+END $$;
 
 COMMIT;
