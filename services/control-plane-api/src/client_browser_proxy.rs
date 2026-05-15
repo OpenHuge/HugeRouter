@@ -1,9 +1,23 @@
 use axum::{extract::State, http::HeaderMap, Json};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{bearer_token_from_headers, ApiError, ControlPlaneState, RequestContext};
 
 const DEFAULT_CLIENT_BROWSER_PROXY_BYPASS_RULES: &str = "<local>;localhost;127.0.0.1;::1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientBrowserProxyProfileResponse {
+    pub id: String,
+    pub label: String,
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_host: Option<String>,
+    pub bypass_rules: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ClientBrowserProxyResponse {
@@ -16,6 +30,8 @@ pub struct ClientBrowserProxyResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connect_host: Option<String>,
     pub bypass_rules: String,
+    pub default_profile_id: String,
+    pub profiles: Vec<ClientBrowserProxyProfileResponse>,
 }
 
 #[allow(clippy::struct_field_names)]
@@ -29,6 +45,44 @@ pub fn client_browser_proxy_config_from_lookup(
     mut lookup: impl FnMut(&str) -> Option<String>,
 ) -> Option<ClientBrowserProxyConfig> {
     let token = read_lookup_string(&mut lookup, "CLIENT_BROWSER_PROXY_TOKEN")?;
+    let profiles_json = read_lookup_string(&mut lookup, "CLIENT_BROWSER_PROXY_PROFILES_JSON");
+    let default_profile_id = read_lookup_string(&mut lookup, "CLIENT_BROWSER_PROXY_DEFAULT_PROFILE_ID");
+
+    if let Some(profiles_json) = profiles_json {
+        let profiles = serde_json::from_str::<Vec<ClientBrowserProxyProfileResponse>>(&profiles_json)
+            .ok()?
+            .into_iter()
+            .filter(|profile| {
+                !profile.id.trim().is_empty()
+                    && !profile.label.trim().is_empty()
+                    && !profile.scheme.trim().is_empty()
+                    && !profile.host.trim().is_empty()
+                    && !profile.username.trim().is_empty()
+                    && !profile.password.trim().is_empty()
+                    && profile.port > 0
+            })
+            .collect::<Vec<_>>();
+        let default_profile_id = default_profile_id?;
+        let default_profile = profiles
+            .iter()
+            .find(|profile| profile.id == default_profile_id)?;
+        return Some(ClientBrowserProxyConfig {
+            response: ClientBrowserProxyResponse {
+                version: 1,
+                scheme: default_profile.scheme.clone(),
+                host: default_profile.host.clone(),
+                port: default_profile.port,
+                username: default_profile.username.clone(),
+                password: default_profile.password.clone(),
+                connect_host: default_profile.connect_host.clone(),
+                bypass_rules: default_profile.bypass_rules.clone(),
+                default_profile_id,
+                profiles,
+            },
+            token,
+        });
+    }
+
     let host = read_lookup_string(&mut lookup, "CLIENT_BROWSER_PROXY_HOST")?;
     let port = read_lookup_string(&mut lookup, "CLIENT_BROWSER_PROXY_PORT")?
         .parse::<u16>()
@@ -44,11 +98,23 @@ pub fn client_browser_proxy_config_from_lookup(
 
     Some(ClientBrowserProxyConfig {
         response: ClientBrowserProxyResponse {
-            bypass_rules,
-            connect_host,
-            host,
-            password,
+            default_profile_id: "default".to_string(),
+            bypass_rules: bypass_rules.clone(),
+            connect_host: connect_host.clone(),
+            host: host.clone(),
+            password: password.clone(),
             port,
+            profiles: vec![ClientBrowserProxyProfileResponse {
+                id: "default".to_string(),
+                label: "默认线路".to_string(),
+                scheme: scheme.clone(),
+                host: host.clone(),
+                port,
+                username: username.clone(),
+                password: password.clone(),
+                connect_host: connect_host.clone(),
+                bypass_rules: bypass_rules.clone(),
+            }],
             scheme,
             username,
             version: 1,
@@ -131,9 +197,82 @@ mod tests {
         assert_eq!(config.response.username, "hugeproxy");
         assert_eq!(config.response.password, "secret");
         assert_eq!(config.response.connect_host.as_deref(), Some("203.0.113.10"));
+        assert_eq!(config.response.default_profile_id, "default");
+        assert_eq!(config.response.profiles.len(), 1);
+        assert_eq!(config.response.profiles[0].id, "default");
         assert_eq!(
             config.response.bypass_rules,
             "<local>;localhost;127.0.0.1;::1"
+        );
+    }
+
+    #[test]
+    fn builds_client_browser_proxy_profiles_from_environment_values() {
+        let config = config_from(&[
+            ("CLIENT_BROWSER_PROXY_TOKEN", "client-token"),
+            ("CLIENT_BROWSER_PROXY_DEFAULT_PROFILE_ID", "asia-fast-1"),
+            (
+                "CLIENT_BROWSER_PROXY_PROFILES_JSON",
+                r#"[
+                  {
+                    "id":"asia-fast-1",
+                    "label":"亚洲高速1",
+                    "scheme":"socks5",
+                    "host":"relay-a.example.com",
+                    "port":2081,
+                    "username":"user-a",
+                    "password":"secret-a",
+                    "connect_host":"43.134.121.38",
+                    "bypass_rules":"<local>;localhost;127.0.0.1;::1"
+                  },
+                  {
+                    "id":"asia-fast-2",
+                    "label":"亚洲高速2",
+                    "scheme":"socks5",
+                    "host":"relay-b.example.com",
+                    "port":2081,
+                    "username":"user-b",
+                    "password":"secret-b",
+                    "connect_host":"43.134.121.39",
+                    "bypass_rules":"<local>;localhost;127.0.0.1;::1"
+                  }
+                ]"#,
+            ),
+        ])
+        .expect("proxy config");
+
+        assert_eq!(config.token, "client-token");
+        assert_eq!(config.response.default_profile_id, "asia-fast-1");
+        assert_eq!(config.response.profiles.len(), 2);
+        assert_eq!(config.response.profiles[0].id, "asia-fast-1");
+        assert_eq!(config.response.profiles[1].id, "asia-fast-2");
+        assert_eq!(config.response.host, "relay-a.example.com");
+        assert_eq!(config.response.port, 2081);
+    }
+
+    #[test]
+    fn invalid_default_profile_id_disables_profile_config() {
+        assert!(
+            config_from(&[
+                ("CLIENT_BROWSER_PROXY_TOKEN", "client-token"),
+                ("CLIENT_BROWSER_PROXY_DEFAULT_PROFILE_ID", "missing-profile"),
+                (
+                    "CLIENT_BROWSER_PROXY_PROFILES_JSON",
+                    r#"[
+                      {
+                        "id":"asia-fast-1",
+                        "label":"亚洲高速1",
+                        "scheme":"socks5",
+                        "host":"relay-a.example.com",
+                        "port":2081,
+                        "username":"user-a",
+                        "password":"secret-a",
+                        "bypass_rules":"<local>;localhost;127.0.0.1;::1"
+                      }
+                    ]"#,
+                ),
+            ])
+            .is_none()
         );
     }
 
